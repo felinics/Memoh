@@ -44,11 +44,6 @@ func TestProviderViewFallbackDropsStaleFragmentOverridesFromAudit(t *testing.T) 
 		Slot: contextfrag.SlotHistory, CacheClass: contextfrag.CacheStable, Trust: contextfrag.TrustExternal,
 		Source: "compaction_log", Collector: "history_records",
 	})
-	coverage := contextfrag.NewSummaryCoverage(
-		contextfrag.ContextRef{Namespace: "compaction_summary", ID: "summary-1", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable},
-		[]contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "row-1", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}},
-	)
-	stale.Coverage = &coverage
 	cfg := agentpkg.RunConfig{
 		System:             "legacy system",
 		Messages:           []sdk.Message{sdk.AssistantMessage("actual history")},
@@ -60,9 +55,6 @@ func TestProviderViewFallbackDropsStaleFragmentOverridesFromAudit(t *testing.T) 
 	rendered := contextfrag.Render(got.ContextFrags)
 	if !reflect.DeepEqual(rendered.Messages, got.Messages) {
 		t.Fatalf("fallback audit messages = %#v, emitted messages = %#v", rendered.Messages, got.Messages)
-	}
-	if len(got.ContextManifest.CoverageTrace) != 0 {
-		t.Fatalf("fallback audit retained stale coverage: %#v", got.ContextManifest.CoverageTrace)
 	}
 }
 

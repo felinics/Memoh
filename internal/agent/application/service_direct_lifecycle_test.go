@@ -59,13 +59,6 @@ func (*directLifecycleQueries) GetBotByID(
 	return sqlc.GetBotByIDRow{}, pgx.ErrNoRows
 }
 
-func (*directLifecycleQueries) ListCompactionArtifactLineageBySession(
-	context.Context,
-	pgtype.UUID,
-) ([]sqlc.BotHistoryMessageCompact, error) {
-	return nil, nil
-}
-
 type directLifecycleFixture struct {
 	service    *Service
 	lifecycles *synchronizedLifecycleStore
@@ -297,6 +290,7 @@ func newDirectLifecycleFixture(t *testing.T, mode directLifecycleModelMode) dire
 	runtime := &lifecycleTurnAdmitter{admission: lifecycleTestAdmission()}
 	service := &Service{
 		agent:                  native.New(native.Deps{Logger: logger}),
+		checkpoints:            emptyHistoryCheckpoints(),
 		modelsService:          models.NewService(logger, queries),
 		queries:                queries,
 		contextLifecycles:      lifecycles,

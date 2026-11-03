@@ -275,8 +275,8 @@ export interface ExternalAgentSessionInput {
   agentId: string
   sessionMode?: 'chat' | 'discuss'
   projectPath?: string
-  projectMode?: string
   title?: string
-  /** Warm pre-session runtime to bind to the created session. */
-  runtimeId?: string
+  /** ACP model and reasoning effort picked before the session exists; sent with its creation. */
+  acpModelId?: string
+  acpReasoningEffort?: string
 }

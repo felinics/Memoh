@@ -1,0 +1,91 @@
+package codex
+
+import (
+	"context"
+	"time"
+
+	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocol"
+)
+
+var _ external.Compactor = (*Driver)(nil)
+
+func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (external.CompactionResult, error) {
+	input, err := external.CompactionTurn(input, metadataThreadIDKey)
+	if err != nil {
+		return external.CompactionResult{}, err
+	}
+	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
+	if err != nil {
+		return external.CompactionResult{}, err
+	}
+	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
+	if err != nil {
+		return external.CompactionResult{}, err
+	}
+	defer release()
+	if err := srv.ensureAuth(ctx, cfg); err != nil {
+		return external.CompactionResult{}, err
+	}
+	threadID, err := d.ensureThread(ctx, srv, cfg, input)
+	if err != nil {
+		return external.CompactionResult{}, err
+	}
+	var waiter func(string) func()
+	if d.approval != nil {
+		waiter = d.approval.RegisterWaiter
+	}
+	turn := newTurnState(ctx, input, threadID, d.approval, waiter, d.userInput, srv.toolLookup, d.logger)
+	defer turn.close()
+	srv.registerTurn(threadID, turn)
+	defer srv.unregisterTurn(threadID, turn)
+	metadata, err := awaitCompaction(ctx, srv.conn, turn, srv.proc.Done(), func() { d.cancelOperation(srv, input, turn) })
+	recordThreadMetadata(&metadata, input.RuntimeMetadata, threadID, srv.threadPath(threadID))
+	return external.CompactionResult{RuntimeMetadata: metadata}, err
+}
+
+// Acknowledgement only starts the operation; turn/completed owns its outcome.
+func awaitCompaction(ctx context.Context, connection *conn, turn *turnState, processDone <-chan struct{}, cancelOperation func()) (map[string]any, error) {
+	if err := connection.Call(ctx, protocol.MethodThreadCompactStart, protocol.ThreadCompactStartParams{ThreadID: turn.threadID}, nil); err != nil {
+		if ctx.Err() != nil {
+			cancelOperation()
+		}
+		return nil, err
+	}
+	select {
+	case <-turn.done:
+	case <-ctx.Done():
+		cancelOperation()
+		return nil, ctx.Err()
+	case <-processDone:
+		return nil, connection.exitError("during compaction")
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	result, err := turn.result()
+	if err != nil {
+		return nil, err
+	}
+	if !result.TurnCompleted {
+		return nil, context.Canceled
+	}
+	return result.RuntimeMetadata, nil
+}
+
+func (d *Driver) cancelOperation(srv *appServer, input external.PromptInput, turn *turnState) {
+	id := turn.currentTurnID()
+	if id == "" {
+		d.markBroken(input.BotID, input.BotAgentID, srv)
+		return
+	}
+	d.interruptTurn(srv, turn, id)
+	timer := time.NewTimer(interruptSettleTimeout)
+	defer timer.Stop()
+	select {
+	case <-turn.done:
+	case <-srv.proc.Done():
+	case <-timer.C:
+		d.markBroken(input.BotID, input.BotAgentID, srv)
+	}
+}

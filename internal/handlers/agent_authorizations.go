@@ -30,7 +30,6 @@ func (h *AgentAuthorizationHandler) Register(e *echo.Echo) {
 	g := e.Group("/agent-authorizations")
 	g.POST("", h.Create)
 	g.GET("/:id", h.Get)
-	g.POST("/:id/poll", h.Poll)
 	g.POST("/:id/exchange", h.Exchange)
 	g.DELETE("/:id", h.Cancel)
 	e.POST("/bots/:bot_id/agents/:id/credential/claim", h.Claim)
@@ -38,7 +37,7 @@ func (h *AgentAuthorizationHandler) Register(e *echo.Echo) {
 
 // Create godoc
 // @Summary Authorize an Agent account independently of a Bot
-// @Description Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
+// @Description Starts Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A ChatGPT or Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
 // @Tags agent-authorizations
 // @Accept json
 // @Produce json
@@ -71,16 +70,17 @@ func (h *AgentAuthorizationHandler) Create(c echo.Context) error {
 // @Success 200 {object} agentcredential.Authorization
 // @Failure 403,410,503 {object} server.Problem
 // @Router /agent-authorizations/{id} [get].
-func (h *AgentAuthorizationHandler) Get(c echo.Context) error { return h.status(c, false) }
-
-// Poll godoc
-// @Summary Poll a pending Agent device authorization
-// @Tags agent-authorizations
-// @Param id path string true "Authorization ID"
-// @Success 200 {object} agentcredential.Authorization
-// @Failure 403,410,503 {object} server.Problem
-// @Router /agent-authorizations/{id}/poll [post].
-func (h *AgentAuthorizationHandler) Poll(c echo.Context) error { return h.status(c, true) }
+func (h *AgentAuthorizationHandler) Get(c echo.Context) error {
+	owner, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	result, err := h.service.Get(c.Request().Context(), owner, c.Param("id"))
+	if err != nil {
+		return mapAuthorizationError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
 
 type AgentAuthorizationExchangeRequest struct {
 	Code string `json:"code" validate:"required"`
@@ -108,18 +108,6 @@ func (h *AgentAuthorizationHandler) Exchange(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
 	defer cancel()
 	result, err := h.service.Exchange(ctx, owner, c.Param("id"), req.Code)
-	if err != nil {
-		return mapAuthorizationError(err)
-	}
-	return c.JSON(http.StatusOK, result)
-}
-
-func (h *AgentAuthorizationHandler) status(c echo.Context, poll bool) error {
-	owner, err := RequireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	result, err := h.service.Get(c.Request().Context(), owner, c.Param("id"), poll)
 	if err != nil {
 		return mapAuthorizationError(err)
 	}
@@ -177,7 +165,7 @@ func (h *AgentAuthorizationHandler) Claim(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return mapAuthorizationError(agentcredential.ErrInvalidRequest)
 	}
-	session, err := h.service.Get(c.Request().Context(), owner, req.AuthorizationID, false)
+	session, err := h.service.Get(c.Request().Context(), owner, req.AuthorizationID)
 	if err != nil {
 		return mapAuthorizationError(err)
 	}

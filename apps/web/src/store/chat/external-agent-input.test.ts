@@ -16,11 +16,4 @@ describe('External Agent input normalization', () => {
     expect(sameExternalAgentSessionInput(custom, { agentId: 'codex', runtime: 'codex' })).toBe(false)
   })
 
-  it('normalizes project defaults once without mutating the caller', () => {
-    const input = { agentId: ' custom ', projectPath: ' ', projectMode: ' ' }
-    expect(normalizedExternalAgentInput(input)).toMatchObject({
-      agentId: 'custom', runtime: 'acp', projectPath: '/data', projectMode: 'project',
-    })
-    expect(input.agentId).toBe(' custom ')
-  })
 })

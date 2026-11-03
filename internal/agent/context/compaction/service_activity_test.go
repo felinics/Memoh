@@ -53,7 +53,7 @@ func TestCompactionActivityLifecycle(t *testing.T) {
 
 func TestCompactionActivityClearsAfterPanic(t *testing.T) {
 	t.Parallel()
-	svc := NewService(slog.New(slog.DiscardHandler), &fakeQueries{listPanic: true, listStarted: make(chan struct{})})
+	svc := NewService(slog.New(slog.DiscardHandler), &fakeQueries{listPanic: true})
 	hub := messageevent.NewHub()
 	svc.SetEventPublisher(hub)
 	cfg := TriggerConfig{BotID: "00000000-0000-0000-0000-00000000b715", SessionID: "00000000-0000-0000-0000-00000000e715", HistoryBudgetTokens: 1000, SummaryWindowTokens: 128000}

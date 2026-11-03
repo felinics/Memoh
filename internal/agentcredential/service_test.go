@@ -48,12 +48,10 @@ func TestCompatibilityMatrix(t *testing.T) {
 		want        bool
 	}{
 		{"codex", AuthKindOpenAIAPIKey, true},
-		{"codex", AuthKindOpenAICodexOAuth, true},
 		{"claude-code", AuthKindClaudeCodeOAuth, true},
 		{"claude-code", AuthKindOpenAIAPIKey, false},
 		{"claude-code", AuthKindAnthropicAPIKey, true},
 		{"grok-build", AuthKindXAIAPIKey, true},
-		{"grok-build", AuthKindXAIGrokOAuth, true},
 		{"grok-build", AuthKindOpenAIAPIKey, false},
 		{"codex", AuthKindXAIAPIKey, false},
 		{"codex", "unknown_kind", false},

@@ -189,7 +189,7 @@ type activityHistoryStore struct {
 func (s activityHistoryStore) DeleteBySession(context.Context, string) error { return s.deleteErr }
 func (s activityHistoryStore) DeleteByBot(context.Context, string) error     { return s.deleteErr }
 
-type activityHistoryReset struct{ recordingACPSessionCloser }
+type activityHistoryReset struct{ recordingRuntimeResets }
 
 func (r *activityHistoryReset) BeginBotHistoryReset(ctx context.Context, botID string) (context.Context, func(), error) {
 	return r.BeginSessionHistoryReset(ctx, botID, "")

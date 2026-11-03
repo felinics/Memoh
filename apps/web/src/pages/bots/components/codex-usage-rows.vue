@@ -39,7 +39,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Progress, SettingsRow, Skeleton } from '@felinic/ui'
-import type { ExternalagentCodexUsageWindow } from '@memohai/sdk'
+import type { ExternalagentAgentQuotaWindow } from '@memohai/sdk'
 import { useCodexUsage } from '@/composables/useCodexUsage'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { codexUsageResetTime, codexUsageWindowLabel } from '@/utils/codex-usage'
@@ -56,7 +56,7 @@ const usage = useCodexUsage({
   enabled: () => true,
 })
 
-function windowDescription(window: ExternalagentCodexUsageWindow): string {
+function windowDescription(window: ExternalagentAgentQuotaWindow): string {
   const exhausted = window.used_percent >= 100
   if (!window.resets_at) return exhausted ? t('bots.agent.usage.exhaustedNoReset') : ''
   const time = codexUsageResetTime(window.resets_at, locale.value)

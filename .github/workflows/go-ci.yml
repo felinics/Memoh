@@ -207,19 +207,17 @@ jobs:
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresRuntimeFence' ./internal/chat/message
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresRuntimeFence' ./internal/agent/runtime/acp
-          TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             ./internal/agent/runtime/session/ledger
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgres(ResumeScopes|WSStepHistory|ProviderUsage|RedisDecision|NativeDecisionAcceptance|HistoryReset|RedisHistoryReset)' ./internal/agent/application
+            -run '^TestPostgres(ResumeScopes|ShutdownResume|WSStepHistory|ProviderUsage|RedisDecision|NativeDecisionAcceptance|HistoryReset|RedisHistoryReset)' ./internal/agent/application
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresBotCreate' ./internal/bots
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresClaim' ./internal/botworkspace
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresDiscuss(RecoveryPreservesBatchAcrossCompactorRestart|BacklogOverBudgetIsAnsweredAndNextRoundContinues|BacklogWithoutCompactionIsAnsweredAndRecordsOmission|OversizedInputFailsOnceThenNextMessageIsAnswered|ImageBacklogKeepsImagesOnTheirMessages|OversizedImageInputFailsOnceThenNextMessageIsAnswered|ImageBacklogYieldsAnsweredHistoryFirst|CompactedImageInputIsRecorded|CompactionKeepsBatchTextOverImages)$' ./cmd/agent
+            -run '^TestPostgresDiscuss(RecoveryPreservesBatchAcrossCompactorRestart|BacklogOverBudgetIsAnsweredAndNextRoundContinues|OversizedInputFoldsByItsHeadAndTail|ImageBacklogKeepsImagesOnTheirMessages|OversizedImageInputFailsOnceThenNextMessageIsAnswered|ImageBacklogYieldsAnsweredHistoryFirst|CompactedImageInputIsRecorded|CompactionKeepsBatchTextOverImages)$' ./cmd/agent
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgres(SummaryOnlyRollup|CompleteCompactionRollup)' ./internal/chat/message
+            -run '^TestPostgresCommit' ./internal/chat/checkpoint
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresHistoryToolResultRef$' ./internal/agent/tool
       - name: Verify atomic connector disconnect and tenant isolation

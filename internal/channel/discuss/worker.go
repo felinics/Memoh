@@ -80,32 +80,49 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 	d.handleReplyWithTurn(ctx, sess, rc, log, d.turnServiceSnapshot())
 }
 
-// loadArtifacts projects the session's active compaction frontier. A load
-// failure fails the trigger: composing without the frontier would either
-// re-materialize the raw history or leave what it covers out (CM-ADM-003).
-func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionConfig) ([]timeline.CompactionArtifact, error) {
-	if d.artifacts == nil {
-		return nil, nil
+// discussHistory is what a trigger composes beside its rendered context:
+// the session's history checkpoint and the turn responses after it.
+type discussHistory struct {
+	checkpoint timeline.HistoryCheckpoint
+	trs        []timeline.TurnResponseEntry
+}
+
+// loadHistory reads the session's history checkpoint for rc and the turn
+// responses after it. A load failure fails the trigger: composing without
+// the checkpoint would either re-materialize the history it folds or leave
+// what it holds out (CM-ADM-003).
+func (d *DiscussDriver) loadHistory(ctx context.Context, cfg DiscussSessionConfig, rc timeline.RenderedContext, log *slog.Logger) (discussHistory, error) {
+	var history discussHistory
+	if d.checkpoints != nil {
+		var err error
+		if history.checkpoint, err = d.checkpoints.Load(ctx, cfg.ThreadID, rc); err != nil {
+			return discussHistory{}, err
+		}
 	}
-	return d.artifacts.ActiveCompactionArtifacts(ctx, cfg.BotID, cfg.ThreadID)
+	trs, measure, err := d.history.Load(ctx, cfg.ThreadID, history.checkpoint.Position)
+	if err != nil {
+		return discussHistory{}, err
+	}
+	if measure.TotalMessages > int64(measure.Loaded) {
+		log.InfoContext(ctx, "context_admission",
+			slog.String("path", "discuss_history_load"),
+			slog.Int64("history_total_messages", measure.TotalMessages),
+			slog.Int64("history_total_bytes", measure.TotalBytes),
+			slog.Int("history_loaded_messages", measure.Loaded),
+			slog.Int("budget_tokens", d.admissionMaxTokens()))
+	}
+	history.trs = trs
+	return history, nil
 }
 
 // handleReplyWithTurn remains as a narrow seam for parity tests. Production
 // workers obtain the current service through turnServiceSnapshot.
 func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger, turnSvc turn.Service) {
 	cfg := d.sessionConfigSnapshot(sess)
-	trs, historyMeasure, err := d.history.Load(ctx, cfg.ThreadID)
+	history, err := d.loadHistory(ctx, cfg, rc, log)
 	if err != nil {
 		d.failMissingSource(ctx, cfg, log, "history_load_failed", err)
 		return
-	}
-	if historyMeasure.TotalMessages > int64(historyMeasure.Loaded) {
-		log.InfoContext(ctx, "context_admission",
-			slog.String("path", "discuss_history_load"),
-			slog.Int64("history_total_messages", historyMeasure.TotalMessages),
-			slog.Int64("history_total_bytes", historyMeasure.TotalBytes),
-			slog.Int("history_loaded_messages", historyMeasure.Loaded),
-			slog.Int("budget_tokens", d.admissionMaxTokens()))
 	}
 
 	// Cold-start / post-idle initialisation combines the durable position with
@@ -113,7 +130,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 	// cursor or source-time domain.
 	if sess.lastProcessed == (timeline.DiscussCursorPosition{}) {
 		persisted := d.cursor.Load(ctx, cfg, log)
-		sess.lastProcessed = persisted.Merge(timeline.DiscussCursorPosition{SourceCursor: anchorFromTRs(trs)})
+		sess.lastProcessed = persisted.Merge(timeline.DiscussCursorPosition{SourceCursor: anchorFromTRs(history.trs)})
 	}
 	if !timeline.HasUncoveredExternalEvent(rc, sess.lastProcessed) {
 		return
@@ -125,12 +142,15 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 	}
 
 	for recoveries := 0; recoveries <= maxDiscussRecoveries; recoveries++ {
-		artifacts, err := d.loadArtifacts(ctx, cfg)
-		if err != nil {
-			d.failMissingSource(ctx, cfg, log, "artifact_load_failed", err)
-			return
+		// A recompose follows a compaction: the checkpoint moved, and with it
+		// the turn responses after it.
+		if recoveries > 0 {
+			if history, err = d.loadHistory(ctx, cfg, rc, log); err != nil {
+				d.failMissingSource(ctx, cfg, log, "history_load_failed", err)
+				return
+			}
 		}
-		plan, admission, ok := d.trigger.Build(cfg, rc, trs, sess.lastProcessed, artifacts, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
+		plan, admission, ok := d.trigger.Build(cfg, rc, history.trs, sess.lastProcessed, history.checkpoint, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
 		if !ok {
 			if admission.ProtectedOverflow {
 				log.ErrorContext(ctx, "context_admission_rejected",

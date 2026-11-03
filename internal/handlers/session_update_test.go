@@ -13,8 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
+	acpprofileadapter "github.com/felinics/memoh/internal/agent/adapter/acpprofile"
 	"github.com/felinics/memoh/internal/agent/application"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
@@ -107,15 +108,19 @@ func TestUpdateSessionResolvesPersistedBotAgentDescriptor(t *testing.T) {
 			Metadata:    testJSON(map[string]any{}),
 		},
 	}
-	resetter := &recordingACPSessionCloser{}
+	resetter := &recordingRuntimeResets{}
+	agents := botagents.NewService(slog.Default(), queries)
+	// The thread service reads the ACP profile from the Bot Agent instance.
+	threads := session.NewService(nil, queries, nil)
+	threads.SetACPSetupValidator(acpprofileadapter.NewCatalog(agents))
 	handler := NewSessionHandler(
 		slog.Default(),
-		newThreadServiceForTest(queries),
+		threads,
 		resetter,
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
-	handler.SetBotAgents(botagents.NewService(slog.Default(), queries))
+	handler.SetBotAgents(agents)
 
 	rec, err := callUpdateSession(handler, botID, sessionID, `{"bot_agent_id":"`+botAgentID+`"}`)
 	if err != nil {
@@ -134,15 +139,16 @@ func TestUpdateSessionResolvesPersistedBotAgentDescriptor(t *testing.T) {
 	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
 		t.Fatalf("metadata json = %v", err)
 	}
-	if metadata["acp_agent_id"] != acpprofile.AgentACPID || metadata["project_path"] != session.DefaultACPProjectPath {
-		t.Fatalf("metadata = %#v, want resolved Codex descriptor", metadata)
+	// The instance carries the agent profile; the session does not.
+	if metadata["acp_agent_id"] != nil || metadata["project_path"] != session.DefaultACPProjectPath {
+		t.Fatalf("metadata = %#v, want the default project and no profile", metadata)
 	}
 	var runtimeMetadata map[string]any
 	if err := json.Unmarshal(queries.updateParams.RuntimeMetadata, &runtimeMetadata); err != nil {
 		t.Fatalf("runtime metadata json = %v", err)
 	}
-	if runtimeMetadata["acp_agent_id"] != acpprofile.AgentACPID || runtimeMetadata["project_path"] != session.DefaultACPProjectPath {
-		t.Fatalf("runtime metadata = %#v, want resolved Codex descriptor", runtimeMetadata)
+	if runtimeMetadata["acp_agent_id"] != nil || runtimeMetadata["project_path"] != session.DefaultACPProjectPath {
+		t.Fatalf("runtime metadata = %#v, want the default project and no profile", runtimeMetadata)
 	}
 }
 
@@ -175,7 +181,7 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		&recordingACPSessionCloser{},
+		&recordingRuntimeResets{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -197,8 +203,11 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
 		t.Fatalf("metadata json = %v", err)
 	}
-	if metadata["acp_agent_id"] != "acp" || metadata["project_path"] != "/data/app" {
-		t.Fatalf("metadata = %#v, want ACP agent metadata", metadata)
+	if metadata["acp_agent_id"] != nil || metadata["project_path"] != "/data/app" {
+		t.Fatalf("metadata = %#v, want the project and no profile", metadata)
+	}
+	if got := queries.updateParams.BotAgentID.String(); got != testACPInstanceID("acp") {
+		t.Fatalf("bot_agent_id = %q, want the bot's acp instance", got)
 	}
 	if metadata["runtime_owner_account_id"] != "user-1" {
 		t.Fatalf("runtime owner = %#v, want authenticated user", metadata["runtime_owner_account_id"])
@@ -302,7 +311,7 @@ func TestUpdateSessionAllowsConcordantACPTypeAndRuntime(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		&recordingACPSessionCloser{},
+		&recordingRuntimeResets{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -350,7 +359,7 @@ func TestUpdateSessionSwitchToACPDoesNotInheritOwnerFromNonACPMetadata(t *testin
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		&recordingACPSessionCloser{},
+		&recordingRuntimeResets{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -403,7 +412,7 @@ func TestUpdateSessionSwitchToACPRequiresWorkspaceExec(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		&recordingACPSessionCloser{},
+		&recordingRuntimeResets{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("user"),
 	)
@@ -440,7 +449,7 @@ func TestUpdateSessionDefaultsACPProjectPath(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		&recordingACPSessionCloser{},
+		&recordingRuntimeResets{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -456,8 +465,8 @@ func TestUpdateSessionDefaultsACPProjectPath(t *testing.T) {
 	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
 		t.Fatalf("metadata json = %v", err)
 	}
-	if metadata["project_path"] != session.DefaultACPProjectPath || metadata["acp_project_mode"] != session.DefaultACPProjectMode {
-		t.Fatalf("metadata = %#v, want default ACP project", metadata)
+	if metadata["project_path"] != session.DefaultACPProjectPath || metadata["acp_agent_id"] != nil || metadata["acp_project_mode"] != nil {
+		t.Fatalf("metadata = %#v, want the default project and no ACP profile keys", metadata)
 	}
 }
 
@@ -480,7 +489,7 @@ func TestUpdateSessionDefaultsACPProjectPathBeforeAgentChangeCheck(t *testing.T)
 			Metadata: testJSON(map[string]any{
 				"acp_agent_id":             "acp",
 				"project_path":             session.DefaultACPProjectPath,
-				"acp_project_mode":         session.DefaultACPProjectMode,
+				"acp_project_mode":         "project",
 				"runtime_owner_account_id": "original-owner",
 			}),
 		},
@@ -505,8 +514,8 @@ func TestUpdateSessionDefaultsACPProjectPathBeforeAgentChangeCheck(t *testing.T)
 	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
 		t.Fatalf("metadata json = %v", err)
 	}
-	if metadata["project_path"] != session.DefaultACPProjectPath || metadata["acp_project_mode"] != session.DefaultACPProjectMode {
-		t.Fatalf("metadata = %#v, want default ACP project", metadata)
+	if metadata["project_path"] != session.DefaultACPProjectPath || metadata["acp_agent_id"] != nil || metadata["acp_project_mode"] != nil {
+		t.Fatalf("metadata = %#v, want the default project and no ACP profile keys", metadata)
 	}
 }
 
@@ -533,7 +542,7 @@ func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
-		&recordingACPSessionCloser{},
+		&recordingRuntimeResets{},
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
 	)
@@ -670,7 +679,7 @@ func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 		},
 		messageCount: 0,
 	}
-	closer := &recordingACPSessionCloser{active: map[string]bool{sessionID: true}}
+	closer := &recordingRuntimeResets{}
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
@@ -688,9 +697,6 @@ func TestUpdateSessionAllowsEmptyACPAgentChangeAndClosesRuntime(t *testing.T) {
 	}
 	if !queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata was not called")
-	}
-	if len(closer.closed) != 0 {
-		t.Fatalf("UpdateSession bypassed the reset gate through CloseSession: %#v", closer.closed)
 	}
 	var metadata map[string]any
 	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
@@ -755,14 +761,19 @@ func TestUpdateSessionMetadataPatchPreservesDiscussACPRuntime(t *testing.T) {
 	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
 		t.Fatalf("metadata json = %v", err)
 	}
-	if metadata["topic"] != "new" || metadata["acp_agent_id"] != "acp" || metadata["project_path"] != "/data/app" {
-		t.Fatalf("metadata = %#v, want patched topic with ACP metadata preserved", metadata)
+	// Rewriting a session from before instances binds it to the bot's
+	// instance of its profile, which then carries the profile.
+	if metadata["topic"] != "new" || metadata["acp_agent_id"] != nil || metadata["acp_project_mode"] != nil || metadata["project_path"] != "/data/app" {
+		t.Fatalf("metadata = %#v, want patched topic with the project preserved", metadata)
+	}
+	if got := queries.updateParams.BotAgentID.String(); got != testACPInstanceID("acp") {
+		t.Fatalf("bot_agent_id = %q, want the bot's acp instance", got)
 	}
 	var runtimeMetadata map[string]any
 	if err := json.Unmarshal(queries.updateParams.RuntimeMetadata, &runtimeMetadata); err != nil {
 		t.Fatalf("runtime metadata json = %v", err)
 	}
-	if runtimeMetadata["runtime_owner_account_id"] != "original-owner" || runtimeMetadata["acp_agent_id"] != "acp" {
+	if runtimeMetadata["runtime_owner_account_id"] != "original-owner" || runtimeMetadata["project_path"] != "/data/app" {
 		t.Fatalf("runtime metadata = %#v, want ACP runtime metadata preserved", runtimeMetadata)
 	}
 }
@@ -792,7 +803,7 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 			}),
 		},
 	}
-	closer := &recordingACPSessionCloser{}
+	closer := &recordingRuntimeResets{}
 	handler := NewSessionHandler(
 		slog.Default(),
 		newThreadServiceForTest(queries),
@@ -826,9 +837,6 @@ func TestUpdateSessionSwitchesACPAgentToChatClearsMetadataAndClosesRuntime(t *te
 	}
 	if len(runtimeMetadata) != 0 {
 		t.Fatalf("runtime metadata = %#v, want cleared", runtimeMetadata)
-	}
-	if len(closer.closed) != 0 {
-		t.Fatalf("UpdateSession bypassed the reset gate through CloseSession: %#v", closer.closed)
 	}
 }
 

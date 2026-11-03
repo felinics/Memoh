@@ -133,7 +133,6 @@
       "reasoning_selection_unsupported": "This external agent does not support reasoning effort selection.",
       "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
       "runtime_conflict": "The Agent runtime is not ready for this operation. Refresh and try again.",
-      "runtime_limit_reached": "Too many Agent runtimes are active. Close one and try again.",
       "runtime_not_found": "That Agent runtime is no longer available. It will be started again."
     },
     "acp_agent_auth_invalid": "External agent authentication is invalid. Update the agent setup and try again.",
@@ -180,7 +179,6 @@
       "request_invalid": "Check the Agent account details and try again.",
       "revoked": "This Agent account has been disconnected. Connect it again or choose another account.",
       "runtime_busy": "Wait for the current response to finish before switching Agent accounts.",
-      "usage_auth_expired": "The account sign-in has expired. It renews after the next conversation; if usage still can't load, connect the account again.",
       "usage_unavailable": "Couldn't load usage limits right now. Try again later."
     },
     "agent_dependency_missing": "{dep_id} is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.",
@@ -239,8 +237,6 @@
     "chat": {
       "message_empty": "Enter a message or attach a file."
     },
-    "codex_auth_token_missing": "Codex authentication is missing or incomplete for this bot workspace.",
-    "codex_oauth_incomplete": "Codex ChatGPT sign-in is not complete for this bot workspace.",
     "compaction": {
       "model_unavailable": "The compaction model is unavailable. Pick an enabled chat model with a declared context window."
     },
@@ -280,8 +276,9 @@
       "context_window_exceeded": "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
       "overloaded": "The external Agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
       "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
+      "reported": "The Agent reported an error: {message}",
       "request_blocked": "The model service's safety policy blocked this request. Change the request and send it again.",
-      "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
+      "session_resume_failed": "The session could not be resumed: {message}. Try again or start a new conversation.",
       "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",
       "upstream_unreachable": "The external Agent could not reach its model service, or the connection dropped. Check the network and the Agent's service address, then try again.",
       "usage_limited": "The external Agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing."
@@ -800,13 +797,9 @@
       "colorSchemeDescription": "Select a palette for brand, status, and UI elements.",
       "typography": "Typography",
       "uiFontFamily": "UI Font Family",
-      "uiFontFamilyDescription": "Overrides the default interface font",
       "uiFontSize": "UI Font Size",
-      "uiFontSizeDescription": "Scales interface text and controls",
       "codeFontFamily": "Code Font Family",
-      "codeFontFamilyDescription": "Overrides the default code font",
       "codeFontSize": "Code Font Size",
-      "codeFontSizeDescription": "Applies to code editors, code blocks, and the terminal",
       "syntaxHighlighting": "Syntax Highlighting",
       "shikiThemeLight": "Light theme",
       "shikiThemeLightDescription": "Applied to code blocks and editors in light mode",
@@ -829,16 +822,13 @@
         "amber": "Golden highlights with clear status indicators"
       },
       "codeHighlight": "Code highlight",
-      "codeHighlightDescription": "Themes applied to code blocks and editors.",
       "diagrams": "Diagrams",
       "mermaidTheme": "Mermaid Theme",
-      "mermaidThemeDescription": "Applies to rendered Mermaid diagrams.",
       "advanced": "Advanced",
-      "advancedEntryTitle": "Code & diagrams"
+      "mermaidThemeAuto": "Follow appearance"
     },
     "keyboard": {
       "title": "Keyboard Shortcuts",
-      "intro": "Click Edit on a row, then press the new key combination. Cmd/Ctrl + W, Q, T, N stay reserved for the browser and OS. Workspace defaults use ⌘⌥ on macOS, matched by the key positions of a US keyboard, and Alt+Shift on Windows and Linux. If Alt+Shift switches your keyboard layout, assign other keys here.",
       "resetAll": "Reset all",
       "scopes": {
         "workspace": "Workspace",
@@ -865,80 +855,61 @@
       },
       "commands": {
         "newChatSession": {
-          "label": "New session",
-          "description": "Open or focus a new chat in the current group."
+          "label": "New session"
         },
         "focusChatInput": {
-          "label": "Focus chat input",
-          "description": "Activate chat and focus its message input."
+          "label": "Focus chat input"
         },
         "showSessions": {
-          "label": "Show Chat",
-          "description": "Open the Chat sidebar with your sessions."
+          "label": "Show Chat"
         },
         "showFiles": {
-          "label": "Show Files",
-          "description": "Open the Files sidebar."
+          "label": "Show Files"
         },
         "showSchedule": {
-          "label": "Show Schedule",
-          "description": "Open the Schedule sidebar."
+          "label": "Show Schedule"
         },
         "showSupermarket": {
-          "label": "Show Supermarket",
-          "description": "Open the Supermarket sidebar."
+          "label": "Show Supermarket"
         },
         "nextWorkspaceTab": {
-          "label": "Next tab",
-          "description": "Focus the next tab in the current group."
+          "label": "Next tab"
         },
         "previousWorkspaceTab": {
-          "label": "Previous tab",
-          "description": "Focus the previous tab in the current group."
+          "label": "Previous tab"
         },
         "splitWorkspaceRight": {
-          "label": "Split right",
-          "description": "Split the current panel to the right."
+          "label": "Split right"
         },
         "splitWorkspaceBelow": {
-          "label": "Split below",
-          "description": "Split the current panel below."
+          "label": "Split below"
         },
         "newTerminal": {
-          "label": "New terminal",
-          "description": "Open a terminal in the current group."
+          "label": "New terminal"
         },
         "newBrowser": {
-          "label": "New browser",
-          "description": "Open a workspace browser in the current group."
+          "label": "New browser"
         },
         "closeCurrentWorkspaceTab": {
-          "label": "Close current workspace tab",
-          "description": "Close the active tab in the workspace pane (falls back to the OS close behavior)."
+          "label": "Close current workspace tab"
         },
         "saveActiveFile": {
-          "label": "Save active file",
-          "description": "Save the file open in the workspace's editor."
+          "label": "Save active file"
         },
         "toggleSidebar": {
-          "label": "Toggle sidebar",
-          "description": "Show or hide the main sidebar."
+          "label": "Toggle sidebar"
         },
         "openSettings": {
-          "label": "Open Settings",
-          "description": "Jump to the Settings area from anywhere."
+          "label": "Open Settings"
         },
         "closeMediaLightbox": {
-          "label": "Close media lightbox",
-          "description": "Dismiss the media preview overlay."
+          "label": "Close media lightbox"
         },
         "mediaLightboxPrev": {
-          "label": "Previous media",
-          "description": "Show the previous item while the lightbox is open."
+          "label": "Previous media"
         },
         "mediaLightboxNext": {
-          "label": "Next media",
-          "description": "Show the next item while the lightbox is open."
+          "label": "Next media"
         }
       }
     },
@@ -1581,7 +1552,10 @@
       "dependencyMissingProgress": "Installing in the background…",
       "dependencyMissingDone": "Installed. You can resend now.",
       "dependencyMissingFailed": "Background install failed. Retry from the bot's Dependencies tab.",
-      "dependencyOpen": "Open dependencies"
+      "dependencyOpen": "Open dependencies",
+      "resetSession": "Start a new Agent session",
+      "resetSessionDone": "Your next message starts a new Agent session. It won't remember the conversation above.",
+      "resetSessionFailed": "Couldn't start a new Agent session."
     },
     "sessionFilterAll": "All",
     "searchSessionPlaceholder": "Search",
@@ -2155,7 +2129,8 @@
       "exa": "Exa",
       "bocha": "Bocha",
       "duckduckgo": "DuckDuckGo",
-      "yandex": "Yandex"
+      "yandex": "Yandex",
+      "deepseek": "DeepSeek"
     },
     "fetchProviderNames": {
       "native": "Native",
@@ -2495,7 +2470,8 @@
         "fileMustReview": "/etc/**\n.env*",
         "execBypass": "ls\npwd\ngit status",
         "execMustReview": "rm -rf *\nsudo *"
-      }
+      },
+      "enableTitle": "Require approval for tool calls"
     },
     "hooks": {
       "title": "Hooks",
@@ -2513,9 +2489,7 @@
       "invalidJson": "The hooks file has a syntax error. Check commas, quotes and brackets.",
       "testPayloadInvalid": "The payload is not valid JSON.",
       "rules": "Rules",
-      "rulesDescription": "Enabled rules over total rules.",
       "actions": "Actions",
-      "actionsDescription": "Commands and tool calls configured by matching hooks.",
       "eventsSection": "Events",
       "editorSection": "Config",
       "jsonConfig": "hooks.json",
@@ -2531,7 +2505,8 @@
       "saveSuccess": "Hooks saved",
       "saveFailed": "Failed to save hooks",
       "testSuccess": "Hook test completed",
-      "testFailed": "Hook test failed"
+      "testFailed": "Hook test failed",
+      "entryTitle": "Event hooks"
     },
     "title": "Bots",
     "searchPlaceholder": "Search bots…",
@@ -2610,7 +2585,6 @@
     "avatarUrl": "Avatar URL",
     "avatarUrlPlaceholder": "Enter avatar image URL",
     "timezone": "Timezone",
-    "timezoneHint": "Scheduled tasks use this timezone to determine when to run.",
     "timezonePlaceholder": "e.g. America/New_York",
     "timezoneInherited": "Inherited from user/system",
     "aclPreset": "IM App Policy",
@@ -2808,8 +2782,9 @@
       "apps": "Apps"
     },
     "agent": {
-      "add": "Add Agent",
-      "added": "Agent added",
+      "title": "External Agents",
+      "add": "Add External Agent",
+      "added": "External Agent added",
       "provider": "Provider",
       "providerPlaceholder": "Select a provider",
       "providerSearchPlaceholder": "Search providers...",
@@ -2817,14 +2792,14 @@
       "providerRequired": "Select a provider.",
       "namePlaceholder": "Enter an Agent name",
       "nameRequired": "Enter an Agent name.",
-      "emptyTitle": "No Agents yet",
-      "emptyDescription": "Add an Agent to let this Bot use Codex, Claude Code, Grok Build, or a custom ACP Agent.",
+      "emptyTitle": "No External Agents yet",
+      "emptyDescription": "Memoh's built-in runtime is used by default. Add an external Agent to let this Bot use Codex, Claude Code, Grok Build, or a custom ACP Agent.",
       "statusNeedsConfig": "Needs setup",
       "statusOff": "Disabled",
-      "deleteTitle": "Delete Agent?",
+      "deleteTitle": "Delete External Agent?",
       "deleteDescription": "Delete \"{name}\"? Existing conversations keep their binding, but this Agent cannot be selected for new conversations.",
-      "deleted": "Agent deleted",
-      "deleteFailed": "Failed to delete Agent",
+      "deleted": "External Agent deleted",
+      "deleteFailed": "Failed to delete External Agent",
       "nameDescription": "This name identifies the Agent in selectors and conversations.",
       "runtimeSetup": "Runtime setup",
       "authMode": "Authentication",
@@ -2843,16 +2818,20 @@
       "defaultModelDescription": "Optional. Leave blank to use the external Agent's default; conversations can still override it.",
       "defaultModelPlaceholder": "Use runtime default",
       "account": "Account",
-      "chatgptAccountDescription": "Memoh encrypts this Agent's ChatGPT credentials and provides them to Codex only at runtime.",
-      "chatgptAccountConnectedDescription": "This Agent's ChatGPT credentials are encrypted at rest.",
+      "chatgptAccountDescription": "Codex signs in to ChatGPT in this Agent's workspace and keeps the sign-in itself.",
+      "chatgptAccountConnectedDescription": "Codex is signed in to ChatGPT in this Agent's workspace.",
+      "signedInAs": "Signed in as {account}",
+      "checkingSignIn": "Checking sign-in…",
+      "enableToSignIn": "Enable this Agent to check or connect its account.",
+      "signInCheckFailed": "Couldn't check the sign-in.",
       "reconnect": "Reconnect",
       "codexDeviceHint": "Open the verification page and enter this one-time code. Only enter it on the OpenAI verification address shown there. Memoh will finish authorization automatically.",
       "codexLoginSuccess": "Codex is connected to ChatGPT",
       "codexLoginFailed": "Codex account authorization failed. Try again.",
       "authGrokAccountDescription": "Sign in to Grok Build with your Grok account.",
       "grokAccount": "Grok account",
-      "grokAccountDescription": "Memoh encrypts this Agent's Grok credentials and provides them to Grok Build only at runtime.",
-      "grokAccountConnectedDescription": "This Agent's Grok credentials are encrypted at rest.",
+      "grokAccountDescription": "Grok signs in in this Agent's workspace and keeps the sign-in itself.",
+      "grokAccountConnectedDescription": "Grok is signed in in this Agent's workspace.",
       "grokDeviceHint": "Open the verification page and confirm this one-time code. Only confirm it on the accounts.x.ai address shown there. Memoh will finish authorization automatically.",
       "grokLoginSuccess": "Grok Build is connected to your Grok account",
       "grokLoginFailed": "Grok account sign-in failed. Try again.",
@@ -3054,8 +3033,7 @@
       "unknownComputer": "Unavailable computer",
       "noComputers": "No computers available",
       "manageComputers": "Manage computers",
-      "connectManage": "Connect or disconnect computers",
-      "connectManageDescription": "Manage every computer on the Computers page."
+      "connectManage": "Connect or disconnect computers"
     },
     "desktop": {
       "title": "Desktop Environment",
@@ -3361,7 +3339,6 @@
         "multimedia": "Multimedia"
       },
       "chatModel": "Default chat model",
-      "chatModelDescription": "Used by Memoh Agent in new channel conversations, such as Telegram. Choosing a model in a web conversation does not change this default.",
       "chatModelPlaceholder": "Select model",
       "defaultAgent": "Default Agent",
       "defaultAgentDescription": "Used for new local chats. Existing conversations keep their current Agent.",
@@ -3386,21 +3363,15 @@
       "videoModelPlaceholder": "Select video model (optional)",
       "language": "Language",
       "showToolCallsInIM": "Show Tool Calls in IM",
-      "showToolCallsInIMDescription": "Show live tool execution status (running / complete / failed) directly in the chat. Disabled by default.",
       "displayEnabled": "Enable Workspace Display",
       "displayEnabledDescription": "Launch Xvnc in the workspace. Restart the workspace for this to take effect.",
       "desktopEnabled": "Desktop",
       "desktopEnabledDescription": "Give this bot a screen it can see and control, for browsing and desktop apps. You can watch it live and take over anytime.",
       "toolApproval": "Tool Call Approval",
       "toolApprovalDescription": "Require human approval for read, write, and exec operations, with bypass templates for safe paths or commands.",
-      "acpSetupMode": "Setup",
       "acpLaunchSection": "Launch",
       "acpCommand": "Command",
       "acpArguments": "Arguments",
-      "acpSetupApiKey": "API Key",
-      "acpSetupOAuth": "OAuth",
-      "acpSetupSelf": "Self-managed",
-      "acpSelfModeHint": "Uses the Agent you've already configured inside the workspace runtime (e.g. an existing login).",
       "acpStatusNeedsConfig": "Needs setup",
       "acpStatusOff": "Disabled",
       "acpEmptyTitle": "No agents available",
@@ -4538,5 +4509,30 @@
   "elicitation": {
     "done": "Done",
     "cancel": "Cancel"
+  },
+  "notifications": {
+    "clearAll": "Mark all as read",
+    "clearAllConfirm": "Mark all {count} as read?",
+    "clearedAll": "Marked {count} as read",
+    "undo": "Undo",
+    "markUnread": "Mark as unread",
+    "markRead": "Mark as read",
+    "updateFailed": "Couldn’t update unread state",
+    "inbox": "Needs you",
+    "justNow": "Just now",
+    "showAll": "Show all ({count})",
+    "showLess": "Show less",
+    "otherBots": "Unread sessions in other bots",
+    "settingsTitle": "Desktop notifications",
+    "settingsDescription": "Notify me when a session I'm not viewing receives a reply, fails, or needs my attention.",
+    "denied": "Notifications are blocked. Allow them in your browser settings, then turn this on.",
+    "unsupported": "Browser notifications are not supported in this browser. Unread indicators remain available.",
+    "kind": {
+      "reply": "Reply ready",
+      "failed": "Run failed",
+      "needs_input": "Waiting for your input",
+      "marked": "Marked unread"
+    },
+    "browserSettingsTitle": "Browser notifications"
   }
 }

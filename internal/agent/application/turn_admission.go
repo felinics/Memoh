@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 
-	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
@@ -58,20 +57,12 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 		return err
 	}
 	manager.SetDecisionStore(s)
-	manager.SetLostRunDecisionCanceller(func(ctx context.Context, botID, sessionID, runID string, fencingToken int64, reason string) error {
-		canceller, ok := s.userInput.(interface {
-			CancelPendingForRun(context.Context, string, string, string, int64, string) ([]userinput.Request, error)
-		})
-		if !ok {
-			return nil
-		}
-		_, err := canceller.CancelPendingForRun(ctx, botID, sessionID, runID, fencingToken, reason)
-		return err
-	})
+	manager.SetLostRunDecisionCanceller(s.cancelRunDecisions)
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
 	manager.SetDecisionFinalizer(s.finalizeRuntimeDecisions)
 	manager.SetTerminalObserver(func(ctx context.Context, terminal sessionruntime.TerminalRun) {
 		s.logRunResult(ctx, terminal)
+		s.markTerminalAttention(ctx, terminal)
 		s.reconcileTerminalContextLifecycle(ctx, terminal)
 		// Steers die with their run; follow-ups outlive it. Close the steer
 		// queue before the follow-up starter so a continuation run never sees
@@ -80,6 +71,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 		s.startFollowUpAfterTerminal(ctx, terminal)
 	})
 	manager.SetTerminalReconciler(s.reconcileTerminalContextLifecycles)
+	manager.SetWaitingDecisionObserver(s.markWaitingAttention)
 }
 
 func drainDeferredTurn(handle turn.RunHandle) {

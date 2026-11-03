@@ -13,7 +13,7 @@ export interface ComposerActionInput {
   hasSession: boolean
   readOnly: boolean
   loadingMessages: boolean
-  configPending: 'agent' | 'mode' | false
+  configPending: 'agent' | 'mode' | 'model' | false
   hasNoModel: boolean
   modeUnavailable: boolean
   modeChangeDisabled: boolean

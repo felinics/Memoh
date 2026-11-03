@@ -175,7 +175,6 @@ func preserveExplicitHistoryMetadata(collected []contextfrag.ContextFrag, cfg ag
 		if candidate, ok := overrides[index]; ok && frag.ID == messageFragmentID(index) {
 			frag.Kind = contextfrag.KindConversationSummary
 			frag.Ref = candidate.Ref
-			frag.Coverage = candidate.Coverage
 			frag.Provenance.Source = candidate.Provenance.Source
 			frag.Provenance.SourceID = candidate.Provenance.SourceID
 			frag.Provenance.Collector = candidate.Provenance.Collector
@@ -190,7 +189,7 @@ func messageFragmentID(index int) string {
 }
 
 func hasExplicitHistoryMetadata(frag contextfrag.ContextFrag) bool {
-	return frag.Kind == contextfrag.KindConversationSummary && frag.Coverage != nil && frag.Ref.Durability == contextfrag.RefDurable
+	return frag.Kind == contextfrag.KindConversationSummary && frag.Ref.Durability == contextfrag.RefDurable
 }
 
 func singleSDKMessage(frag contextfrag.ContextFrag) (sdk.Message, bool) {
@@ -368,6 +367,9 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "budget_plan_error", "context budget plan failed", budgetErr), nil
 	}
 
+	// An armed run keeps its whole history and folds what does not fit before
+	// it dispatches; every dispatch checks the allowance.
+	armed := cfg.SwitchContext != nil
 	registry := NewMapCollectorRegistry(StaticCollector{CollectorName: sourceFragsCollectorName, Frags: frags})
 	builder := NewBuilder(registry, selector, StablePrefixPlacer{}, NewMapRendererRegistry(&SDKMessagesRenderer{}))
 	view, err := builder.Build(ctx, BuildInput{
@@ -378,6 +380,7 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 			MaxTokens:           cfg.ContextBudgetMaxTokens,
 			Plan:                budgetPlan,
 			RecentProtectTokens: resolveRecentProtectTokens(cfg.ContextRecentProtectTokens),
+			KeepHistory:         armed,
 		},
 		DynamicMutators: cfg.ContextDynamicMutators,
 	})
@@ -432,7 +435,7 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 	if !ok {
 		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "unexpected_payload", "context view rendered unexpected payload", nil), nil
 	}
-	if err := validateProviderRenderedEnvelope(payload, cfg.ContextToolDefs, budgetPlan); err != nil {
+	if err := validateProviderRenderedEnvelope(payload, cfg.ContextToolDefs, budgetPlan); err != nil && !armed {
 		recordContextBudgetFailure(ledger, err)
 		return providerBudgetAuditConfig(cfg, view, ledger, budgetPlan), err
 	}

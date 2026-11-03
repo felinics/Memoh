@@ -2328,18 +2328,17 @@ func TestLatestOnlyForkProjectionUsesDurableAnchorAcrossPages(t *testing.T) {
 		{ID: "m2", TurnID: "t2", Role: "assistant", Content: json.RawMessage(`{"role":"assistant","content":"second"}`), Metadata: map[string]any{"agent_turn_id": "p2"}},
 	}
 	meta := map[string]any{"grok_last_prompt_id": "p2"}
-	turns := ConvertSessionMessagesToUITurns(rows, "grok-build", meta)
+	turns := ConvertSessionMessagesToUITurns(rows, "grok_last_prompt_id", meta)
 	if len(turns) != 2 || turns[0].RuntimeForkable || !turns[1].RuntimeForkable {
 		t.Fatalf("fork flags: %+v", turns)
 	}
-	older := ConvertSessionMessagesToUITurns(rows[:1], "grok-build", meta)
+	older := ConvertSessionMessagesToUITurns(rows[:1], "grok_last_prompt_id", meta)
 	if older[0].RuntimeForkable {
 		t.Fatal("last reply on an older page is not the latest native turn")
 	}
-	for _, runtime := range []string{"codex", "claude-code"} {
-		turns = ConvertSessionMessagesToUITurns(rows, runtime, meta)
-		if !turns[0].RuntimeForkable || !turns[1].RuntimeForkable {
-			t.Fatalf("historical fork regressed for %s", runtime)
-		}
+	// A runtime without an anchor forks from any turn.
+	turns = ConvertSessionMessagesToUITurns(rows, "", meta)
+	if !turns[0].RuntimeForkable || !turns[1].RuntimeForkable {
+		t.Fatal("historical fork regressed")
 	}
 }
