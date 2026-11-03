@@ -83,14 +83,11 @@ var directRuntimes = map[string]directRuntime{
 			if err != nil {
 				return "", err
 			}
-			switch cfg.Auth {
-			case claudecfg.AuthAPIKey:
+			if cfg.Auth == claudecfg.AuthAPIKey {
 				return agentcredential.AuthKindAnthropicAPIKey, nil
-			case claudecfg.AuthOAuthToken:
-				return agentcredential.AuthKindClaudeCodeOAuth, nil
-			default:
-				return "", nil
 			}
+			// Claude Code keeps its Claude account login in the Agent's workspace.
+			return "", nil
 		},
 	},
 	RuntimeGrokBuild: {
@@ -107,6 +104,17 @@ var directRuntimes = map[string]directRuntime{
 			return agentcredential.AuthKindXAIAPIKey, nil
 		},
 	},
+}
+
+// SignsInOnAgent reports whether a direct Agent's auth mode is an account
+// the Agent's own runtime signs in to, rather than a credential Memoh stores.
+func SignsInOnAgent(agent BotAgent) bool {
+	direct, ok := directRuntimes[agent.Runtime]
+	if !ok {
+		return false
+	}
+	kind, err := direct.credentialAuthKind(agent.Metadata)
+	return err == nil && kind == ""
 }
 
 type ConfigurationError struct {
@@ -651,6 +659,12 @@ func fromRow(row sqlc.BotAgent) (BotAgent, error) {
 		if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
 			return BotAgent{}, fmt.Errorf("decode bot agent metadata: %w", err)
 		}
+	}
+	// A Claude account used to be stored as a token Memoh obtained
+	// (oauth_token) or as a login found in the workspace (workspace); either
+	// now signs in on the Agent itself.
+	if auth := metadata["auth"]; row.Runtime == RuntimeClaudeCode && (auth == "oauth_token" || auth == "workspace") {
+		metadata["auth"] = string(claudecfg.AuthClaudeAccount)
 	}
 	item := BotAgent{
 		ID:        uuidString(row.ID),

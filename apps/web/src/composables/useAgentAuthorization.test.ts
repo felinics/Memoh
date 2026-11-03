@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, ref, type App } from 'vue'
-const api = vi.hoisted(() => ({ create: vi.fn(), get: vi.fn(), exchange: vi.fn(), cancel: vi.fn() }))
+const api = vi.hoisted(() => ({ create: vi.fn(), get: vi.fn(), cancel: vi.fn() }))
 vi.mock('@memohai/sdk', () => ({ postAgentAuthorizations: api.create, getAgentAuthorizationsById: api.get,
-  postAgentAuthorizationsByIdExchange: api.exchange, deleteAgentAuthorizationsById: api.cancel }))
+  deleteAgentAuthorizationsById: api.cancel }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 import { useAgentAuthorization } from './useAgentAuthorization'
 import type { DirectBotAgentRuntime } from '@/utils/bot-agent'
@@ -65,37 +65,4 @@ it('resumes expiry and cleanup when Bot creation fails before leaving onboarding
   await vi.advanceTimersByTimeAsync(60_000)
   expect(state.ready.value).toBe(false)
   expect(api.cancel).toHaveBeenCalled()
-})
-
-it('waits for the Claude code without polling, permits retry, and stores no code or token', async () => {
-  runtime.value = 'claude-code'
-  const pending = { ...session('pending'), runtime: 'claude-code', auth_kind: 'claude_code_oauth', authorization_url: 'https://claude.ai/oauth/authorize?state=test' }
-  api.create.mockResolvedValue({ data: pending })
-  api.exchange.mockRejectedValueOnce(new Error('invalid code')).mockResolvedValue({ data: { ...pending, status: 'ready', authorization_url: undefined } })
-  mount(); await state.start('claude_code_oauth')
-  await vi.advanceTimersByTimeAsync(10_000)
-  await state.exchange('bad-code')
-  expect(state.pending.value).toBe(true)
-  expect(state.error.value).toBeTruthy()
-  await state.exchange('SECRET-authorization-code')
-  expect(state.ready.value).toBe(true)
-  expect(state.error.value).toBe('')
-  expect(JSON.parse(sessionStorage.getItem(key)!)).toEqual({ id: 'session', runtime: 'claude-code' })
-})
-
-it('ignores a late code exchange after cancellation and expires pending Claude sessions', async () => {
-  runtime.value = 'claude-code'
-  const pending = { ...session('pending'), runtime: 'claude-code', auth_kind: 'claude_code_oauth', authorization_url: 'https://claude.ai/oauth/authorize' }
-  api.create.mockResolvedValue({ data: pending })
-  let finish!: (value: unknown) => void
-  api.exchange.mockReturnValue(new Promise(resolve => { finish = resolve }))
-  mount(); await state.start('claude_code_oauth')
-  const exchange = state.exchange('code')
-  state.cancel()
-  finish({ data: { ...pending, status: 'ready' } }); await exchange
-  expect(state.session.value).toBeNull()
-  await state.start('claude_code_oauth')
-  await vi.advanceTimersByTimeAsync(60_000)
-  expect(state.session.value).toBeNull()
-  expect(state.error.value).toBe('errors.agent_authorization.expired')
 })

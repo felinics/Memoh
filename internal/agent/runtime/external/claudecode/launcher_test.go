@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
@@ -16,7 +17,12 @@ func TestCLICommandQuotesTheLauncher(t *testing.T) {
 	if cliCommand(" /x/claude ", nil) != "'/x/claude'" {
 		t.Fatalf("bare launcher = %q", cliCommand(" /x/claude ", nil))
 	}
-	if got := cliEnv(claudecfg.Config{}); got[0] != "PATH="+agentproc.ContainerPath {
+	got := cliEnv(claudecfg.Config{}, "agent")
+	if got[0] != "PATH="+agentproc.ContainerPath {
 		t.Fatalf("cliEnv PATH = %q", got[0])
+	}
+	// Each Agent keeps its own login, sessions and settings.
+	if !slices.Contains(got, "CLAUDE_CONFIG_DIR=/data/.claude-code/agents/agent") {
+		t.Fatalf("cliEnv config dir = %q", got)
 	}
 }

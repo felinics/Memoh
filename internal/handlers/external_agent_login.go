@@ -19,9 +19,9 @@ import (
 )
 
 // ExternalAgentLoginHandler exposes the account sign-in of direct runtimes
-// that sign in inside the Agent's own process (Codex, Grok Build): the agent
-// obtains a device code, the user confirms it, and the agent writes the login
-// into its home and keeps it there.
+// that sign in inside the Agent's own process (Codex, Claude Code, Grok
+// Build): the agent starts the sign-in, the user confirms it in the browser,
+// and the agent writes the login into its home and keeps it there.
 type ExternalAgentLoginHandler struct {
 	runtimes       *external.Registry
 	agents         *botagents.Service
@@ -55,6 +55,7 @@ func (h *ExternalAgentLoginHandler) Register(e *echo.Echo) {
 		g.POST("/poll", h.PollDevice)
 		g.POST("/cancel", h.CancelDevice)
 	}
+	e.POST("/bots/:bot_id/agents/:id/login/device/code", h.SubmitCode)
 	e.GET("/bots/:bot_id/agents/:id/account", h.Account)
 	e.GET("/bots/:bot_id/agents/:id/quota", h.Quota)
 }
@@ -65,6 +66,8 @@ type AgentQuotaWindow struct {
 	// WindowMinutes is 0 when the runtime does not report the window length.
 	WindowMinutes int        `json:"window_minutes" validate:"required"`
 	ResetsAt      *time.Time `json:"resets_at,omitempty"`
+	// Model names the models the window counts alone; absent when it counts all.
+	Model string `json:"model,omitempty"`
 } // @name externalagent.AgentQuotaWindow
 
 // AgentQuotaResponse reports the usage limits of the Agent's account.
@@ -75,7 +78,7 @@ type AgentQuotaResponse struct {
 
 // Quota godoc
 // @Summary Get the usage limits of the Agent's account
-// @Description For runtimes whose account reports its usage (Codex with a ChatGPT account). Available to anyone who can chat with the Bot, so the composer can warn before a turn runs into the limit.
+// @Description For runtimes whose account reports its usage (Codex with a ChatGPT account, Claude Code with a Claude account). Available to anyone who can chat with the Bot, so the composer can warn before a turn runs into the limit.
 // @Tags external-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
@@ -113,7 +116,7 @@ func (h *ExternalAgentLoginHandler) Quota(c echo.Context) error {
 	}
 	response := AgentQuotaResponse{LimitReached: quota.LimitReached, Windows: make([]AgentQuotaWindow, 0, len(quota.Windows))}
 	for _, window := range quota.Windows {
-		response.Windows = append(response.Windows, AgentQuotaWindow{UsedPercent: window.UsedPercent, WindowMinutes: window.WindowMinutes, ResetsAt: window.ResetsAt})
+		response.Windows = append(response.Windows, AgentQuotaWindow{UsedPercent: window.UsedPercent, WindowMinutes: window.WindowMinutes, ResetsAt: window.ResetsAt, Model: window.Model})
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -126,7 +129,7 @@ type AgentAccountResponse struct {
 
 // Account godoc
 // @Summary Get the account a direct runtime Agent is signed in to
-// @Description For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.
+// @Description For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Claude Code with a Claude account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.
 // @Tags external-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
@@ -186,12 +189,21 @@ func (h *ExternalAgentLoginHandler) requireLogin(c echo.Context) (external.Devic
 	return login, bot.ID, agent.ID, channelIdentityID, nil
 }
 
-// DeviceLoginAuthorizeResponse is a started device-code sign-in.
+// DeviceLoginAuthorizeResponse is a started sign-in. With a user code the
+// user enters it at the URL; with code_required the page there shows a code
+// the user pastes back to /login/device/code instead.
 type DeviceLoginAuthorizeResponse struct {
 	LoginID         string `json:"login_id" validate:"required"`
-	UserCode        string `json:"user_code" validate:"required"`
+	UserCode        string `json:"user_code,omitempty"`
 	VerificationURL string `json:"verification_url" validate:"required"`
+	CodeRequired    bool   `json:"code_required,omitempty"`
 } // @name externalagent.DeviceLoginAuthorizeResponse
+
+// DeviceLoginCodeRequest is the code the sign-in page showed.
+type DeviceLoginCodeRequest struct {
+	LoginID string `json:"login_id" validate:"required"`
+	Code    string `json:"code" validate:"required"`
+} // @name externalagent.DeviceLoginCodeRequest
 
 // DeviceLoginPollRequest identifies the sign-in being polled or cancelled.
 type DeviceLoginPollRequest struct {
@@ -204,8 +216,8 @@ type DeviceLoginPollResponse struct {
 } // @name externalagent.DeviceLoginPollResponse
 
 // AuthorizeDevice godoc
-// @Summary Start a device-code account sign-in on a direct runtime Agent
-// @Description The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex, Grok Build) accept it.
+// @Summary Start an account sign-in on a direct runtime Agent
+// @Description The Agent's own process starts the sign-in. For Codex and Grok Build the user opens the URL and confirms the device code there; for Claude Code (code_required) the page shows a code the user pastes back to /login/device/code.
 // @Tags external-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
@@ -228,7 +240,50 @@ func (h *ExternalAgentLoginHandler) AuthorizeDevice(c echo.Context) error {
 		LoginID:         start.LoginID,
 		UserCode:        start.UserCode,
 		VerificationURL: start.VerificationURL,
+		CodeRequired:    start.CodeRequired,
 	})
+}
+
+// SubmitCode godoc
+// @Summary Finish a sign-in with the code its page showed
+// @Description For sign-ins started with code_required. The code goes to the Agent's own process, which completes the sign-in and keeps the login; Memoh does not store it. A rejected code ends the sign-in.
+// @Tags external-agents
+// @Param bot_id path string true "Bot ID"
+// @Param id path string true "Bot Agent ID"
+// @Param body body DeviceLoginCodeRequest true "Sign-in reference and code"
+// @Success 204
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 503 {object} server.Problem
+// @Router /bots/{bot_id}/agents/{id}/login/device/code [post].
+func (h *ExternalAgentLoginHandler) SubmitCode(c echo.Context) error {
+	login, botID, botAgentID, _, err := h.requireLogin(c)
+	if err != nil {
+		return err
+	}
+	submitter, ok := login.(external.LoginCodeSubmitter)
+	if !ok {
+		return apperror.New(apperror.CodeBotAgentNotFound, nil)
+	}
+	var req DeviceLoginCodeRequest
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.LoginID) == "" {
+		return apperror.FieldRequired("login_id")
+	}
+	if strings.TrimSpace(req.Code) == "" {
+		return apperror.FieldRequired("code")
+	}
+	err = submitter.SubmitLoginCode(c.Request().Context(), botID, botAgentID, strings.TrimSpace(req.LoginID), req.Code)
+	if errors.Is(err, external.ErrLoginCodeInvalid) {
+		return apperror.Wrap(apperror.CodeAgentAuthorizationCodeInvalid, err, nil)
+	}
+	if err != nil {
+		return h.runtimeError(c, err)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // PollDevice godoc

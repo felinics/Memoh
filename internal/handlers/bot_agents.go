@@ -307,6 +307,8 @@ func (h *BotAgentsHandler) present(agent botagents.BotAgent, bot bots.Bot) botag
 	if caps, ok := h.runtimes.Caps(agent.Runtime); ok && caps.Dependency != "" {
 		agent.Dependency = &botagents.DependencyRequirement{DependencyID: caps.Dependency}
 	}
+	_, quota := external.As[external.QuotaReader](h.runtimes, agent.Runtime)
+	agent.ReportsQuota = quota && botagents.SignsInOnAgent(agent)
 	return botagents.WithACPSetup(agent, bot.Metadata)
 }
 

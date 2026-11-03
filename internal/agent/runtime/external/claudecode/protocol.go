@@ -57,7 +57,6 @@ type inboundMessage struct {
 
 	// system/init fields.
 	Model              string              `json:"model,omitempty"`
-	ClaudeCodeVersion  string              `json:"claude_code_version,omitempty"`
 	Capabilities       []string            `json:"capabilities,omitempty"`
 	PermissionMode     string              `json:"permissionMode,omitempty"`
 	Skills             []string            `json:"skills,omitempty"`
@@ -105,6 +104,20 @@ type inboundMessage struct {
 type initializeResponse struct {
 	Models   []initializeModel   `json:"models"`
 	Commands []initializeCommand `json:"commands"`
+	Account  initializeAccount   `json:"account"`
+}
+
+// initializeAccount is who the CLI runs as. A Claude account login reports
+// its plan (and email) but no token source; a token from elsewhere reports
+// only its source, which is "none" when there is no login at all.
+type initializeAccount struct {
+	Email            string `json:"email"`
+	SubscriptionType string `json:"subscriptionType"`
+	TokenSource      string `json:"tokenSource"`
+}
+
+func (a initializeAccount) signedIn() bool {
+	return a.SubscriptionType != "" || a.Email != "" || (a.TokenSource != "" && a.TokenSource != "none")
 }
 
 type initializeCommand struct {

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   updateMe: vi.fn(),
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
   user: { onboardingCompleted: false },
 }))
 
@@ -21,7 +22,7 @@ vi.mock('@memohai/sdk', () => ({
 }))
 
 vi.mock('@felinic/ui', () => ({
-  toast: { error: mocks.toastError },
+  toast: { error: mocks.toastError, info: mocks.toastInfo },
 }))
 
 vi.mock('@/store/user', () => ({
@@ -86,6 +87,22 @@ describe('useOnboarding completion', () => {
     })
     expect(readOnboardingBotResult()).toBeNull()
     expect(localStorage.getItem(ONBOARDING_KEYS.forceOnboarding)).toBeNull()
+  })
+
+  it('lands an Agent that has yet to sign in on its settings', async () => {
+    writeOnboardingBotResult({
+      botId: 'bot-id',
+      modelConfigured: false,
+      agent: { agentId: 'claude-code', botAgentId: 'agent-id', signInFirst: true },
+    })
+
+    expect(await useOnboarding().complete()).toBe(true)
+    expect(mocks.replace).toHaveBeenLastCalledWith({
+      name: 'bot-detail',
+      params: { botName: 'bot-id' },
+      query: { tab: 'agents', openAgent: 'agent-id' },
+    })
+    expect(mocks.toastInfo).toHaveBeenCalledWith('bots.createBotSignInFirst')
   })
 
   it('treats a resolved router failure as a failed completion', async () => {

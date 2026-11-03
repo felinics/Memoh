@@ -1,6 +1,6 @@
 import type { ExternalControls, TurnRuntimeCommand, TurnRuntimeMode } from '@memohai/sdk'
 import type { CommandActionResult } from '@/composables/api/useChat'
-import { codexUsageResetTime } from './codex-usage'
+import { agentQuotaResetTime } from './agent-quota'
 
 type Translate = (key: string, fallback: string) => string
 
@@ -74,7 +74,7 @@ function commandSummary(command: string, data: unknown, t: Translate, locale: st
       const window = record(limits?.[key])
       if (typeof window?.usedPercent === 'number') {
         const resets = typeof window.resetsAt === 'number'
-          ? ` · ${t('runtime.result.resets', '{time}').replace('{time}', codexUsageResetTime(new Date(window.resetsAt * 1000).toISOString(), locale))}`
+          ? ` · ${t('runtime.result.resets', '{time}').replace('{time}', agentQuotaResetTime(new Date(window.resetsAt * 1000).toISOString(), locale))}`
           : ''
         lines.push(`${t(`runtime.result.fields.${key}`, key)}: ${scalar(window.usedPercent)}%${resets}`)
       }

@@ -28,7 +28,7 @@ func TestAgentAuthorizationClaimAndExpiry(t *testing.T) {
 		}
 	}
 	creds := agentcredential.NewService(postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool)), config.Config{Auth: config.AuthConfig{AgentCredentialsEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}})
-	svc := agentcredential.NewAuthorizationService(creds, nil)
+	svc := agentcredential.NewAuthorizationService(creds)
 	create := func() agentcredential.Authorization {
 		t.Helper()
 		session, err := svc.Create(ctx, appUserID, agentcredential.AuthorizationRequest{Runtime: "claude-code", AuthKind: agentcredential.AuthKindAnthropicAPIKey, Secret: map[string]string{"api_key": "SECRET-test-key"}})

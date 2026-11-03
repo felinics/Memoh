@@ -34,7 +34,7 @@ const docTemplate = `{
         },
         "/agent-authorizations": {
             "post": {
-                "description": "Starts Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A ChatGPT or Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.",
+                "description": "Encrypts a supplied API key. A ChatGPT, Claude or Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys are not probed against the provider.",
                 "consumes": [
                     "application/json"
                 ],
@@ -164,70 +164,6 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/agent-authorizations/{id}/exchange": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "agent-authorizations"
-                ],
-                "summary": "Complete Claude browser authorization with the returned authorization code",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Authorization ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Authorization code",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.AgentAuthorizationExchangeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.Authorization"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "410": {
-                        "description": "Gone",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -1443,7 +1379,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents/{id}/account": {
             "get": {
-                "description": "For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.",
+                "description": "For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Claude Code with a Claude account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.",
                 "tags": [
                     "external-agents"
                 ],
@@ -1719,11 +1655,11 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents/{id}/login/device/authorize": {
             "post": {
-                "description": "The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex, Grok Build) accept it.",
+                "description": "The Agent's own process starts the sign-in. For Codex and Grok Build the user opens the URL and confirms the device code there; for Claude Code (code_required) the page shows a code the user pastes back to /login/device/code.",
                 "tags": [
                     "external-agents"
                 ],
-                "summary": "Start a device-code account sign-in on a direct runtime Agent",
+                "summary": "Start an account sign-in on a direct runtime Agent",
                 "parameters": [
                     {
                         "type": "string",
@@ -1823,6 +1759,69 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/login/device/code": {
+            "post": {
+                "description": "For sign-ins started with code_required. The code goes to the Agent's own process, which completes the sign-in and keeps the login; Memoh does not store it. A rejected code ends the sign-in.",
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Finish a sign-in with the code its page showed",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Sign-in reference and code",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.DeviceLoginCodeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -1954,7 +1953,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents/{id}/quota": {
             "get": {
-                "description": "For runtimes whose account reports its usage (Codex with a ChatGPT account). Available to anyone who can chat with the Bot, so the composer can warn before a turn runs into the limit.",
+                "description": "For runtimes whose account reports its usage (Codex with a ChatGPT account, Claude Code with a Claude account). Available to anyone who can chat with the Bot, so the composer can warn before a turn runs into the limit.",
                 "tags": [
                     "external-agents"
                 ],
@@ -17938,9 +17937,6 @@ const docTemplate = `{
                 "auth_kind": {
                     "type": "string"
                 },
-                "authorization_url": {
-                    "type": "string"
-                },
                 "expires_at": {
                     "type": "string"
                 },
@@ -17953,7 +17949,6 @@ const docTemplate = `{
                 "status": {
                     "type": "string",
                     "enum": [
-                        "pending",
                         "ready",
                         "claimed"
                     ]
@@ -18495,6 +18490,10 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "reports_quota": {
+                    "description": "ReportsQuota is decided at read time: the Agent's own account login\nreports its plan usage (GET .../quota).",
+                    "type": "boolean"
                 },
                 "runtime": {
                     "type": "string"
@@ -21260,6 +21259,10 @@ const docTemplate = `{
                 "window_minutes"
             ],
             "properties": {
+                "model": {
+                    "description": "Model names the models the window counts alone; absent when it counts all.",
+                    "type": "string"
+                },
                 "resets_at": {
                     "type": "string"
                 },
@@ -21276,10 +21279,12 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "login_id",
-                "user_code",
                 "verification_url"
             ],
             "properties": {
+                "code_required": {
+                    "type": "boolean"
+                },
                 "login_id": {
                     "type": "string"
                 },
@@ -21287,6 +21292,21 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "verification_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.DeviceLoginCodeRequest": {
+            "type": "object",
+            "required": [
+                "code",
+                "login_id"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "login_id": {
                     "type": "string"
                 }
             }
@@ -21496,17 +21516,6 @@ const docTemplate = `{
             ],
             "properties": {
                 "authorization_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.AgentAuthorizationExchangeRequest": {
-            "type": "object",
-            "required": [
-                "code"
-            ],
-            "properties": {
-                "code": {
                     "type": "string"
                 }
             }

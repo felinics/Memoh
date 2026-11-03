@@ -127,11 +127,16 @@ async function goToBot() {
   if (navigated) return
   clearReadyRedirectTimer()
   navigated = true
+  // An account that signs in on the Agent itself has not signed in yet: land
+  // on the Agent's settings rather than on a chat that cannot run.
+  const agent = createdAgent.value
+  const auth = String(agent?.metadata?.auth ?? '')
+  const signInFirst = !!agent?.id && isDeviceLoginAuthMode(auth)
   if (props.onboarding && bot.value?.id) {
-    const runtime = createdAgent.value?.runtime
+    const runtime = agent?.runtime
     writeOnboardingBotResult({ botId: bot.value.id, modelConfigured: modelConfigured.value,
       ...(isDirectBotAgentRuntime(runtime) && { agent: {
-        agentId: runtime, botAgentId: createdAgent.value?.id ?? '', authorizationId: authorizationId.value,
+        agentId: runtime, botAgentId: agent?.id ?? '', authorizationId: authorizationId.value, signInFirst,
       } }),
     })
     void queryCache.invalidateQueries({ key: getBotsQueryKey() })
@@ -140,11 +145,6 @@ async function goToBot() {
     return
   }
   const target = bot.value?.name ?? bot.value?.id
-  // An account that signs in on the Agent itself has not signed in yet: land
-  // on the Agent's settings rather than on a chat that cannot run.
-  const agent = createdAgent.value
-  const auth = String(agent?.metadata?.auth ?? '')
-  const signInFirst = !!agent?.id && isDeviceLoginAuthMode(auth)
   if (setupError.value) {
     toast.error(setupError.value)
   } else if (signInFirst) {

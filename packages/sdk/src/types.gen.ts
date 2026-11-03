@@ -343,11 +343,10 @@ export type AdaptersUsageResponse = {
 
 export type AgentcredentialAuthorization = {
     auth_kind: string;
-    authorization_url?: string;
     expires_at: string;
     id: string;
     runtime: string;
-    status: 'pending' | 'ready' | 'claimed';
+    status: 'ready' | 'claimed';
 };
 
 export type AgentcredentialAuthorizationRequest = {
@@ -571,6 +570,11 @@ export type BotagentsBotAgent = {
         [key: string]: unknown;
     };
     name?: string;
+    /**
+     * ReportsQuota is decided at read time: the Agent's own account login
+     * reports its plan usage (GET .../quota).
+     */
+    reports_quota?: boolean;
     runtime?: string;
     updated_at?: string;
 };
@@ -1619,6 +1623,10 @@ export type ExternalagentAgentQuotaResponse = {
 };
 
 export type ExternalagentAgentQuotaWindow = {
+    /**
+     * Model names the models the window counts alone; absent when it counts all.
+     */
+    model?: string;
     resets_at?: string;
     used_percent: number;
     /**
@@ -1628,9 +1636,15 @@ export type ExternalagentAgentQuotaWindow = {
 };
 
 export type ExternalagentDeviceLoginAuthorizeResponse = {
+    code_required?: boolean;
     login_id: string;
-    user_code: string;
+    user_code?: string;
     verification_url: string;
+};
+
+export type ExternalagentDeviceLoginCodeRequest = {
+    code: string;
+    login_id: string;
 };
 
 export type ExternalagentDeviceLoginPollRequest = {
@@ -1713,10 +1727,6 @@ export type GithubComFelinicsMemohInternalMcpConnection = {
 
 export type HandlersAgentAuthorizationClaimRequest = {
     authorization_id: string;
-};
-
-export type HandlersAgentAuthorizationExchangeRequest = {
-    code: string;
 };
 
 export type HandlersAppConnectorCredentialRequest = {
@@ -4745,51 +4755,6 @@ export type GetAgentAuthorizationsByIdResponses = {
 
 export type GetAgentAuthorizationsByIdResponse = GetAgentAuthorizationsByIdResponses[keyof GetAgentAuthorizationsByIdResponses];
 
-export type PostAgentAuthorizationsByIdExchangeData = {
-    /**
-     * Authorization code
-     */
-    body: HandlersAgentAuthorizationExchangeRequest;
-    path: {
-        /**
-         * Authorization ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/agent-authorizations/{id}/exchange';
-};
-
-export type PostAgentAuthorizationsByIdExchangeErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Gone
-     */
-    410: ServerProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ServerProblem;
-};
-
-export type PostAgentAuthorizationsByIdExchangeError = PostAgentAuthorizationsByIdExchangeErrors[keyof PostAgentAuthorizationsByIdExchangeErrors];
-
-export type PostAgentAuthorizationsByIdExchangeResponses = {
-    /**
-     * OK
-     */
-    200: AgentcredentialAuthorization;
-};
-
-export type PostAgentAuthorizationsByIdExchangeResponse = PostAgentAuthorizationsByIdExchangeResponses[keyof PostAgentAuthorizationsByIdExchangeResponses];
-
 export type PostAuthLoginData = {
     /**
      * Login request
@@ -6057,6 +6022,53 @@ export type PostBotsByBotIdAgentsByIdLoginDeviceCancelErrors = {
 export type PostBotsByBotIdAgentsByIdLoginDeviceCancelError = PostBotsByBotIdAgentsByIdLoginDeviceCancelErrors[keyof PostBotsByBotIdAgentsByIdLoginDeviceCancelErrors];
 
 export type PostBotsByBotIdAgentsByIdLoginDeviceCancelResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostBotsByBotIdAgentsByIdLoginDeviceCodeData = {
+    /**
+     * Sign-in reference and code
+     */
+    body: ExternalagentDeviceLoginCodeRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/login/device/code';
+};
+
+export type PostBotsByBotIdAgentsByIdLoginDeviceCodeErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type PostBotsByBotIdAgentsByIdLoginDeviceCodeError = PostBotsByBotIdAgentsByIdLoginDeviceCodeErrors[keyof PostBotsByBotIdAgentsByIdLoginDeviceCodeErrors];
+
+export type PostBotsByBotIdAgentsByIdLoginDeviceCodeResponses = {
     /**
      * No Content
      */

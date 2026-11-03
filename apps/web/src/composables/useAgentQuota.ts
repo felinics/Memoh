@@ -2,15 +2,15 @@ import type { Ref } from 'vue'
 import { useQuery } from '@pinia/colada'
 import { getBotsByBotIdAgentsByIdQuota } from '@memohai/sdk'
 
-// Usage is read from the Agent's Codex, which a read starts when it is not
-// running, so it is never polled: callers read it when it can have changed.
-export function useCodexUsage(options: {
+// Usage is read from the Agent's own runtime, which a read starts when it is
+// not running, so it is never polled: callers read it when it can have changed.
+export function useAgentQuota(options: {
   botId: Ref<string>
   botAgentId: Ref<string>
   enabled: () => boolean
 }) {
   return useQuery({
-    key: () => ['codex-usage', options.botId.value, options.botAgentId.value],
+    key: () => ['agent-quota', options.botId.value, options.botAgentId.value],
     enabled: () => !!options.botId.value && !!options.botAgentId.value && options.enabled(),
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
