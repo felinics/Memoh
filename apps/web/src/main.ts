@@ -24,6 +24,7 @@ import { PiniaColada } from '@pinia/colada'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import { createQueryCachePersistencePlugin, whenQueryCacheRestored } from './lib/query-cache-persistence'
 import 'katex/dist/katex.min.css'
+import { installNativeShell } from './shells/mobile/native-bridge'
 
 setupApiClient({
   onUnauthorized: () => router.replace({ name: 'Login' }),
@@ -84,6 +85,10 @@ if (forceDesktopShell) {
 // Mount only after the snapshot is hydrated so the first render already has
 // the last-known values (storage is sync, so this resolves in a microtask).
 void whenQueryCacheRestored().then(() => app.mount('#app'))
+
+// Inside the native mobile shell (apps/mobile): keep the system bars in step
+// with the page theme. A no-op in a browser.
+installNativeShell()
 
 // Installed-app support (public/sw.js): keeps the app shell openable offline.
 // Production builds only, so the dev server's unbundled modules are never

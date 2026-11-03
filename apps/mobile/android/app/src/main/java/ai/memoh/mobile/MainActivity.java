@@ -9,6 +9,7 @@ import android.view.View;
 import android.view.Window;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
+import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
@@ -82,7 +83,7 @@ public class MainActivity extends BridgeActivity {
                             moveTaskToBack(true);
                         } else {
                             lastExitBackTime = now;
-                            webView.evaluateJavascript("window.showToast && window.showToast('再返回一次退出')", null);
+                            Toast.makeText(MainActivity.this, R.string.back_again_to_exit, Toast.LENGTH_SHORT).show();
                         }
                     }
                 );

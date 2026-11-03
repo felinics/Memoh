@@ -17,8 +17,9 @@ Everything the shell and the page ask of each other goes through one module on t
 
 Current contract:
 
-- **System back.** `MainActivity` evaluates `window.__handleNativeBack()`. `'handled'` means the page consumed the back. `'exit'` falls back to WebView history, and with no history to a double-back exit.
-- **`window.MemohNative`** (`isSystemNight`, `setCanvasColor`, `trigger`) is exposed by `MainActivity` but not yet used by the web app.
+- **System back.** `MainActivity` evaluates `window.__handleNativeBack()`. `'handled'` means the page consumed the back. `'exit'` falls back to WebView history, and with no history to a double-back exit with a native toast.
+- **System bars.** On every theme change the page calls Capacitor's `SystemBars.setStyle` for the icon style, then `MemohNative.setCanvasColor` for the window background, in that order, because `setStyle` resets the background.
+- **`window.MemohNative`** also exposes `isSystemNight` and `trigger` (haptics), which the web app does not use yet.
 
 ## Server address
 

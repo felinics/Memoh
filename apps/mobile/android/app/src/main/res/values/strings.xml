@@ -4,4 +4,5 @@
     <string name="title_activity_main">Memoh</string>
     <string name="package_name">ai.memoh.mobile</string>
     <string name="custom_url_scheme">ai.memoh.mobile</string>
+    <string name="back_again_to_exit">Press back again to exit</string>
 </resources>

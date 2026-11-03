@@ -50,3 +50,69 @@ export function useNativeBack(handler: NativeBackHandler): void {
     unregister = null
   })
 }
+
+// System bars. The page draws under the status bar and the gesture bar, so
+// their icons must follow the page's theme, not the phone's: a dark page on a
+// phone in light mode would otherwise get dark icons on a dark background.
+// Two calls, in this order, because SystemBars.setStyle resets the window
+// background:
+//   1. Capacitor's SystemBars plugin sets the icon style. Its styles name the
+//      page under the bar: LIGHT means dark icons for a light page.
+//   2. MemohNative.setCanvasColor sets the window background, which shows at
+//      launch and behind the keyboard while it animates.
+// The page loads no Capacitor JS bundle, so plugins are reached through the
+// bridge's nativePromise rather than Capacitor.Plugins.
+type NativeShellWindow = Window & {
+  MemohNative?: { setCanvasColor: (hex: string) => void }
+  Capacitor?: {
+    nativePromise?: (plugin: string, method: string, options: object) => Promise<unknown>
+  }
+}
+
+// setCanvasColor takes #rrggbb (Android's Color.parseColor); the theme
+// tokens may be any CSS color, oklch included, so let the browser resolve it.
+function toHexColor(cssColor: string): string | null {
+  const context = document.createElement('canvas').getContext('2d')
+  if (!context) return null
+  context.fillStyle = cssColor
+  context.fillRect(0, 0, 1, 1)
+  const [r, g, b] = context.getImageData(0, 0, 1, 1).data
+  return `#${[r, g, b].map(channel => (channel ?? 0).toString(16).padStart(2, '0')).join('')}`
+}
+
+function syncSystemBars(nativeWindow: NativeShellWindow, lastKey: { value: string }): void {
+  const root = document.documentElement
+  const dark = root.classList.contains('dark')
+  const canvas = toHexColor(getComputedStyle(root).getPropertyValue('--background').trim())
+  if (!canvas) return
+  const key = `${dark} ${canvas}`
+  if (key === lastKey.value) return
+  lastKey.value = key
+  const sendCanvas = () => {
+    try {
+      nativeWindow.MemohNative?.setCanvasColor(canvas)
+    }
+    catch {
+      // An older shell without the method keeps its launch color.
+    }
+  }
+  const nativePromise = nativeWindow.Capacitor?.nativePromise
+  if (!nativePromise) {
+    sendCanvas()
+    return
+  }
+  nativePromise('SystemBars', 'setStyle', { style: dark ? 'DARK' : 'LIGHT' })
+    .catch(() => {})
+    .then(sendCanvas)
+}
+
+// Called once at startup; does nothing outside the native shell. The theme
+// lives on <html>: the dark class, plus attributes that swap the palette.
+export function installNativeShell(): void {
+  const nativeWindow = window as NativeShellWindow
+  if (!nativeWindow.MemohNative) return
+  const lastKey = { value: '' }
+  const sync = () => syncSystemBars(nativeWindow, lastKey)
+  new MutationObserver(sync).observe(document.documentElement, { attributes: true })
+  sync()
+}

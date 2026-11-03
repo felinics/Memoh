@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Page paper color, dark theme. Must match the paper custom property in index.html. -->
+    <!-- Window color before the page reports its own (dark system theme), shown during launch and behind the keyboard. The page replaces it through MemohNative.setCanvasColor. -->
     <color name="memoh_canvas">#111113</color>
 </resources>
