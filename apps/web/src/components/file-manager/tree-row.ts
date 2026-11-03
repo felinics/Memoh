@@ -1,7 +1,7 @@
 // The Explorer tree-row shape — ONE home for it.
 //
 // File-tree rows are a deliberately LOCAL row system (see
-// packages/ui/skills/ui-owners/SKILL.md § "When to STAY hand-written": tree rows
+// packages/ui/skills/ui-owners/SKILL.md § "九、何时保留手写": tree rows
 // live on their own surface and are not settings rows). Local does not mean
 // copied: the moment a second surface renders a tree row — the folder picker in
 // the New-folder dialog — hand-copying these strings would be exactly the

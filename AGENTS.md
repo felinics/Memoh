@@ -78,9 +78,9 @@ Top-level layout — see `docs/codebase-map.md` for the full annotated tree, con
 Before making changes to a directory, check whether that directory (or its nearest parent application/package directory) contains an `AGENTS.md`. If it does, read it first. Local files contain domain-specific conventions that override or extend this root guide.
 
 Key local developer guides:
-- `apps/web/AGENTS.md` — web frontend architecture, routing, page conventions, and i18n rules.
+- `apps/web/AGENTS.md` — web frontend entry point routing to `.agents/skills/memoh-frontend-rules/SKILL.md` (host rules, architecture, review checklist) and `packages/ui` skills.
 - `apps/desktop/AGENTS.md` — Electron shell, hosted-server bootstrap, tray/menu/preload rules.
-- `packages/ui/AGENTS.md` — UI-owned entry point for the design contract and adjacent Web composition guidance. Read it before Web/UI work; do not duplicate its skills under `.agents/skills/`.
+- `packages/ui/AGENTS.md` — UI-owned entry point for the `@felinic/ui` design token contract, `skills/ui-owners/` (component & primitive vocabulary), and `skills/ui-patterns/` (cross-component interaction patterns). Read it before Web/UI work; do not duplicate `packages/ui` skills under `.agents/skills/`.
 
 Reference docs moved out of this file:
 - `docs/development.md` — prerequisites, `mise` commands, Docker deployment

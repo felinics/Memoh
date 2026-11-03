@@ -38,6 +38,53 @@ export default [
         skipBlankLines: true,
         skipComments: true,
       }],
+      'no-restricted-imports': ['error', {
+        paths: [
+          {
+            name: '@/router',
+            message: '违反 M6（保持分发边界）：共享 Pinia store 严禁直接导入 Web 专用的 @/router（Desktop 使用内存路由），请使用宿主注入的 router。',
+          },
+        ],
+      }],
+    },
+  },
+  {
+    files: ['apps/web/src/**/*.{ts,tsx,vue}'],
+    ignores: [
+      'apps/web/src/**/*.test.ts',
+      'apps/web/src/lib/api-client.ts',
+      'apps/web/src/store/update.ts',
+      'apps/web/src/components/provider-icon/preload.ts',
+      'apps/web/src/components/sidebar/files-pane.vue',
+      'apps/web/src/pages/home/components/attachment-block.vue',
+      'apps/web/src/pages/home/components/browser-pane.vue',
+      'apps/web/src/pages/home/components/dockview/panel-asset.vue',
+    ],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'fetch',
+          message: '违反 M3（服务端数据只有一条访问路径）：禁止在业务代码直接调用裸 fetch()，请统一使用 @memohai/sdk 配合 Pinia Colada useQuery / useMutation。',
+        },
+      ],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'reka-ui',
+              message: '违反 M1 / M2：业务层严禁直接导入 reka-ui，请使用 @felinic/ui 封装的组件原语。',
+            },
+          ],
+          patterns: [
+            {
+              group: ['@fortawesome/*'],
+              message: '违反 M1 / U9：严禁使用 FontAwesome 图标，通用图标请用 lucide-vue-next，品牌图标请用 @memohai/icon。',
+            },
+          ],
+        },
+      ],
     },
   },
   {
