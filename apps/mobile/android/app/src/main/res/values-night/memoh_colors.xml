@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Page paper color, dark theme. Must match the paper custom property in index.html. -->
+    <color name="memoh_canvas">#111113</color>
+</resources>

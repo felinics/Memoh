@@ -1,0 +1,21 @@
+{
+  "name": "@memohai/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Memoh native mobile shell (Capacitor) that loads the Memoh web app",
+  "scripts": {
+    "sync": "cap sync android",
+    "android:build": "cap sync android && cd android && ./gradlew assembleDebug",
+    "android:open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/core": "8.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0",
+    "@types/node": "^25.9.5",
+    "typescript": "~6.0.3"
+  }
+}

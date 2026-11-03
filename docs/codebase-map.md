@@ -141,6 +141,7 @@ Memoh/
 │       └── bridgepb/           #     Protobuf definitions (bridge.proto)
 ├── apps/                       # Application services
 │   ├── desktop/                #   Native Electron app (@memohai/desktop): hosted-server renderer, tray, menus, preload IPC
+│   ├── mobile/                 #   Native mobile shell (@memohai/mobile, Capacitor): loads the web app, system back, status bar, packaging
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
 │   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/felinics/ui; its AGENTS.md routes agents to the UI-owned Web guidance

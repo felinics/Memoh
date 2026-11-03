@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Memoh</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; padding: max(24px, env(safe-area-inset-top)) 24px 24px; font: 16px/1.5 system-ui, sans-serif; }
+    code { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <!-- Shown only when the shell was synced without a server to load. -->
+  <h1>No Memoh server set</h1>
+  <p>This build was made without a server address. Rebuild it with one:</p>
+  <p><code>MEMOH_MOBILE_DEV_URL=http://&lt;your-computer&gt;:&lt;port&gt; pnpm --filter @memohai/mobile android:build</code></p>
+</body>
+</html>

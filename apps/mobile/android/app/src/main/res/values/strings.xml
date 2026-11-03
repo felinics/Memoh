@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Memoh</string>
+    <string name="title_activity_main">Memoh</string>
+    <string name="package_name">ai.memoh.mobile</string>
+    <string name="custom_url_scheme">ai.memoh.mobile</string>
+</resources>

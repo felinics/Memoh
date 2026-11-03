@@ -67,7 +67,7 @@ Top-level layout — see `docs/codebase-map.md` for the full annotated tree, con
 
 - `cmd/` — Go entry points (`agent`, `channel`, `bridge`, `mcp`, …)
 - `internal/` — Go backend domain packages (`agent`, `channel`, `chat`, `workspace`, …)
-- `apps/` — `web` (Vue 3 management UI) and `desktop` (Electron native client)
+- `apps/` — `web` (Vue 3 management UI), `desktop` (Electron native client) and `mobile` (Capacitor native mobile shell)
 - `packages/` — shared TypeScript libraries (`ui`, `sdk`, `icons`, `config`)
 - `db/postgres/` — migrations + sqlc queries; `conf/` — config templates; `docker/` — production Docker; `devenv/` — dev environment; `docs/` — reference docs
 
@@ -80,6 +80,7 @@ Before making changes to a directory, check whether that directory (or its neare
 Key local developer guides:
 - `apps/web/AGENTS.md` — web frontend architecture, routing, page conventions, and i18n rules.
 - `apps/desktop/AGENTS.md` — Electron shell, hosted-server bootstrap, tray/menu/preload rules.
+- `apps/mobile/AGENTS.md` — native mobile shell boundary, dev server URL, Android build.
 - `packages/ui/AGENTS.md` — UI-owned entry point for the design contract and adjacent Web composition guidance. Read it before Web/UI work; do not duplicate its skills under `.agents/skills/`.
 
 Reference docs moved out of this file:
