@@ -198,11 +198,17 @@ func attentionFrame(event messageevent.Event, access func(botID string) bool) ma
 		if json.Unmarshal(event.Data, &payload) != nil || !access(payload.BotID) {
 			return nil
 		}
-		return map[string]any{
+		frame := map[string]any{
 			"type": string(event.Type), "bot_id": payload.BotID, "session_id": payload.SessionID,
 			"title": payload.Title, "attention_kind": payload.Kind, "attention_at": payload.At,
 			"read_through": payload.ReadThrough, "marked": payload.Marked,
 		}
+		// A run session names its schedule so a live arrival joins that
+		// schedule's inbox row, as it does when the summary loads.
+		if payload.ScheduleID != "" {
+			frame["schedule_id"] = payload.ScheduleID
+		}
+		return frame
 	case messageevent.EventTypeSessionRead:
 		var payload attention.Read
 		if json.Unmarshal(event.Data, &payload) != nil {

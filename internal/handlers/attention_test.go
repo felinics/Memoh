@@ -311,3 +311,22 @@ func TestAttentionStreamForwardsManualUnreadMarks(t *testing.T) {
 		t.Fatalf("frames = %+v, want ready then a session_unread frame", frames)
 	}
 }
+
+func TestAttentionStreamNamesTheScheduleOfARunSession(t *testing.T) {
+	const scheduleID = "00000000-0000-0000-0000-0000000000e1"
+	h, hub, _ := attentionTestHandler(attentionOwnerID)
+	frames := streamAttention(t, h, hub, attentionOwnerID, 3, func() {
+		publishAttention(hub, attentionOwnerID)
+		data, _ := json.Marshal(attention.Attention{BotID: activityTestBotID, SessionID: activityTestSessionID, Title: "t", Kind: attention.KindUpdate, At: time.Now(), ScheduleID: scheduleID})
+		hub.Publish(messageevent.Event{Type: messageevent.EventTypeSessionAttention, BotID: messageevent.UserTopic(attentionOwnerID), Data: data})
+	})
+	if len(frames) != 3 {
+		t.Fatalf("frames = %+v, want ready and two attentions", frames)
+	}
+	if _, ok := frames[1]["schedule_id"]; ok {
+		t.Fatalf("a chat session frame names a schedule: %+v", frames[1])
+	}
+	if frames[2]["schedule_id"] != scheduleID || frames[2]["attention_kind"] != string(attention.KindUpdate) {
+		t.Fatalf("run session frame = %+v, want its schedule and update", frames[2])
+	}
+}
