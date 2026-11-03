@@ -56,7 +56,6 @@
 
     <SettingsRow
       :label="$t('bots.settings.memory')"
-      :description="$t('bots.settings.memoryDescription')"
     >
       <Switch
         :model-value="form.memory_enabled"
