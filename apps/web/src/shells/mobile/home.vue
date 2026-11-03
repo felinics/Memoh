@@ -283,7 +283,8 @@ async function switchBot(bot: BotsBot) {
   try {
     await Promise.all([
       chatStore.selectBot(id),
-      router.push({ name: 'bot', params: { botName: bot.name ?? id } }),
+      // Sideways, not deeper: the chat stays one entry in the back stack.
+      router.replace({ name: 'bot', params: { botName: bot.name ?? id } }),
     ])
     await nextTick()
   }

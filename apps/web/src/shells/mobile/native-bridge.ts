@@ -1,19 +1,28 @@
 import { onBeforeUnmount, onMounted } from 'vue'
+import type { Router } from 'vue-router'
+import { canGoBack } from '@/composables/useBackOr'
 
 // The contract between this web app and the native mobile shell (apps/mobile).
 // Everything the shell asks of the page goes through this module, so the page
 // side of the contract lives in one place.
 //
-// System back. Some mobile views are not routes (the navigation page, the
-// files and schedules pages inside it), so browser history cannot step out of
-// them. On a system back gesture the shell evaluates
-// window.__handleNativeBack() first: 'handled' means the page consumed the
-// back; 'exit' means it did not, and the shell falls back to history, then to
-// leaving the app. In a browser nothing calls it and history alone applies.
+// System back follows Android's navigation principles: what the user sees is
+// one back stack, back pops its top and nothing else, the chat is the fixed
+// start destination, and back at the start leaves the app. An on-screen back
+// button and system back do the same thing.
 //
-// Views register a handler while they are mounted. The most recently
-// registered one is asked first, so a view opened on top of another gets the
-// back before the one beneath it.
+// On a back gesture the shell calls window.__handleNativeBack(), which asks,
+// in this order, the first one that applies wins:
+//   1. An open overlay (dialog, sheet, menu, popover) closes, as on Escape.
+//   2. Views that are not routes (the mobile navigation page and its files /
+//      schedules pages) and sections whose back has a parent (settings)
+//      register a handler while mounted; the latest registered is asked
+//      first, so a view opened on top of another gets the back before it.
+//   3. Off the start destination, a page with an earlier entry of this app in
+//      history pops it.
+// Nothing applies → 'exit', and the shell leaves the app. The shell never
+// walks browser history itself: entries it cannot see the meaning of are
+// exactly how back used to land somewhere the user had not just been.
 
 export type NativeBackResult = 'handled' | 'exit'
 // Returns true when the handler consumed the back.
@@ -22,17 +31,44 @@ export type NativeBackHandler = () => boolean
 type NativeBackWindow = Window & { __handleNativeBack?: () => NativeBackResult }
 
 const backHandlers: NativeBackHandler[] = []
+let appRouter: Router | null = null
+
+// Every overlay of the component library dismisses on Escape (Reka's
+// DismissableLayer), so back closes the topmost one the same way.
+const OPEN_OVERLAY = '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [data-reka-popper-content-wrapper]'
+
+// Also read by views that close on Escape themselves, so one Escape (or back)
+// closes only the overlay on top of them.
+export function hasOpenOverlay(): boolean {
+  return document.querySelector(OPEN_OVERLAY) !== null
+}
+
+function closeTopOverlay(): boolean {
+  if (!hasOpenOverlay()) return false
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  return true
+}
+
+const START_ROUTES = new Set(['home', 'bot'])
+
+function popPage(): boolean {
+  if (!appRouter) return false
+  if (START_ROUTES.has(String(appRouter.currentRoute.value.name))) return false
+  if (!canGoBack(appRouter)) return false
+  appRouter.back()
+  return true
+}
 
 function handleNativeBack(): NativeBackResult {
+  if (closeTopOverlay()) return 'handled'
   for (let i = backHandlers.length - 1; i >= 0; i--) {
     if (backHandlers[i]!()) return 'handled'
   }
-  return 'exit'
+  return popPage() ? 'handled' : 'exit'
 }
 
 export function onNativeBack(handler: NativeBackHandler): () => void {
   backHandlers.push(handler)
-  ;(window as NativeBackWindow).__handleNativeBack = handleNativeBack
   return () => {
     const index = backHandlers.lastIndexOf(handler)
     if (index !== -1) backHandlers.splice(index, 1)
@@ -108,7 +144,9 @@ function syncSystemBars(nativeWindow: NativeShellWindow, lastKey: { value: strin
 
 // Called once at startup; does nothing outside the native shell. The theme
 // lives on <html>: the dark class, plus attributes that swap the palette.
-export function installNativeShell(): void {
+export function installNativeShell(router: Router): void {
+  appRouter = router
+  ;(window as NativeBackWindow).__handleNativeBack = handleNativeBack
   const nativeWindow = window as NativeShellWindow
   if (!nativeWindow.MemohNative) return
   const lastKey = { value: '' }

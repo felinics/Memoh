@@ -67,14 +67,11 @@ public class MainActivity extends BridgeActivity {
                 webView.evaluateJavascript(
                     "(function(){ return window.__handleNativeBack ? window.__handleNativeBack() : 'exit'; })()",
                     result -> {
+                        // The page owns the back stack (apps/web/src/shells/mobile/
+                        // native-bridge.ts): "exit" means the user is at the start
+                        // destination. Walking WebView history here would land on
+                        // entries the page did not mean as steps.
                         if ("\"handled\"".equals(result)) {
-                            return;
-                        }
-                        // Views the page did not claim (see apps/web/src/shells/mobile/
-                        // native-bridge.ts) get browser history: back returns to the
-                        // previous route.
-                        if ("\"exit\"".equals(result) && webView.canGoBack()) {
-                            webView.goBack();
                             return;
                         }
                         long now = System.currentTimeMillis();

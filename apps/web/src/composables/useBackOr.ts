@@ -1,4 +1,4 @@
-import { computed, shallowReactive, unref, type ComputedRef } from 'vue'
+import { computed, shallowReactive, unref } from 'vue'
 import { useRouter, type RouteLocationNormalized, type RouteLocationRaw, type Router } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
@@ -76,43 +76,46 @@ function resolveBreadcrumbLabel(
 }
 
 /**
- * Read-only reactive access to the tracked previous route (null when the
- * current page was reached cold — fresh window, refresh, deep link).
+ * Whether back has an earlier entry of this app to return to.
  *
- * Shells that must distinguish "entered from another in-app page" from
- * "deep-linked" read this — e.g. the mobile settings shell opens on its
- * navigation list only when the user arrived from outside settings. For back
- * buttons themselves, prefer useBackOr / useBackAffordance above.
+ * On the web build this is exact: vue-router records the previous location in
+ * window.history.state.back, null at the first entry. The tracked previous
+ * route is not enough there: after a back it still names the page just left,
+ * so a second back at the first entry would call router.back() and go
+ * nowhere. The desktop memory history has no such record (see above), so it
+ * falls back to the tracked previous route.
  */
-export function usePreviousRoute(): ComputedRef<RouteLocationNormalized | null> {
-  const router = useRouter()
-  return computed(() => histories.get(router)?.previous ?? null)
+export function canGoBack(router: Router): boolean {
+  const state = window.history.state as { back?: unknown } | null
+  if (state && 'back' in state) return state.back != null
+  return histories.get(router)?.previous != null
+}
+
+/**
+ * Back for a page whose parent is known: pops history when there is an
+ * earlier entry, otherwise replaces the page with `fallback`, its parent. A
+ * cold-opened page (refresh, deep link) thus steps up through its parents and
+ * never pushes, so back and forward cannot loop between the two.
+ */
+export function backOr(router: Router, fallback: RouteLocationRaw): void {
+  if (canGoBack(router)) router.back()
+  else void router.replace(fallback)
 }
 
 /**
  * Builds a click handler for "back" affordances that follows real navigation
- * history instead of hard-coding a destination.
- *
- * - Reached from another in-app page → returns to it via router.back().
- * - Opened cold (fresh window, refresh, deep link) → no predecessor, so it
- *   routes to `fallback` (e.g. the bots list).
+ * history instead of hard-coding a destination (see backOr).
  */
 export function useBackOr(fallback: RouteLocationRaw) {
   const router = useRouter()
-  return () => {
-    if (histories.get(router)?.previous != null) {
-      router.back()
-    } else {
-      void router.push(fallback)
-    }
-  }
+  return () => backOr(router, fallback)
 }
 
 /**
  * History-following back affordance that also derives its label from where back
  * actually leads, so the text never lies about the destination.
  *
- * - `onBack`: router.back() when there's an in-app predecessor, else push(fallback).
+ * - `onBack`: router.back() when there's an in-app predecessor, else replace(fallback).
  * - `label`: the previous page's breadcrumb; the fallback's breadcrumb on a cold
  *   load; a generic "Back" if neither resolves one.
  *

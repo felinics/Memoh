@@ -88,7 +88,7 @@ void whenQueryCacheRestored().then(() => app.mount('#app'))
 
 // Inside the native mobile shell (apps/mobile): keep the system bars in step
 // with the page theme. A no-op in a browser.
-installNativeShell()
+installNativeShell(router)
 
 // Installed-app support (public/sw.js): keeps the app shell openable offline.
 // Production builds only, so the dev server's unbundled modules are never

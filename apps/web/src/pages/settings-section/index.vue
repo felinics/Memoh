@@ -128,7 +128,8 @@ import MobileTopBar from './components/mobile-top-bar.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import { useIsMobile } from '@/composables/useIsMobile'
-import { usePreviousRoute } from '@/composables/useBackOr'
+import { backOr } from '@/composables/useBackOr'
+import { useNativeBack } from '@/shells/mobile/native-bridge'
 import { useBackToChatRoute } from '@/composables/useBackToChat'
 
 const desktopShell = inject(DesktopShellKey, false)
@@ -136,7 +137,6 @@ const isMobile = useIsMobile()
 
 const route = useRoute()
 const router = useRouter()
-const previousRoute = usePreviousRoute()
 const backToChatRoute = useBackToChatRoute()
 
 // macOS desktop only: the settings sidebar now runs to the very top of the window
@@ -160,33 +160,24 @@ watch([isMobile, () => route.path], ([mobile, path]) => {
   }
 }, { immediate: true })
 
-// LIST ← exits settings: follow real history when settings was entered from
-// another app page (chat), otherwise route to chat explicitly (cold load, or
-// the entries below are settings-internal from replace cycles).
+// Back on mobile, from the list or a page, on screen or by the system gesture
+// (the same action, see shells/mobile/native-bridge.ts): pop history when
+// settings was reached by navigating, otherwise step up to the parent — the
+// chat from the list, the list from a page — without pushing.
 function onListBack(): void {
-  const prev = previousRoute.value
-  if (prev && !prev.path.startsWith('/settings')) {
-    router.back()
-    return
-  }
-  void router.push(backToChatRoute.value).catch(() => {})
+  backOr(router, backToChatRoute.value)
 }
 
-// CONTENT ← : pop real drill-ins (bots → bots/new → progress, supermarket →
-// App detail) — their paths nest under the page that opened them, so "the
-// route before this one is my ancestor" is exactly when router.back() is
-// right. Everything else goes back to the list at /settings: replace, so the
-// content page doesn't linger as a history entry above the list.
 function onContentBack(): void {
-  const prevPath = previousRoute.value?.path
-  if (prevPath
-    && prevPath.startsWith('/settings')
-    && route.path.startsWith(`${prevPath.replace(/\/+$/, '')}/`)) {
-    router.back()
-    return
-  }
-  void router.replace('/settings').catch(() => {})
+  backOr(router, '/settings')
 }
+
+useNativeBack(() => {
+  if (!isMobile.value) return false
+  if (isListView.value) onListBack()
+  else onContentBack()
+  return true
+})
 
 // ── List ⇄ page motion (mobile) ─────────────────────────────────────────────
 // Opening a page from the list is a stack push: the page slides in from the

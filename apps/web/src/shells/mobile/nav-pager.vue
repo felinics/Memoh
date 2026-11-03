@@ -26,6 +26,7 @@ import { useI18n } from 'vue-i18n'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { CompositorSpring, PAGE_SPRING, rubberBand, VelocityTracker } from '@/lib/compositor-spring'
 import MobileHome from './home.vue'
+import { hasOpenOverlay } from './native-bridge'
 
 const props = defineProps<{
   /** The chat column that slides out to the right while the navigation is open. */
@@ -172,7 +173,8 @@ function onClickCapture(event: MouseEvent) {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && mobileNavOpen.value) workspaceTabs.closeMobileNav()
+  // An open menu or dialog takes this Escape; the page under it stays.
+  if (event.key === 'Escape' && mobileNavOpen.value && !hasOpenOverlay()) workspaceTabs.closeMobileNav()
 }
 
 let resizeObserver: ResizeObserver | null = null
