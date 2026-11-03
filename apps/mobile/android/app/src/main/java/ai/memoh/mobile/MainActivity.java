@@ -12,7 +12,6 @@ import android.webkit.WebView;
 import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.content.ContextCompat;
-import androidx.core.view.WindowCompat;
 import com.getcapacitor.BridgeActivity;
 
 /**
@@ -43,9 +42,9 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         Window window = getWindow();
-        // Android 15+ enforces edge-to-edge for targetSdk 35+. Opting in here gives older
-        // Android versions the same layout, so the page draws behind both system bars everywhere.
-        WindowCompat.setDecorFitsSystemWindows(window, false);
+        // Edge-to-edge is left to SystemBars, which owns the decor view's insets (see above): a
+        // second setDecorFitsSystemWindows here conflicts with it. Android 15+ enforces
+        // edge-to-edge at targetSdk 35+ anyway.
         window.setStatusBarColor(Color.TRANSPARENT);
         window.setNavigationBarColor(Color.TRANSPARENT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

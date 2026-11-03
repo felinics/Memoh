@@ -1372,9 +1372,18 @@
 /* Full-screen frames under viewport-fit=cover (index.html): the frame's own
    background runs under the status bar, notch and home indicator, while its
    content stays inside the safe area. The insets are 0 wherever the browser
-   does not overlap the page, so desktop is unaffected. */
+   does not overlap the page, so desktop is unaffected.
+   Inside the Android shell (apps/mobile), Capacitor's SystemBars sets
+   --safe-area-inset-* on <html>, and those win: before WebView 140 env() is
+   unreliable there, and on such WebViews Capacitor pads the window natively
+   and sets the variables to 0, so reading env() as well would pad twice.
+   Browsers and the PWA never set the variables and fall back to env(). */
 @utility safe-area-frame {
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding:
+    var(--safe-area-inset-top, env(safe-area-inset-top))
+    var(--safe-area-inset-right, env(safe-area-inset-right))
+    var(--safe-area-inset-bottom, env(safe-area-inset-bottom))
+    var(--safe-area-inset-left, env(safe-area-inset-left));
 }
 
 /* Provider forms share compact, divider-free rows while their controls stack.
