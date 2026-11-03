@@ -2099,7 +2099,8 @@
       "bocha": "ボチャ",
       "duckduckgo": "DuckDuckGo",
       "yandex": "ヤンデックス",
-      "deepseek": "DeepSeek"
+      "deepseek": "DeepSeek",
+      "keenable": "Keenable"
     },
     "fetchProviderNames": {
       "native": "ネイティブ取得",

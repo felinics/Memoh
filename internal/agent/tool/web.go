@@ -129,6 +129,8 @@ func (*WebProvider) callSearch(ctx context.Context, providerName string, configJ
 		return callYandexSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderDeepSeek):
 		return callDeepSeekSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderKeenable):
+		return callKeenableSearch(ctx, configJSON, query, count)
 	default:
 		return nil, errors.New("unsupported search provider")
 	}
@@ -742,6 +744,63 @@ func callDeepSeekSearch(ctx context.Context, configJSON []byte, query string, co
 	results := make([]map[string]any, 0, len(raw.Results))
 	for _, item := range raw.Results {
 		results = append(results, map[string]any{"title": item.Title, "url": item.URL, "description": firstNonEmpty(item.Summary, item.Snippet)})
+	}
+	return map[string]any{"query": query, "results": results}, nil
+}
+
+const keenableSearchURL = "https://api.keenable.ai/v1/search"
+
+// callKeenableSearch works without an API key: Keenable serves a keyless,
+// per-IP rate-limited endpoint at <search URL>/public that requires an
+// X-Keenable-Title header naming the calling app. A configured key uses the
+// keyed endpoint with X-API-Key instead.
+func callKeenableSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
+	cfg := parseSearchConfig(configJSON)
+	endpoint := strings.TrimRight(firstNonEmpty(stringValue(cfg["base_url"]), keenableSearchURL), "/")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		endpoint += "/public"
+	}
+	payload, _ := json.Marshal(map[string]any{"query": query, "max_results": count})
+	timeout := parseSearchTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, errors.New("invalid search provider base_url")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	} else {
+		req.Header.Set("X-Keenable-Title", "Memoh")
+	}
+	resp, err := client.Do(req) //nolint:gosec
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, buildSearchHTTPError(resp.StatusCode, body)
+	}
+	var raw struct {
+		Results []struct {
+			Title       string `json:"title"`
+			URL         string `json:"url"`
+			Snippet     string `json:"snippet"`
+			Description string `json:"description"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, errors.New("invalid search response")
+	}
+	results := make([]map[string]any, 0, len(raw.Results))
+	for _, item := range raw.Results {
+		if item.URL == "" {
+			continue
+		}
+		results = append(results, map[string]any{"title": item.Title, "url": item.URL, "description": firstNonEmpty(item.Snippet, item.Description)})
 	}
 	return map[string]any{"query": query, "results": results}, nil
 }

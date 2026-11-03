@@ -2130,7 +2130,8 @@
       "bocha": "博查",
       "duckduckgo": "DuckDuckGo",
       "yandex": "Yandex",
-      "deepseek": "DeepSeek"
+      "deepseek": "DeepSeek",
+      "keenable": "Keenable"
     },
     "fetchProviderNames": {
       "native": "原生抓取",

@@ -112,6 +112,9 @@
             <template v-else-if="form.values.provider === 'deepseek'">
               <DeepseekSettings v-model="configProxy" />
             </template>
+            <template v-else-if="form.values.provider === 'keenable'">
+              <KeenableSettings v-model="configProxy" />
+            </template>
             <div
               v-else-if="form.values.provider"
               class="px-4 py-3 text-xs text-muted-foreground"
@@ -158,6 +161,7 @@ import BochaSettings from './bocha-settings.vue'
 import DuckduckgoSettings from './duckduckgo-settings.vue'
 import YandexSettings from './yandex-settings.vue'
 import DeepseekSettings from './deepseek-settings.vue'
+import KeenableSettings from './keenable-settings.vue'
 import { Trash2 } from 'lucide-vue-next'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { computed, inject, ref, watch } from 'vue'

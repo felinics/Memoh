@@ -201,3 +201,101 @@ func TestCallSearXNGSearchKeepsLiteralBaseURLCompatibility(t *testing.T) {
 		t.Fatalf("literal base_url should remain supported: %v", err)
 	}
 }
+
+func TestCallSearchKeenableKeyless(t *testing.T) {
+	var (
+		gotMethod string
+		gotPath   string
+		gotTitle  string
+		gotAPIKey string
+		gotBody   map[string]any
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotTitle = r.Header.Get("X-Keenable-Title")
+		gotAPIKey = r.Header.Get("X-API-Key")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"results":[` +
+			`{"title":"A","url":"https://a.example","description":"","snippet":"long excerpt a","published_at":"2026-05-06T10:00:00Z"},` +
+			`{"title":"no url","url":"","snippet":"dropped"},` +
+			`{"title":"B","url":"https://b.example","description":"","snippet":"long excerpt b"}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	config := []byte(`{"base_url":"` + server.URL + `/v1/search"}`)
+	result, err := (&WebProvider{}).callSearch(t.Context(), string(searchproviders.ProviderKeenable), config, "keenable search", 3)
+	if err != nil {
+		t.Fatalf("callSearch: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/search/public" || gotTitle != "Memoh" || gotAPIKey != "" {
+		t.Fatalf("request = %s %s with X-Keenable-Title %q, X-API-Key %q", gotMethod, gotPath, gotTitle, gotAPIKey)
+	}
+	if gotBody["query"] != "keenable search" || gotBody["max_results"] != float64(3) {
+		t.Fatalf("request body = %v", gotBody)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	want := `{"query":"keenable search","results":[` +
+		`{"description":"long excerpt a","title":"A","url":"https://a.example"},` +
+		`{"description":"long excerpt b","title":"B","url":"https://b.example"}]}`
+	if string(encoded) != want {
+		t.Fatalf("result = %s, want %s", encoded, want)
+	}
+}
+
+func TestCallSearchKeenableWithAPIKey(t *testing.T) {
+	const apiKey = "keenable-test-key" //nolint:gosec // G101: test-only fixed credential.
+	var gotPath, gotTitle, gotAPIKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTitle = r.Header.Get("X-Keenable-Title")
+		gotAPIKey = r.Header.Get("X-API-Key")
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	config := []byte(`{"api_key":"` + apiKey + `","base_url":"` + server.URL + `/v1/search/"}`)
+	if _, err := (&WebProvider{}).callSearch(t.Context(), string(searchproviders.ProviderKeenable), config, "q", 1); err != nil {
+		t.Fatalf("callSearch: %v", err)
+	}
+	if gotPath != "/v1/search" || gotAPIKey != apiKey || gotTitle != "" {
+		t.Fatalf("request path %q with X-API-Key %q, X-Keenable-Title %q", gotPath, gotAPIKey, gotTitle)
+	}
+}
+
+func TestCallSearchKeenableSurfacesAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"detail":"Rate limit exceeded"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	config := []byte(`{"base_url":"` + server.URL + `/v1/search"}`)
+	_, err := (&WebProvider{}).callSearch(t.Context(), string(searchproviders.ProviderKeenable), config, "q", 1)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 429") {
+		t.Fatalf("error = %v, want HTTP 429", err)
+	}
+}
+
+func TestCallSearchKeenableLive(t *testing.T) {
+	if os.Getenv("KEENABLE_LIVE_TEST") == "" {
+		t.Skip("set KEENABLE_LIVE_TEST=1 to call the keyless Keenable endpoint")
+	}
+	config, err := json.Marshal(map[string]any{"api_key": strings.TrimSpace(os.Getenv("KEENABLE_API_KEY")), "timeout_seconds": 30})
+	if err != nil {
+		t.Fatalf("marshal live config: %v", err)
+	}
+	result, err := (&WebProvider{}).callSearch(t.Context(), string(searchproviders.ProviderKeenable), config, "Memoh AI agent", 3)
+	if err != nil {
+		t.Fatalf("live Keenable search failed: %v", err)
+	}
+	results, _ := result.(map[string]any)["results"].([]map[string]any)
+	if len(results) == 0 || results[0]["url"] == "" || results[0]["description"] == "" {
+		t.Fatalf("live Keenable search returned unusable results: %v", results)
+	}
+}

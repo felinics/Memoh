@@ -431,6 +431,34 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderKeenable),
+			DisplayName: "Keenable",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Keenable API key (optional; without it the keyless public endpoint is used, rate limited per IP)",
+						Required:    false,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Keenable Search API URL",
+						Required:    false,
+						Example:     "https://api.keenable.ai/v1/search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -598,6 +626,7 @@ var defaultProviders = []struct {
 	{ProviderDuckDuckGo, "DuckDuckGo"},
 	{ProviderYandex, "Yandex"},
 	{ProviderDeepSeek, "DeepSeek"},
+	{ProviderKeenable, "Keenable"},
 }
 
 func (s *Service) EnsureDefaults(ctx context.Context) error {
@@ -645,7 +674,8 @@ func isValidProviderName(name ProviderName) bool {
 		ProviderBocha,
 		ProviderDuckDuckGo,
 		ProviderYandex,
-		ProviderDeepSeek:
+		ProviderDeepSeek,
+		ProviderKeenable:
 		return true
 	default:
 		return false

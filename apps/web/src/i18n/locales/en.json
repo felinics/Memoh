@@ -2130,7 +2130,8 @@
       "bocha": "Bocha",
       "duckduckgo": "DuckDuckGo",
       "yandex": "Yandex",
-      "deepseek": "DeepSeek"
+      "deepseek": "DeepSeek",
+      "keenable": "Keenable"
     },
     "fetchProviderNames": {
       "native": "Native",

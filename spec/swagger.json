@@ -27066,7 +27066,8 @@
                 "bocha",
                 "duckduckgo",
                 "yandex",
-                "deepseek"
+                "deepseek",
+                "keenable"
             ],
             "x-enum-varnames": [
                 "ProviderBrave",
@@ -27081,7 +27082,8 @@
                 "ProviderBocha",
                 "ProviderDuckDuckGo",
                 "ProviderYandex",
-                "ProviderDeepSeek"
+                "ProviderDeepSeek",
+                "ProviderKeenable"
             ]
         },
         "searchproviders.UpdateRequest": {

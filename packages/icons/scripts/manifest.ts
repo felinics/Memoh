@@ -81,6 +81,7 @@ const searchProviders: string[] = [
   'searxng',
   'sogou',
   'serper',
+  'keenable',
 ]
 
 // ---------------------------------------------------------------------------

@@ -6924,6 +6924,7 @@ definitions:
     - duckduckgo
     - yandex
     - deepseek
+    - keenable
     type: string
     x-enum-varnames:
     - ProviderBrave
@@ -6939,6 +6940,7 @@ definitions:
     - ProviderDuckDuckGo
     - ProviderYandex
     - ProviderDeepSeek
+    - ProviderKeenable
   searchproviders.UpdateRequest:
     properties:
       config:
