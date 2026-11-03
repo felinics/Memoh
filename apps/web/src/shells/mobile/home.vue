@@ -205,7 +205,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
+import { computed, nextTick, ref, watch, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -235,7 +235,8 @@ import PanelFiles from '@/components/sidebar/panel-files.vue'
 import PanelSchedule from '@/components/sidebar/panel-schedule.vue'
 import SessionDialogs from '@/components/sidebar/session-dialogs.vue'
 import SessionSearchDialog from '@/components/sidebar/session-search-dialog.vue'
-import MobileBotPills from './mobile-bot-pills.vue'
+import MobileBotPills from './bot-pills.vue'
+import { useNativeBack } from './native-bridge'
 import MobileBar from '@/components/mobile-bar/index.vue'
 import MobileBarIconButton from '@/components/mobile-bar/icon-button.vue'
 
@@ -259,7 +260,6 @@ const pillBots = computed<BotsBot[]>(() =>
   switcherBots(botData.value?.items ?? [], sortBots, botOrder.value),
 )
 const currentBot = computed(() => pillBots.value.find(bot => bot.id === currentBotId.value) ?? null)
-
 
 // ── Dismissal ───────────────────────────────────────────────────────────────
 // Picking something for the chat page to show returns to it: a session (from
@@ -372,26 +372,13 @@ watch(currentBotId, () => {
 })
 
 // ── System back ─────────────────────────────────────────────────────────────
-// Neither the files/schedules page nor this page itself is a route, so
-// browser history cannot step out of them. The Android dev shell asks the page
-// before falling back to history: window.__handleNativeBack returns 'handled'
-// when the page consumed the back, 'exit' otherwise. Back first leaves a
-// files/schedules page, then returns from this page to the chat.
-type NativeBackWindow = Window & { __handleNativeBack?: () => 'handled' | 'exit' }
-
-function handleNativeBack(): 'handled' | 'exit' {
-  if (!mobileNavOpen.value) return 'exit'
+// Neither the files/schedules page nor this page itself is a route, so back
+// is answered here (see native-bridge.ts): it first leaves a files/schedules
+// page, then returns from this page to the chat.
+useNativeBack(() => {
+  if (!mobileNavOpen.value) return false
   if (subview.value !== 'home') closeSubview()
   else workspaceTabs.closeMobileNav()
-  return 'handled'
-}
-
-onMounted(() => {
-  (window as NativeBackWindow).__handleNativeBack = handleNativeBack
-})
-
-onBeforeUnmount(() => {
-  const nativeWindow = window as NativeBackWindow
-  if (nativeWindow.__handleNativeBack === handleNativeBack) delete nativeWindow.__handleNativeBack
+  return true
 })
 </script>

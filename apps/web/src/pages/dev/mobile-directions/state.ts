@@ -16,7 +16,7 @@
 // open a specific combination from a link without touching the switcher.
 import { ref, watch, type Ref } from 'vue'
 import { bubbleSpringEnabled } from '@/pages/home/bubble-motion'
-import { mobileNavMode, type MobileNavMode } from '@/pages/main-section/mobile-nav-mode'
+import { mobileNavMode, type MobileNavMode } from '@/shells/mobile/nav-mode'
 
 export const mobileDirections = [
   { value: 'baseline', label: 'Current' },

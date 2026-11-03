@@ -121,9 +121,11 @@ src/
 │   └── main-layout/           # Top-level layout (SidebarProvider)
 ├── lib/
 │   └── api-client.ts          # SDK client setup (base URL, auth interceptor)
+├── shells/                    # What surrounds the pages: navigation and how pages are entered
+│   └── mobile/                #   Mobile shell: nav sheet, two-page navigation, mobile home, bot pills, top bar, native-shell bridge
 ├── pages/                     # Route page components
 │   ├── login/                 #   Login page
-│   ├── main-section/          #   Chat section layout (bot sidebar + main container)
+│   ├── main-section/          #   Chat section layout: desktop sidebar or mobile shell around the main container
 │   ├── settings-section/      #   Settings section layout (settings sidebar + KeepAlive)
 │   ├── home/                  #   Chat interface (used by both `/` and `/chat/:botId?`)
 │   │   ├── index.vue          #     Route ↔ store sync + workspace host (left shell lives in components/sidebar)
@@ -318,6 +320,7 @@ The shell splits into three layers (`App.vue` is the orchestrator):
 2. **Chat section internals** (`MainSection` — hand-rolled flex, no `MainLayout`):
    - On macOS desktop a 36px full-width drag strip clears the traffic lights; web has no strip.
    - **Sidebar** (`components/sidebar/`) — Activity rail (44px icon column: bot switcher avatar on top, Sessions/Files/Search views, Settings gear at bottom) + a resizable, collapsible side panel. Clicking the active rail icon toggles the panel open/closed. Files view is hidden without `workspace_read`.
+   - **Mobile shell** (`shells/mobile/`) — replaces the sidebar below the desktop breakpoint: a top bar plus the navigation, hosted either as a left sheet (production) or, behind the dev-only mobile direction switch, as a page beside the chat (two-page navigation with a mobile home).
    - **ChatWorkspace** (`pages/home/components/chat-workspace.vue`) — [dockview-vue](https://dockview.dev) host for the center area.
 
 3. **Settings section** — `pages/settings-section/` renders in a fixed full-screen layer (visibility toggle, not v-if). Uses `MainLayout` with:
@@ -330,6 +333,13 @@ The shell splits into three layers (`App.vue` is the orchestrator):
    - Panel types: `chat` (singleton, content follows the active session), `file`, `terminal`, `browser`, `display`. Floating groups are disabled; panels use `renderer: 'always'` so terminals / iframes / WebRTC survive tab switches.
    - **ChatPane** — Message list with scroll and input area with attachments (KeepAlive-cached per session inside the chat panel).
    - **SessionInfoRing** — Session info display in the composer.
+
+Mobile and desktop differ in four ways, each with one home, so pages do not branch on `isMobile`:
+
+- **Size** (type, control height, icons) — design tokens.
+- **Form** (a dialog that becomes a bottom sheet, a menu that becomes an action sheet) — one adaptive component with two presentations.
+- **Structure** (sidebar versus two-page navigation, the mobile home) — `shells/`. A shell arranges shared data and panels; it does not re-implement them.
+- **Platform capability** (system back, status bar, packaging) — the native shell in `apps/mobile`, reached only through `shells/mobile/native-bridge.ts`.
 
 Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, memory, voice).
 

@@ -1,8 +1,8 @@
 <template>
-  <!-- Mobile main navigation content for the left Sheet (mobile-nav-sheet):
+  <!-- Mobile main navigation content for the left Sheet (nav-sheet.vue):
        the desktop rail's contents (bot switcher, view switch,
        sessions/files/schedule panels, Settings entry). The two-page form
-       hosts mobile-home.vue instead. Open state lives in the workspace store
+       hosts home.vue instead. Open state lives in the workspace store
        (mobileNavOpen); selection dismisses the sheet (see the watchers
        below). -->
   <div class="flex h-full w-full min-h-0 flex-col overflow-hidden">

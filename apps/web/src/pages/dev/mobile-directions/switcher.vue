@@ -72,7 +72,7 @@ import { ref } from 'vue'
 import { Palette, X } from 'lucide-vue-next'
 import { Button, SegmentedControl } from '@felinic/ui'
 import { useIsMobile } from '@/composables/useIsMobile'
-import type { MobileNavMode } from '@/pages/main-section/mobile-nav-mode'
+import type { MobileNavMode } from '@/shells/mobile/nav-mode'
 import { bubbleMotion, bubbleMotions, direction, feel, mobileDirections, navForm, navForms, pressFeels, type BubbleMotion, type MobileDirection, type PressFeel } from './state'
 
 const isMobile = useIsMobile()

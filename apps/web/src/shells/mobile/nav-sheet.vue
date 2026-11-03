@@ -30,7 +30,7 @@ import {
   SheetTitle,
 } from '@felinic/ui'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import MobileNavPanel from './mobile-nav-panel.vue'
+import MobileNavPanel from './nav-panel.vue'
 
 const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()

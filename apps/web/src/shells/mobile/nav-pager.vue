@@ -25,7 +25,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { CompositorSpring, PAGE_SPRING, rubberBand, VelocityTracker } from '@/lib/compositor-spring'
-import MobileHome from './mobile-home.vue'
+import MobileHome from './home.vue'
 
 const props = defineProps<{
   /** The chat column that slides out to the right while the navigation is open. */

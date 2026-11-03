@@ -32,7 +32,7 @@
         <MobileTopBar v-if="isMobile" />
         <MainContainer />
       </div>
-      <!-- Two hosts for the same mobile navigation (see mobile-nav-mode.ts).
+      <!-- Two hosts for the same mobile navigation (see shells/mobile/nav-mode.ts).
            The pager drives mainColumn's position itself, so the chat column
            stays in place in the tree whichever host is active. -->
       <MobileNavSheet v-if="isMobile && mobileNavMode === 'sheet'" />
@@ -63,9 +63,9 @@ import { useRoute } from 'vue-router'
 import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
-import MobileTopBar from './components/mobile-top-bar.vue'
-import MobileNavSheet from './components/mobile-nav-sheet.vue'
-import { mobileNavMode } from './mobile-nav-mode'
+import MobileTopBar from '@/shells/mobile/top-bar.vue'
+import MobileNavSheet from '@/shells/mobile/nav-sheet.vue'
+import { mobileNavMode } from '@/shells/mobile/nav-mode'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
 import { KEYBOARD_REGISTRY, useKeyboardCommand } from '@/composables/useKeyboardCommand'
@@ -84,7 +84,7 @@ import { getChatFileDropTarget } from '@/pages/home/composables/chat-file-drop-t
 const { t } = useI18n()
 
 // Loaded only when the pager form is chosen; production stays on the sheet.
-const MobileNavPager = defineAsyncComponent(() => import('./components/mobile-nav-pager.vue'))
+const MobileNavPager = defineAsyncComponent(() => import('@/shells/mobile/nav-pager.vue'))
 const mainColumn = ref<HTMLElement | null>(null)
 
 // Base layer of the page's drop model: EVERYWHERE defaults to the focused chat
