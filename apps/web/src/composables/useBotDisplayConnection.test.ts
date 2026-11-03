@@ -60,6 +60,6 @@ describe('BotDisplayConnection structured preparation errors', () => {
 
     expect(ready).toBe(false)
     expect(connection.status.value).toBe('unavailable')
-    expect(connection.unavailableReason.value).toBe('暂时无法连接工作区，请稍后重试。')
+    expect(connection.unavailableReason.value).toBe('暂时无法连接工作区，请稍后重试')
   })
 })
