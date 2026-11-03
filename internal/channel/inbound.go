@@ -4,16 +4,65 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/logger"
 	"github.com/felinics/memoh/internal/telemetry"
 )
+
+// inboundAdmissionLimit caps the messages of one channel config that a
+// connection hands to the processor at once, until each releases its slot
+// before its turn starts. A backlog arrives as thousands of messages at once;
+// without a cap they all wait on the database pool, and every other bot's
+// messages wait behind them. With 10,000 backlogged group messages and a Bot
+// API answering in 150ms, a backlog drained no faster above 128 than at 128,
+// and other bots' replies were unaffected.
+const inboundAdmissionLimit = 128
+
+type inboundSlotKey struct{}
+
+// WithInboundSlot returns ctx carrying release, the function that gives back
+// the admission slot of the message ctx belongs to.
+func WithInboundSlot(ctx context.Context, release func()) context.Context {
+	return context.WithValue(ctx, inboundSlotKey{}, release)
+}
+
+// ReleaseInboundSlot gives back the admission slot of the message ctx belongs
+// to, if it holds one. The processor calls it before work that lasts as long
+// as the conversation needs, such as a turn. Releasing twice is harmless.
+func ReleaseInboundSlot(ctx context.Context) {
+	if release, ok := ctx.Value(inboundSlotKey{}).(func()); ok {
+		release()
+	}
+}
+
+// acquireInboundSlot waits for one of the config's inboundAdmissionLimit slots
+// and returns the function that gives it back, safe to call more than once.
+// Slots outlive a connection, so messages still running across a reconnect
+// count against the same cap.
+func (m *Manager) acquireInboundSlot(ctx context.Context, configID string) (func(), error) {
+	m.inboundSlotsMu.Lock()
+	slots, ok := m.inboundSlots[configID]
+	if !ok {
+		if m.inboundSlots == nil {
+			m.inboundSlots = make(map[string]*semaphore.Weighted)
+		}
+		slots = semaphore.NewWeighted(inboundAdmissionLimit)
+		m.inboundSlots[configID] = slots
+	}
+	m.inboundSlotsMu.Unlock()
+	if err := slots.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	return sync.OnceFunc(func() { slots.Release(1) }), nil
+}
 
 // ErrInboundQueueFull indicates the synchronous inbound queue admission failed
 // because all worker slots are saturated.

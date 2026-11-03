@@ -3339,6 +3339,37 @@ func TestChannelInboundProcessorRetriesBusyTurnWithoutDuplicatingDelivery(t *tes
 	}
 }
 
+func TestChannelInboundProcessorReleasesAdmissionSlotBeforeTurn(t *testing.T) {
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeProcessingStatusAdapter{notifier: &fakeProcessingStatusNotifier{}})
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-slot", RouteID: "route-slot"}}
+	var released, releasedAtStart bool
+	gateway := &fakeChatGateway{
+		onChat: func(turn.StartTurnCommand) { releasedAtStart = released },
+		resp: fakeChatResponse{Messages: []turn.ModelMessage{
+			{Role: "assistant", Content: turn.NewTextContent("reply")},
+		}},
+	}
+	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway, &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-slot"}}, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-slot"}})
+	cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-slot", BotID: "bot-slot", ChannelType: channel.ChannelType("feishu")}
+	msg := channel.InboundMessage{
+		BotID: "bot-slot", Channel: channel.ChannelType("feishu"),
+		Message:     channel.Message{ID: "msg-slot", Text: "ordinary message"},
+		ReplyTarget: "target-slot", Sender: channel.Identity{SubjectID: "ext-slot"},
+		Conversation: channel.Conversation{ID: "chat-slot", Type: channel.ConversationTypePrivate},
+	}
+
+	ctx := channel.WithInboundSlot(context.Background(), func() { released = true })
+	if err := processor.HandleInbound(ctx, cfg, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("HandleInbound() error = %v", err)
+	}
+	if !releasedAtStart {
+		t.Fatal("the turn started while the message still held its admission slot")
+	}
+}
+
 // A web (local) ingress observes runs through the session runtime
 // subscription, so a busy session parks its complete command in the follow-up
 // queue and the inbound call returns without a reply.

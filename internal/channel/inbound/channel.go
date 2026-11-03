@@ -1159,6 +1159,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	defer p.activeStreams.Delete(streamKey)
 
 	publicationStart := time.Now()
+	// The turn and a busy retry last as long as they need; the admission slot
+	// covers only the work before them.
+	channel.ReleaseInboundSlot(ctx)
 	handle, startErr := p.startTurnWithBusyRetry(streamCtx, cmd)
 	if startErr != nil {
 		if errors.Is(startErr, turn.ErrDuplicateTurn) {

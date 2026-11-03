@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	"github.com/felinics/memoh/internal/markdownmedia"
 )
 
@@ -78,6 +80,10 @@ type Manager struct {
 	refreshMu      sync.Mutex
 	connections    map[string]*connectionEntry
 	connectionMeta map[string]ConnectionStatus
+
+	// inboundSlots holds each channel config's inboundAdmissionLimit slots.
+	inboundSlotsMu sync.Mutex
+	inboundSlots   map[string]*semaphore.Weighted
 }
 
 // ManagerOption configures a Manager during construction.

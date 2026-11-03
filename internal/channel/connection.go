@@ -188,7 +188,16 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 	// message reports the same id as its result line.
 	chain := handler
 	handler = func(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error {
-		return chain(withInboundRequestID(ctx), cfg, msg)
+		release, err := m.acquireInboundSlot(ctx, cfg.ID)
+		if err != nil {
+			if m.logger != nil {
+				m.logger.WarnContext(ctx, "inbound message dropped: connection stopped while it waited",
+					slog.String("config_id", cfg.ID), slog.Any("error", err))
+			}
+			return err
+		}
+		defer release()
+		return chain(WithInboundSlot(withInboundRequestID(ctx), release), cfg, msg)
 	}
 	// Decouple long-lived adapter connections from short-lived request contexts.
 	// The connection also drops the request's id: what an adapter logs on it
