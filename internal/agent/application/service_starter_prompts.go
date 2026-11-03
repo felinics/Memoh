@@ -70,9 +70,9 @@ type StarterPromptsRequest struct {
 }
 
 // StarterPromptsResult is either Unchanged (the client's set still matches
-// the material) or a fresh set with its Hash. A set the model could not
-// produce comes back with an empty Hash and no Items; the client shows its
-// generic examples and asks again next time.
+// the material) or a fresh set with its Hash. No configured title model
+// yields an empty set; generation failures are returned as errors so callers
+// can retain cached suggestions and offer a diagnosable retry.
 type StarterPromptsResult struct {
 	Unchanged bool
 	Hash      string
@@ -126,9 +126,12 @@ func (s *Service) StarterPrompts(ctx context.Context, req StarterPromptsRequest)
 		prompt += starterPromptsAvoidSection(avoid)
 		key += "\x00refresh\x00" + strings.Join(avoid, "\x00")
 	}
-	value, _, _ := s.starterPromptFlights.Do(key, func() (any, error) {
-		return s.generateStarterPrompts(context.WithoutCancel(ctx), req.BotID, ownerUserID, prompt), nil
+	value, err, _ := s.starterPromptFlights.Do(key, func() (any, error) {
+		return s.generateStarterPrompts(context.WithoutCancel(ctx), req.BotID, ownerUserID, prompt)
 	})
+	if err != nil {
+		return StarterPromptsResult{}, err
+	}
 	items, _ := value.([]StarterPrompt)
 	if len(items) == 0 {
 		return StarterPromptsResult{Items: []StarterPrompt{}}, nil
@@ -136,40 +139,36 @@ func (s *Service) StarterPrompts(ctx context.Context, req StarterPromptsRequest)
 	return StarterPromptsResult{Hash: hash, Items: items}, nil
 }
 
-// generateStarterPrompts runs the title model on prompt. Every failure, from
-// a missing title model to unparsable output, yields nil: the caller treats
-// that as "no suggestions this time".
-func (s *Service) generateStarterPrompts(ctx context.Context, botID, ownerUserID, prompt string) []StarterPrompt {
+// generateStarterPrompts leaves suggestions absent when no title model is configured.
+// Operational failures propagate to the HTTP boundary for safe, correlated errors.
+func (s *Service) generateStarterPrompts(ctx context.Context, botID, ownerUserID, prompt string) ([]StarterPrompt, error) {
 	logger := s.logger.With(slog.String("bot_id", botID))
 	account, err := s.accountService.Get(ctx, ownerUserID)
 	if err != nil {
-		logger.WarnContext(ctx, "starter prompts: load owner account failed", slog.Any("error", err))
-		return nil
+		return nil, errs.Wrap(err, "load starter prompt owner account")
 	}
 	modelID := strings.TrimSpace(account.TitleModelID)
 	if modelID == "" {
 		logger.DebugContext(ctx, "starter prompts: no title model configured")
-		return nil
+		return nil, nil
 	}
 	model, provider, err := s.fetchChatModel(ctx, modelID)
 	if err != nil {
-		logger.WarnContext(ctx, "starter prompts: resolve title model failed", slog.Any("error", err))
-		return nil
+		return nil, errs.Wrap(err, "resolve starter prompt title model")
 	}
-	return s.completeStarterPrompts(ctx, logger, ownerUserID, model, provider, prompt)
+	return s.completeStarterPrompts(ctx, ownerUserID, model, provider, prompt)
 }
 
-func (s *Service) completeStarterPrompts(ctx context.Context, logger *slog.Logger, ownerUserID string, model models.GetResponse, provider sqlc.Provider, prompt string) []StarterPrompt {
+func (s *Service) completeStarterPrompts(ctx context.Context, ownerUserID string, model models.GetResponse, provider sqlc.Provider, prompt string) ([]StarterPrompt, error) {
 	text, err := s.generateWithTitleModel(ctx, "agent.starter_prompts", ownerUserID, model, provider, prompt)
 	if err != nil {
-		logger.WarnContext(ctx, "starter prompts: generation failed", slog.Any("error", err))
-		return nil
+		return nil, errs.Wrap(err, "generate starter prompts")
 	}
 	items := parseStarterPrompts(text)
 	if len(items) == 0 {
-		logger.WarnContext(ctx, "starter prompts: model output had no usable items", slog.Int("output_len", len(text)))
+		return nil, errs.New("starter prompt model output had no usable items")
 	}
-	return items
+	return items, nil
 }
 
 // collectStarterPromptMaterial reads everything the suggestions depend on.

@@ -1,4 +1,4 @@
-import { ref, toValue, type MaybeRefOrGetter } from 'vue'
+import { computed, ref, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -69,22 +69,27 @@ export function useStarterPromptsQuery(botId: MaybeRefOrGetter<string>) {
   })
 
   const refreshing = ref(false)
+  const refreshError = shallowRef<unknown>(null)
+  watch(() => toValue(botId), () => { refreshError.value = null })
+  const error = computed(() => refreshError.value ?? query.error.value)
   async function refresh(): Promise<boolean> {
     const held = queryCache.getQueryData<StarterPromptSet>(key())
     refreshing.value = true
+    refreshError.value = null
     try {
       const { data } = await postBotsByBotIdStarterPromptsRefresh({
         path: { bot_id: toValue(botId) },
         body: { locale: locale.value, avoid: held?.items.map(item => item.prompt) ?? [] },
         throwOnError: true,
       })
-      if (!data.hash || data.items.length === 0) return false
+      if (!data.hash || data.items.length === 0) throw new Error('No starter prompts returned')
       // A read still in flight answered for the set being replaced; drop it.
       queryCache.cancelQueries({ key: key() })
       queryCache.setQueryData<StarterPromptSet>(key(), { hash: data.hash, items: data.items })
       return true
     }
-    catch {
+    catch (error) {
+      refreshError.value = error
       return false
     }
     finally {
@@ -92,5 +97,5 @@ export function useStarterPromptsQuery(botId: MaybeRefOrGetter<string>) {
     }
   }
 
-  return { ...query, refresh, refreshing }
+  return { ...query, error, refresh, refreshing }
 }

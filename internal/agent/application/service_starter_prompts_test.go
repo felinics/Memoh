@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -278,11 +279,55 @@ func TestCompleteStarterPromptsParsesModelOutput(t *testing.T) {
 
 	svc := &Service{logger: slog.New(slog.DiscardHandler)}
 	provider := sqlc.Provider{ClientType: "openai-completions", Config: []byte(`{"base_url":"` + server.URL + `","api_key":"k"}`)}
-	items := svc.completeStarterPrompts(context.Background(), svc.logger, "user-1", models.GetResponse{ModelID: "m"}, provider, "PROMPT-MARKER")
+	items, err := svc.completeStarterPrompts(context.Background(), "user-1", models.GetResponse{ModelID: "m"}, provider, "PROMPT-MARKER")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(items) != 1 || items[0].Title != "查攻略" || items[0].Prompt != "帮我找一份神庙攻略" {
 		t.Fatalf("completeStarterPrompts() = %+v", items)
 	}
 	if !strings.Contains(gotBody, "PROMPT-MARKER") {
 		t.Fatalf("request body did not carry the prompt: %s", gotBody)
+	}
+}
+
+type unavailableStarterAccountStore struct{ dbstore.AccountStore }
+
+func (unavailableStarterAccountStore) GetByUserID(context.Context, string) (dbstore.AccountRecord, error) {
+	return dbstore.AccountRecord{}, errors.New("PRIVATE account lookup failure")
+}
+
+func TestStarterPromptsReturnsGenerationSetupFailure(t *testing.T) {
+	svc, _ := newStarterPromptService(t, "")
+	svc.accountService = accounts.NewService(nil, unavailableStarterAccountStore{})
+	_, err := svc.StarterPrompts(context.Background(), starterRequest(""))
+	if err == nil {
+		t.Fatal("generation setup failure was swallowed as an empty successful response")
+	}
+}
+
+func TestStarterPromptGenerationFailuresAreReturned(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"quota exhausted", http.StatusPaymentRequired, `{"error":{"message":"PRIVATE diagnostic", "type":"insufficient_quota"}}`},
+		{"unusable output", http.StatusOK, `{"id":"r","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"No suggestions"},"finish_reason":"stop"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			svc := &Service{logger: slog.New(slog.DiscardHandler)}
+			provider := sqlc.Provider{ClientType: "openai-completions", Config: []byte(`{"base_url":"` + server.URL + `","api_key":"k"}`)}
+			items, err := svc.completeStarterPrompts(context.Background(), "user-1", models.GetResponse{ModelID: "m"}, provider, "test")
+			if err == nil || len(items) != 0 {
+				t.Fatalf("got items=%v, err=%v; want a diagnosable failure", items, err)
+			}
+		})
 	}
 }
