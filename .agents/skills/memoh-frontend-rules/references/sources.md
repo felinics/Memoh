@@ -1,34 +1,41 @@
 # 依据来源清单
 
-`SKILL.md` 的「依据来源」规定了优先级。本文件先列出哪些是官方的权威来源，再说明清单里
-没有时怎么找，最后按领域列出该读哪几篇。表中的链接、llms.txt 和 skill 都在 2026-11-04
+`SKILL.md` 的「依据来源」规定了优先级。本文件先列出官方的权威来源和只作对照的来源，再说明
+清单里没有时怎么找，最后按领域列出该读哪几篇。表中的链接、llms.txt 和 skill 都在 2026-11-04
 实际打开或检索过。
 
 ## 目录
 
-- [官方来源](#官方来源), L:19
-  - [平台](#平台), L:24
-  - [Web 标准](#web-标准), L:33
-  - [框架与库](#框架与库), L:43
-  - [只作对照的来源](#只作对照的来源), L:69
-- [清单里没有时怎么找](#清单里没有时怎么找), L:79
-- [按领域查找](#按领域查找), L:104
-- [llms.txt 与官方 skill](#llmstxt-与官方-skill), L:119
-- [维护本清单](#维护本清单), L:136
+- [官方来源](#官方来源), L:18
+  - [平台](#平台), L:27
+  - [Web 标准](#web-标准), L:40
+  - [框架与库](#框架与库), L:50
+- [只作对照的来源](#只作对照的来源), L:82
+- [清单里没有时怎么找](#清单里没有时怎么找), L:93
+- [按领域查找](#按领域查找), L:120
+- [维护本清单](#维护本清单), L:135
 
 ## 官方来源
 
-拿不准一个行为或一个库的用法时，先到这里列出的地方查。前两组决定行为对不对，第三组
-决定在本仓库怎么实现。
+拿不准一个行为或一个库的用法时，先到这里列出的地方查。平台和 Web 标准决定行为对不对，
+框架与库的文档决定在本仓库怎么实现。
+
+表中「llms.txt」写「有」的，路径是文档站根目录下的 `/llms.txt`，「另有全文版」指还有
+`/llms-full.txt`。「官方 skill」指维护方自己发布的 skill；「未发现」指在维护方的 GitHub
+组织或账号下检索名称含 skill 的仓库，没有结果。
 
 ### 平台
 
-| 名称 | 地址 |
-|---|---|
-| Android Developers | https://developer.android.com |
-| Material Design 3 | https://m3.material.io |
-| Apple Developer Documentation | https://developer.apple.com/documentation |
-| Apple Human Interface Guidelines | https://developer.apple.com/design/human-interface-guidelines |
+| 名称 | 地址 | llms.txt | 官方 skill |
+|---|---|---|---|
+| Android Developers | https://developer.android.com | 无 | [android/skills](https://github.com/android/skills)（见下） |
+| Material Design 3 | https://m3.material.io | 无 | 未发现 |
+| Apple Developer Documentation | https://developer.apple.com/documentation | 无 | 未发现 |
+| Apple Human Interface Guidelines | https://developer.apple.com/design/human-interface-guidelines | 无 | 未发现 |
+
+android/skills 由 Google 安卓团队发布，用 Android CLI 安装（`android skills add <name>`，见
+[Android skills](https://developer.android.com/tools/agents/android-skills)）。内容以 Jetpack
+Compose 为主；移动壳是 WebView，只取讲平台行为的部分，例如 `edge-to-edge`、`navigation-event`。
 
 ### Web 标准
 
@@ -45,30 +52,37 @@
 版本以 `apps/web/package.json`、`apps/desktop/package.json` 等锁定的为准，打开对应大版本
 的文档。
 
-| 名称 | 用在哪 | 地址 |
-|---|---|---|
-| Vue | 全部 | https://vuejs.org |
-| Vue Router | 路由与历史 | https://router.vuejs.org |
-| Pinia | 客户端 store | https://pinia.vuejs.org |
-| Pinia Colada | 服务端数据 | https://pinia-colada.esm.dev |
-| Reka UI | `@felinic/ui` 内部 | https://reka-ui.com |
-| VueUse | 通用 composable | https://vueuse.org |
-| Tailwind CSS | 样式 | https://tailwindcss.com/docs |
-| vee-validate | 表单 | https://vee-validate.logaretm.com/v4/ |
-| Zod | 校验 | https://zod.dev |
-| vue-i18n | 三语文案 | https://vue-i18n.intlify.dev |
-| markstream-vue | Markdown 渲染 | https://markstream-vue-docs.simonhe.me |
-| Shiki / Mermaid / KaTeX | 代码高亮、图表、公式 | https://shiki.style 、https://mermaid.js.org 、https://katex.org |
-| dockview | 工作区面板 | https://dockview.dev |
-| ECharts / xterm.js / Monaco | 图表、终端、编辑器 | https://echarts.apache.org 、https://xtermjs.org 、https://microsoft.github.io/monaco-editor/ |
-| lucide | 图标 | https://lucide.dev |
-| Vite / Vitest | 构建、测试 | https://vite.dev 、https://vitest.dev |
-| Electron / electron-vite | 桌面端 | https://www.electronjs.org/docs/latest 、https://electron-vite.org |
-| Capacitor | 移动壳（开发中，尚未合入） | https://capacitorjs.com/docs |
+| 名称 | 用在哪 | 地址 | llms.txt | 官方 skill |
+|---|---|---|---|---|
+| Vue | 全部 | https://vuejs.org | 有，另有全文版 | 未发现（见下） |
+| Vue Router | 路由与历史 | https://router.vuejs.org | 有 | 未发现（见下） |
+| Pinia | 客户端 store | https://pinia.vuejs.org | 有 | 未发现（见下） |
+| Pinia Colada | 服务端数据 | https://pinia-colada.esm.dev | 有 | 未发现 |
+| Reka UI | `@felinic/ui` 内部 | https://reka-ui.com | 有，另有全文版 | 未发现 |
+| VueUse | 通用 composable | https://vueuse.org | 无 | [vueuse/skills](https://github.com/vueuse/skills)（`vueuse-functions`） |
+| Tailwind CSS | 样式 | https://tailwindcss.com/docs | 无 | 未发现 |
+| vee-validate | 表单 | https://vee-validate.logaretm.com/v4/ | 无 | 未发现 |
+| Zod | 校验 | https://zod.dev | 有 | 未发现 |
+| vue-i18n | 三语文案 | https://vue-i18n.intlify.dev | 有 | 未发现 |
+| markstream-vue | Markdown 渲染 | https://markstream-vue-docs.simonhe.me | 有 | 未发现 |
+| Shiki / Mermaid / KaTeX | 代码高亮、图表、公式 | https://shiki.style 、https://mermaid.js.org 、https://katex.org | 无 | 未发现 |
+| dockview | 工作区面板 | https://dockview.dev | 有 | 未发现 |
+| ECharts / xterm.js / Monaco | 图表、终端、编辑器 | https://echarts.apache.org 、https://xtermjs.org 、https://microsoft.github.io/monaco-editor/ | 无 | 未发现 |
+| lucide | 图标 | https://lucide.dev | 有 | 未发现 |
+| Vite / Vitest | 构建、测试 | https://vite.dev 、https://vitest.dev | 都有 | 未发现 |
+| Electron / electron-vite | 桌面端 | https://www.electronjs.org/docs/latest 、https://electron-vite.org | 无 | 未发现 |
+| Capacitor | 移动壳（开发中，尚未合入） | https://capacitorjs.com/docs | 无 | [ionic-team/capacitor-skills](https://github.com/ionic-team/capacitor-skills)（见下） |
 
-### 只作对照的来源
+- Vue、Vue Router、Pinia：社区的 [vuejs-ai/skills](https://github.com/vuejs-ai/skills) 含这三者的
+  best practices，但它在 README 中自述为非官方实验，只当线索。
+- Capacitor：ionic-team/capacitor-skills 由 Capacitor 的维护方 Ionic 团队发布，覆盖插件生成、
+  Cordova 插件迁移与 UIScene 迁移，不涉及导航与返回。Capgo 发布的 Capacitor skills 是第三方的，
+  只当线索。
 
-下面这些不是本仓库所用技术的维护方，只在同类问题上作对照。引用时说明为什么适用。
+## 只作对照的来源
+
+下面这些不是本仓库所用技术的维护方，不属于官方来源，只在同类问题上作对照。引用时说明为什么
+适用于本仓库。
 
 | 名称 | 对照什么 | 地址 |
 |---|---|---|
@@ -90,7 +104,9 @@
    自己 `package.json` 里的这两个字段。文档站和源码仓库属于同一个维护方（同一个 GitHub
    组织或账号、同一个域名），它的文档才算官方。打开与锁定版本相同大版本的文档。
 4. **官方文档没写清时，读维护方自己的源码、issue 和发布说明。** 这些可以确认实际行为，
-   引用时注明出处是源码、issue 还是发布说明，不当成文档的承诺。
+   引用时注明出处是源码、issue 还是发布说明，不当成文档的承诺。平台组件同样如此：WebView
+   和 Chrome 的行为看 Chromium 的源码与 issue（https://source.chromium.org 、
+   https://issues.chromium.org），Android 系统行为看 AOSP 源码（https://cs.android.com）。
 5. **找给 agent 读的入口。** 在文档站根目录试 `/llms.txt` 和 `/llms-full.txt`；在维护方的
    GitHub 组织或账号下找 skill 仓库。发布方不是维护方的 skill 一律算第三方，只当线索。
 6. **以下都不算官方来源**：第三方教程和博客、问答帖、文档镜像和聚合站、其他产品的源码与
@@ -115,23 +131,6 @@ Material 3 站点），如实写「未读到原文」，不凭印象引用。
 | 服务端数据与缓存 | Pinia Colada |
 | 表单与校验 | vee-validate；Zod |
 | 桌面端窗口、托盘与菜单 | Electron；electron-vite |
-
-## llms.txt 与官方 skill
-
-llms.txt 写「有」的，路径是文档站根目录下的 `/llms.txt`，「另有全文版」指还有
-`/llms-full.txt`。「未发现」指在维护方的 GitHub 组织或账号下检索名称含 skill 的仓库，
-没有结果。
-
-| 名称 | llms.txt | 官方 skill |
-|---|---|---|
-| Android | 无 | [android/skills](https://github.com/android/skills)：Google 安卓团队发布，用 Android CLI 安装（`android skills add <name>`，见 [Android skills](https://developer.android.com/tools/agents/android-skills)）。以 Jetpack Compose 为主；移动壳是 WebView，只取讲平台行为的部分，如 `edge-to-edge`、`navigation-event` |
-| Apple | 无 | 未发现 |
-| Vue | 有，另有全文版 | 未发现。社区的 [vuejs-ai/skills](https://github.com/vuejs-ai/skills) 自述为非官方实验，含 Vue、Vue Router、Pinia 的 best practices，只当线索 |
-| Vue Router、Pinia、Pinia Colada、Zod、vue-i18n、markstream-vue、dockview、lucide、Vite、Vitest | 有 | 未发现 |
-| Reka UI | 有，另有全文版 | 未发现 |
-| VueUse | 无 | [vueuse/skills](https://github.com/vueuse/skills)（`vueuse-functions`） |
-| Tailwind CSS、vee-validate、Shiki、Mermaid、KaTeX、ECharts、xterm.js、Monaco、Electron、electron-vite | 无 | 未发现 |
-| Capacitor | 无 | [ionic-team/capacitor-skills](https://github.com/ionic-team/capacitor-skills)：由 Capacitor 的维护方 Ionic 团队发布，覆盖插件生成、Cordova 插件迁移与 UIScene 迁移，不涉及导航与返回。Capgo 发布的 Capacitor skills 是第三方的，只当线索 |
 
 ## 维护本清单
 
