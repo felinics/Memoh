@@ -13,16 +13,30 @@
       :data-kind="kind"
       aria-hidden="true"
     />
-    <Avatar class="size-5 shrink-0 ring-1 ring-border">
-      <AvatarImage
-        v-if="avatarUrl"
-        :src="avatarUrl"
-        :alt="botName"
-      />
-      <AvatarFallback class="text-caption">
-        {{ firstAvatarCharacter(botName) }}
-      </AvatarFallback>
-    </Avatar>
+    <span class="relative inline-flex shrink-0">
+      <Avatar class="size-5 shrink-0 ring-1 ring-border">
+        <AvatarImage
+          v-if="avatarUrl"
+          :src="avatarUrl"
+          :alt="botName"
+        />
+        <AvatarFallback class="text-caption">
+          {{ firstAvatarCharacter(botName) }}
+        </AvatarFallback>
+      </Avatar>
+      <!-- A schedule raised this row, not a conversation the user started:
+           a small clock rides the avatar's corner, cut out of the card. -->
+      <span
+        v-if="scheduled"
+        data-slot="needs-you-row-schedule"
+        class="absolute -right-1 -bottom-1 inline-flex size-3 items-center justify-center rounded-full bg-card text-muted-foreground ring-2 ring-card"
+      >
+        <Clock
+          class="size-2.5"
+          aria-hidden="true"
+        />
+      </span>
+    </span>
     <span class="min-w-0 flex-1">
       <!-- Time rides the title line like a mail list, so the narrow
            meta line only has to fit bot and state. -->
@@ -71,6 +85,7 @@
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Avatar, AvatarFallback, AvatarImage, BadgeCount } from '@felinic/ui'
+import { Clock } from 'lucide-vue-next'
 import type { AttentionKind } from '@/composables/api/attention-api'
 import { firstAvatarCharacter } from '@/composables/useAvatarInitials'
 import { useUnreadStore, type UnreadEntry } from '@/store/unread'
@@ -109,10 +124,13 @@ const kindClass: Record<AttentionKind, string> = {
 }
 
 const kind = computed(() => props.urgentKind ?? props.entry.kind)
+/** Raised by a schedule: one of its run sessions, or an update, which only notify_user in a scheduled run raises. */
+const scheduled = computed(() => !!props.entry.scheduleId || props.entry.kind === 'update')
 const title = computed(() => props.entry.title || t('chat.untitledSession'))
 const label = computed(() => [
   title.value,
   props.botName,
+  ...(scheduled.value ? [t('notifications.fromSchedule')] : []),
   t(`notifications.kind.${kind.value}`),
   ...(props.count > 1 ? [t('notifications.unreadRuns', { count: props.count })] : []),
 ].join(', '))

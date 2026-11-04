@@ -85,6 +85,7 @@
               :unread-kinds="unreadOf(item)"
               @open="handleOpen(item)"
               @edit="handleOpenTask(item)"
+              @read-all="readAllRuns(item)"
               @delete="deleteTarget = item"
               @toggle="(enabled) => handleToggleEnabled(item, enabled)"
             >
@@ -94,6 +95,8 @@
                 :schedule-id="item.id"
                 :schedule-name="item.name ?? ''"
                 :revision="currentScheduleRevision"
+                :focus-session-id="attentionFocus.scheduleRun?.scheduleId === item.id ? attentionFocus.scheduleRun.sessionId : ''"
+                @focused="attentionFocus.scheduleRun = null"
               />
             </ScheduleItem>
           </div>
@@ -130,6 +133,7 @@ import type { ScheduleSchedule } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useUnreadStore, type AttentionKind } from '@/store/unread'
+import { useAttentionFocusStore } from '@/store/attention-focus'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import { scheduleDeleteConfirmKey } from '@/utils/schedule-delete'
@@ -147,6 +151,7 @@ const chatStore = useChatStore()
 const { currentBotId, scheduleActivityRevisions } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
 const unread = useUnreadStore()
+const attentionFocus = useAttentionFocusStore()
 const { sidebarView } = storeToRefs(workspaceTabs)
 
 const isLoading = ref(false)
@@ -348,6 +353,30 @@ function unreadOf(item: ScheduleSchedule): AttentionKind[] {
   return (unread.bySchedule[item.id ?? ''] ?? []).map(entry => entry.kind)
 }
 
+/**
+ * Reads every unread run of a schedule. The toast's undo marks them unread
+ * again, as the "Needs you" clear-all does.
+ */
+async function readAllRuns(item: ScheduleSchedule) {
+  const ids = (unread.bySchedule[item.id ?? ''] ?? []).map(entry => entry.sessionId)
+  let cleared: string[]
+  try {
+    cleared = await unread.markSessionsRead(ids)
+  }
+  catch {
+    toast.error(t('notifications.updateFailed'))
+    return
+  }
+  if (!cleared.length) return
+  toast(t('notifications.clearedAll', { count: cleared.length }), {
+    duration: 8000,
+    action: {
+      label: t('notifications.undo'),
+      onClick: () => { unread.markUnread(cleared).catch(() => toast.error(t('notifications.updateFailed'))) },
+    },
+  })
+}
+
 function isPinnedSessionRunning(item: ScheduleSchedule): boolean {
   const sessionId = pinnedSessionId(item)
   return !!sessionId && chatStore.isSessionStreaming(currentBotId.value, sessionId)
@@ -380,5 +409,20 @@ function handleOpen(item: ScheduleSchedule) {
     [botId]: expandedScheduleId.value === id ? '' : id,
   }
 }
+
+// Opening a schedule run from "Needs you" or a notification brings it into
+// view: its card opens here, once the schedules are loaded, and the run list
+// scrolls to it (focus-session-id).
+watch(
+  () => [attentionFocus.scheduleRun?.scheduleId, schedules.value] as const,
+  ([scheduleId, items]) => {
+    const botId = (currentBotId.value ?? '').trim()
+    if (!scheduleId || !botId || !items.some(item => item.id === scheduleId)) return
+    if (expandedScheduleId.value !== scheduleId) {
+      expandedScheduleByBot.value = { ...expandedScheduleByBot.value, [botId]: scheduleId }
+    }
+  },
+  { immediate: true },
+)
 
 </script>

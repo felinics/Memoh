@@ -1806,6 +1806,10 @@
         "budgetLimited": "Token 予算に到達",
         "complete": "目標を達成"
       }
+    },
+    "notifyNotice": {
+      "title": "通知しました",
+      "description": "この実行は「確認が必要」に表示されます"
     }
   },
   "chatExamples": {
@@ -4546,6 +4550,7 @@
       "marked": "未読にしました"
     },
     "browserSettingsTitle": "ブラウザ通知",
-    "unreadRuns": "未読 {count} 件"
+    "unreadRuns": "未読 {count} 件",
+    "fromSchedule": "定期タスク"
   }
 }

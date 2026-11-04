@@ -154,12 +154,13 @@ describe('needs-you inbox', () => {
     const { root, app } = mount()
     const rows = root.querySelectorAll<HTMLButtonElement>('[data-slot="needs-you-row"]')
     expect(rows).toHaveLength(2)
-    expect(rows[0]!.getAttribute('aria-label')).toBe('Daily news, Kitty, notifications.kind.failed, notifications.unreadRuns(2)')
+    expect(rows[0]!.getAttribute('aria-label')).toBe('Daily news, Kitty, notifications.fromSchedule, notifications.kind.failed, notifications.unreadRuns(2)')
     expect(rows[0]!.querySelector('[data-test="count"]')?.textContent).toBe('2')
     expect(rows[0]!.querySelector('[data-test="count"]')?.getAttribute('data-variant')).toBe('destructive')
     expect(rows[0]!.querySelector('[data-slot="attention-dot"]')).toBeNull()
     rows[0]!.click()
-    expect(push).toHaveBeenCalledWith('/bot/b1?session=s0')
+    // The newest run is an update, so the jump also reveals its notice and the run's row.
+    expect(push).toHaveBeenCalledWith('/bot/b1?session=s0&notice=1&schedule=sch1')
     app.unmount()
   })
 

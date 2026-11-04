@@ -1837,6 +1837,10 @@
         "budgetLimited": "Token budget reached",
         "complete": "Goal completed"
       }
+    },
+    "notifyNotice": {
+      "title": "Notified you",
+      "description": "This run shows in Needs you"
     }
   },
   "chatExamples": {
@@ -4550,6 +4554,7 @@
       "marked": "Marked unread"
     },
     "browserSettingsTitle": "Browser notifications",
-    "unreadRuns": "{count} unread"
+    "unreadRuns": "{count} unread",
+    "fromSchedule": "Scheduled task"
   }
 }

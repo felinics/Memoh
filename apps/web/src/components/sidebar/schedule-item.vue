@@ -75,6 +75,15 @@
               <Pencil />
               {{ t('bots.schedule.edit') }}
             </DropdownMenuItem>
+            <!-- Runs that each made a session pile up as unread; reading one
+                 leaves the rest, so the card offers to read them all. -->
+            <DropdownMenuItem
+              v-if="expandable && unreadCount"
+              @select="$emit('readAll')"
+            >
+              <CheckCheck />
+              {{ t('notifications.clearAll') }}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
@@ -105,7 +114,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { CheckCheck, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import {
   AutoHeight,
   BadgeCount,
@@ -151,6 +160,7 @@ withDefaults(defineProps<{
 defineEmits<{
   open: []
   edit: []
+  readAll: []
   delete: []
   toggle: [enabled: boolean]
 }>()

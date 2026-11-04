@@ -310,6 +310,24 @@ describe('unread store', () => {
     expect(store.total).toBe(2)
   })
 
+  it('reads only the sessions it is given', async () => {
+    const second = { ...reply, session_id: 's2', attention_at: '2026-10-16T09:00:00Z' }
+    api.fetchUnreadSessions.mockResolvedValue([reply, second])
+    captureStream()
+    const store = useUnreadStore()
+    store.start()
+    await flush()
+
+    expect(await store.markSessionsRead(['s2', 'gone'])).toEqual(['s2'])
+    expect(api.setReadState).toHaveBeenCalledWith([{ session_id: 's2', unread: false, through: second.attention_at }])
+    expect(store.isUnread('s1')).toBe(true)
+    expect(store.isUnread('s2')).toBe(false)
+
+    api.setReadState.mockClear()
+    expect(await store.markSessionsRead(['gone'])).toEqual([])
+    expect(api.setReadState).not.toHaveBeenCalled()
+  })
+
   it('restores the inbox when reading everything fails', async () => {
     api.fetchUnreadSessions.mockResolvedValue([reply])
     captureStream()

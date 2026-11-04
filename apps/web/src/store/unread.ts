@@ -259,7 +259,16 @@ export const useUnreadStore = defineStore('unread', () => {
    * back if the request fails; the returned ids feed markUnread for an undo.
    */
   async function markAllRead(): Promise<string[]> {
-    const cleared = Object.values(entries.value)
+    return markSessionsRead(Object.keys(entries.value))
+  }
+
+  /**
+   * Reads the given unread sessions in one request, the way markAllRead reads
+   * all of them; sessions that are not unread are skipped. Returns the ids it
+   * read, for an undo through markUnread.
+   */
+  async function markSessionsRead(sessionIds: string[]): Promise<string[]> {
+    const cleared = sessionIds.map(id => entries.value[id]).filter((entry): entry is UnreadEntry => !!entry)
     if (!cleared.length) return []
     for (const entry of cleared) remove(entry.sessionId)
     try {
@@ -287,5 +296,5 @@ export const useUnreadStore = defineStore('unread', () => {
     return () => listeners.delete(listener)
   }
 
-  return { entries, total, countByBot, inbox, inboxGroups, bySchedule, isUnread, kindOf, isFresh, start, stop, reset, markRead, markAllRead, markUnread, onAttention }
+  return { entries, total, countByBot, inbox, inboxGroups, bySchedule, isUnread, kindOf, isFresh, start, stop, reset, markRead, markAllRead, markSessionsRead, markUnread, onAttention }
 })

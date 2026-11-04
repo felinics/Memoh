@@ -1837,6 +1837,10 @@
         "budgetLimited": "已达到 Token 预算",
         "complete": "目标已完成"
       }
+    },
+    "notifyNotice": {
+      "title": "已提醒你",
+      "description": "这次运行会出现在「需要你」中"
     }
   },
   "chatExamples": {
@@ -4550,6 +4554,7 @@
       "marked": "标记为未读"
     },
     "browserSettingsTitle": "浏览器通知",
-    "unreadRuns": "{count} 条未读"
+    "unreadRuns": "{count} 条未读",
+    "fromSchedule": "定时任务"
   }
 }

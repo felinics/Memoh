@@ -1,8 +1,24 @@
 import type { AttentionKind } from '@/composables/api/attention-api'
 
+/** What opening an attention link should bring into view besides the session. */
+export interface AttentionFocus {
+  /** The run notified the user (notify_user): scroll to its notice. */
+  notice?: boolean
+  /** The session is a run of this schedule: reveal it in the schedule panel. */
+  scheduleId?: string
+}
+
 /** Stable deep link shared by the inbox and system notifications, including Electron's memory router. */
-export function sessionAttentionPath(botId: string, sessionId: string): string {
-  return `/bot/${encodeURIComponent(botId)}?session=${encodeURIComponent(sessionId)}`
+export function sessionAttentionPath(botId: string, sessionId: string, focus: AttentionFocus = {}): string {
+  const query = new URLSearchParams({ session: sessionId })
+  if (focus.notice) query.set('notice', '1')
+  if (focus.scheduleId) query.set('schedule', focus.scheduleId)
+  return `/bot/${encodeURIComponent(botId)}?${query.toString()}`
+}
+
+/** The focus an attention entry asks for when the user opens it. */
+export function attentionFocusOf(entry: { kind: AttentionKind, scheduleId?: string }): AttentionFocus {
+  return { notice: entry.kind === 'update', scheduleId: entry.scheduleId }
 }
 
 /**

@@ -30,7 +30,7 @@ vi.mock('@/store/workspace-tabs', () => ({
 
 let app: ReturnType<typeof createApp> | undefined
 let root: HTMLDivElement
-let props: { botId: string, scheduleId: string, scheduleName: string, revision: number }
+let props: { botId: string, scheduleId: string, scheduleName: string, revision: number, focusSessionId?: string, onFocused?: () => void }
 
 function run(id: number, extra: Record<string, unknown> = {}) {
   return {
@@ -68,6 +68,7 @@ beforeEach(() => {
   root = document.createElement('div')
   document.body.append(root)
   props = reactive({ botId: 'bot-1', scheduleId: 'sched-1', scheduleName: 'Daily AI news', revision: 0 })
+  Element.prototype.scrollIntoView = vi.fn()
 })
 
 afterEach(() => {
@@ -177,4 +178,36 @@ it('marks a run whose session is unread with its kind and a bold title', async (
   expect(readRow!.querySelector('[data-slot="attention-dot"]')).toBeNull()
   expect(readRow!.querySelector('.font-semibold')).toBeNull()
   mocks.unreadKinds = {}
+})
+
+it('scrolls the focused run into view once its row loads, then reports it', async () => {
+  const focused = vi.fn()
+  Object.assign(props, { focusSessionId: 'session-2', onFocused: focused })
+  mocks.fetchRuns.mockResolvedValue({ items: [run(1), run(2)], nextCursor: null })
+  await mount()
+
+  const scroll = vi.mocked(Element.prototype.scrollIntoView)
+  expect(scroll).toHaveBeenCalledTimes(1)
+  expect(scroll.mock.contexts[0]).toBe(rows()[1])
+  expect(focused).toHaveBeenCalledTimes(1)
+})
+
+it('pages for a focused run that is not on the first page, and gives up when the runs end', async () => {
+  const focused = vi.fn()
+  Object.assign(props, { focusSessionId: 'session-5', onFocused: focused })
+  mocks.fetchRuns
+    .mockResolvedValueOnce({ items: [run(0), run(1), run(2), run(3)], nextCursor: 'c1' })
+    .mockResolvedValueOnce({ items: [run(4), run(5)], nextCursor: null })
+  await mount()
+  await flush()
+
+  expect(mocks.fetchRuns).toHaveBeenLastCalledWith('bot-1', 'sched-1', { limit: 8, cursor: 'c1' })
+  expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts[0]).toBe(rows()[5])
+  expect(focused).toHaveBeenCalledTimes(1)
+
+  vi.mocked(Element.prototype.scrollIntoView).mockClear()
+  props.focusSessionId = 'session-gone'
+  await flush()
+  expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+  expect(focused).toHaveBeenCalledTimes(2)
 })

@@ -136,7 +136,7 @@ import { useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore, type UnreadEntry } from '@/store/unread'
 import { bounce, enterRow, leaveRow, revealRow } from '@/utils/attention-motion'
-import { attentionBadgeVariant, mostUrgentKind, sessionAttentionPath } from '@/utils/session-attention'
+import { attentionBadgeVariant, attentionFocusOf, mostUrgentKind, sessionAttentionPath } from '@/utils/session-attention'
 import NeedsYouRow from './needs-you-row.vue'
 
 const LIMIT = 5
@@ -220,6 +220,6 @@ async function clearAll() {
 }
 
 function openSession(entry: UnreadEntry) {
-  void router.push(sessionAttentionPath(entry.botId, entry.sessionId))
+  void router.push(sessionAttentionPath(entry.botId, entry.sessionId, attentionFocusOf(entry)))
 }
 </script>

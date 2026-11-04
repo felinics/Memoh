@@ -31,12 +31,22 @@ describe('desktop attention notifications', () => {
   it('rejects invalid IPC input and stale events', () => {
     const show = vi.fn(() => vi.fn())
     const notifications = createAttentionNotifications({ show, navigate: vi.fn() })
-    for (const invalid of [null, {}, { ...payload, botId: '//evil.test' }, { ...payload, attentionAt: 'bad' }, { ...payload, title: 'x'.repeat(1000) }]) {
+    for (const invalid of [null, {}, { ...payload, botId: '//evil.test' }, { ...payload, attentionAt: 'bad' }, { ...payload, title: 'x'.repeat(1000) }, { ...payload, scheduleId: '../../evil' }, { ...payload, notice: 'yes' }]) {
       notifications.notify(invalid)
     }
     expect(show).not.toHaveBeenCalled()
     notifications.notify(payload)
     notifications.notify({ ...payload, attentionAt: '2026-10-19T08:00:00Z' })
     expect(show).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens the notice and the schedule run a notification points at', () => {
+    const clicks: Array<() => void> = []
+    const show = vi.fn((_p, onClick: () => void) => { clicks.push(onClick); return vi.fn() })
+    const navigate = vi.fn()
+    const notifications = createAttentionNotifications({ show, navigate })
+    notifications.notify({ ...payload, notice: true, scheduleId: 'cccccccc-cccc-cccc-cccc-cccccccccccc' })
+    clicks[0]?.()
+    expect(navigate).toHaveBeenCalledWith(`/bot/${payload.botId}?session=${payload.sessionId}&notice=1&schedule=cccccccc-cccc-cccc-cccc-cccccccccccc`)
   })
 })
