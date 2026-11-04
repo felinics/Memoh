@@ -84,7 +84,7 @@ func (s *Service) finalizeRuntimeDecisions(ctx context.Context, handle sessionru
 			var req toolapproval.Request
 			var err error
 			if strings.EqualFold(target.Status, toolapproval.StatusPending) {
-				req, err = s.toolApproval.Reject(ctx, target.ID, "", "run_ended")
+				req, err = s.toolApproval.Cancel(ctx, target.ID, "run_ended")
 			} else {
 				req, err = s.toolApproval.Get(ctx, target.ID)
 			}
@@ -135,4 +135,24 @@ func (s *Service) runtimeDecisionsForFinish(ctx context.Context, runID string) (
 		targets = append(targets, userInputDecisionTarget(row))
 	}
 	return targets, nil
+}
+
+// cancelRunDecisions closes every request a run left pending when it ended
+// without its owner's finish path: both kinds, only that run's, and only under
+// the token the run ended with.
+func (s *Service) cancelRunDecisions(ctx context.Context, botID, sessionID, runID string, fencingToken int64, reason string) error {
+	var errs []error
+	if canceller, ok := s.userInput.(interface {
+		CancelPendingForRun(context.Context, string, string, string, int64, string) ([]userinput.Request, error)
+	}); ok {
+		if _, err := canceller.CancelPendingForRun(ctx, botID, sessionID, runID, fencingToken, reason); err != nil {
+			errs = append(errs, fmt.Errorf("cancel run user inputs: %w", err))
+		}
+	}
+	if s.toolApproval != nil {
+		if _, err := s.toolApproval.CancelPendingForRun(ctx, botID, sessionID, runID, fencingToken, reason); err != nil {
+			errs = append(errs, fmt.Errorf("cancel run tool approvals: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }

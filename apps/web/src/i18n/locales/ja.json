@@ -130,7 +130,6 @@
       "reasoning_selection_unsupported": "この外部Agentは推論強度の選択に対応していません。",
       "request_invalid": "Agent ランタイムのリクエストが無効です。内容を確認して、もう一度お試しください。",
       "runtime_conflict": "Agent ランタイムはこの操作を実行できる状態ではありません。更新してからもう一度お試しください。",
-      "runtime_limit_reached": "実行中の Agent ランタイムが多すぎます。1 つ終了してからもう一度お試しください。",
       "runtime_not_found": "この Agent ランタイムは利用できなくなりました。再起動します。"
     },
     "acp_agent_auth_invalid": "外部Agentの認証が無効です。Agent設定を更新してからもう一度お試しください。",
@@ -177,7 +176,6 @@
       "request_invalid": "Agent アカウントの情報を確認して、もう一度お試しください。",
       "revoked": "この Agent アカウントは切断されています。再接続するか、別のアカウントを選択してください。",
       "runtime_busy": "現在の応答が完了してから Agent アカウントを切り替えてください。",
-      "usage_auth_expired": "アカウントのサインインが期限切れです。次の会話のあとに自動で更新されます。それでも利用上限を表示できない場合は、アカウントを再接続してください。",
       "usage_unavailable": "利用上限を取得できませんでした。しばらくしてからもう一度お試しください。"
     },
     "agent_dependency_missing": "{dep_id} はこの Workspace にインストールされていません。Bot の「依存関係」からインストールするか、実行中のインストールの完了を待ってから、メッセージを再送してください。",
@@ -236,8 +234,6 @@
     "chat": {
       "message_empty": "メッセージを入力するか、ファイルを添付してください。"
     },
-    "codex_auth_token_missing": "このBotワークスペースのCodex認証が不足しているか不完全です。",
-    "codex_oauth_incomplete": "このBotワークスペースではCodexのChatGPTサインインが完了していません。",
     "compaction": {
       "model_unavailable": "圧縮Modelを利用できません。有効でコンテキストウィンドウが宣言されたチャットModelを選択してください。"
     },
@@ -277,8 +273,9 @@
       "context_window_exceeded": "この会話はモデルのコンテキストウィンドウを超えました。コンテキストを圧縮するか、新しい会話を開始してください。",
       "overloaded": "外部 Agent のモデルサービスが一時的に利用できないか、過負荷になっています。しばらくしてからもう一度お試しいただくか、別のモデルに切り替えてください。",
       "rate_limited": "外部 Agent がモデルサービスのレート制限に達しました。しばらく待ってからもう一度送信してください。",
+      "reported": "Agent がエラーを報告しました：{message}",
       "request_blocked": "このリクエストはモデルサービスの安全ポリシーによりブロックされました。内容を変更してもう一度送信してください。",
-      "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。",
+      "session_resume_failed": "セッションを再開できませんでした：{message}。もう一度お試しいただくか、新しい会話を開始してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。",
       "upstream_unreachable": "外部 Agent がモデルサービスに接続できないか、接続が途中で切断されました。ネットワークと Agent のサービスアドレスを確認して、もう一度お試しください。",
       "usage_limited": "外部 Agent のアカウントの利用枠を使い切りました。上限がリセットされてからもう一度お試しいただくか、アカウントのプランと請求情報をご確認ください。"
@@ -797,13 +794,9 @@
       "colorSchemeDescription": "ブランド、ステータス、UI 要素に使うパレットを選択します。",
       "typography": "タイポグラフィ",
       "uiFontFamily": "UI フォント",
-      "uiFontFamilyDescription": "標準のUIフォントを上書きします",
       "uiFontSize": "UI フォントサイズ",
-      "uiFontSizeDescription": "画面上の文字とコントロールのサイズを調整します",
       "codeFontFamily": "コードフォント",
-      "codeFontFamilyDescription": "標準のコードフォントを上書きします",
       "codeFontSize": "コードフォントサイズ",
-      "codeFontSizeDescription": "コードエディタ、コードブロック、ターミナルに適用されます",
       "syntaxHighlighting": "Syntax Highlight",
       "shikiThemeLight": "Light テーマ",
       "shikiThemeLightDescription": "Light モード時のコードブロックとエディタに適用されます",
@@ -826,16 +819,13 @@
         "amber": "明確なステータスインジケーターを備えた金色のハイライト"
       },
       "codeHighlight": "コードハイライト",
-      "codeHighlightDescription": "コードブロックとエディタに適用される配色。",
       "diagrams": "ダイアグラム",
       "mermaidTheme": "Mermaid テーマ",
-      "mermaidThemeDescription": "レンダリング済みの Mermaid 図表に適用されます。",
       "advanced": "詳細",
-      "advancedEntryTitle": "コードとダイアグラム"
+      "mermaidThemeAuto": "外観に合わせる"
     },
     "keyboard": {
       "title": "キーボードショートカット",
-      "intro": "各行の「編集」をクリックしてから、新しい組み合わせを押してください。Cmd/Ctrl + W、Q、T、N はブラウザと OS に予約されているため変更できません。Workspace の既定のショートカットは、macOS では ⌘⌥（US キーボードのキー位置で判定）、Windows と Linux では Alt+Shift を使います。Alt+Shift で入力言語を切り替えている場合は、ここで別のキーに変更してください。",
       "resetAll": "すべてリセット",
       "scopes": {
         "workspace": "ワークスペース",
@@ -862,80 +852,61 @@
       },
       "commands": {
         "newChatSession": {
-          "label": "新しいセッション",
-          "description": "現在のグループで新しいチャットを開くか、既存の下書きに移動します。"
+          "label": "新しいセッション"
         },
         "focusChatInput": {
-          "label": "チャット入力にフォーカス",
-          "description": "チャットパネルに移動し、メッセージ入力欄にフォーカスします。"
+          "label": "チャット入力にフォーカス"
         },
         "showSessions": {
-          "label": "チャットを表示",
-          "description": "チャットのサイドバーとセッション一覧を開きます。"
+          "label": "チャットを表示"
         },
         "showFiles": {
-          "label": "ファイルを表示",
-          "description": "ワークスペースのファイルサイドバーを開きます。"
+          "label": "ファイルを表示"
         },
         "showSchedule": {
-          "label": "スケジュールを表示",
-          "description": "スケジュールのサイドバーを開きます。"
+          "label": "スケジュールを表示"
         },
         "showSupermarket": {
-          "label": "マーケットプレイスを表示",
-          "description": "マーケットプレイスのサイドバーを開きます。"
+          "label": "マーケットプレイスを表示"
         },
         "nextWorkspaceTab": {
-          "label": "次のタブ",
-          "description": "現在のグループの次のタブに移動します。"
+          "label": "次のタブ"
         },
         "previousWorkspaceTab": {
-          "label": "前のタブ",
-          "description": "現在のグループの前のタブに移動します。"
+          "label": "前のタブ"
         },
         "splitWorkspaceRight": {
-          "label": "右に分割",
-          "description": "現在のパネルを右側に分割します。"
+          "label": "右に分割"
         },
         "splitWorkspaceBelow": {
-          "label": "下に分割",
-          "description": "現在のパネルを下側に分割します。"
+          "label": "下に分割"
         },
         "newTerminal": {
-          "label": "新しいターミナル",
-          "description": "現在のグループでターミナルを開きます。"
+          "label": "新しいターミナル"
         },
         "newBrowser": {
-          "label": "新しいブラウザー",
-          "description": "現在のグループでワークスペースのブラウザーを開きます。"
+          "label": "新しいブラウザー"
         },
         "closeCurrentWorkspaceTab": {
-          "label": "現在の Workspace タブを閉じる",
-          "description": "Workspace ペインで開いているタブを閉じます (OS の閉じる動作にフォールバックします)。"
+          "label": "現在の Workspace タブを閉じる"
         },
         "saveActiveFile": {
-          "label": "現在のファイルを保存",
-          "description": "Workspace のエディタで開いているファイルを保存します。"
+          "label": "現在のファイルを保存"
         },
         "toggleSidebar": {
-          "label": "サイドバーを切り替え",
-          "description": "メインサイドバーの表示/非表示を切り替えます。"
+          "label": "サイドバーを切り替え"
         },
         "openSettings": {
-          "label": "設定を開く",
-          "description": "どこからでも設定画面に移動します。"
+          "label": "設定を開く"
         },
         "closeMediaLightbox": {
-          "label": "メディアライトボックスを閉じる",
-          "description": "メディアプレビューのオーバーレイを閉じます。"
+          "label": "メディアライトボックスを閉じる"
         },
         "mediaLightboxPrev": {
-          "label": "前のメディア",
-          "description": "ライトボックスを開いている間、前のアイテムへ移動します。"
+          "label": "前のメディア"
         },
         "mediaLightboxNext": {
-          "label": "次のメディア",
-          "description": "ライトボックスを開いている間、次のアイテムへ移動します。"
+          "label": "次のメディア"
         }
       }
     },
@@ -1041,6 +1012,7 @@
     "actions": {
       "copy": "コピー",
       "edit": "編集",
+      "editHint": "保存すると、このメッセージとそれ以降の応答が置き換えられ、ここから会話が続きます。",
       "share": "共有",
       "retry": "もう一度試す",
       "fork": "フォーク",
@@ -1558,7 +1530,10 @@
       "dependencyMissingProgress": "バックグラウンドでインストール中…",
       "dependencyMissingDone": "インストール完了。再送できます。",
       "dependencyMissingFailed": "バックグラウンドのインストールに失敗しました。Bot 設定の「依存関係」から再試行してください。",
-      "dependencyOpen": "依存関係を開く"
+      "dependencyOpen": "依存関係を開く",
+      "resetSession": "新しい Agent セッションを開始",
+      "resetSessionDone": "次のメッセージから新しい Agent セッションが始まります。上の会話は引き継がれません。",
+      "resetSessionFailed": "新しい Agent セッションを開始できませんでした。"
     },
     "sessionFilterAll": "全て",
     "searchSessionPlaceholder": "検索",
@@ -2123,7 +2098,8 @@
       "exa": "エクサ",
       "bocha": "ボチャ",
       "duckduckgo": "DuckDuckGo",
-      "yandex": "ヤンデックス"
+      "yandex": "ヤンデックス",
+      "deepseek": "DeepSeek"
     },
     "fetchProviderNames": {
       "native": "ネイティブ取得",
@@ -2493,7 +2469,8 @@
         "execBypass": "ls\npwd\ngit status",
         "execMustReview": "rm -rf *\nsudo *"
       },
-      "unsavedChanges": "未保存の変更"
+      "unsavedChanges": "未保存の変更",
+      "enableTitle": "ツール呼び出しの承認を有効にする"
     },
     "hooks": {
       "title": "Hooks",
@@ -2511,9 +2488,7 @@
       "invalidJson": "hooks ファイルに構文エラーがあります。カンマ、引用符、括弧を確認してください。",
       "testPayloadInvalid": "ペイロードが有効な JSON ではありません。",
       "rules": "ルール",
-      "rulesDescription": "有効なルール数 / すべてのルール数。",
       "actions": "アクション",
-      "actionsDescription": "一致したHooksで実行されるコマンドとTool呼び出し。",
       "eventsSection": "イベント",
       "editorSection": "設定",
       "jsonConfig": "hooks.json",
@@ -2529,7 +2504,8 @@
       "saveSuccess": "Hooksを保存しました",
       "saveFailed": "Hooksの保存に失敗しました",
       "testSuccess": "Hookテストが完了しました",
-      "testFailed": "Hookテストに失敗しました"
+      "testFailed": "Hookテストに失敗しました",
+      "entryTitle": "イベントフック"
     },
     "title": "Bot",
     "searchPlaceholder": "Botを検索…",
@@ -2607,7 +2583,6 @@
     "avatarUrl": "アバターURL",
     "avatarUrlPlaceholder": "アバター画像を入力してくださいURL",
     "timezone": "タイムゾーン",
-    "timezoneHint": "スケジュールタスクはこのタイムゾーンに基づいて実行時刻を決定します。",
     "timezonePlaceholder": "例: America/New_York",
     "timezoneInherited": "ユーザー/システムから継承",
     "aclPreset": "IM アプリポリシー",
@@ -2805,8 +2780,9 @@
       "apps": "アプリ"
     },
     "agent": {
-      "add": "Agent を追加",
-      "added": "Agent を追加しました",
+      "title": "外部 Agent",
+      "add": "外部 Agent を追加",
+      "added": "外部 Agent を追加しました",
       "provider": "タイプ",
       "providerPlaceholder": "タイプを選択",
       "providerSearchPlaceholder": "タイプを検索...",
@@ -2814,14 +2790,14 @@
       "providerRequired": "Agent のタイプを選択してください。",
       "namePlaceholder": "Agent 名を入力",
       "nameRequired": "Agent 名を入力してください。",
-      "emptyTitle": "Agent はまだありません",
-      "emptyDescription": "Agent を追加すると、この Bot で Codex、Claude Code、Grok Build、またはカスタム ACP Agent を利用できます。",
+      "emptyTitle": "外部 Agent はまだありません",
+      "emptyDescription": "既定では Memoh 内蔵ランタイムが使用されます。外部 Agent を追加すると、この Bot で Codex、Claude Code、Grok Build、またはカスタム ACP Agent を利用できます。",
       "statusNeedsConfig": "設定が必要",
       "statusOff": "無効",
-      "deleteTitle": "Agent を削除しますか？",
+      "deleteTitle": "外部 Agent を削除しますか？",
       "deleteDescription": "「{name}」を削除しますか？既存の会話は関連付けを維持しますが、新しい会話では選択できなくなります。",
-      "deleted": "Agent を削除しました",
-      "deleteFailed": "Agent を削除できませんでした",
+      "deleted": "外部 Agent を削除しました",
+      "deleteFailed": "外部 Agent を削除できませんでした",
       "nameDescription": "選択画面や会話で Agent を識別する名前です。",
       "runtimeSetup": "Runtime の設定",
       "authMode": "認証方法",
@@ -2840,16 +2816,20 @@
       "defaultModelDescription": "任意項目です。空欄の場合は External Agent のデフォルトを使用し、会話中に一時的に変更できます。",
       "defaultModelPlaceholder": "Runtime のデフォルトを使用",
       "account": "アカウント",
-      "chatgptAccountDescription": "Memoh はこの Agent の ChatGPT 認証情報を暗号化して保存し、Runtime でのみ Codex に渡します。",
-      "chatgptAccountConnectedDescription": "この Agent の ChatGPT 認証情報は暗号化して保存されています。",
+      "chatgptAccountDescription": "Codex がこの Agent の Workspace で ChatGPT にサインインし、サインイン状態を自分で保持します。",
+      "chatgptAccountConnectedDescription": "Codex はこの Agent の Workspace で ChatGPT にサインインしています。",
+      "signedInAs": "{account} でサインイン中",
+      "checkingSignIn": "サインイン状態を確認しています…",
+      "enableToSignIn": "アカウントを確認・接続するには、この Agent を有効にしてください。",
+      "signInCheckFailed": "サインイン状態を確認できませんでした。",
       "reconnect": "再接続",
       "codexDeviceHint": "認証ページを開き、このワンタイムコードを入力してください。表示された OpenAI の認証ページ以外には入力しないでください。Memoh が認証を自動で完了します。",
       "codexLoginSuccess": "Codex を ChatGPT アカウントに接続しました",
       "codexLoginFailed": "Codex アカウントを認証できませんでした。もう一度お試しください。",
       "authGrokAccountDescription": "Grok アカウントで Grok Build にサインインします。",
       "grokAccount": "Grok アカウント",
-      "grokAccountDescription": "Memoh はこの Agent の Grok 認証情報を暗号化して保存し、Runtime でのみ Grok Build に渡します。",
-      "grokAccountConnectedDescription": "この Agent の Grok 認証情報は暗号化して保存されています。",
+      "grokAccountDescription": "Grok がこの Agent の Workspace でサインインし、サインイン状態を自分で保持します。",
+      "grokAccountConnectedDescription": "Grok はこの Agent の Workspace でサインインしています。",
       "grokDeviceHint": "認証ページを開き、このワンタイムコードを確認してください。表示された accounts.x.ai のページ以外では確認しないでください。Memoh が認証を自動で完了します。",
       "grokLoginSuccess": "Grok Build を Grok アカウントに接続しました",
       "grokLoginFailed": "Grok アカウントにサインインできませんでした。もう一度お試しください。",
@@ -3051,8 +3031,7 @@
       "unknownComputer": "利用できないコンピューター",
       "noComputers": "利用できるコンピューターがありません",
       "manageComputers": "コンピューターを管理",
-      "connectManage": "コンピューターの接続・切断",
-      "connectManageDescription": "すべてのコンピューターは「コンピューター」ページで管理します。"
+      "connectManage": "コンピューターの接続・切断"
     },
     "desktop": {
       "title": "Desktop環境",
@@ -3367,7 +3346,6 @@
         "multimedia": "マルチメディア"
       },
       "chatModel": "デフォルトのチャットモデル",
-      "chatModelDescription": "Telegram などのチャネルで新しい会話を始める際に Memoh Agent が使用します。Web チャットで選んだモデルは、この設定を変更しません。",
       "chatModelPlaceholder": "Modelを選択",
       "defaultAgent": "デフォルトAgent",
       "defaultAgentDescription": "新しいローカルチャットにのみ適用されます。既存の会話では現在のAgentが引き続き使用されます。",
@@ -3392,21 +3370,15 @@
       "videoModelPlaceholder": "動画Modelを選択 (オプション)",
       "language": "language",
       "showToolCallsInIM": "Tool呼び出しを表示IM",
-      "showToolCallsInIMDescription": "ライブToolの実行ステータス (実行中/完了/失敗) をチャットに直接表示します。デフォルトでは無効になっています。",
       "displayEnabled": "Workspace表示を有効にする",
       "displayEnabledDescription": "Workspace 内で Xvnc を起動します。この変更を反映するには Workspace を再起動してください。",
       "desktopEnabled": "Desktop",
       "desktopEnabledDescription": "有効にするVNCDesktop。 Memoh は、Debian/Ubuntu または Alpine Workspaceが見つからない場合、自動的にプロビジョニングします。",
       "toolApproval": "Tool呼び出しの承認",
       "toolApprovalDescription": "安全なパスまたはコマンドのバイパス テンプレートを使用して、機密性の高い書き込み、編集、および実行Toolの呼び出しには人間の承認が必要です。",
-      "acpSetupMode": "設定",
       "acpLaunchSection": "起動設定",
       "acpCommand": "コマンド",
       "acpArguments": "起動引数",
-      "acpSetupApiKey": "APIキー",
-      "acpSetupOAuth": "OAuth",
-      "acpSetupSelf": "自己管理",
-      "acpSelfModeHint": "Workspace ランタイム内ですでに設定されている Agent（既存のログインなど）を使用します。",
       "acpRequiredField": "{agent} には {field} が必要です。",
       "toolApprovalBypass": "バイパス",
       "toolApprovalMustReview": "要検討",
@@ -3824,10 +3796,6 @@
       "title": "圧縮ログ",
       "loadFailed": "圧縮ログのロードに失敗しました",
       "empty": "圧縮ログがありません",
-      "clearLogs": "ログをクリアする",
-      "clearConfirm": "すべての圧縮ログをクリアしてもよろしいですか?これを元に戻すことはできません。",
-      "clearSuccess": "圧縮ログがクリアされました",
-      "clearFailed": "圧縮ログのクリアに失敗しました",
       "status": "ステータス",
       "time": "時間",
       "duration": "間隔",
@@ -4537,5 +4505,30 @@
   "elicitation": {
     "done": "完了",
     "cancel": "キャンセル"
+  },
+  "notifications": {
+    "clearAll": "すべて既読にする",
+    "clearAllConfirm": "{count} 件をすべて既読にしますか？",
+    "clearedAll": "{count} 件を既読にしました",
+    "undo": "元に戻す",
+    "markUnread": "未読にする",
+    "markRead": "既読にする",
+    "updateFailed": "未読状態を更新できませんでした",
+    "inbox": "確認が必要",
+    "justNow": "たった今",
+    "showAll": "すべて表示 ({count})",
+    "showLess": "折りたたむ",
+    "otherBots": "他の Bot に未読のセッションがあります",
+    "settingsTitle": "デスクトップ通知",
+    "settingsDescription": "表示していないセッションで返信の完了、実行の失敗、または確認が必要なときに通知します。",
+    "denied": "通知がブロックされています。ブラウザの設定で許可してから有効にしてください。",
+    "unsupported": "このブラウザはブラウザ通知に対応していません。未読マークは引き続き表示されます。",
+    "kind": {
+      "reply": "返信が届きました",
+      "failed": "実行に失敗しました",
+      "needs_input": "確認を待っています",
+      "marked": "未読にしました"
+    },
+    "browserSettingsTitle": "ブラウザ通知"
   }
 }

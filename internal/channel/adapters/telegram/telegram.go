@@ -58,9 +58,13 @@ type TelegramAdapter struct {
 	bots          map[string]*tele.Bot // keyed by effective bot config
 	fileEndpoints map[*tele.Bot]string // bot instance → file endpoint format string
 	assets        assetOpener
-	streamLimiter *rate.Limiter // global rate limiter for all streaming API calls
-	seenUpdatesMu sync.Mutex
-	seenUpdates   map[string]time.Time
+	// streamLimiters paces streaming API calls per channel config. Telegram
+	// applies its aggregate rate limit to each bot, so streams of one bot share
+	// a limiter and streams of different bots never wait on each other.
+	streamLimitersMu sync.Mutex
+	streamLimiters   map[string]*rate.Limiter
+	seenUpdatesMu    sync.Mutex
+	seenUpdates      map[string]time.Time
 
 	// ask_user durable-state integration: ops are applied to the persistent
 	// interaction via the userinput service; only the force-reply prompt
@@ -115,16 +119,38 @@ func NewTelegramAdapter(log *slog.Logger) *TelegramAdapter {
 		logger:        log.With(slog.String("adapter", "telegram")),
 		bots:          make(map[string]*tele.Bot),
 		fileEndpoints: make(map[*tele.Bot]string),
-		streamLimiter: rate.NewLimiter(rate.Every(time.Second), 3), // 1 req/s sustained, burst of 3
 		seenUpdates:   make(map[string]time.Time),
 	}
 }
 
-// waitStreamLimit waits for the global stream rate limiter to allow one request.
-// All streams from the same adapter share this limiter to coordinate and avoid
-// aggregate Telegram API rate limits across concurrent conversations.
-func (a *TelegramAdapter) waitStreamLimit(ctx context.Context) error {
-	return a.streamLimiter.Wait(ctx)
+// waitStreamLimit waits until the bot of configID may make one more streaming
+// API call: 1 request/s sustained, burst of 3, shared by that bot's streams.
+func (a *TelegramAdapter) waitStreamLimit(ctx context.Context, configID string) error {
+	return a.streamLimiter(configID).Wait(ctx)
+}
+
+func (a *TelegramAdapter) streamLimiter(configID string) *rate.Limiter {
+	a.streamLimitersMu.Lock()
+	defer a.streamLimitersMu.Unlock()
+	limiter, ok := a.streamLimiters[configID]
+	if !ok {
+		if a.streamLimiters == nil {
+			a.streamLimiters = make(map[string]*rate.Limiter)
+		}
+		limiter = rate.NewLimiter(rate.Every(time.Second), 3)
+		a.streamLimiters[configID] = limiter
+	}
+	return limiter
+}
+
+// dropStreamLimiter forgets the limiter of a channel config whose connection
+// stopped, so the map does not keep every config this process ever served.
+// A stream still running keeps the limiter it already holds; one opened after
+// a reconnect gets a fresh limiter.
+func (a *TelegramAdapter) dropStreamLimiter(configID string) {
+	a.streamLimitersMu.Lock()
+	delete(a.streamLimiters, configID)
+	a.streamLimitersMu.Unlock()
 }
 
 // SetAssetOpener injects the media asset reader for storage-first file delivery.
@@ -516,6 +542,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 			// connection: by the time stop runs, that one is usually done.
 			a.logger.InfoContext(stopCtx, "stop", slog.String("config_id", cfg.ID))
 		}
+		a.dropStreamLimiter(cfg.ID)
 		bot.Stop()
 		cancel()
 		flushAllMediaGroups()

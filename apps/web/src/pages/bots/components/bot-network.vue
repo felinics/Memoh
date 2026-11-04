@@ -1,18 +1,18 @@
 <template>
-  <SectionGroup
-    :title="$t('bots.settings.networkPageTitle')"
-  >
-    <template
-      v-if="props.botId && settings && hasChanges"
-      #actions
-    >
-      <span class="text-xs text-muted-foreground">
-        {{ $t('common.unsaved') }}
-      </span>
-    </template>
-
+  <div class="space-y-4">
     <div class="space-y-8">
-      <SettingsSection v-if="props.botId">
+      <SettingsSection
+        v-if="props.botId"
+        :title="$t('bots.settings.networkPageTitle')"
+      >
+        <template
+          v-if="props.botId && settings && hasChanges"
+          #actions
+        >
+          <span class="text-xs text-muted-foreground">
+            {{ $t('common.unsaved') }}
+          </span>
+        </template>
         <SettingsRow
           :label="$t('bots.settings.networkSDWANSectionTitle')"
           :description="$t('bots.settings.networkSDWANSectionHint')"
@@ -543,7 +543,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </SectionGroup>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -564,7 +564,7 @@ import {
 } from '@felinic/ui'
 import { SquarePen, Eye, EyeOff, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
-import { ConfirmPopover, InlineLoadingRow, SectionGroup, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { ConfirmPopover, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'

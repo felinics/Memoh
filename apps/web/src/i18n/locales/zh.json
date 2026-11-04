@@ -67,7 +67,7 @@
     "inactive": "未启用",
     "loadFailed": "加载失败",
     "saveFailed": "保存失败",
-    "networkError": "网络连接失败，请检查网络后重试。",
+    "networkError": "网络连接失败，请检查网络后重试",
     "createdAt": "创建时间",
     "none": "无",
     "yes": "是",
@@ -96,7 +96,7 @@
     "preview": "预览"
   },
   "computerAccess": {
-    "emptyBots": "还没有 Bot。",
+    "emptyBots": "还没有 Bot",
     "yourComputer": "你的电脑",
     "notConnected": "未连接",
     "updateFailed": "更新访问权失败",
@@ -107,487 +107,484 @@
   "computerConnect": {
     "title": "连接电脑",
     "replaceAction": "覆盖这台电脑已保存的连接",
-    "replaceDescription": "终端提示已有其他连接时开启，再重新复制命令运行。",
+    "replaceDescription": "终端提示已有其他连接时开启，再重新复制命令运行",
     "restore": "恢复连接",
     "existingDescription": "在「{name}」上运行命令，沿用原凭证恢复后台连接。电脑记录和 Bot 权限会保留。",
     "commandLabel": "连接命令",
     "platformLabel": "操作系统",
-    "commandDescription": "在要连接的电脑上安装 Node.js 20+，然后在终端运行下方命令。",
+    "commandDescription": "在要连接的电脑上安装 Node.js 20+，然后在终端运行下方命令",
     "waiting": "等待电脑连接…",
     "finish": "完成"
   },
   "errors": {
     "acp": {
-      "access_forbidden": "你没有权限控制这个 Agent 运行实例。",
+      "access_forbidden": "你没有权限控制这个 Agent 运行实例",
       "command_not_found": "在工作区里找不到命令「{command}」。请先在工作区终端里安装它，或在 Agent 配置里把命令改成绝对路径。",
-      "config_update_failed": "外部 Agent 无法应用所选设置，请重试。",
-      "mode_id_required": "请选择会话模式后重试。",
-      "mode_selection_unsupported": "这个外部 Agent 不支持切换会话模式。",
-      "mode_unavailable": "所选会话模式已不再可用于这个外部 Agent。",
-      "model_id_required": "请选择模型后重试。",
-      "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
-      "model_unavailable": "所选模型已不再可用于这个外部 Agent。",
-      "operation_failed": "Agent 运行实例操作失败，请重试。",
-      "reasoning_effort_required": "请选择推理强度后重试。",
-      "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
-      "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度。",
-      "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
-      "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
-      "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
-      "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。"
+      "config_update_failed": "外部 Agent 无法应用所选设置，请重试",
+      "mode_id_required": "请选择会话模式后重试",
+      "mode_selection_unsupported": "这个外部 Agent 不支持切换会话模式",
+      "mode_unavailable": "所选会话模式已不再可用于这个外部 Agent",
+      "model_id_required": "请选择模型后重试",
+      "model_selection_unsupported": "这个外部 Agent 不支持切换模型",
+      "model_unavailable": "所选模型已不再可用于这个外部 Agent",
+      "operation_failed": "Agent 运行实例操作失败，请重试",
+      "reasoning_effort_required": "请选择推理强度后重试",
+      "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent",
+      "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度",
+      "request_invalid": "Agent 运行实例请求无效，请检查后重试",
+      "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试",
+      "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动"
     },
     "acp_agent_auth_invalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
-    "acp_agent_not_configured": "该 Bot 的外部 Agent 配置尚未完成。",
-    "acp_agent_not_enabled": "该 Bot 已停用选中的外部 Agent。",
-    "acp_agent_not_found": "选中的外部 Agent 不可用。",
-    "acp_attachment_invalid": "附件无效，请重新添加。",
-    "acp_attachment_unavailable": "无法让外部 Agent 访问该附件，请重新添加。",
-    "acp_discuss_unsupported": "这个外部 Agent 无法在讨论模式中运行。",
-    "acp_display_args_invalid": "外部 Agent 的显示参数无效。",
-    "acp_image_input_unsupported": "这个外部 Agent 无法读取所附图片。",
-    "acp_project_mode_invalid": "外部 Agent 的项目模式无效。",
-    "acp_project_path_invalid": "外部 Agent 的项目路径必须是绝对路径。",
-    "acp_runtime_busy": "外部 Agent 正在处理该会话的上一轮请求。",
+    "acp_agent_not_configured": "该 Bot 的外部 Agent 配置尚未完成",
+    "acp_agent_not_enabled": "该 Bot 已停用选中的外部 Agent",
+    "acp_agent_not_found": "选中的外部 Agent 不可用",
+    "acp_attachment_invalid": "附件无效，请重新添加",
+    "acp_attachment_unavailable": "无法让外部 Agent 访问该附件，请重新添加",
+    "acp_discuss_unsupported": "这个外部 Agent 无法在讨论模式中运行",
+    "acp_display_args_invalid": "外部 Agent 的显示参数无效",
+    "acp_image_input_unsupported": "这个外部 Agent 无法读取所附图片",
+    "acp_project_mode_invalid": "外部 Agent 的项目模式无效",
+    "acp_project_path_invalid": "外部 Agent 的项目路径必须是绝对路径",
+    "acp_runtime_busy": "外部 Agent 正在处理该会话的上一轮请求",
     "acp_runtime_owner_missing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
-    "acp_runtime_start_failed": "外部 Agent 运行时启动失败。",
+    "acp_runtime_start_failed": "外部 Agent 运行时启动失败",
     "agent": {
       "chat_model_not_configured": "尚未选择对话模型。请在 Bot 设置 → 通用中设置默认对话模型，然后重试。",
-      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。",
-      "provider_overloaded": "模型服务暂时不可用或过载，请稍后重试。",
-      "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。",
-      "provider_quota_exhausted": "模型服务账户的余额或配额已用尽。",
-      "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送。",
-      "provider_request_rejected": "模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。",
-      "provider_unreachable": "无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。",
-      "response_interrupted": "模型响应意外中断，请重试。",
-      "response_timeout": "模型未能及时响应，请重试。",
-      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。"
+      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key",
+      "provider_overloaded": "模型服务暂时不可用或过载，请稍后重试",
+      "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型",
+      "provider_quota_exhausted": "模型服务账户的余额或配额已用尽",
+      "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送",
+      "provider_request_rejected": "模型服务商拒绝了这次请求，请检查模型设置，或换一个模型",
+      "provider_unreachable": "无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行",
+      "response_interrupted": "模型响应意外中断，请重试",
+      "response_timeout": "模型未能及时响应，请重试",
+      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试"
     },
     "agent_authorization": {
-      "code_invalid": "授权码无效或已过期，请复制 Claude 页面上的完整授权码，或重新连接。",
-      "expired": "授权已过期，请重新连接账号。",
-      "failed": "账号授权失败，请重试。",
-      "limit": "请关闭其他待完成的授权，然后重试。",
-      "not_ready": "请先完成账号连接，再创建 Bot。"
+      "code_invalid": "授权码无效或已过期，请复制 Claude 页面上的完整授权码，或重新连接",
+      "expired": "授权已过期，请重新连接账号",
+      "failed": "账号授权失败，请重试",
+      "limit": "请关闭其他待完成的授权，然后重试",
+      "not_ready": "请先完成账号连接，再创建 Bot"
     },
     "agent_credential": {
-      "encryption_unavailable": "此服务器尚未配置 Agent 账号存储。",
-      "forbidden": "你没有权限使用这个 Agent 账号。",
-      "incompatible": "这个账号不能用于所选 Agent。",
-      "materialization_failed": "Agent 账号准备失败，请重试。",
-      "not_found": "这个 Agent 账号已不可用，请选择其他账号。",
-      "reauthorization_required": "请先重新连接这个 Agent 账号。",
-      "request_invalid": "请检查 Agent 账号信息后重试。",
-      "revoked": "这个 Agent 账号已断开，请重新连接或选择其他账号。",
-      "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
-      "usage_auth_expired": "账户登录已过期，下次对话后会自动续期；如果仍无法查看额度，请重新连接账户。",
-      "usage_unavailable": "暂时无法获取额度，请稍后再试。"
+      "encryption_unavailable": "此服务器尚未配置 Agent 账号存储",
+      "forbidden": "你没有权限使用这个 Agent 账号",
+      "incompatible": "这个账号不能用于所选 Agent",
+      "materialization_failed": "Agent 账号准备失败，请重试",
+      "not_found": "这个 Agent 账号已不可用，请选择其他账号",
+      "reauthorization_required": "请先重新连接这个 Agent 账号",
+      "request_invalid": "请检查 Agent 账号信息后重试",
+      "revoked": "这个 Agent 账号已断开，请重新连接或选择其他账号",
+      "runtime_busy": "请等待当前回复结束后再切换 Agent 账号",
+      "usage_unavailable": "暂时无法获取额度，请稍后再试"
     },
     "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
     "app": {
-      "busy": "该应用的另一个操作正在进行中。",
+      "busy": "该应用的另一个操作正在进行中",
       "dependencies_unavailable": "此服务器未启用工作区依赖服务，应用无法管理依赖。请联系管理员。",
-      "not_found": "未找到该应用安装记录。",
-      "operation_failed": "应用操作失败。",
+      "not_found": "未找到该应用安装记录",
+      "operation_failed": "应用操作失败",
       "prerequisite_failed": "所需的前置依赖安装失败。请先处理该依赖，再重试。",
-      "request_invalid": "应用请求无效。"
+      "request_invalid": "应用请求无效"
     },
     "bot": {
-      "name_invalid": "名称需为 2-63 个小写字母、数字或连字符，并以字母或数字开头；部分名称为保留名。",
-      "name_taken": "该名称已被占用。",
-      "not_found": "这个 Bot 已不存在，请返回 Bot 列表重新选择。"
+      "name_invalid": "名称需为 2-63 个小写字母、数字或连字符，并以字母或数字开头；部分名称为保留名",
+      "name_taken": "该名称已被占用",
+      "not_found": "这个 Bot 已不存在，请返回 Bot 列表重新选择"
     },
     "bot_access": {
-      "grant_not_found": "这条访问授权已不存在，请刷新成员列表后重试。"
+      "grant_not_found": "这条访问授权已不存在，请刷新成员列表后重试"
     },
     "bot_agent": {
-      "default_in_use": "请先选择其他默认 Agent，再停用或删除这个 Agent。",
-      "invalid_metadata": "Agent 配置无效。",
-      "invalid_runtime": "暂不支持这个 Agent 运行时。",
-      "name_taken": "这个 Bot 中已存在同名 Agent。",
-      "not_found": "这个 Agent 已不存在。",
-      "provider_direct_runtime": "该服务商以直连运行时方式运行，请改用 {runtime} 运行时创建 Agent。",
-      "unavailable": "这个 Agent 已不能用于新对话。"
+      "default_in_use": "请先选择其他默认 Agent，再停用或删除这个 Agent",
+      "invalid_metadata": "Agent 配置无效",
+      "invalid_runtime": "暂不支持这个 Agent 运行时",
+      "name_taken": "这个 Bot 中已存在同名 Agent",
+      "not_found": "这个 Agent 已不存在",
+      "provider_direct_runtime": "该服务商以直连运行时方式运行，请改用 {runtime} 运行时创建 Agent",
+      "unavailable": "这个 Agent 已不能用于新对话"
     },
     "bot_backup": {
-      "bundle_invalid": "备份文件已损坏，或版本不受支持。"
+      "bundle_invalid": "备份文件已损坏，或版本不受支持"
     },
-    "bot_ready_update_failed": "工作区已创建，但未能加载 Bot，请刷新页面。",
+    "bot_ready_update_failed": "工作区已创建，但未能加载 Bot，请刷新页面",
     "browser": {
-      "session_not_found": "这个浏览器会话已过期或被关闭，请重新打开一个。"
+      "session_not_found": "这个浏览器会话已过期或被关闭，请重新打开一个"
     },
-    "canceled": "请求已取消。",
+    "canceled": "请求已取消",
     "capability": {
-      "access_denied": "需要此 Bot 的管理权限才能管理其能力。",
-      "approval_required": "请先批准此能力变更请求。",
-      "not_found": "找不到请求的能力，请刷新后重试。",
-      "operation_failed": "能力管理操作失败，请检查当前状态后重试。",
-      "request_invalid": "能力管理请求无效，请检查操作和参数。"
+      "access_denied": "需要此 Bot 的管理权限才能管理其能力",
+      "approval_required": "请先批准此能力变更请求",
+      "not_found": "找不到请求的能力，请刷新后重试",
+      "operation_failed": "能力管理操作失败，请检查当前状态后重试",
+      "request_invalid": "能力管理请求无效，请检查操作和参数"
     },
     "channel": {
-      "binding_required": "接收方尚未绑定该渠道。",
-      "config_not_found": "这个 Bot 还没有配置该渠道，请先完成配置再重试。",
-      "enable_failed": "渠道启用失败，请检查凭据后重试。",
-      "identity_config_not_found": "你还没有配置该渠道，请先完成配置再重试。",
-      "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。",
-      "verification_failed": "无法验证平台配置，请检查凭据后重试。",
-      "webhook_endpoint_invalid": "请使用公网 HTTPS 地址，不带端口、凭据、查询串或片段，路径须为该渠道显示的 webhook 路径。"
+      "binding_required": "接收方尚未绑定该渠道",
+      "config_not_found": "这个 Bot 还没有配置该渠道，请先完成配置再重试",
+      "enable_failed": "渠道启用失败，请检查凭据后重试",
+      "identity_config_not_found": "你还没有配置该渠道，请先完成配置再重试",
+      "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试",
+      "verification_failed": "无法验证平台配置，请检查凭据后重试",
+      "webhook_endpoint_invalid": "请使用公网 HTTPS 地址，不带端口、凭据、查询串或片段，路径须为该渠道显示的 webhook 路径"
     },
     "channel_route": {
-      "not_found": "这条会话路由已不存在，请从渠道重新发起会话。"
+      "not_found": "这条会话路由已不存在，请从渠道重新发起会话"
     },
     "chat": {
-      "message_empty": "请输入消息或添加附件。"
+      "message_empty": "请输入消息或添加附件"
     },
-    "codex_auth_token_missing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
-    "codex_oauth_incomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
     "compaction": {
       "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"
     },
     "connector": {
-      "conflict": "该连接器与现有连接冲突。",
-      "not_configured": "此服务器尚未配置连接器，请联系管理员启用 Connect-It。",
-      "not_found": "该连接器已不可用，请刷新后重新连接。",
+      "conflict": "该连接器与现有连接冲突",
+      "not_configured": "此服务器尚未配置连接器，请联系管理员启用 Connect-It",
+      "not_found": "该连接器已不可用，请刷新后重新连接",
       "oauth_client_not_configured": "Connect-It 尚未为该连接器配置 OAuth App（Client ID 和 Client Secret）。请联系本部署的管理员或负责 Connect-It 的运营方，配置完成后再连接。",
-      "operation_failed": "连接器操作失败，请重试。",
-      "request_invalid": "连接器请求无效。",
-      "request_rejected": "Connect-It 拒绝了该连接器请求，请检查填写内容后重试。",
-      "upstream_unavailable": "Connect-It 暂时无法完成请求，请稍后重试。"
+      "operation_failed": "连接器操作失败，请重试",
+      "request_invalid": "连接器请求无效",
+      "request_rejected": "Connect-It 拒绝了该连接器请求，请检查填写内容后重试",
+      "upstream_unavailable": "Connect-It 暂时无法完成请求，请稍后重试"
     },
     "context": {
       "budget_unsatisfied": "当前请求放不进模型上下文窗口，本次运行已停止。可重试、缩短请求、开始新对话，或改用上下文窗口更大的模型。",
       "protected_overflow": "必要的上下文内容超出了模型上下文预算。请缩短请求，或改用上下文窗口更大的模型。"
     },
     "context_lifecycle": {
-      "access_denied": "你没有权限查看上下文生命周期诊断信息。",
-      "authentication_required": "请登录后查看上下文生命周期诊断信息。",
-      "load_failed": "无法加载上下文生命周期诊断信息，请稍后重试。",
-      "not_found": "未找到该会话。",
-      "request_invalid": "上下文生命周期请求无效，请检查后重试。"
+      "access_denied": "你没有权限查看上下文生命周期诊断信息",
+      "authentication_required": "请登录后查看上下文生命周期诊断信息",
+      "load_failed": "无法加载上下文生命周期诊断信息，请稍后重试",
+      "not_found": "未找到该会话",
+      "request_invalid": "上下文生命周期请求无效，请检查后重试"
     },
     "display": {
-      "session_not_found": "这个显示会话已结束，请重新打开一个。"
+      "session_not_found": "这个显示会话已结束，请重新打开一个"
     },
-    "elicitation_declined": "工具请求的交互未能展示，此次请求已拒绝。",
+    "elicitation_declined": "工具请求的交互未能展示，此次请求已拒绝",
     "external_agent": {
       "account_unbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
       "container_workspace_required": "该 Agent 运行时需要容器工作区。请先把 Bot 切换到容器工作区，再重试。",
-      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。"
+      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息"
     },
     "external_runtime": {
       "auth_required": "这个 Agent 尚未登录，或它的凭据被拒绝。请前往 Agent 设置重新登录，或更新 API Key。",
-      "busy": "此 Agent 仍在完成之前的操作，请等待操作结束后重试。",
+      "busy": "此 Agent 仍在完成之前的操作，请等待操作结束后重试",
       "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
       "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
-      "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
-      "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。",
-      "session_resume_failed": "会话无法恢复，请重试或新开会话。",
+      "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送",
+      "reported": "Agent 报错：{message}",
+      "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送",
+      "session_resume_failed": "会话无法恢复：{message}。请重试或新开会话。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
       "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
       "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。"
     },
     "fetch_provider": {
-      "native_managed": "内置抓取服务由 Memoh 管理，无法这样修改。",
-      "not_found": "这个抓取服务已不存在，请刷新列表后重新选择。"
+      "native_managed": "内置抓取服务由 Memoh 管理，无法这样修改",
+      "not_found": "这个抓取服务已不存在，请刷新列表后重新选择"
     },
     "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new <Agent 名称> 或 /new discuss <Agent 名称>。",
     "history": {
-      "delete_failed": "会话历史删除失败，请重试。"
+      "delete_failed": "会话历史删除失败，请重试"
     },
-    "history_reset": "会话历史已重置，这次回复已取消。",
+    "history_reset": "会话历史已重置，这次回复已取消",
     "hook": {
-      "user_message_failed": "消息未能通过消息 Hook，请检查 Hook 配置后重试。"
+      "user_message_failed": "消息未能通过消息 Hook，请检查 Hook 配置后重试"
     },
     "http": {
-      "bad_gateway": "上游服务返回了无效响应，请重试。",
-      "bad_request": "请求无效。",
-      "conflict": "请求与当前状态冲突，请刷新后重试。",
-      "forbidden": "你没有执行此操作的权限。",
-      "gateway_timeout": "上游服务响应超时，请重试。",
-      "method_not_allowed": "此处不允许使用该请求方法。",
-      "not_found": "请求的资源不存在。",
-      "not_implemented": "服务器不支持此操作。",
-      "payload_too_large": "请求内容过大。",
-      "service_unavailable": "服务暂时不可用，请稍后重试。",
-      "too_many_requests": "请求过于频繁，请稍后再试。",
-      "unauthorized": "请先登录。",
-      "unsupported_media_type": "不支持该请求内容类型。",
-      "upgrade_required": "该接口需要使用其他协议。"
+      "bad_gateway": "上游服务返回了无效响应，请重试",
+      "bad_request": "请求无效",
+      "conflict": "请求与当前状态冲突，请刷新后重试",
+      "forbidden": "你没有执行此操作的权限",
+      "gateway_timeout": "上游服务响应超时，请重试",
+      "method_not_allowed": "此处不允许使用该请求方法",
+      "not_found": "请求的资源不存在",
+      "not_implemented": "服务器不支持此操作",
+      "payload_too_large": "请求内容过大",
+      "service_unavailable": "服务暂时不可用，请稍后重试",
+      "too_many_requests": "请求过于频繁，请稍后再试",
+      "unauthorized": "请先登录",
+      "unsupported_media_type": "不支持该请求内容类型",
+      "upgrade_required": "该接口需要使用其他协议"
     },
-    "internal": "服务器出错了，请重试。",
-    "invalid_chat_runtime": "选择的对话运行时无效。",
+    "internal": "服务器出错了，请重试",
+    "invalid_chat_runtime": "选择的对话运行时无效",
     "mcp": {
-      "connection_not_found": "这个 MCP 连接已不存在或已关闭，请刷新列表后重新连接。",
-      "endpoint_invalid": "请填写命令（本地服务器）或 URL（远程服务器），二选一，不能同时填写或都不填。",
-      "name_taken": "已存在同名的 MCP 连接。",
+      "connection_not_found": "这个 MCP 连接已不存在或已关闭，请刷新列表后重新连接",
+      "endpoint_invalid": "请填写命令（本地服务器）或 URL（远程服务器），二选一，不能同时填写或都不填",
+      "name_taken": "已存在同名的 MCP 连接",
       "oauth_client_id_required": "该服务器无法自动注册客户端。请填写你在该服务器上注册的 OAuth 应用的 Client ID。",
       "oauth_discovery_failed": "无法从该 MCP 服务器发现 OAuth 配置。请确认 URL 正确且服务器支持 OAuth。",
-      "oauth_not_discovered": "请先对该连接执行 OAuth 发现。"
+      "oauth_not_discovered": "请先对该连接执行 OAuth 发现"
     },
     "media": {
-      "asset_not_found": "这个文件已不存在，如仍需要请重新上传。",
-      "reference_unavailable": "文件未能分享，请让 Agent 重新生成或再次分享。"
+      "asset_not_found": "这个文件已不存在，如仍需要请重新上传",
+      "reference_unavailable": "文件未能分享，请让 Agent 重新生成或再次分享"
     },
     "memory": {
-      "compact_unsupported": "当前记忆提供方不支持记忆压缩，请在 Bot 的记忆设置中换用支持压缩的提供方。"
+      "compact_unsupported": "当前记忆提供方不支持记忆压缩，请在 Bot 的记忆设置中换用支持压缩的提供方"
     },
     "message": {
-      "not_found": "这条消息已不存在，请刷新会话后重试。"
+      "not_found": "这条消息已不存在，请刷新会话后重试"
     },
     "model": {
-      "not_found": "这个模型已不存在，请刷新列表后重新选择。"
+      "not_found": "这个模型已不存在，请刷新列表后重新选择"
     },
     "native_history_lost": "Agent 无法恢复此前的对话上下文，已重新开始。上方消息仅保留作历史记录；继续前，请重新提供所需信息。",
     "network": {
-      "provider_not_configured": "请先为此 Bot 选择网络服务。"
+      "provider_not_configured": "请先为此 Bot 选择网络服务"
     },
-    "no_workspace_exec": "你没有执行该 Bot 工作区命令的权限。",
+    "no_workspace_exec": "你没有执行该 Bot 工作区命令的权限",
     "oauth": {
-      "state_invalid": "本次授权已过期或已失效，请重新发起授权。"
+      "state_invalid": "本次授权已过期或已失效，请重新发起授权"
     },
     "output_truncated": "回复达到模型的输出上限，内容被截断。可以让它继续，或把请求拆成更小的部分。",
     "profile": {
-      "request_invalid": "个人资料更新请求无效。",
-      "title_model_invalid": "所选标题模型不可用或不是聊天模型。",
-      "update_failed": "个人资料更新失败。"
+      "request_invalid": "个人资料更新请求无效",
+      "title_model_invalid": "所选标题模型不可用或不是聊天模型",
+      "update_failed": "个人资料更新失败"
     },
     "provider": {
-      "catalog_source_not_found": "此服务商没有公共模型目录，请从服务商接口导入。",
-      "catalog_unavailable": "模型目录暂不可用，请稍后重试，或选择从服务商接口导入。",
-      "managed_readonly": "此服务商由平台管理，请使用内置模型同步。",
-      "name_taken": "已存在同名提供方。",
-      "not_found": "这个服务商已不存在，请刷新列表后重新选择。"
+      "catalog_source_not_found": "此服务商没有公共模型目录，请从服务商接口导入",
+      "catalog_unavailable": "模型目录暂不可用，请稍后重试，或选择从服务商接口导入",
+      "managed_readonly": "此服务商由平台管理，请使用内置模型同步",
+      "name_taken": "已存在同名提供方",
+      "not_found": "这个服务商已不存在，请刷新列表后重新选择"
     },
     "provider_template": {
-      "domain_invalid": "提供方模板类型无效。",
-      "domain_mismatch": "该提供方模板不能用于此处。",
-      "not_found": "该提供方模板已不可用。",
-      "operation_failed": "提供方模板操作失败。",
-      "request_invalid": "提供方配置无效。"
+      "domain_invalid": "提供方模板类型无效",
+      "domain_mismatch": "该提供方模板不能用于此处",
+      "not_found": "该提供方模板已不可用",
+      "operation_failed": "提供方模板操作失败",
+      "request_invalid": "提供方配置无效"
     },
     "queue": {
-      "steer_unsupported": "当前运行不支持插入消息，请等它结束后再发送。"
+      "steer_unsupported": "当前运行不支持插入消息，请等它结束后再发送"
     },
-    "queue_admission_overloaded": "队列当前繁忙，请稍后重试。",
-    "queue_admission_unavailable": "队列服务暂时不可用，请稍后重试。",
-    "queue_capacity_exceeded": "该会话队列已满，请取消或等待待处理项完成后再添加。",
-    "queue_follow_up_command_invalid": "这条排队消息无法启动，请重新作为新消息发送。",
+    "queue_admission_overloaded": "队列当前繁忙，请稍后重试",
+    "queue_admission_unavailable": "队列服务暂时不可用，请稍后重试",
+    "queue_capacity_exceeded": "该会话队列已满，请取消或等待待处理项完成后再添加",
+    "queue_follow_up_command_invalid": "这条排队消息无法启动，请重新作为新消息发送",
     "queue_follow_up_unsupported_channel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。",
-    "queue_invocation_conflict": "这条消息已用不同内容提交过。",
-    "queue_item_not_editable": "只有发送者可以编辑这条排队消息。",
-    "queue_item_not_pending": "这条消息已不在待处理队列中。",
-    "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",
-    "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
-    "queue_target_run_not_active": "这条指令送达前回复已结束，请把它作为新消息发送。",
-    "queue_unsupported_session": "讨论会话暂不支持队列操作。",
+    "queue_invocation_conflict": "这条消息已用不同内容提交过",
+    "queue_item_not_editable": "只有发送者可以编辑这条排队消息",
+    "queue_item_not_pending": "这条消息已不在待处理队列中",
+    "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送",
+    "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容",
+    "queue_target_run_not_active": "这条指令送达前回复已结束，请把它作为新消息发送",
+    "queue_unsupported_session": "讨论会话暂不支持队列操作",
     "registry": {
-      "app_install_failed": "应用安装失败，请重试。",
-      "app_invalid": "该应用无效，无法安装。",
-      "app_not_found": "该应用已不存在。",
-      "unavailable": "暂时无法连接 Supermarket，请稍后重试。"
+      "app_install_failed": "应用安装失败，请重试",
+      "app_invalid": "该应用无效，无法安装",
+      "app_not_found": "该应用已不存在",
+      "unavailable": "暂时无法连接 Supermarket，请稍后重试"
     },
     "request": {
-      "field_invalid": "{field} 的值无效。",
-      "field_required": "缺少 {field}。"
+      "field_invalid": "{field} 的值无效",
+      "field_required": "缺少 {field}"
     },
-    "runtime_admission_orphaned": "这次回复未能开始，已被清理，请重试。",
+    "runtime_admission_orphaned": "这次回复未能开始，已被清理，请重试",
     "runtime_agent_command_stale": "Agent 已不再提供该命令。请重新打开命令面板后重试。",
     "runtime_control": {
-      "cancelled": "操作已中止。",
-      "command_unavailable": "此命令已不可用，请刷新后重试。",
-      "failed": "操作未能完成，请重试。",
-      "forbidden": "你没有访问此会话的权限。",
-      "fork_latest_only": "只能从最新一条回复分叉，请选择最新回复后重试。",
-      "goal_requires_default_mode": "请先退出计划模式，再创建或继续目标。",
-      "mode_unavailable": "此模式已不可用，请刷新后重新选择。",
-      "request_invalid": "请求无效，请刷新后重试。",
+      "cancelled": "操作已中止",
+      "command_unavailable": "此命令已不可用，请刷新后重试",
+      "failed": "操作未能完成，请重试",
+      "forbidden": "你没有访问此会话的权限",
+      "fork_latest_only": "只能从最新一条回复分叉，请选择最新回复后重试",
+      "goal_requires_default_mode": "请先退出计划模式，再创建或继续目标",
+      "mode_unavailable": "此模式已不可用，请刷新后重新选择",
+      "request_invalid": "请求无效，请刷新后重试",
       "steer_failed": "补充指令未能送达。请等本轮结束后重新发送。",
-      "thread_unavailable": "请先开始对话，再执行此操作。",
-      "unsupported": "当前运行时不支持此操作。"
+      "thread_unavailable": "请先开始对话，再执行此操作",
+      "unsupported": "当前运行时不支持此操作"
     },
-    "runtime_fence_activation_failed": "回复未能开始，请稍后重试。",
-    "runtime_live_backend_lost": "这次回复的运行状态已丢失，回复已结束，请重试。",
-    "runtime_owner_lease_expired": "处理这次回复的服务器已无响应，回复已结束，请重试。",
-    "runtime_prompt_failed": "Agent 运行时未能完成这次回复，请重试。",
-    "runtime_reservation_declined": "回复开始前，另一台服务器接管了这个会话，请重试。",
-    "runtime_reservation_failed": "回复未能开始，请稍后重试。",
-    "runtime_run_failed": "回复未能完成，请重试。",
+    "runtime_fence_activation_failed": "回复未能开始，请稍后重试",
+    "runtime_live_backend_lost": "这次回复的运行状态已丢失，回复已结束，请重试",
+    "runtime_owner_lease_expired": "处理这次回复的服务器已无响应，回复已结束，请重试",
+    "runtime_prompt_failed": "Agent 运行时未能完成这次回复，请重试",
+    "runtime_reservation_declined": "回复开始前，另一台服务器接管了这个会话，请重试",
+    "runtime_reservation_failed": "回复未能开始，请稍后重试",
+    "runtime_run_failed": "回复未能完成，请重试",
     "schedule": {
-      "execution_timeout": "定时任务已达到执行时限，请检查执行进度或延长时限。",
-      "model_conflict": "模型设置与该定时任务的运行时不匹配，请改用与运行时对应的模型字段。",
+      "execution_timeout": "定时任务已达到执行时限，请检查执行进度或延长时限",
+      "model_conflict": "模型设置与该定时任务的运行时不匹配，请改用与运行时对应的模型字段",
       "model_required": "该机器人没有默认模型，定时任务需要明确指定模型。请选择模型，或先设置默认模型。",
-      "model_unusable": "该模型无法用于定时任务，请选择已启用的对话模型。",
-      "not_found": "这个定时任务已不存在，请刷新列表后重新选择。",
-      "run_target_conflict": "该定时任务的运行目标、运行时、Agent 与会话设置互相冲突，请调整后重试。",
-      "session_mode_unsupported": "定时任务只能接续对话会话或定时任务会话，请选择其他目标会话。"
+      "model_unusable": "该模型无法用于定时任务，请选择已启用的对话模型",
+      "not_found": "这个定时任务已不存在，请刷新列表后重新选择",
+      "run_target_conflict": "该定时任务的运行目标、运行时、Agent 与会话设置互相冲突，请调整后重试",
+      "session_mode_unsupported": "定时任务只能接续对话会话或定时任务会话，请选择其他目标会话"
     },
     "search_provider": {
-      "invalid_provider": "不支持该搜索提供方。",
-      "not_found": "这个搜索服务已不存在，请刷新列表后重新选择。",
-      "type_conflict": "该搜索提供方已完成配置。"
+      "invalid_provider": "不支持该搜索提供方",
+      "not_found": "这个搜索服务已不存在，请刷新列表后重新选择",
+      "type_conflict": "该搜索提供方已完成配置"
     },
     "session": {
-      "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。",
-      "not_found": "会话不存在。"
+      "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择",
+      "not_found": "会话不存在"
     },
     "session_runtime": {
-      "abort_failed": "会话已删除，但运行中的任务未能停止，请刷新。",
-      "history_inconsistent": "会话记录保存出错，请刷新后重试。",
-      "interrupted": "服务关闭时中断了本次运行，重启后可从已保存的进度继续。",
-      "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",
-      "publish_failed": "会话状态更新失败，请稍后再试。",
-      "reset_conflict": "会话正忙，请稍后再试。",
-      "reset_unavailable": "当前无法重置会话历史，请联系开发者。",
-      "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
-      "turn_incomplete": "这条消息暂时无法重试，请刷新会话。",
-      "turn_not_found": "会话中找不到这条消息，请刷新会话后重试。",
-      "turn_not_latest": "会话已有新内容，请刷新后重试。"
+      "abort_failed": "会话已删除，但运行中的任务未能停止，请刷新",
+      "history_inconsistent": "会话记录保存出错，请刷新后重试",
+      "interrupted": "服务关闭时中断了本次运行，重启后可从已保存的进度继续",
+      "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容",
+      "publish_failed": "会话状态更新失败，请稍后再试",
+      "reset_conflict": "会话正忙，请稍后再试",
+      "reset_unavailable": "当前无法重置会话历史，请联系开发者",
+      "session_busy": "这个会话还在处理上一条消息，请稍后再试",
+      "turn_incomplete": "这条消息暂时无法重试，请刷新会话",
+      "turn_not_found": "会话中找不到这条消息，请刷新会话后重试",
+      "turn_not_latest": "会话已有新内容，请刷新后重试"
     },
     "settings": {
-      "reasoning_effort_invalid": "所选对话模型不支持推理级别“{effort}”。",
-      "reasoning_options_unavailable": "暂时无法解析对话模型的推理选项，请稍后重试。"
+      "reasoning_effort_invalid": "所选对话模型不支持推理级别“{effort}”",
+      "reasoning_options_unavailable": "暂时无法解析对话模型的推理选项，请稍后重试"
     },
     "skill": {
-      "builtin_read_only": "Memoh 自带 Skill 由系统管理，无法编辑或删除。",
+      "builtin_read_only": "Memoh 自带 Skill 由系统管理，无法编辑或删除",
       "directory_shared": "该 Skill 的文件夹中还包含其他 Skill，无法在这里重命名或删除。请在文件中删除它的 SKILL.md。",
-      "name_invalid": "Skill 的 YAML frontmatter 中需要有效的名称。",
-      "name_taken": "已存在同名 Skill，请换一个名称。",
-      "not_found": "未找到该技能，请刷新列表后重试。",
-      "registry_read_only": "该 Skill 属于 Registry App，请通过更新或卸载 App 来修改。",
-      "save_failed": "Skill 保存失败，请重试。"
+      "name_invalid": "Skill 的 YAML frontmatter 中需要有效的名称",
+      "name_taken": "已存在同名 Skill，请换一个名称",
+      "not_found": "未找到该技能，请刷新列表后重试",
+      "registry_read_only": "该 Skill 属于 Registry App，请通过更新或卸载 App 来修改",
+      "save_failed": "Skill 保存失败，请重试"
     },
     "slash": {
-      "attachments_unsupported": "slash 命令不能附带附件，请移除附件后重新发送。",
-      "permission_denied": "你没有使用此命令的权限。",
-      "requires_websocket": "激活 Skill 需要实时对话连接，请重新连接后再试。",
-      "reserved_metadata": "消息中带有保留的 Skill 元数据，客户端不能提交这类数据。",
-      "skill_activation_unsupported": "只有使用 Bot 自身模型的对话会话才能激活 Skill，请切换到这类会话后再试。",
-      "skill_ambiguous": "有多个 Skill 使用这个名称，请在 Bot 的 Skill 中重命名或停用其中一个后再试。",
-      "skill_context_too_large": "所选 Skill 内容过多，一条消息放不下，请减少 Skill 后再试。",
-      "skill_disabled": "该 Skill 已停用，请在 Bot 的 Skill 中启用后再试。",
-      "skill_not_found": "没有这个名称的 Skill，请检查名称后再试。",
-      "skill_not_usable": "该 Skill 不能在对话中使用。",
-      "skill_syntax_invalid": "请用 /<skill-name> [prompt] 激活 Skill。",
-      "too_many_skills": "一条消息里的 Skill 太多，请减少后再试。",
-      "unknown_command": "未知的 slash 命令，发送 /help 可查看可用命令。",
-      "unsupported_in_web": "该 slash 命令不能在 Web 对话中使用。"
+      "attachments_unsupported": "slash 命令不能附带附件，请移除附件后重新发送",
+      "permission_denied": "你没有使用此命令的权限",
+      "requires_websocket": "激活 Skill 需要实时对话连接，请重新连接后再试",
+      "reserved_metadata": "消息中带有保留的 Skill 元数据，客户端不能提交这类数据",
+      "skill_activation_unsupported": "只有使用 Bot 自身模型的对话会话才能激活 Skill，请切换到这类会话后再试",
+      "skill_ambiguous": "有多个 Skill 使用这个名称，请在 Bot 的 Skill 中重命名或停用其中一个后再试",
+      "skill_context_too_large": "所选 Skill 内容过多，一条消息放不下，请减少 Skill 后再试",
+      "skill_disabled": "该 Skill 已停用，请在 Bot 的 Skill 中启用后再试",
+      "skill_not_found": "没有这个名称的 Skill，请检查名称后再试",
+      "skill_not_usable": "该 Skill 不能在对话中使用",
+      "skill_syntax_invalid": "请用 /<skill-name> [prompt] 激活 Skill",
+      "too_many_skills": "一条消息里的 Skill 太多，请减少后再试",
+      "unknown_command": "未知的 slash 命令，发送 /help 可查看可用命令",
+      "unsupported_in_web": "该 slash 命令不能在 Web 对话中使用"
     },
     "supermarket": {
-      "not_found": "这个条目已不在应用市场中，请刷新列表后重试。"
+      "not_found": "这个条目已不在应用市场中，请刷新列表后重试"
     },
     "tool_approval": {
-      "ambiguous": "匹配到多条审批请求。",
-      "expired": "这条审批请求已过期或已被处理。",
-      "forbidden": "你没有权限处理这条审批请求。",
-      "not_found": "找不到这条审批请求。",
-      "operation_failed": "审批响应处理失败。",
-      "request_invalid": "审批响应格式无效，请刷新后重试。"
+      "ambiguous": "匹配到多条审批请求",
+      "expired": "这条审批请求已过期或已被处理",
+      "forbidden": "你没有权限处理这条审批请求",
+      "not_found": "找不到这条审批请求",
+      "operation_failed": "审批响应处理失败",
+      "request_invalid": "审批响应格式无效，请刷新后重试"
     },
-    "tools_unavailable": "此会话的 Memoh 工具不可用，请新建会话后重试。",
+    "tools_unavailable": "此会话的 Memoh 工具不可用，请新建会话后重试",
     "transcription_model": {
-      "not_found": "这个语音转写模型已不存在，请刷新列表后重新选择。"
+      "not_found": "这个语音转写模型已不存在，请刷新列表后重新选择"
     },
     "tts": {
-      "model_not_configured": "此 Bot 尚未配置语音合成模型，请先在 Bot 设置中选择。",
-      "text_too_long": "文本过长，最多 {max} 个字符。"
+      "model_not_configured": "此 Bot 尚未配置语音合成模型，请先在 Bot 设置中选择",
+      "text_too_long": "文本过长，最多 {max} 个字符"
     },
     "tts_model": {
-      "not_found": "这个语音合成模型已不存在，请刷新列表后重新选择。"
+      "not_found": "这个语音合成模型已不存在，请刷新列表后重新选择"
     },
     "tts_provider": {
-      "not_found": "这个语音服务商已不存在，请刷新列表后重新选择。"
+      "not_found": "这个语音服务商已不存在，请刷新列表后重新选择"
     },
     "user": {
-      "cannot_remove_self": "不能移除自己，请让其他管理员操作。",
-      "not_found": "这个用户已不存在，请刷新成员列表后重试。"
+      "cannot_remove_self": "不能移除自己，请让其他管理员操作",
+      "not_found": "这个用户已不存在，请刷新成员列表后重试"
     },
     "user_input": {
-      "expired": "这个问题已过期或已被回答。",
-      "forbidden": "你没有权限回答这个问题。",
-      "operation_failed": "答案处理失败。"
+      "expired": "这个问题已过期或已被回答",
+      "forbidden": "你没有权限回答这个问题",
+      "operation_failed": "答案处理失败"
     },
     "user_runtime": {
-      "not_found": "这个运行环境已不在你的账号下，请刷新列表后重试。"
+      "not_found": "这个运行环境已不在你的账号下，请刷新列表后重试"
     },
     "video": {
-      "job_outcome_unknown": "无法确认视频任务状态，请先检查已保存的任务，再决定是否重新生成。"
+      "job_outcome_unknown": "无法确认视频任务状态，请先检查已保存的任务，再决定是否重新生成"
     },
     "video_model": {
-      "not_found": "这个视频模型已不存在，请刷新列表后重新选择。"
+      "not_found": "这个视频模型已不存在，请刷新列表后重新选择"
     },
     "video_provider": {
-      "not_found": "这个视频服务商已不存在，请刷新列表后重新选择。"
+      "not_found": "这个视频服务商已不存在，请刷新列表后重新选择"
     },
     "workdir": {
-      "git_branch_unavailable": "该本地分支已不可用，请刷新后选择已有分支。",
-      "git_busy": "有 Agent 正在使用此工作目录，请等待执行结束后再切换分支。",
-      "git_switch_failed": "Git 无法切换分支，请检查未提交的修改，以及目标分支是否被其他 Worktree 使用。",
-      "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试。",
-      "not_found": "这个工作目录已不存在，请刷新列表后重新选择。",
-      "remote_unsupported_for_agent": "外部智能体会话不能使用远程电脑，请改选原生工作区中的工作目录。"
+      "git_branch_unavailable": "该本地分支已不可用，请刷新后选择已有分支",
+      "git_busy": "有 Agent 正在使用此工作目录，请等待执行结束后再切换分支",
+      "git_switch_failed": "Git 无法切换分支，请检查未提交的修改，以及目标分支是否被其他 Worktree 使用",
+      "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试",
+      "not_found": "这个工作目录已不存在，请刷新列表后重新选择",
+      "remote_unsupported_for_agent": "外部 Agent 会话不支持远程电脑，请改选原生工作区中的工作目录"
     },
     "workspace": {
-      "archive_invalid": "无法解压该文件，请使用有效的 .zip、.tar.gz 或 .tgz 文件。",
-      "display_clipboard_failed": "剪贴板同步失败，请重新连接桌面后重试。",
-      "display_clipboard_too_large": "剪贴板文本超过 48 KiB，请缩小复制范围。",
-      "display_prepare_failed": "显示环境准备失败，请稍后重试。",
-      "image_not_found": "工作区镜像不存在、需要镜像仓库凭据，或名称无效，请检查镜像名称后重试。",
-      "image_registry_unavailable": "暂时无法连接镜像仓库，请稍后重试。",
+      "archive_invalid": "无法解压该文件，请使用有效的 .zip、.tar.gz 或 .tgz 文件",
+      "display_clipboard_failed": "剪贴板同步失败，请重新连接桌面后重试",
+      "display_clipboard_too_large": "剪贴板文本超过 48 KiB，请缩小复制范围",
+      "display_prepare_failed": "显示环境准备失败，请稍后重试",
+      "image_not_found": "工作区镜像不存在、需要镜像仓库凭据，或名称无效，请检查镜像名称后重试",
+      "image_registry_unavailable": "暂时无法连接镜像仓库，请稍后重试",
       "teardown_failed": "移除工作区失败。请重试删除 bot。",
-      "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区。",
-      "unreachable": "暂时无法连接工作区，请稍后重试。"
+      "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区",
+      "unreachable": "暂时无法连接工作区，请稍后重试"
     },
-    "workspace_create_failed": "创建工作区失败，请重试。",
-    "workspace_create_request_invalid": "工作区请求无效。",
-    "workspace_delete_failed": "删除工作区失败，请重试。",
+    "workspace_create_failed": "创建工作区失败，请重试",
+    "workspace_create_request_invalid": "工作区请求无效",
+    "workspace_delete_failed": "删除工作区失败，请重试",
     "workspace_dependency": {
-      "action_unsupported": "该依赖不支持此操作。",
-      "busy": "该依赖正在进行其他操作，请稍后再试。",
-      "catalog_unavailable": "暂时无法获取依赖目录，请稍后重试。",
-      "definition_invalid": "依赖定义未通过校验，请刷新目录后重试。",
-      "definition_unavailable": "本地没有缓存这份依赖定义，请连接 Supermarket 后重试。",
-      "discovery_failed": "暂时无法检查工作区依赖，请重试。",
-      "not_found": "该依赖不存在。",
-      "operation_failed": "依赖操作失败，请查看日志后重试。",
-      "operation_interrupted": "操作未完成就被中断了，请重新执行。",
-      "platform_unsupported": "当前工作区平台不支持该依赖。",
-      "prerequisites_changed": "确认后，它所需的前置依赖发生了变化，请重新确认此操作。",
-      "request_invalid": "依赖请求无效，请检查后重试。",
-      "required": "{dependents} 仍依赖它，请先移除这些依赖。",
-      "rollback_unavailable": "没有可回滚的旧版本。",
-      "workspace_missing": "尚未创建工作区，请先创建。",
-      "workspace_not_running": "工作区未运行，请先启动。"
+      "action_unsupported": "该依赖不支持此操作",
+      "busy": "该依赖正在进行其他操作，请稍后再试",
+      "catalog_unavailable": "暂时无法获取依赖目录，请稍后重试",
+      "definition_invalid": "依赖定义未通过校验，请刷新目录后重试",
+      "definition_unavailable": "本地没有缓存这份依赖定义，请连接 Supermarket 后重试",
+      "discovery_failed": "暂时无法检查工作区依赖，请重试",
+      "not_found": "该依赖不存在",
+      "operation_failed": "依赖操作失败，请查看日志后重试",
+      "operation_interrupted": "操作未完成就被中断了，请重新执行",
+      "platform_unsupported": "当前工作区平台不支持该依赖",
+      "prerequisites_changed": "确认后，它所需的前置依赖发生了变化，请重新确认此操作",
+      "request_invalid": "依赖请求无效，请检查后重试",
+      "required": "{dependents} 仍依赖它，请先移除这些依赖",
+      "rollback_unavailable": "没有可回滚的旧版本",
+      "workspace_missing": "尚未创建工作区，请先创建",
+      "workspace_not_running": "工作区未运行，请先启动"
     },
-    "workspace_dependency_operation_unknown": "操作结果尚未确认，请刷新依赖列表查看状态。",
-    "workspace_display_disabled": "工作区桌面未启用。",
+    "workspace_dependency_operation_unknown": "操作结果尚未确认，请刷新依赖列表查看状态",
+    "workspace_display_disabled": "工作区桌面未启用",
     "workspace_file": {
-      "not_found": "工作区里已没有这个文件或文件夹，请刷新后重试。"
+      "not_found": "工作区里已没有这个文件或文件夹，请刷新后重试"
     },
-    "workspace_load_failed": "加载工作区信息失败，请重试。",
-    "workspace_manager_unavailable": "服务器未配置工作区管理。",
-    "workspace_metrics_load_failed": "加载资源状态失败，请重试。",
-    "workspace_not_found": "该 Bot 还没有工作区。",
-    "workspace_preserved_data_not_found": "没有找到保留的工作区数据。",
-    "workspace_resource_limits_invalid": "资源限制无效，限制值不能为负数。",
-    "workspace_resource_limits_required": "请填写资源限制。",
-    "workspace_resource_limits_save_failed": "保存资源限制失败，请重试。",
-    "workspace_restore_failed": "恢复工作区数据失败，请重试。",
-    "workspace_setup_failed": "创建工作区时出错。",
-    "workspace_setup_timeout": "工作区仍在创建中，请到 Bot 的工作区页面查看。",
-    "workspace_snapshot_chain_not_found": "找不到工作区的快照历史。",
-    "workspace_snapshot_create_failed": "创建快照失败，请重试。",
-    "workspace_snapshot_manager_unavailable": "服务器未配置快照功能。",
-    "workspace_snapshot_request_invalid": "快照请求无效。",
-    "workspace_snapshot_rollback_failed": "回滚工作区失败，请重试。",
-    "workspace_snapshot_rollback_request_invalid": "回滚请求无效。",
-    "workspace_snapshot_version_invalid": "快照版本无效。",
-    "workspace_snapshots_load_failed": "加载快照失败，请重试。",
-    "workspace_snapshots_unsupported": "当前工作区运行后端不支持快照。",
-    "workspace_snapshotter_mismatch": "快照器与工作区运行后端不匹配。",
-    "workspace_start_failed": "启动工作区失败，请重试。",
-    "workspace_stop_failed": "停止工作区失败，请重试。",
+    "workspace_load_failed": "加载工作区信息失败，请重试",
+    "workspace_manager_unavailable": "服务器未配置工作区管理",
+    "workspace_metrics_load_failed": "加载资源状态失败，请重试",
+    "workspace_not_found": "该 Bot 还没有工作区",
+    "workspace_preserved_data_not_found": "没有找到保留的工作区数据",
+    "workspace_resource_limits_invalid": "资源限制无效，限制值不能为负数",
+    "workspace_resource_limits_required": "请填写资源限制",
+    "workspace_resource_limits_save_failed": "保存资源限制失败，请重试",
+    "workspace_restore_failed": "恢复工作区数据失败，请重试",
+    "workspace_setup_failed": "创建工作区时出错",
+    "workspace_setup_timeout": "工作区仍在创建中，请到 Bot 的工作区页面查看",
+    "workspace_snapshot_chain_not_found": "找不到工作区的快照历史",
+    "workspace_snapshot_create_failed": "创建快照失败，请重试",
+    "workspace_snapshot_manager_unavailable": "服务器未配置快照功能",
+    "workspace_snapshot_request_invalid": "快照请求无效",
+    "workspace_snapshot_rollback_failed": "回滚工作区失败，请重试",
+    "workspace_snapshot_rollback_request_invalid": "回滚请求无效",
+    "workspace_snapshot_version_invalid": "快照版本无效",
+    "workspace_snapshots_load_failed": "加载快照失败，请重试",
+    "workspace_snapshots_unsupported": "当前工作区运行后端不支持快照",
+    "workspace_snapshotter_mismatch": "快照器与工作区运行后端不匹配",
+    "workspace_start_failed": "启动工作区失败，请重试",
+    "workspace_stop_failed": "停止工作区失败，请重试",
     "workspace_target": {
-      "not_found": "这个工作区目标已不可用，请刷新后重新选择。"
+      "not_found": "这个工作区目标已不可用，请刷新后重新选择"
     }
   },
   "auth": {
@@ -611,8 +608,8 @@
     "title": "连接到 Memoh",
     "subtitle": "输入你的 Memoh 服务器地址",
     "fullInstallLead": "想运行完整的 Memoh？",
-    "fullInstallAction": "使用 Docker 安装 Memoh。",
-    "fullInstallHint": "Desktop 仅用于连接已有的 Memoh Server。",
+    "fullInstallAction": "使用 Docker 安装 Memoh",
+    "fullInstallHint": "Desktop 仅用于连接已有的 Memoh Server",
     "placeholder": "https://memoh.example.com",
     "connect": "连接",
     "failed": "无法连接",
@@ -668,12 +665,12 @@
     "otherComputers": "其他电脑",
     "loadingComputers": "正在加载电脑...",
     "loadFailed": "无法加载电脑",
-    "loadFailedDescription": "请检查服务器连接后重试。",
+    "loadFailedDescription": "请检查服务器连接后重试",
     "retry": "重试",
     "emptyTitle": "还没有连接电脑",
-    "emptyDescription": "创建连接命令，然后在你希望 Memoh 使用的电脑上运行它。",
+    "emptyDescription": "创建连接命令，然后在你希望 Memoh 使用的电脑上运行它",
     "emptyOtherTitle": "还没有连接其他电脑",
-    "emptyOtherDescription": "如果希望 Bot 使用其他设备，可以再连接一台电脑。",
+    "emptyOtherDescription": "如果希望 Bot 使用其他设备，可以再连接一台电脑",
     "copyCommand": "复制连接命令",
     "revoke": "断开连接",
     "revokeTitle": "断开这台电脑的连接？",
@@ -690,17 +687,17 @@
     "thisComputer": {
       "title": "这台电脑",
       "allow": "允许 Bot 使用这台电脑",
-      "description": "打开后需要给这台电脑命名并建立连接，然后才能将它添加给各个 Bot。",
-      "enabledDescription": "只有你允许的 Bot 才能访问你的主目录，并以你的身份执行命令。",
+      "description": "打开后需要给这台电脑命名并建立连接，然后才能将它添加给各个 Bot",
+      "enabledDescription": "只有你允许的 Bot 才能访问你的主目录，并以你的身份执行命令",
       "pausedDescription": "已暂停。Bot 暂时无法使用这台电脑，已授予的访问权会保留。",
       "fallbackName": "Memoh Desktop",
       "dialogTitle": "允许使用这台电脑",
-      "dialogDescription": "这个名称会显示在 Bot 设置、审批和聊天记录中。",
+      "dialogDescription": "这个名称会显示在 Bot 设置、审批和聊天记录中",
       "confirm": "允许使用",
       "loading": "正在读取这台电脑...",
       "loadFailed": "无法读取这台电脑的连接状态",
-      "loadFailedDescription": "请重启 Memoh Desktop 后重试。",
-      "invalidCredential": "服务器没有返回可用的连接信息。",
+      "loadFailedDescription": "请重启 Memoh Desktop 后重试",
+      "invalidCredential": "服务器没有返回可用的连接信息",
       "enableFailed": "无法允许 Bot 使用这台电脑",
       "disableFailed": "无法关闭这台电脑的使用权限",
       "status": {
@@ -714,7 +711,7 @@
     },
     "connectDialog": {
       "name": "电脑名称",
-      "nameHelp": "可以按位置或用途命名，例如“办公室 Mac”。",
+      "nameHelp": "可以按位置或用途命名，例如“办公室 Mac”",
       "namePlaceholder": "办公室 Mac",
       "nameRequired": "请输入电脑名称",
       "createFailed": "无法创建连接"
@@ -722,7 +719,7 @@
     "botAccess": "{count}/{total} 个 Bot",
     "noBotAccess": "无 Bot",
     "manageAccess": "管理 Bot 访问权",
-    "revokeAccessWarning": "将同时解除 {count} 个 Bot 的访问权。",
+    "revokeAccessWarning": "将同时解除 {count} 个 Bot 的访问权",
     "computerOnline": "{name} 已上线"
   },
   "breadcrumb": {
@@ -735,11 +732,11 @@
     "userProfile": "个人资料",
     "connectedAccounts": {
       "title": "关联账号",
-      "subtitle": "关联后，Bot 才能在 IM 里认出你是所有者，你就能在聊天里直接管理它。",
+      "subtitle": "关联后，Bot 才能在 IM 里认出你是所有者，你就能在聊天里直接管理它",
       "connect": "获取关联码",
       "empty": "暂无关联账号",
       "linkAnother": "关联另一个账号",
-      "codeInstruction": "复制这行，在 IM 里发给你的 Bot；关联成功后这里会自动更新。",
+      "codeInstruction": "复制这行，在 IM 里发给你的 Bot；关联成功后这里会自动更新",
       "linked": "账号已关联",
       "copy": "复制",
       "copied": "已复制",
@@ -749,9 +746,9 @@
       "disconnected": "已断开账号",
       "disconnectFailed": "断开失败",
       "expiresIn": "{time} 后过期",
-      "expired": "关联码已过期 —— 请重新获取。",
+      "expired": "关联码已过期 —— 请重新获取",
       "noImBotTitle": "还没有接入 IM 的 Bot",
-      "noImBotHint": "先把 Bot 接入 IM 渠道，才能关联账号。",
+      "noImBotHint": "先把 Bot 接入 IM 渠道，才能关联账号",
       "goToBots": "前往 Bot"
     },
     "userID": "用户 ID",
@@ -760,7 +757,7 @@
     "timezone": "时区",
     "timezonePlaceholder": "例如 Asia/Shanghai",
     "titleModel": "标题模型",
-    "titleModelDescription": "使用此模型为你名下所有 Bot 的会话生成标题。",
+    "titleModelDescription": "使用此模型为你名下所有 Bot 的会话生成标题",
     "titleModelPlaceholder": "未启用（使用首条消息）",
     "saveProfile": "保存更改",
     "profileUpdated": "个人资料已更新",
@@ -779,37 +776,33 @@
     "platform": "平台",
     "loadUserFailed": "用户信息加载失败",
     "language": "显示语言",
-    "languagePlaceholder": "选择语言",
+    "languagePlaceholder": "选择界面语言",
     "theme": "主题模式",
     "themePlaceholder": "选择主题",
     "themeLight": "浅色",
     "themeDark": "深色",
     "themeSystem": "跟随系统",
     "appearance": {
-      "title": "外观定制",
-      "description": "个性化你的界面：语言、主题及全局配色方案。",
+      "title": "外观",
+      "description": "个性化你的界面：语言、主题及全局配色方案",
       "interface": "界面偏好",
-      "interfaceDescription": "这些设置将立即生效并保存在本地设备上。",
+      "interfaceDescription": "这些设置将立即生效并保存在本地设备上",
       "colorScheme": "配色方案",
       "showExamplesEntry": "侧边栏示例入口",
       "showExamplesEntryDescription": "在侧边栏左下角显示「看看 Memoh 能做什么」",
-      "colorSchemeDescription": "为品牌、状态和 UI 元素选择一套调色盘。",
+      "colorSchemeDescription": "为品牌、状态和 UI 元素选择一套调色盘",
       "typography": "字体与字号",
       "uiFontFamily": "界面字体",
-      "uiFontFamilyDescription": "替换默认界面字体",
       "uiFontSize": "界面字号",
-      "uiFontSizeDescription": "缩放界面文字和控件",
       "codeFontFamily": "代码字体",
-      "codeFontFamilyDescription": "替换默认代码字体",
       "codeFontSize": "代码字号",
-      "codeFontSizeDescription": "应用于代码编辑器、代码块与终端",
       "syntaxHighlighting": "语法高亮",
       "shikiThemeLight": "浅色主题",
       "shikiThemeLightDescription": "浅色模式下用于代码块与编辑器",
       "shikiThemeDark": "深色主题",
       "shikiThemeDarkDescription": "深色模式下用于代码块与编辑器",
       "shikiThemeSearch": "搜索主题…",
-      "shikiThemeEmpty": "未找到主题。",
+      "shikiThemeEmpty": "未找到主题",
       "colorSchemes": {
         "memoh": "Memoh",
         "ocean": "海洋",
@@ -825,116 +818,94 @@
         "amber": "明亮的琥珀色，清晰的状态指示"
       },
       "codeHighlight": "代码高亮",
-      "codeHighlightDescription": "应用于代码块与编辑器的配色方案。",
       "diagrams": "图表",
       "mermaidTheme": "Mermaid 主题",
-      "mermaidThemeDescription": "应用于已渲染的 Mermaid 图表。",
       "advanced": "高级",
-      "advancedEntryTitle": "代码与图表"
+      "mermaidThemeAuto": "跟随外观"
     },
     "keyboard": {
       "title": "快捷键",
-      "intro": "点击任意一行右侧的「编辑」，然后按下新的组合键。Cmd/Ctrl + W、Q、T、N 为浏览器和系统保留，不可绑定。工作区默认快捷键在 macOS 上使用 ⌘⌥，按美式键盘的按键位置识别；在 Windows 和 Linux 上使用 Alt+Shift。如果你用 Alt+Shift 切换输入法，请在这里改用其他组合。",
       "resetAll": "全部重置",
       "scopes": {
         "workspace": "工作区",
         "global": "全局",
-        "mediaLightbox": "媒体灯箱"
+        "mediaLightbox": "媒体预览"
       },
       "row": {
         "reset": "恢复默认",
-        "ignored": "已保存的 {combo} 在这里不可用，已改用默认快捷键。",
-        "shadowed": "{combo} 已分配给“{command}”，这条快捷键暂不生效，请另选组合。"
+        "ignored": "已保存的 {combo} 在这里不可用，已改用默认快捷键",
+        "shadowed": "{combo} 已分配给“{command}”，这条快捷键暂不生效，请另选组合"
       },
       "dialog": {
         "title": "修改快捷键",
         "prompt": "请按下新的组合键…",
         "resetDefault": "恢复默认",
-        "reservedError": "该组合键已被浏览器、操作系统或应用菜单占用。",
-        "editingError": "该组合键用于文本编辑（复制、粘贴、撤销等）。",
-        "menuPauseFailed": "无法暂停应用菜单快捷键，录制时它们仍可能被触发。",
-        "menuRestoreFailed": "无法恢复应用菜单快捷键，如果它们不再响应，请重新加载窗口。",
-        "noModifierError": "该快捷键必须包含 Cmd/Ctrl 或 Alt 修饰键，否则会在普通输入时被触发。",
-        "typingError": "在 macOS 上，Option 加字母或符号会输入字符，请加上 Command。",
-        "sameScopeError": "这个组合已用于“{command}”。",
-        "crossScopeWarn": "也被 {command} 使用（仅在其作用域内生效）。"
+        "reservedError": "该组合键已被浏览器、操作系统或应用菜单占用",
+        "editingError": "该组合键用于文本编辑（复制、粘贴、撤销等）",
+        "menuPauseFailed": "无法暂停应用菜单快捷键，录制时它们仍可能被触发",
+        "menuRestoreFailed": "无法恢复应用菜单快捷键，如果它们不再响应，请重新加载窗口",
+        "noModifierError": "该快捷键必须包含 Cmd/Ctrl 或 Alt 修饰键，否则会在普通输入时被触发",
+        "typingError": "在 macOS 上，Option 加字母或符号会输入字符，请加上 Command",
+        "sameScopeError": "这个组合已用于“{command}”",
+        "crossScopeWarn": "也被 {command} 使用（仅在其作用域内生效）"
       },
       "commands": {
         "newChatSession": {
-          "label": "新建会话",
-          "description": "在当前分组打开或聚焦一个新会话。"
+          "label": "新建会话"
         },
         "focusChatInput": {
-          "label": "聚焦聊天输入",
-          "description": "切换到聊天面板并聚焦消息输入框。"
+          "label": "聚焦聊天输入"
         },
         "showSessions": {
-          "label": "显示对话",
-          "description": "打开对话侧栏和会话列表。"
+          "label": "显示对话"
         },
         "showFiles": {
-          "label": "显示文件",
-          "description": "打开工作区文件侧栏。"
+          "label": "显示文件"
         },
         "showSchedule": {
-          "label": "显示日程",
-          "description": "打开日程侧栏。"
+          "label": "显示日程"
         },
         "showSupermarket": {
-          "label": "显示市场",
-          "description": "打开市场侧栏。"
+          "label": "显示市场"
         },
         "nextWorkspaceTab": {
-          "label": "下一个标签",
-          "description": "聚焦当前分组的下一个标签。"
+          "label": "下一个标签"
         },
         "previousWorkspaceTab": {
-          "label": "上一个标签",
-          "description": "聚焦当前分组的上一个标签。"
+          "label": "上一个标签"
         },
         "splitWorkspaceRight": {
-          "label": "向右分屏",
-          "description": "在当前面板右侧创建分屏。"
+          "label": "向右分屏"
         },
         "splitWorkspaceBelow": {
-          "label": "向下分屏",
-          "description": "在当前面板下方创建分屏。"
+          "label": "向下分屏"
         },
         "newTerminal": {
-          "label": "新建终端",
-          "description": "在当前分组打开终端。"
+          "label": "新建终端"
         },
         "newBrowser": {
-          "label": "新建浏览器",
-          "description": "在当前分组打开工作区浏览器。"
+          "label": "新建浏览器"
         },
         "closeCurrentWorkspaceTab": {
-          "label": "关闭当前工作区标签页",
-          "description": "关闭工作区面板内激活的标签页（退回到系统的关闭行为）。"
+          "label": "关闭当前工作区标签页"
         },
         "saveActiveFile": {
-          "label": "保存当前文件",
-          "description": "保存工作区编辑器中打开的文件。"
+          "label": "保存当前文件"
         },
         "toggleSidebar": {
-          "label": "切换侧边栏",
-          "description": "显示或隐藏主侧边栏。"
+          "label": "切换侧边栏"
         },
         "openSettings": {
-          "label": "打开设置",
-          "description": "在任何位置跳转到设置页。"
+          "label": "打开设置"
         },
         "closeMediaLightbox": {
-          "label": "关闭媒体灯箱",
-          "description": "关闭媒体预览覆盖层。"
+          "label": "关闭媒体灯箱"
         },
         "mediaLightboxPrev": {
-          "label": "上一张媒体",
-          "description": "灯箱打开时切换到上一项。"
+          "label": "上一张媒体"
         },
         "mediaLightboxNext": {
-          "label": "下一张媒体",
-          "description": "灯箱打开时切换到下一项。"
+          "label": "下一张媒体"
         }
       }
     },
@@ -953,7 +924,7 @@
     "newMember": "新建成员",
     "memberName": "名称",
     "displayNamePlaceholder": "可选显示名称",
-    "usernamePlaceholder": "用户名",
+    "usernamePlaceholder": "输入用户名",
     "usernameRequired": "请填写用户名",
     "email": "邮箱",
     "emailPlaceholder": "name{'@'}example.com",
@@ -985,18 +956,18 @@
     "updatingVersion": "正在更新至 v{version}",
     "readyToRestart": "更新已就绪",
     "applyingUpdate": "正在安装更新",
-    "autoUpdatePausedDescription": "已暂停自动检查与安装。",
+    "autoUpdatePausedDescription": "已暂停自动检查与安装",
     "updateReadyPaused": "更新已就绪。自动安装已关闭，重启以安装。",
     "preparingUpdate": "正在准备更新…",
     "installingUpdate": "正在重启…",
-    "autoUpdateDescription": "后台下载，退出 Memoh 时自动安装。",
+    "autoUpdateDescription": "后台下载，退出 Memoh 时自动安装",
     "autoUpdate": "自动更新",
     "tagline": "开源多智能体平台",
-    "description": "多个 AI Agent，各自拥有独立的电脑与长期记忆。",
+    "description": "多个 AI Agent，各自拥有独立的电脑与长期记忆",
     "updatesSection": "更新",
     "currentVersion": "当前版本 v{version}",
-    "checkHint": "前往 GitHub 检查最新版本。",
-    "desktopCheckHint": "检查是否有新的 Desktop 版本。",
+    "checkHint": "前往 GitHub 检查最新版本",
+    "desktopCheckHint": "检查是否有新的 Desktop 版本",
     "checkForUpdates": "检查更新",
     "checking": "检查中…",
     "upToDate": "已是最新版本",
@@ -1008,7 +979,7 @@
     "viewOnGitHub": "在 GitHub 上查看",
     "checkFailed": "检查更新失败",
     "desktopUpdatesUnavailable": "自动更新不可用",
-    "desktopUpdatesUnavailableDesc": "当前构建未配置更新源。",
+    "desktopUpdatesUnavailableDesc": "当前构建未配置更新源",
     "downloadingUpdate": "正在下载… {progress}%",
     "desktopUpdateDownloadedDesc": "更新已就绪。可以立即重启，或在退出 Memoh 时自动安装。",
     "restartToUpdate": "重启并更新",
@@ -1018,14 +989,14 @@
     "docs": "技术文档",
     "feedback": "问题反馈",
     "advanced": "高级设置",
-    "advancedDescription": "Desktop 连接及其他不常修改的设置。",
+    "advancedDescription": "Desktop 连接及其他不常修改的设置",
     "serverConnection": "服务器连接",
-    "serverConnectionDescription": "将 Desktop 连接到另一台 Memoh 服务器。",
+    "serverConnectionDescription": "将 Desktop 连接到另一台 Memoh 服务器",
     "configureServer": "设置",
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
-    "workspaceLinkUnavailable": "此处无法打开工作区链接，请在有工作区访问权限的 Memoh 对话中打开。",
+    "workspaceLinkUnavailable": "此处无法打开工作区链接，请在有工作区访问权限的 Memoh 对话中打开",
     "runtimeStatus": {
       "compacting": "正在压缩上下文…",
       "api_retry": "{seconds} 秒后重试（{attempt}/{max_retries}）…"
@@ -1036,14 +1007,14 @@
       "g1": "我们从哪里开始？",
       "g2": "在想些什么？",
       "g3": "需要帮你做点什么？",
-      "g4": "准备好了就开始吧。",
+      "g4": "准备好了就开始吧",
       "g5": "今天我们做点什么？",
       "g6": "想从哪里入手？",
       "g7": "你想做些什么？",
-      "g8": "来，搞定一件事。",
+      "g8": "来，搞定一件事",
       "g9": "今天需要什么帮助？",
       "g10": "接下来做什么？",
-      "g11": "说说你的需求。",
+      "g11": "说说你的需求",
       "g12": "先从哪件事开始？"
     },
     "emptySystemSession": "系统会话暂无记录",
@@ -1057,6 +1028,7 @@
     "actions": {
       "copy": "复制",
       "edit": "编辑",
+      "editHint": "保存后会替换这条消息和它之后的回复，对话从这里重新继续。",
       "share": "分享",
       "retry": "重试",
       "fork": "分叉",
@@ -1135,7 +1107,7 @@
     "composer": {
       "selectBot": "请选择 Bot 后发送消息",
       "selectModel": "请选择模型后发送消息",
-      "modeChanging": "正在保存模式，请稍后发送。"
+      "modeChanging": "正在保存模式，请稍后发送"
     },
     "queue": {
       "steer": "当前回复",
@@ -1146,9 +1118,9 @@
       "steerPlaceholder": "输入要插入当前回复的内容…",
       "enqueueSteer": "插入当前回复",
       "enqueueFollowUp": "添加到接下来",
-      "textOnly": "排队消息仅支持文本，请移除附件和技能后再发送。",
+      "textOnly": "排队消息仅支持文本，请移除附件和技能后再发送",
       "steerQueued": "已加入当前回复队列",
-      "steerFailed": "无法插入当前回复，消息仍保留在队列中。",
+      "steerFailed": "无法插入当前回复，消息仍保留在队列中",
       "reorder": "调整顺序",
       "remove": "删除",
       "switchToFollowUp": "排到本次运行之后",
@@ -1162,11 +1134,11 @@
       "start": "开始语音输入",
       "stop": "停止录音",
       "transcribing": "正在转写",
-      "notConfigured": "请先选择语音转写模型。",
-      "unsupported": "当前浏览器不支持语音输入。",
-      "permissionDenied": "麦克风权限已被拒绝。",
-      "empty": "没有识别到语音内容。",
-      "failed": "语音输入失败。",
+      "notConfigured": "请先选择语音转写模型",
+      "unsupported": "当前浏览器不支持语音输入",
+      "permissionDenied": "麦克风权限已被拒绝",
+      "empty": "没有识别到语音内容",
+      "failed": "语音输入失败",
       "barLabel": "语音录制",
       "cancel": "取消语音输入",
       "confirm": "完成并转写"
@@ -1198,27 +1170,27 @@
       "clear": "不在项目中工作",
       "none": "未选择项目",
       "workspace": "Memoh 工作区",
-      "empty": "请先在侧边栏添加文件夹，再选择项目。"
+      "empty": "请先在侧边栏添加文件夹，再选择项目"
     },
     "folderDetachDraft": "不放入文件夹",
     "folderNewSession": "在 {name} 中新建会话",
-    "apps": "Apps",
+    "apps": "应用",
     "manageConnectors": "管理连接器",
     "attachFiles": "上传文件或图片",
     "dropToAttach": "将文件拖到这里加入对话",
-    "dropFolderUnsupported": "附件不支持文件夹，可拖到左侧文件面板上传。",
-    "pdfTooLargeForNative": "PDF 超过 12MB,将以路径形式存入工作区,模型无法直接查看其内容。",
-    "pdfUnsupportedByModel": "当前模型不支持读取 PDF,文件将以路径形式存入工作区,模型无法直接查看其内容。",
+    "dropFolderUnsupported": "附件不支持文件夹，可拖到左侧文件面板上传",
+    "pdfTooLargeForNative": "PDF 超过 12MB,将以路径形式存入工作区,模型无法直接查看其内容",
+    "pdfUnsupportedByModel": "当前模型不支持读取 PDF,文件将以路径形式存入工作区,模型无法直接查看其内容",
     "send": "发送",
     "sendFailed": "消息发送失败",
     "sendOutcomeUnknown": "服务端尚未确认这条消息，它可能已被受理。重发前请先在会话列表中查看。",
     "sendWorkdirUnsupported": "服务端无法在所选文件夹中开始这个对话。请升级服务端，或取消文件夹后再发送。",
     "forkFailed": "分叉会话失败",
     "forkedFrom": "分叉自 {session}",
-    "forkSourceUnavailable": "原始会话不存在或已被删除。",
+    "forkSourceUnavailable": "原始会话不存在或已被删除",
     "forkDialog": {
       "title": "创建分叉",
-      "description": "为新会话设置一个名字。",
+      "description": "为新会话设置一个名字",
       "namePlaceholder": "新的会话名称",
       "defaultTitle": "{session} 分叉"
     },
@@ -1462,7 +1434,7 @@
       "userInputTellMore": "告诉 Bot 更多",
       "submitUserInput": "提交",
       "cancelUserInput": "取消",
-      "userInputConnectionLost": "连接已断开，请重连后重试。",
+      "userInputConnectionLost": "连接已断开，请重连后重试",
       "pending": {
         "generic": "正在准备下一步",
         "write": "正在写入文件",
@@ -1470,7 +1442,7 @@
         "apply_patch": "正在应用补丁"
       },
       "detail": {
-        "failed": "工具执行失败。",
+        "failed": "工具执行失败",
         "openInFiles": "在文件中打开",
         "input": "输入",
         "result": "结果",
@@ -1479,7 +1451,7 @@
         "waitingOutput": "等待输出中",
         "noChanges": "无变更",
         "noContent": "无内容",
-        "contentTruncated": "预览已截断，完整写入大小：{bytes} 字节。",
+        "contentTruncated": "预览已截断，完整写入大小：{bytes} 字节",
         "noTasks": "暂无任务",
         "noImage": "暂无图像",
         "noResults": "暂无结果",
@@ -1527,8 +1499,8 @@
     "deleteSessionsConfirm": "确定要删除这 {count} 个会话吗？",
     "deleteSessionsFailed": "{count} 个会话删除失败",
     "renameSession": "重命名会话",
-    "renameSessionDescription": "为这段对话设置一个简短名称。",
-    "renameSessionPlaceholder": "会话名称",
+    "renameSessionDescription": "为这段对话设置一个简短名称",
+    "renameSessionPlaceholder": "输入会话名称",
     "renameSessionFailed": "会话重命名失败",
     "sessionTitle": "会话",
     "untitledSession": "未命名会话",
@@ -1556,43 +1528,46 @@
     "sessionModePlaceholder": "选择会话模式",
     "sessionModeCaution": "切换会话模式可能改变外部 Agent 可执行的操作。工具授权仍需单独确认。",
     "sessionModeChanged": "会话模式已切换。工具授权仍需单独确认。",
-    "agentSwitchTimeout": "切换耗时过长，请重试。",
+    "agentSwitchTimeout": "切换耗时过长，请重试",
     "modelOptions": "选项",
     "modelEffort": "强度",
     "noModels": "暂无可用模型",
-    "defaultExternalAgentLoading": "默认 Agent 仍在加载，请稍后重试。",
-    "defaultAgentNoWorkspaceExec": "已启用默认 Agent，但你没有执行工作区命令的权限。",
-    "defaultAgentMissing": "已启用默认 Agent，但尚未选择 Agent。",
-    "defaultAgentUnavailable": "已启用默认 Agent，但选中的 Agent 不可用。",
-    "defaultAgentDisabled": "已启用默认 Agent，但选中的 Agent 已停用。",
-    "defaultAgentNotConfigured": "已启用默认 Agent，但选中的 Agent 尚未配置完成。",
+    "defaultExternalAgentLoading": "默认 Agent 仍在加载，请稍后重试",
+    "defaultAgentNoWorkspaceExec": "已启用默认 Agent，但你没有执行工作区命令的权限",
+    "defaultAgentMissing": "已启用默认 Agent，但尚未选择 Agent",
+    "defaultAgentUnavailable": "已启用默认 Agent，但选中的 Agent 不可用",
+    "defaultAgentDisabled": "已启用默认 Agent，但选中的 Agent 已停用",
+    "defaultAgentNotConfigured": "已启用默认 Agent，但选中的 Agent 尚未配置完成",
     "externalAgent": {
-      "agentNotConfigured": "该 Bot 的外部 Agent 配置尚未完成。",
+      "agentNotConfigured": "该 Bot 的外部 Agent 配置尚未完成",
       "agentCommandStale": "Agent 已不再提供该命令。请重新打开命令面板后重试。",
-      "agentNotFound": "选中的外部 Agent 不可用。",
-      "agentNotEnabled": "该 Bot 已停用选中的外部 Agent。",
-      "codexOAuthIncomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
-      "codexAuthTokenMissing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
+      "agentNotFound": "选中的外部 Agent 不可用",
+      "agentNotEnabled": "该 Bot 已停用选中的外部 Agent",
+      "codexOAuthIncomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录",
+      "codexAuthTokenMissing": "该 Bot 工作区的 Codex 认证缺失或不完整",
       "agentAuthInvalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
-      "noWorkspaceExec": "你没有执行该 Bot 工作区命令的权限。",
+      "noWorkspaceExec": "你没有执行该 Bot 工作区命令的权限",
       "accountUnbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
       "runtimeOwnerMissing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
-      "discussUnsupported": "这个外部 Agent 无法在讨论模式中运行。",
+      "discussUnsupported": "这个外部 Agent 无法在讨论模式中运行",
       "groupChatUnsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new <Agent 名称> 或 /new discuss <Agent 名称>。",
-      "projectModeInvalid": "外部 Agent 的项目模式无效。",
-      "projectPathInvalid": "外部 Agent 的项目路径必须是绝对路径。",
-      "displayArgsInvalid": "外部 Agent 的显示参数无效。",
-      "runtimeStartFailed": "外部 Agent 运行时启动失败。",
-      "runtimeBusy": "外部 Agent 正在处理该会话的上一轮请求。",
-      "attachmentInvalid": "附件无效，请重新添加。",
-      "attachmentUnavailable": "无法让外部 Agent 访问该附件，请重新添加。",
-      "imageInputUnsupported": "这个外部 Agent 无法读取所附图片。",
-      "invalidChatRuntime": "选择的对话运行时无效。",
+      "projectModeInvalid": "外部 Agent 的项目模式无效",
+      "projectPathInvalid": "外部 Agent 的项目路径必须是绝对路径",
+      "displayArgsInvalid": "外部 Agent 的显示参数无效",
+      "runtimeStartFailed": "外部 Agent 运行时启动失败",
+      "runtimeBusy": "外部 Agent 正在处理该会话的上一轮请求",
+      "attachmentInvalid": "附件无效，请重新添加",
+      "attachmentUnavailable": "无法让外部 Agent 访问该附件，请重新添加",
+      "imageInputUnsupported": "这个外部 Agent 无法读取所附图片",
+      "invalidChatRuntime": "选择的对话运行时无效",
       "dependencyMissing": "{dep_id} 尚未安装在此工作区，正在后台安装。完成后请重发这条消息。",
       "dependencyMissingProgress": "正在后台安装…",
-      "dependencyMissingDone": "安装完成，可以重发消息了。",
-      "dependencyMissingFailed": "后台安装失败，请到 Bot 设置的「依赖」中重试。",
-      "dependencyOpen": "查看依赖"
+      "dependencyMissingDone": "安装完成，可以重发消息了",
+      "dependencyMissingFailed": "后台安装失败，请到 Bot 设置的「依赖」中重试",
+      "dependencyOpen": "查看依赖",
+      "resetSession": "新开 Agent 会话",
+      "resetSessionDone": "下一条消息会开始新的 Agent 会话，它不会记得上面的对话",
+      "resetSessionFailed": "无法新开 Agent 会话"
     },
     "sessionFilterAll": "全部",
     "searchSessionPlaceholder": "搜索",
@@ -1658,26 +1633,26 @@
       "newDescription": "开始新会话",
       "permissionModesText": "请选择该 Agent 声明的模式。更改仅作用于当前会话。",
       "permissionModeChangedTitle": "会话模式已更新",
-      "permissionModeChangedText": "已应用所选会话模式。",
+      "permissionModeChangedText": "已应用所选会话模式",
       "permissionCurrentMode": "当前模式",
       "modelDescription": "切换模型（当前：{model}）",
       "helpTextWithSkills": "Web 可用快捷操作：/help、/skill list。要激活 Skill，请发送 /<skill-name> 或 /<skill-name> <prompt>。",
-      "helpTextNoSkills": "Web 可用快捷操作：/help。",
+      "helpTextNoSkills": "Web 可用快捷操作：/help",
       "loadingSkills": "正在加载 Skills",
       "noResults": "没有匹配的 slash 操作",
-      "attachmentsUnsupported": "slash 命令不支持附件。",
+      "attachmentsUnsupported": "slash 命令不支持附件",
       "removeSkill": "移除 {name}",
       "commandResult": "快捷操作",
       "commandError": "slash 命令",
       "dismiss": "关闭",
       "errorMessages": {
-        "generic": "slash 命令失败。"
+        "generic": "slash 命令失败"
       }
     },
     "skillActivation": {
       "title": "已激活 Skill",
       "titleMany": "已激活 Skills",
-      "promptLabel": "Prompt"
+      "promptLabel": "附加指令"
     },
     "topBar": {
       "hideWorkbench": "隐藏侧边栏",
@@ -1711,7 +1686,7 @@
     },
     "unsaved": {
       "title": "是否保存对 {name} 的更改？",
-      "description": "如果不保存，你的更改将会丢失。",
+      "description": "如果不保存，你的更改将会丢失",
       "save": "保存",
       "dontSave": "不保存"
     },
@@ -1761,11 +1736,11 @@
       "keyboardInput": "远程桌面键盘输入",
       "clipboard": {
         "copyDenied": "浏览器拒绝写入剪贴板。请检查网站权限，然后回到桌面重新复制。",
-        "copyRequiresSecureContext": "复制到本机需要通过 HTTPS 或 localhost 访问。",
-        "copyUnsupported": "当前浏览器不支持复制桌面文本，请使用支持剪贴板 API 的浏览器。",
-        "copyTimedOut": "未收到远程桌面的新复制结果，请选中文本后重新复制。",
-        "syncFailed": "剪贴板同步未完成，请重试或使用粘贴快捷键。",
-        "pasteFailed": "无法粘贴这段文本，请尝试缩小复制范围（最多 48 KB）。"
+        "copyRequiresSecureContext": "复制到本机需要通过 HTTPS 或 localhost 访问",
+        "copyUnsupported": "当前浏览器不支持复制桌面文本，请使用支持剪贴板 API 的浏览器",
+        "copyTimedOut": "未收到远程桌面的新复制结果，请选中文本后重新复制",
+        "syncFailed": "剪贴板同步未完成，请重试或使用粘贴快捷键",
+        "pasteFailed": "无法粘贴这段文本，请尝试缩小复制范围（最多 48 KB）"
       },
       "title": "桌面",
       "reconnect": "重新连接",
@@ -1835,10 +1810,10 @@
       "enable": "开启计划模式",
       "disable": "关闭计划模式",
       "placeholder": "描述你的任务以生成计划…",
-      "changeFailed": "无法切换计划模式，请重试。"
+      "changeFailed": "无法切换计划模式，请重试"
     },
-    "runtimeModeNextTurn": "在下次运行开始时生效。",
-    "runtimeModeModelUnavailable": "当前模型不支持此权限模式，请选择其他模式或模型。",
+    "runtimeModeNextTurn": "在下次运行开始时生效",
+    "runtimeModeModelUnavailable": "当前模型不支持此权限模式，请选择其他模式或模型",
     "permissionMode": "权限模式",
     "goal": {
       "label": "目标",
@@ -1849,7 +1824,7 @@
       "pause": "暂停目标",
       "resume": "继续目标",
       "clear": "清除目标",
-      "textOnly": "请用纯文本设置目标，不附带附件或技能。",
+      "textOnly": "请用纯文本设置目标，不附带附件或技能",
       "status": {
         "active": "正在推进目标",
         "paused": "目标已暂停",
@@ -1861,7 +1836,7 @@
     }
   },
   "chatExamples": {
-    "noBot": "请先创建一个 Bot 再试试。",
+    "noBot": "请先创建一个 Bot 再试试",
     "createBot": "创建 Bot",
     "tryThese": "试试这些",
     "needs": "需要{capability}",
@@ -1878,16 +1853,16 @@
     "hideSidebarEntry": "隐藏此入口",
     "sidebarEntryHidden": "已隐藏，可在外观设置中恢复",
     "undoHideSidebarEntry": "撤销",
-    "sidebarEntrySaveFailed": "没能保存，请稍后再试。",
+    "sidebarEntrySaveFailed": "没能保存，请稍后再试",
     "galleryTitle": "看看 Memoh 能做什么",
-    "galleryDescription": "选一个示例填进输入框，发送前可以修改。",
+    "galleryDescription": "选一个示例填进输入框，发送前可以修改",
     "refresh": "换一批",
-    "refreshFailed": "没能换一批，请稍后再试。",
+    "refreshFailed": "没能换一批，请稍后再试",
     "fillIn": "填入",
     "dismiss": "隐藏推荐",
     "replaceDraft": {
       "title": "替换输入框里的内容？",
-      "description": "输入框里有还没发送的内容，替换成这条提示词后，原内容会被丢弃。",
+      "description": "输入框里有还没发送的内容，替换成这条提示词后，原内容会被丢弃",
       "confirm": "替换"
     },
     "share": {
@@ -1904,12 +1879,12 @@
     "searchModelPlaceholder": "搜索模型…",
     "searchNoResults": "没有匹配的模型",
     "emptyTitle": "暂无模型",
-    "emptyDescription": "手动添加，或从该服务商导入完整列表。",
-    "managedEmptyDescription": "请先完成授权，再刷新托管模型目录。",
-    "draftEmptyDescription": "手动添加，或填写 API 密钥后从该服务商导入完整列表。",
+    "emptyDescription": "手动添加，或从该服务商导入完整列表",
+    "managedEmptyDescription": "请先完成授权，再刷新托管模型目录",
+    "draftEmptyDescription": "手动添加，或填写 API 密钥后从该服务商导入完整列表",
     "sourcePreviewLoading": "正在从 models.dev 读取模型列表…",
     "sourcePreviewFailed": "无法访问 models.dev",
-    "sourcePreviewFailedDescription": "暂时无法预览该服务商的模型。",
+    "sourcePreviewFailedDescription": "暂时无法预览该服务商的模型",
     "importFromCatalog": "从 models.dev 目录导入",
     "importFromEndpoint": "从服务商接口拉取",
     "importFromCatalogHint": "新增目录中缺少的模型并设为停用。已有模型的上下文、最大输出与推理档位按目录更新；已开启的能力不会被移除，推理预算、默认值与回传字段在仍适用时保留。启用状态保持不变，描述为空时用目录描述补上。",
@@ -1942,7 +1917,7 @@
       "reasoning": "推理"
     },
     "reasoningToggle": "可以开关推理",
-    "reasoningUncontrollableHint": "不选强度也不可开关时，模型始终推理，对话中不显示推理选项。",
+    "reasoningUncontrollableHint": "不选强度也不可开关时，模型始终推理，对话中不显示推理选项",
     "reasoningDialect": "请求形式",
     "reasoningDialectAuto": "自动",
     "reasoningDialectOption": {
@@ -1961,13 +1936,13 @@
       "rejected": "拒绝"
     },
     "reasoningDefault": "默认推理",
-    "reasoningDefaultHint": "默认推理与默认强度在首次选择该模型时使用，之后以对话或 Bot 的设置为准。",
+    "reasoningDefaultHint": "默认推理与默认强度在首次选择该模型时使用，之后以对话或 Bot 的设置为准",
     "reasoningDefaultEffort": "默认强度",
     "reasoningBudget": "推理预算范围",
     "reasoningBudgetMin": "最小 Token",
     "reasoningBudgetMax": "最大 Token",
     "reasoningReplay": "推理回传字段",
-    "reasoningReplayHint": "适用于需要在工具调用时回传先前推理内容的 Chat Completions 接口。",
+    "reasoningReplayHint": "适用于需要在工具调用时回传先前推理内容的 Chat Completions 接口",
     "reasoningReplayProvider": "跟随提供商",
     "reasoningReplayRequired": "每次工具调用都回传",
     "contextWindow": "上下文窗口",
@@ -1985,7 +1960,7 @@
     "testAuthError": "认证失败",
     "testError": "异常",
     "testFailed": "测试失败",
-    "testModelNotSupported": "服务商无法识别该模型，请检查模型 ID。",
+    "testModelNotSupported": "服务商无法识别该模型，请检查模型 ID",
     "importModels": "导入模型",
     "importSuccess": "成功导入 {created} 个模型，跳过 {skipped} 个",
     "importFailed": "导入模型失败",
@@ -1994,10 +1969,10 @@
     "reasoningBudgetMaxMin": "预算上限必须大于 0",
     "reasoningBudgetRange": "预算下限不能大于上限",
     "refreshFailed": "刷新模型目录失败",
-    "refreshConfirmHint": "获取此账号当前可用的最新模型，并从模型选择器中移除已不可用的模型。",
-    "importConfirmHint": "获取并导入该服务商当前可用的模型。",
+    "refreshConfirmHint": "获取此账号当前可用的最新模型，并从模型选择器中移除已不可用的模型",
+    "importConfirmHint": "获取并导入该服务商当前可用的模型",
     "showingCount": "显示 {count} / {total}",
-    "catalogStale": "模型目录暂时无法更新，已使用缓存的模型信息。"
+    "catalogStale": "模型目录暂时无法更新，已使用缓存的模型信息"
   },
   "provider": {
     "add": "添加服务商",
@@ -2030,7 +2005,7 @@
     "deleteConfirm": "确定要删除这个服务商吗？",
     "saveChanges": "保存修改",
     "emptyTitle": "暂无服务商",
-    "emptyDescription": "添加服务商以接入模型服务，供 Bot 使用。",
+    "emptyDescription": "添加服务商以接入模型服务，供 Bot 使用",
     "testConnection": "测试连接",
     "reachable": "可连接",
     "unreachable": "不可连接",
@@ -2050,13 +2025,13 @@
       "option1h": "1 小时（费用更高）",
       "optionOff": "关闭（不推荐）",
       "description": "对系统提示词与工具列表启用 Prompt Caching，可显著降低重复请求的输入费用。当前仅 Anthropic 系列模型生效。",
-      "descriptionOff": "关闭后每次请求都会重新计费完整的系统提示词与工具列表，仅在需要严格隔离上下文时使用。"
+      "descriptionOff": "关闭后每次请求都会重新计费完整的系统提示词与工具列表，仅在需要严格隔离上下文时使用"
     },
     "oauth": {
-      "openaiDeviceHint": "在 OpenAI 验证页面输入此一次性验证码。",
-      "openaiCreateHint": "请先保存提供商，再到详情面板完成授权。",
-      "githubCreateHint": "请先保存提供商，再到详情面板启动设备授权。",
-      "githubDeviceHint": "在 GitHub 验证页面输入此一次性验证码。",
+      "openaiDeviceHint": "在 OpenAI 验证页面输入此一次性验证码",
+      "openaiCreateHint": "请先保存提供商，再到详情面板完成授权",
+      "githubCreateHint": "请先保存提供商，再到详情面板启动设备授权",
+      "githubDeviceHint": "在 GitHub 验证页面输入此一次性验证码",
       "authorizeFailed": "启动授权失败",
       "authorizeSuccess": "授权成功",
       "revoke": "撤销授权",
@@ -2069,25 +2044,25 @@
         "authorizedCurrent": "当前账号已连接",
         "oauthing": "授权中...",
         "pendingDevice": "正在等待设备授权完成...",
-        "expired": "授权已过期，请重新授权。",
-        "missing": "尚未授权。",
-        "notConfigured": "当前提供商未正确配置 OAuth。"
+        "expired": "授权已过期，请重新授权",
+        "missing": "尚未授权",
+        "notConfigured": "当前提供商未正确配置 OAuth"
       },
       "sectionTitle": "账号",
       "chatgptAccount": "ChatGPT 账号",
       "githubAccount": "GitHub 账号",
       "connect": "连接",
-      "openaiConnectHint": "登录 ChatGPT 账号后即可使用其模型。",
-      "githubConnectHint": "登录 GitHub 账号后即可使用 Copilot 模型。",
+      "openaiConnectHint": "登录 ChatGPT 账号后即可使用其模型",
+      "githubConnectHint": "登录 GitHub 账号后即可使用 Copilot 模型",
       "revokeConfirm": "确定撤销此账号的授权？",
       "connecting": "连接中"
     },
     "saveSuccess": "服务商配置已保存",
-    "saveBeforeTest": "请先保存修改，再测试连接。"
+    "saveBeforeTest": "请先保存修改，再测试连接"
   },
   "providerConnect": {
     "title": "添加 Provider",
-    "description": "第三方服务想将以下 Provider 添加到你的 Memoh，确认后才会保存。",
+    "description": "第三方服务想将以下 Provider 添加到你的 Memoh，确认后才会保存",
     "name": "名称",
     "baseUrl": "Base URL",
     "clientType": "API 格式",
@@ -2098,13 +2073,13 @@
     "invalidTitle": "链接无效",
     "backToProviders": "返回 Provider 列表",
     "error": {
-      "missing": "链接缺少 payload 参数。",
-      "decode": "链接内容无法解析。",
-      "kind": "这不是 Provider 导入链接。",
-      "version": "不支持的链接版本。",
-      "baseUrl": "链接中没有合法的 Base URL。",
-      "apiKey": "链接中没有 API Key。",
-      "clientType": "链接指定了不支持的 API 格式。"
+      "missing": "链接缺少 payload 参数",
+      "decode": "链接内容无法解析",
+      "kind": "这不是 Provider 导入链接",
+      "version": "不支持的链接版本",
+      "baseUrl": "链接中没有合法的 Base URL",
+      "apiKey": "链接中没有 API Key",
+      "clientType": "链接指定了不支持的 API 格式"
     }
   },
   "webSearch": {
@@ -2123,15 +2098,15 @@
     "apiToken": "API Token",
     "searchProviders": "搜索",
     "fetchProviders": "抓取",
-    "searchHint": "供 web_search 工具使用的搜索服务。",
-    "fetchHint": "供 web_fetch 工具读取网页内容。",
+    "searchHint": "供 web_search 工具使用的搜索服务",
+    "fetchHint": "供 web_fetch 工具读取网页内容",
     "httpHeaders": "HTTP Headers",
     "headerName": "Header 名称",
     "headerValue": "Header 值",
     "addHeader": "添加 Header",
     "selectHint": "请选择或新建一个搜索提供方",
     "unsupportedProvider": "该提供方暂未实现配置面板",
-    "nativeManaged": "Native 由 Memoh 管理，并始终保持启用。",
+    "nativeManaged": "Native 由 Memoh 管理，并始终保持启用",
     "saveSuccess": "搜索提供方配置已保存",
     "deleteSuccess": "搜索提供方配置已删除",
     "deleteFailed": "删除搜索提供方配置失败",
@@ -2141,7 +2116,7 @@
     "deleteConfirm": "确定删除该搜索提供方？删除后无法恢复。",
     "deleteFetchConfirm": "确定删除该抓取提供方？删除后无法恢复。",
     "providerNames": {
-      "native": "Native",
+      "native": "内置服务",
       "cloudflare_markdown": "Cloudflare Markdown",
       "brave": "Brave",
       "bing": "Bing",
@@ -2154,7 +2129,8 @@
       "exa": "Exa",
       "bocha": "博查",
       "duckduckgo": "DuckDuckGo",
-      "yandex": "Yandex"
+      "yandex": "Yandex",
+      "deepseek": "DeepSeek"
     },
     "fetchProviderNames": {
       "native": "原生抓取",
@@ -2170,7 +2146,7 @@
     "graphEdges": "关联",
     "semanticEmbeddingModel": "Embedding 模型",
     "semanticEmbeddingModelPlaceholder": "选择 Embedding 模型",
-    "graphEmpty": "还没有记忆——添加一些以查看图谱。"
+    "graphEmpty": "暂无记忆，添加后可在此查看关联图谱"
   },
   "network": {
     "title": "网络",
@@ -2179,7 +2155,7 @@
     "provider": "接入方式",
     "searchPlaceholder": "搜索…",
     "emptyTitle": "暂无网络配置",
-    "emptyDescription": "为 Bot 配置网络能力，包括在现有网络之上使用 SD-WAN 式覆盖组网。",
+    "emptyDescription": "为 Bot 配置网络能力，包括在现有网络之上使用 SD-WAN 式覆盖组网",
     "saveSuccess": "网络配置已保存",
     "deleteSuccess": "网络配置已删除",
     "deleteFailed": "删除网络配置失败",
@@ -2190,21 +2166,21 @@
   },
   "voice": {
     "title": "语音",
-    "speakTitle": "朗读",
-    "speakHint": "把回复读成语音。",
-    "listenTitle": "聆听",
-    "listenHint": "把语音转成文字。",
-    "empty": "暂无可用后端，添加具备语音能力的服务商即可。"
+    "speakTitle": "语音合成",
+    "speakHint": "将 Bot 的回复转为语音发送",
+    "listenTitle": "语音识别",
+    "listenHint": "将收到的语音消息转写为文字",
+    "empty": "暂无可用后端，添加具备语音能力的服务商即可"
   },
   "video": {
     "title": "视频",
-    "providersHint": "通过 OpenRouter、ModelArk 或 Volcengine 生成视频。",
-    "empty": "暂无视频后端，添加服务商后即可启用视频生成。",
+    "providersHint": "通过 OpenRouter、ModelArk 或 Volcengine 生成视频",
+    "empty": "暂无视频后端，添加服务商后即可启用视频生成",
     "models": "视频模型",
     "importModels": "导入模型",
     "importSuccess": "模型导入完成：新增 {created} 个，跳过 {skipped} 个",
     "importFailed": "模型导入失败",
-    "noModels": "暂无模型，可从服务商导入或手动创建。",
+    "noModels": "暂无模型，可从服务商导入或手动创建",
     "saveSuccess": "视频服务商已保存",
     "modelSaveSuccess": "视频模型已保存"
   },
@@ -2212,7 +2188,7 @@
     "title": "语音合成",
     "add": "添加语音合成提供方",
     "providerType": "提供方类型",
-    "searchPlaceholder": "搜索语音合成...",
+    "searchPlaceholder": "搜索语音合成…",
     "emptyTitle": "暂无语音合成提供方",
     "emptyDescription": "添加语音合成提供方以为 Bot 启用文字转语音功能",
     "deleteConfirm": "确定要删除此语音合成提供方吗？此操作不可撤销。",
@@ -2223,8 +2199,8 @@
     "addModel": "新建模型",
     "modelId": "模型 ID",
     "modelIdPlaceholder": "输入模型标识符（如 custom-voice）",
-    "noModels": "暂无模型，点击\"导入模型\"发现可用模型，或点击\"新建模型\"手动创建。",
-    "noCapabilities": "该模型暂无可用能力信息。",
+    "noModels": "暂无模型，点击\"导入模型\"发现可用模型，或点击\"新建模型\"手动创建",
+    "noCapabilities": "该模型暂无可用能力信息",
     "saveSuccess": "语音配置已保存",
     "synthesis": {
       "models": "语音合成模型"
@@ -2235,11 +2211,11 @@
     },
     "fields": {
       "language": "语言",
-      "languagePlaceholder": "选择语言...",
+      "languagePlaceholder": "选择语言…",
       "voice": "声音",
-      "voicePlaceholder": "选择声音...",
+      "voicePlaceholder": "选择声音…",
       "format": "输出格式",
-      "formatPlaceholder": "选择格式...",
+      "formatPlaceholder": "选择格式…",
       "speed": "语速",
       "speedDescription": "播放速度（默认：{default}）",
       "pitch": "音调",
@@ -2247,7 +2223,7 @@
     },
     "test": {
       "title": "测试合成",
-      "placeholder": "输入要合成的文本...",
+      "placeholder": "输入要合成的文本…",
       "generate": "生成",
       "failed": "合成失败"
     }
@@ -2257,12 +2233,12 @@
     "emptyTitle": "暂无转写提供方",
     "emptyDescription": "添加转写提供方以为 Bot 启用语音转文字功能",
     "models": "语音识别模型",
-    "noModels": "暂无语音识别模型，可导入可用模型，或保留默认模板模型。",
+    "noModels": "暂无语音识别模型，可导入可用模型，或保留默认模板模型",
     "importModels": "导入模型",
     "importSuccess": "识别模型导入成功",
     "importFailed": "识别模型导入失败",
     "saveSuccess": "转写配置已保存",
-    "noCapabilities": "该模型暂无可用能力信息。",
+    "noCapabilities": "该模型暂无可用能力信息",
     "advanced": {
       "title": "高级设置",
       "description": "这些字段通常对应底层服务商实现细节。大多数情况下保留默认值即可。"
@@ -2276,7 +2252,7 @@
   "mcp": {
     "addTitle": "添加 MCP",
     "addDescription": "配置 MCP 服务器连接",
-    "searchPlaceholder": "搜索 MCP 服务器...",
+    "searchPlaceholder": "搜索 MCP 服务器…",
     "emptyTitle": "暂无 MCP 服务器",
     "emptyDescription": "添加 MCP 服务器以扩展 Bot 的能力",
     "command": "命令",
@@ -2297,7 +2273,7 @@
       "env": "环境变量"
     },
     "draft": "草稿",
-    "empty": "暂未配置 MCP 服务器。",
+    "empty": "暂未配置 MCP 服务器",
     "deleteConfirm": "确定要删除这个 MCP 服务器吗？",
     "loadFailed": "加载 MCP 服务器列表失败",
     "saveFailed": "保存 MCP 服务器失败",
@@ -2320,12 +2296,12 @@
     "tools": "工具",
     "toolsEmpty": "未发现工具",
     "toolsCount": "已发现 {count} 个工具",
-    "discoveredToolsHint": "该服务器发现的工具。",
+    "discoveredToolsHint": "该服务器发现的工具",
     "statusConnected": "已连接",
     "statusError": "错误",
     "statusUnknown": "未测试",
-    "commandRequired": "请先填写启动命令。",
-    "urlRequired": "请先填写端点 URL。",
+    "commandRequired": "请先填写启动命令",
+    "urlRequired": "请先填写端点 URL",
     "authRequired": "需要授权",
     "oauth": {
       "title": "认证",
@@ -2352,14 +2328,14 @@
       "clientIdPlaceholder": "OAuth 应用的 Client ID",
       "clientSecret": "Client Secret",
       "clientSecretPlaceholder": "OAuth 应用的 Client Secret（如需要）",
-      "clientIdHint": "该授权服务器不支持自动注册，请创建 OAuth 应用并输入其 Client ID。",
-      "signInRequired": "需要登录授权后才能使用此服务器。",
+      "clientIdHint": "该授权服务器不支持自动注册，请创建 OAuth 应用并输入其 Client ID",
+      "signInRequired": "需要登录授权后才能使用此服务器",
       "signInLabel": "服务器登录",
-      "optionalHint": "仅当此服务器要求登录时才需要。",
+      "optionalHint": "仅当此服务器要求登录时才需要",
       "callbackUrl": "回调地址",
-      "callbackUrlHint": "请在 OAuth 应用设置中填入此回调地址。",
+      "callbackUrlHint": "请在 OAuth 应用设置中填入此回调地址",
       "callbackMissingParams": "缺少授权码或状态参数",
-      "popupBlocked": "授权窗口被浏览器拦截了,请允许此页面的弹出窗口后重试。"
+      "popupBlocked": "授权窗口被浏览器拦截了,请允许此页面的弹出窗口后重试"
     },
     "servers": "服务器",
     "addNew": "添加服务器",
@@ -2396,28 +2372,28 @@
       "sse": "SSE"
     },
     "advancedSettings": "高级设置",
-    "advancedHintStdio": "传给进程的环境变量。",
-    "advancedHintRemote": "请求头。",
+    "advancedHintStdio": "传给进程的环境变量",
+    "advancedHintRemote": "请求头",
     "expand": "展开",
     "collapse": "收起",
     "envVars": "环境变量",
     "httpHeaders": "HTTP 请求头",
     "notConfigured": "未配置",
     "discoveredTools": "已发现的工具",
-    "noToolsExposed": "该服务器未暴露任何工具。",
+    "noToolsExposed": "该服务器未暴露任何工具",
     "more": "更多",
     "importSandbox": "导入配置",
     "pathCopied": "路径已复制",
     "blindImport": "导入",
     "allTools": "全部工具",
     "searchTools": "搜索工具...",
-    "noDescription": "暂无描述。",
-    "noToolsMatch": "未找到匹配的工具。",
+    "noDescription": "暂无描述",
+    "noToolsMatch": "未找到匹配的工具",
     "diagnosticLog": "诊断日志",
-    "noLog": "暂无诊断信息。",
+    "noLog": "暂无诊断信息",
     "copyLog": "复制日志",
     "editValue": "编辑 {value}",
-    "editLongTextHint": "在此处输入或修改较长的配置值。",
+    "editLongTextHint": "在此处输入或修改较长的配置值",
     "enterContent": "请输入内容...",
     "unsavedChangesDesc": "你有未保存的更改，要放弃它们并切换吗？",
     "keepEditing": "继续编辑",
@@ -2432,15 +2408,15 @@
       "intro": "分别设置这个 Bot 在工作区和每台已连接电脑上可以执行的操作。这些规则只约束 Memoh 提供的工具；Claude Code、Codex 与 Grok Build 的内置工具遵循各自的权限模式，它们发来的询问会以卡片展示，由持有对应工作区权限的用户决定。",
       "loading": "正在加载审核规则...",
       "loadFailed": "无法加载工具审核",
-      "loadFailedDescription": "请检查服务器连接后重试。",
+      "loadFailedDescription": "请检查服务器连接后重试",
       "saveFailed": "无法保存工具审核",
       "enabled": "工具调用审核",
-      "enabledDescription": "这个位置会执行允许、询问和拒绝规则。",
-      "disabledDescription": "文件和命令工具将直接执行，已保存的模式和规则会保留。",
+      "enabledDescription": "这个位置会执行允许、询问和拒绝规则",
+      "disabledDescription": "文件和命令工具将直接执行，已保存的模式和规则会保留",
       "target": {
         "title": "审核位置",
         "label": "工作区或电脑",
-        "description": "规则只对当前选择的工作区或电脑生效。"
+        "description": "规则只对当前选择的工作区或电脑生效"
       },
       "modes": {
         "allow": "允许",
@@ -2480,11 +2456,11 @@
       },
       "toolDisabledHint": "该操作当前未要求审核。下方规则在打开开关后才会生效。",
       "bypass": "跳过审核（白名单）",
-      "bypassHint": "匹配以下模式的调用将直接放行，不弹审核。",
+      "bypassHint": "匹配以下模式的调用将直接放行，不弹审核",
       "mustReview": "必须审核（黑名单）",
-      "mustReviewHint": "匹配以下模式的调用强制弹审核，即使该工具未默认要求审核。",
-      "pathSyntaxHint": "每行或用逗号分隔一项；路径沿用现有 glob、文件名和 /** 匹配。",
-      "commandSyntaxHint": "每行或用逗号分隔一项；可填写可执行文件名、精确命令，或使用 * 和 ? 通配符。",
+      "mustReviewHint": "匹配以下模式的调用强制弹审核，即使该工具未默认要求审核",
+      "pathSyntaxHint": "每行或用逗号分隔一项；路径沿用现有 glob、文件名和 /** 匹配",
+      "commandSyntaxHint": "每行或用逗号分隔一项；可填写可执行文件名、精确命令，或使用 * 和 ? 通配符",
       "placeholders": {
         "filePaths": "/data/**\n/tmp/**",
         "fileReview": "/etc/**\n.env*",
@@ -2494,52 +2470,52 @@
         "fileMustReview": "/etc/**\n.env*",
         "execBypass": "ls\npwd\ngit status",
         "execMustReview": "rm -rf *\nsudo *"
-      }
+      },
+      "enableTitle": "启用工具调用审核"
     },
     "hooks": {
       "title": "Hooks",
-      "subtitle": "围绕工具调用、审批、回合、记忆、频道和运行时事件执行工作区动作。",
+      "subtitle": "围绕工具调用、审批、回合、记忆、频道和运行时事件执行工作区动作",
       "reload": "重新加载",
       "save": "保存",
       "statusSection": "状态",
       "filePath": "配置文件",
       "present": "已存在",
       "missing": "未创建",
-      "missingDescription": "还没有 hooks 文件，编辑器正在显示起始模板。",
-      "enabledDescription": "Hooks 会在匹配事件时运行。",
-      "disabledDescription": "hooks 文件已存在，但当前关闭。",
-      "invalidDescription": "JSON 文件暂时无效。",
-      "invalidJson": "hooks 文件存在语法错误，请检查逗号、引号和括号。",
-      "testPayloadInvalid": "载荷不是有效的 JSON。",
+      "missingDescription": "还没有 hooks 文件，编辑器正在显示起始模板",
+      "enabledDescription": "Hooks 会在匹配事件时运行",
+      "disabledDescription": "hooks 文件已存在，但当前关闭",
+      "invalidDescription": "JSON 文件暂时无效",
+      "invalidJson": "hooks 文件存在语法错误，请检查逗号、引号和括号",
+      "testPayloadInvalid": "载荷不是有效的 JSON",
       "rules": "规则",
-      "rulesDescription": "启用规则数 / 全部规则数。",
       "actions": "动作",
-      "actionsDescription": "匹配 hooks 后会运行的命令和工具调用。",
       "eventsSection": "事件",
       "editorSection": "配置",
       "jsonConfig": "hooks.json",
-      "editorHint": "JSON 有效。",
+      "editorHint": "JSON 有效",
       "template": "模板",
       "testSection": "测试",
       "testEvent": "事件",
-      "testEventDescription": "使用已保存的 hooks 文件执行一次模拟 payload。",
+      "testEventDescription": "使用已保存的 hooks 文件执行一次模拟 payload",
       "selectEvent": "选择事件",
-      "testReady": "Payload 是有效 JSON。",
+      "testReady": "Payload 是有效 JSON",
       "runTest": "运行测试",
       "loadFailed": "加载 hooks 失败",
       "saveSuccess": "Hooks 已保存",
       "saveFailed": "保存 hooks 失败",
       "testSuccess": "Hook 测试完成",
-      "testFailed": "Hook 测试失败"
+      "testFailed": "Hook 测试失败",
+      "entryTitle": "事件触发器"
     },
     "title": "Bots",
     "searchPlaceholder": "搜索 Bot…",
     "notFound": "找不到这个 Bot",
-    "notFoundDescription": "它可能已被删除，或链接有误。",
+    "notFoundDescription": "它可能已被删除，或链接有误",
     "loadFailed": "无法加载这个 Bot",
     "createBot": "新建 Bot",
-    "createBotWaitHint": "首次创建可能需要拉取基础镜像，请耐心等待。",
-    "createBotSuccess": "Bot 创建成功。",
+    "createBotWaitHint": "首次创建可能需要拉取基础镜像，请耐心等待",
+    "createBotSuccess": "Bot 创建成功",
     "createBotSignInFirst": "Bot 已创建。先登录账号，Agent 才能开始回复。",
     "createBotSettingUp": "正在准备...",
     "createBotSetupTitle": "正在准备 Bot",
@@ -2558,18 +2534,18 @@
     },
     "agentCreate": {
       "prepare": "准备 Agent",
-      "prepareDescription": "检查工作空间并安装运行这个 Agent 所需的依赖。",
-      "authorizeAfterCreate": "创建 Bot 后继续为这个 Agent 授权。",
+      "prepareDescription": "检查工作空间并安装运行这个 Agent 所需的依赖",
+      "authorizeAfterCreate": "创建 Bot 后继续为这个 Agent 授权",
       "typeAriaLabel": "Agent 类型",
-      "oauthSettingsHint": "授权在创建后进行，可随时在 Bot 设置中完成。",
+      "oauthSettingsHint": "授权在创建后进行，可随时在 Bot 设置中完成",
       "requiredError": "请填写「{field}」",
-      "directSetupHint": "Codex 和 Claude Code 无需在此配置——创建后在 Bot 设置页完成登录或 API Key。"
+      "directSetupHint": "Codex 和 Claude Code 无需在此配置——创建后在 Bot 设置页完成登录或 API Key"
     },
-    "createBotLocalHint": "Local Bot 会使用这台电脑上的文件夹，且不提供沙箱隔离。",
+    "createBotLocalHint": "Local Bot 会使用这台电脑上的文件夹，且不提供沙箱隔离",
     "create": {
       "terminalTitle": "正在准备 {name}",
       "terminalSubtitle": "正在创建工作区。准备完成后会自动打开这个 Bot。",
-      "failedSubtitle": "准备工作区时出现问题。",
+      "failedSubtitle": "准备工作区时出现问题",
       "failedTitle": "准备失败",
       "retry": "重试",
       "back": "返回表单",
@@ -2598,7 +2574,7 @@
     "displayNamePlaceholder": "给你的 Bot 起个名字",
     "name": "URL 名称",
     "namePlaceholder": "例如 my-assistant",
-    "nameHint": "小写字母、数字和连字符，用于 Bot 的 URL。",
+    "nameHint": "小写字母、数字和连字符，用于 Bot 的 URL",
     "nameStatus": {
       "checking": "正在检测可用性…",
       "available": "名称可用",
@@ -2609,29 +2585,28 @@
     "avatarUrl": "头像链接",
     "avatarUrlPlaceholder": "输入头像图片地址",
     "timezone": "时区",
-    "timezoneHint": "定时任务按此时区计算执行时间。",
     "timezonePlaceholder": "例如 Asia/Shanghai",
     "timezoneInherited": "继承用户或系统时区",
     "aclPreset": "IM 应用策略",
-    "aclPresetDescription": "选择初始的访问控制预设，后续可随时调整。",
-    "aclPresetHint": "建议：个人助手用“仅私聊”，群机器人用“仅群聊”或“群聊和话题”，不确定时保留“允许全部”。",
+    "aclPresetDescription": "选择初始的访问控制预设，后续可随时调整",
+    "aclPresetHint": "建议：个人助手用“仅私聊”，群机器人用“仅群聊”或“群聊和话题”，不确定时保留“允许全部”",
     "aclPresetHelp": "这会配置默认的访问规则。创建后可在“访问控制 › 渠道成员”中修改。",
     "aclPresets": {
       "allowAll": {
         "title": "允许全部",
-        "description": "不额外添加限制，默认允许所有会话类型。"
+        "description": "不额外添加限制，默认允许所有会话类型"
       },
       "privateOnly": {
         "title": "仅私聊",
-        "description": "默认拒绝，仅放行私聊。"
+        "description": "默认拒绝，仅放行私聊"
       },
       "groupOnly": {
         "title": "仅群聊",
-        "description": "默认拒绝，仅放行群聊。"
+        "description": "默认拒绝，仅放行群聊"
       },
       "groupAndThreadOnly": {
         "title": "群聊和话题",
-        "description": "默认拒绝，放行群聊和话题。"
+        "description": "默认拒绝，放行群聊和话题"
       },
       "denyAll": {
         "title": "全部拒绝",
@@ -2641,7 +2616,7 @@
     "editAvatar": "编辑头像",
     "editAvatarDescription": "设置 Bot 头像图片的链接地址",
     "editTimezone": "编辑时区",
-    "editTimezoneDescription": "为这个 Bot 设置独立时区。",
+    "editTimezoneDescription": "为这个 Bot 设置独立时区",
     "avatarUpdateSuccess": "头像已更新",
     "avatarUpdateFailed": "更新头像失败",
     "typePlaceholder": "选择 Bot 类型",
@@ -2657,7 +2632,7 @@
       "exportBot": "导出 Bot",
       "importBot": "导入 Bot",
       "cardTitle": "Bot 备份",
-      "cardSubtitle": "将整个 Bot 导出或导入为可迁移的 .memoh.zip 备份包。",
+      "cardSubtitle": "将整个 Bot 导出或导入为可迁移的 .memoh.zip 备份包",
       "createMode": "新建 Bot",
       "importMode": "从备份导入",
       "dropzoneTitle": "点击选择或拖拽备份文件到此处",
@@ -2666,14 +2641,14 @@
       "exportTitle": "导出 Bot",
       "exportDescription": "导出 Bot 配置、历史记录、附件和工作区文件，可用于恢复、换设备或分享。设置口令可对整个备份加密；不设置时密钥为明文保存，请妥善保管。",
       "importTitle": "导入 Bot",
-      "importDescription": "上传 .memoh.zip 备份文件，先预览内容，再选择创建副本或覆盖当前 Bot。",
+      "importDescription": "上传 .memoh.zip 备份文件，先预览内容，再选择创建副本或覆盖当前 Bot",
       "reading": "正在读取备份…",
       "passphraseLabel": "口令（可选）",
       "passphrasePlaceholder": "留空则不加密",
       "passphraseExportHint": "将对整个备份加密。导入时需要此口令，且无法找回。",
       "passphraseImportPlaceholder": "输入备份口令",
       "encryptedTitle": "此备份已加密",
-      "encryptedHint": "请输入导出时使用的口令以解锁。",
+      "encryptedHint": "请输入导出时使用的口令以解锁",
       "unlock": "解锁",
       "unlocking": "正在解锁…",
       "uploading": "上传中… {percent}%",
@@ -2728,7 +2703,7 @@
         "unknown": "未知"
       },
       "diagnosticTitle": "诊断信息",
-      "diagnosticSubtitle": "实时系统诊断指标。",
+      "diagnosticSubtitle": "实时系统诊断指标",
       "expandAll": "全部展开",
       "collapse": "收起",
       "hasIssue": "存在异常",
@@ -2756,7 +2731,7 @@
       "issueHint": "查看诊断",
       "platformsTitle": "平台",
       "platformsEmpty": "还没连接任何平台",
-      "platformsEmptyHint": "连接一个平台，开始和这个 bot 对话",
+      "platformsEmptyHint": "连接一个平台，开始和这个 Bot 对话",
       "connectAction": "去连接",
       "configTitle": "配置",
       "modelLabel": "模型",
@@ -2765,7 +2740,7 @@
       "memoryCount": "已索引 {count} 条记忆",
       "memoryNone": "关闭",
       "memoryTitle": "记忆",
-      "memoryNoStats": "暂时无法读取记忆统计。",
+      "memoryNoStats": "暂时无法读取记忆统计",
       "usageTitle": "用量 · 近 30 天",
       "usageTotal": "总计",
       "usageInput": "输入",
@@ -2779,7 +2754,7 @@
       "runtimeNoMetrics": "暂时无法获取资源占用",
       "remindersTitle": "待处理",
       "reminderModelTitle": "选择一个模型",
-      "reminderModelHint": "这个 bot 需要先设置模型才能回复。",
+      "reminderModelHint": "这个 Bot 需要先设置模型才能回复",
       "reminderAction": "去设置"
     },
     "tabs": {
@@ -2807,55 +2782,60 @@
       "apps": "应用"
     },
     "agent": {
-      "add": "添加 Agent",
-      "added": "Agent 已添加",
+      "title": "外部 Agent",
+      "add": "添加外部 Agent",
+      "added": "外部 Agent 已添加",
       "provider": "类型",
       "providerPlaceholder": "选择类型",
       "providerSearchPlaceholder": "搜索类型...",
       "providerEmpty": "没有可用类型",
-      "providerRequired": "请选择 Agent 类型。",
+      "providerRequired": "请选择 Agent 类型",
       "namePlaceholder": "输入 Agent 名称",
-      "nameRequired": "请输入 Agent 名称。",
-      "emptyTitle": "还没有 Agent",
-      "emptyDescription": "添加 Agent 后，这个 Bot 就可以使用 Codex、Claude Code、Grok Build 或自定义 ACP Agent。",
+      "nameRequired": "请输入 Agent 名称",
+      "emptyTitle": "还没有外部 Agent",
+      "emptyDescription": "默认使用 Memoh 内置运行时。添加外部 Agent 后，这个 Bot 就可以使用 Codex、Claude Code、Grok Build 或自定义 ACP Agent。",
       "statusNeedsConfig": "需要配置",
       "statusOff": "已停用",
-      "deleteTitle": "删除 Agent？",
+      "deleteTitle": "删除外部 Agent？",
       "deleteDescription": "确定删除“{name}”吗？已有对话会保留绑定，但新对话不能再选择它。",
-      "deleted": "Agent 已删除",
-      "deleteFailed": "删除 Agent 失败",
-      "nameDescription": "这个名称用于在选择器和对话中区分 Agent。",
+      "deleted": "外部 Agent 已删除",
+      "deleteFailed": "删除外部 Agent 失败",
+      "nameDescription": "这个名称用于在选择器和对话中区分 Agent",
       "runtimeSetup": "运行时配置",
       "authMode": "授权方式",
       "authChatGPT": "ChatGPT 账号",
       "authWorkspace": "工作区已有凭据",
       "authOAuthToken": "OAuth Token",
-      "authChatGPTDescription": "使用 ChatGPT 订阅账号授权 Codex。",
-      "authWorkspaceDescription": "使用这个 Bot 工作区中已经保存的 Claude Code 登录状态。",
-      "authOAuthTokenDescription": "使用 Claude Code setup-token 生成的 OAuth Token。",
-      "authApiKeyDescription": "使用由 Memoh 保存并注入运行时的 API Key。",
+      "authChatGPTDescription": "使用 ChatGPT 订阅账号授权 Codex",
+      "authWorkspaceDescription": "使用这个 Bot 工作区中已经保存的 Claude Code 登录状态",
+      "authOAuthTokenDescription": "使用 Claude Code setup-token 生成的 OAuth Token",
+      "authApiKeyDescription": "使用由 Memoh 保存并注入运行时的 API Key",
       "apiKey": "API Key",
-      "apiKeyDescription": "API Key 会加密保存，仅在运行时提供给此 Agent。",
+      "apiKeyDescription": "API Key 会加密保存，仅在运行时提供给此 Agent",
       "oauthToken": "OAuth Token",
-      "oauthTokenDescription": "粘贴 Claude Code setup-token 生成的 Token。",
+      "oauthTokenDescription": "粘贴 Claude Code setup-token 生成的 Token",
       "defaultModel": "默认模型",
       "defaultModelDescription": "可选。留空时由外部 Agent 选择默认模型；对话中仍可临时切换。",
       "defaultModelPlaceholder": "使用运行时默认模型",
       "account": "账号",
-      "chatgptAccountDescription": "Memoh 会加密保存此 Agent 的 ChatGPT 凭据，并仅在运行时提供给 Codex。",
-      "chatgptAccountConnectedDescription": "此 Agent 的 ChatGPT 凭据已加密保存。",
+      "chatgptAccountDescription": "Codex 在此 Agent 的工作区里登录 ChatGPT，并自己保存登录状态",
+      "chatgptAccountConnectedDescription": "Codex 已在此 Agent 的工作区里登录 ChatGPT",
+      "signedInAs": "已登录：{account}",
+      "checkingSignIn": "正在检查登录状态…",
+      "enableToSignIn": "请先启用此 Agent，再检查或连接账号",
+      "signInCheckFailed": "无法检查登录状态",
       "reconnect": "重新连接",
       "codexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码。Memoh 会自动完成授权。",
       "codexLoginSuccess": "Codex 已连接 ChatGPT 账号",
       "codexLoginFailed": "Codex 账号授权失败，请重试",
-      "authGrokAccountDescription": "使用 Grok 账号登录 Grok Build。",
+      "authGrokAccountDescription": "使用 Grok 账号登录 Grok Build",
       "grokAccount": "Grok 账号",
-      "grokAccountDescription": "Memoh 会加密保存此 Agent 的 Grok 凭据，并仅在运行时提供给 Grok Build。",
-      "grokAccountConnectedDescription": "此 Agent 的 Grok 凭据已加密保存。",
+      "grokAccountDescription": "Grok 在此 Agent 的工作区里登录，并自己保存登录状态",
+      "grokAccountConnectedDescription": "Grok 已在此 Agent 的工作区里登录",
       "grokDeviceHint": "打开验证页面并确认这个一次性代码。只在页面显示的 accounts.x.ai 地址上确认。Memoh 会自动完成授权。",
       "grokLoginSuccess": "Grok Build 已连接 Grok 账号",
       "grokLoginFailed": "Grok 账号登录失败，请重试",
-      "signInAfterCreate": "Bot 创建完成后在 Agent 设置里登录：账号在 Agent 自己的工作区内完成登录。",
+      "signInAfterCreate": "Bot 创建完成后在 Agent 设置里登录：账号在 Agent 自己的工作区内完成登录",
       "usage": {
         "window": {
           "weekly": "每周额度",
@@ -2871,10 +2851,10 @@
       "modelsLoadFailed": "无法加载 Agent 模型。请检查 Agent 配置后重试。",
       "openSettings": "打开 Agent 设置",
       "dependencyChecking": "正在检查依赖…",
-      "dependencyInstalledEnableHint": "已安装 {name}，现在可以启用该 Agent。",
+      "dependencyInstalledEnableHint": "已安装 {name}，现在可以启用该 Agent",
       "claudeAccount": "Claude 账号",
-      "claudeAccountDescription": "使用 Claude 订阅账号授权 Claude Code。",
-      "claudeAuthorizationHint": "打开授权页面并登录 Claude，复制页面显示的完整授权码，粘贴到下方即可完成授权。",
+      "claudeAccountDescription": "使用 Claude 订阅账号授权 Claude Code",
+      "claudeAuthorizationHint": "打开授权页面并登录 Claude，复制页面显示的完整授权码，粘贴到下方即可完成授权",
       "openAuthorizationPage": "打开授权页面",
       "authorizationCode": "授权码",
       "authorizationCodePlaceholder": "粘贴完整授权码",
@@ -2884,12 +2864,12 @@
     },
     "dependencies": {
       "title": "工作区依赖",
-      "intro": "这个 Bot 工作区里已安装的命令行工具与运行时。新的依赖从 Supermarket 添加。",
+      "intro": "这个 Bot 工作区里已安装的命令行工具与运行时。新的依赖从应用市场添加。",
       "checkUpdates": "检查更新",
       "checkUpdatesDone": "已检查更新",
       "lastChecked": "上次检查：{time}",
       "emptyTitle": "这个工作区还没有安装依赖",
-      "emptyAction": "去 Supermarket 添加",
+      "emptyAction": "去应用市场添加",
       "loadFailed": "无法加载依赖",
       "close": "关闭",
       "status": {
@@ -2902,7 +2882,7 @@
         "removing": "卸载中",
         "updateAvailable": "有更新 {version}",
         "unsupported": "不支持",
-        "unsupportedTooltip": "当前工作区平台不支持该依赖。",
+        "unsupportedTooltip": "当前工作区平台不支持该依赖",
         "retired": "已下架"
       },
       "action": {
@@ -2929,18 +2909,18 @@
         "reinstallTitle": "重新安装 {name}",
         "updateTitle": "更新 {name}",
         "updateDescription": "当前 {from}。新版本安装完成后才切换；失败不影响当前版本，成功后可回滚。",
-        "installDescription": "将在工作区中下载并安装 {name}。",
-        "prerequisites": "将先安装缺失的前置依赖：{names}。",
-        "reinstallDescription": "在工作区中重新下载并安装 {name}。",
+        "installDescription": "将在工作区中下载并安装 {name}",
+        "prerequisites": "将先安装缺失的前置依赖：{names}",
+        "reinstallDescription": "在工作区中重新下载并安装 {name}",
         "dependency": "依赖",
         "installPath": "安装位置",
         "version": "版本",
         "versionPlaceholder": "最新版本",
-        "versionHelp": "留空则安装最新版。",
+        "versionHelp": "留空则安装最新版",
         "installConfirm": "安装",
         "updateConfirm": "更新",
         "installAndEnable": "安装并启用",
-        "versionInvalid": "请输入 1.2.3 或 latest 这样的版本标识。"
+        "versionInvalid": "请输入 1.2.3 或 latest 这样的版本标识"
       },
       "progress": {
         "installing": "正在安装 {name}",
@@ -2956,7 +2936,7 @@
         "entrypoint": "入口",
         "log": "操作日志",
         "unknownTitle": "结果未确认",
-        "unknownHint": "操作结果尚未确认，请刷新依赖列表查看状态。"
+        "unknownHint": "操作结果尚未确认，请刷新依赖列表查看状态"
       },
       "script": {
         "title": "将在工作区执行的脚本",
@@ -2984,7 +2964,7 @@
       "preflight": {
         "failed": "无法检查依赖",
         "workspaceNotRunningTitle": "先启动工作区",
-        "workspaceNotRunningDescription": "启用 {name} 前需要在运行中的工作区安装依赖。",
+        "workspaceNotRunningDescription": "启用 {name} 前需要在运行中的工作区安装依赖",
         "workspaceMissingTitle": "先创建工作区",
         "startAndContinue": "启动并继续",
         "platformUnsupported": "当前工作区平台不支持 {name}"
@@ -2999,7 +2979,7 @@
         "removed": "已卸载 {name}",
         "failed": "{name} 操作失败"
       },
-      "busy": "此工作区还有其他依赖操作在进行中。"
+      "busy": "此工作区还有其他依赖操作在进行中"
     },
     "folders": {
       "create": "新建文件夹",
@@ -3012,7 +2992,7 @@
       "renameFailed": "重命名文件夹失败",
       "archive": "归档",
       "archiveTitle": "归档文件夹",
-      "archiveDescription": "已在「{name}」中的会话会继续使用原目录；新会话将无法再加入。",
+      "archiveDescription": "已在「{name}」中的会话会继续使用原目录；新会话将无法再加入",
       "archiveFailed": "归档文件夹失败",
       "rowActions": "{name} 的操作",
       "targetNative": "云端电脑",
@@ -3040,21 +3020,20 @@
       "workspaceTitle": "使用位置",
       "loading": "正在加载使用位置...",
       "loadFailed": "无法加载使用位置",
-      "loadFailedDescription": "请检查服务器连接后重试。",
+      "loadFailedDescription": "请检查服务器连接后重试",
       "primary": "默认位置",
-      "primaryDescription": "未另行选择时，文件和命令都在这里执行。",
+      "primaryDescription": "未另行选择时，文件和命令都在这里执行",
       "primarySaveFailed": "无法切换默认位置",
       "defaultBadge": "默认",
       "nativeWorkspace": "云端电脑",
-      "serverDescription": "此 Bot 的内置工作区，由 Memoh 托管。",
+      "serverDescription": "此 Bot 的内置工作区，由 Memoh 托管",
       "thisComputerOff": "使用这台电脑",
-      "thisComputerOffDescription": "请先在「电脑」页面允许这台电脑，再在这里开启访问。",
+      "thisComputerOffDescription": "请先在「电脑」页面允许这台电脑，再在这里开启访问",
       "openComputerSettings": "打开电脑设置",
       "unknownComputer": "不可用的电脑",
       "noComputers": "暂无可授权的电脑",
       "manageComputers": "管理电脑",
-      "connectManage": "连接或断开电脑",
-      "connectManageDescription": "在「电脑」页面管理所有电脑。"
+      "connectManage": "连接或断开电脑"
     },
     "desktop": {
       "title": "桌面环境",
@@ -3098,9 +3077,9 @@
       "selectAll": "全选",
       "selectItem": "选择 {name}",
       "selectedCount": "已选择 {count} 项",
-      "fileNamePlaceholder": "文件名",
-      "folderNamePlaceholder": "文件夹名称",
-      "newNamePlaceholder": "新名称",
+      "fileNamePlaceholder": "输入文件名",
+      "folderNamePlaceholder": "输入文件夹名称",
+      "newNamePlaceholder": "输入新名称",
       "uploadedFolderFallbackName": "上传的文件夹",
       "confirmDelete": "确认删除",
       "confirmDeleteMessage": "确定要删除 \"{name}\" 吗？此操作不可撤销。",
@@ -3155,27 +3134,27 @@
     },
     "container": {
       "title": "工作区",
-      "subtitle": "这个 Bot 编辑文件、执行命令的隔离运行环境。",
-      "botNotReady": "Bot 状态正在变更，暂时无法操作工作区。",
+      "subtitle": "这个 Bot 编辑文件、执行命令的隔离运行环境",
+      "botNotReady": "Bot 状态正在变更，暂时无法操作工作区",
       "empty": "尚未创建工作区。创建后即可使用文件、命令和运行工具。",
       "legacyWarning": "旧版架构。建议重建以获得完整兼容性（数据将自动保留）。",
       "legacyRecreate": "重建",
       "legacyRecreateSuccess": "工作区已重建",
       "createHint": "工作区将使用当前镜像。开启恢复可自动找回保留数据。",
       "createRestoreDataLabel": "创建后恢复已保留数据",
-      "createRestoreDataDescription": "导出的备份或旧版数据将在创建后自动恢复至 /data。",
+      "createRestoreDataDescription": "导出的备份或旧版数据将在创建后自动恢复至 /data",
       "createImageLabel": "基础镜像",
       "createImageDescription": "作为基础环境的 Docker 镜像（如 debian:bookworm-slim）。留空使用默认镜像。",
       "createAdvancedTitle": "高级选项",
-      "createAdvancedDescription": "配置 GPU 访问能力与 CDI 设备映射。",
+      "createAdvancedDescription": "配置 GPU 访问能力与 CDI 设备映射",
       "createGpuLabel": "启用 GPU",
-      "createGpuDescription": "允许新工作区使用宿主机的 GPU。",
+      "createGpuDescription": "允许新工作区使用宿主机的 GPU",
       "createGpuDevicesLabel": "CDI 设备",
       "createGpuDevicesDescription": "每行或用逗号填写一个 CDI 设备名。关闭 GPU 后将清空已保存的偏好。",
       "createGpuDevicesPlaceholder": "nvidia.com/gpu=0\namd.com/gpu=0",
-      "gpuDevicesRequired": "已启用 GPU 时，至少需要填写一个 CDI 设备名。",
+      "gpuDevicesRequired": "已启用 GPU 时，至少需要填写一个 CDI 设备名",
       "cdiDevicesEmpty": "未附加 GPU",
-      "gpuRecreateHint": "GPU 配置变更需要重建工作区后生效，单纯启动或停止不会更新设备。",
+      "gpuRecreateHint": "GPU 配置变更需要重建工作区后生效，单纯启动或停止不会更新设备",
       "deleteConfirm": "确定要彻底删除此工作区吗？未保留的数据将无法恢复。",
       "deletePreserveConfirm": "确定要先导出 `/data` 再删除此工作区吗？",
       "restoreConfirm": "确定要将已保留的数据恢复到 `/data` 吗？",
@@ -3206,14 +3185,14 @@
       "deletePreserveSuccess": "工作区已删除，数据已保留",
       "removal": {
         "removingTitle": "正在删除工作区",
-        "removingHint": "可以先离开此页面，回来仍能看到结果。",
+        "removingHint": "可以先离开此页面，回来仍能看到结果",
         "removingKeepHint": "会先备份数据，备份完成后再删除工作区。可以先离开此页面，回来仍能看到结果。",
         "failedTitle": "工作区删除失败",
         "failedHint": "工作区没有被删除（失败于 {time}）。可以重试，或取消删除继续使用。",
         "retry": "重试",
         "cancel": "取消删除",
         "cancelSuccess": "已取消删除",
-        "recreateStopped": "旧工作区没有删除成功，未进行重建。"
+        "recreateStopped": "旧工作区没有删除成功，未进行重建"
       },
       "snapshotSuccess": "快照创建成功",
       "restoreSuccess": "数据恢复成功",
@@ -3224,17 +3203,17 @@
       "restoringData": "正在迁移数据...",
       "lifecycleTitle": "生命周期",
       "snapshotTitle": "快照管理",
-      "snapshotSubtitle": "保存或回滚工作区运行状态。",
+      "snapshotSubtitle": "保存或回滚工作区运行状态",
       "snapshotEmpty": "暂无快照",
       "snapshotLoadFailed": "加载快照失败",
       "snapshotNamePlaceholder": "显示名称（可选）",
-      "snapshotNameHint": "用户可见的显示名称，系统将自动生成内部快照名。",
+      "snapshotNameHint": "用户可见的显示名称，系统将自动生成内部快照名",
       "metricsTitle": "资源状态",
-      "metricsSubtitle": "CPU、内存及存储使用情况和限制。",
+      "metricsSubtitle": "CPU、内存及存储使用情况和限制",
       "metricsLoadFailed": "加载资源状态失败",
       "metricsUnsupported": "当前后端不支持资源监控",
-      "metricsUnavailable": "暂无可用指标。",
-      "metricsStopped": "工作区未运行，仅显示存储使用情况。",
+      "metricsUnavailable": "暂无可用指标",
+      "metricsStopped": "工作区未运行，仅显示存储使用情况",
       "metricsPath": "统计范围",
       "currentSample": "当前采样",
       "sampledAt": "采样时间",
@@ -3249,9 +3228,9 @@
         "cpuLabel": "CPU 核心数",
         "memoryLabel": "内存（GiB）",
         "storageLabel": "存储（GiB）",
-        "cpuHint": "支持的容器和 VM 运行后端会将其作为硬限制执行。",
-        "memoryHint": "支持的容器和 VM 运行后端会将其作为硬限制执行。",
-        "storageHint": "为 VM 硬限制预留；容器运行后端当前仅将其记录为软限制。",
+        "cpuHint": "支持的容器和 VM 运行后端会将其作为硬限制执行",
+        "memoryHint": "支持的容器和 VM 运行后端会将其作为硬限制执行",
+        "storageHint": "为 VM 硬限制预留；容器运行后端当前仅将其记录为软限制",
         "unlimited": "不限制",
         "unlimitedPlaceholder": "不限制",
         "cpuSummary": "CPU {value}",
@@ -3265,7 +3244,7 @@
         "statusUnsupported": "不支持",
         "statusUnknown": "未知",
         "storageSoftOnly": "当前容器运行后端还不能强制执行存储硬限制。该值会被保存并作为软限制展示，同时为后续 VM 强制限制预留。",
-        "storageSoftExceeded": "当前存储使用量已超过配置的软限制。",
+        "storageSoftExceeded": "当前存储使用量已超过配置的软限制",
         "recreatePrompt": "已保存。CPU 或内存硬限制需要重建工作区后生效。/data 会被保留，但正在运行的进程和 Shell 会话会中断。",
         "recreateConfirmTitle": "重建工作区",
         "recreateConfirm": "现在重建工作区吗？Memoh 会保留 /data，应用新的限制，然后恢复 /data。",
@@ -3273,16 +3252,16 @@
         "saveForLater": "稍后再说",
         "save": "保存限制",
         "saveSuccess": "资源限制已保存",
-        "saveRequiresRecreate": "资源限制已保存，重建后生效。",
+        "saveRequiresRecreate": "资源限制已保存，重建后生效",
         "saveFailed": "保存资源限制失败",
         "loadFailed": "加载资源限制失败",
-        "invalidNumber": "{field} 必须为 0 或正数。"
+        "invalidNumber": "{field} 必须为 0 或正数"
       },
       "dataTitle": "数据操作",
-      "dataSubtitle": "管理 `/data` 目录的导入、导出与恢复。",
+      "dataSubtitle": "管理 `/data` 目录的导入、导出与恢复",
       "deleteTitle": "删除工作区",
-      "deleteSubtitle": "请确认是否在删除前备份 /data。",
-      "preservedDataAvailable": "检测到可恢复的已保留数据。",
+      "deleteSubtitle": "请确认是否在删除前备份 /data",
+      "preservedDataAvailable": "检测到可恢复的已保留数据",
       "preservedDataAvailableShort": "可恢复",
       "preservedDataEmpty": "无",
       "sourceManual": "手动创建",
@@ -3338,19 +3317,19 @@
         "createDialogTitle": "创建工作区",
         "createSubmit": "创建工作区",
         "issueLegacyTitle": "检测到旧版架构",
-        "issueLegacyHint": "重建以获得完整兼容性，数据将自动保留。",
+        "issueLegacyHint": "重建以获得完整兼容性，数据将自动保留",
         "issueRecreateTitle": "资源限额需重建后生效",
         "issueRecreateHint": "CPU 或内存硬限制需要重建工作区才能生效。/data 会保留，但运行中的会话会中断。",
         "dangerDeleteTitle": "删除此工作区",
         "stopDialogTitle": "停止此工作区？",
         "stopDialogBody": "运行环境会停止，正在进行的任务会随之结束。文件会保留，你随时可以重新启动。",
         "deleteDialogTitle": "删除工作区",
-        "deleteDialogBodyKeep": "工作区将被移除，但会保留一份数据副本，之后可恢复到新建的工作区。",
-        "deleteDialogBodyWipe": "工作区及其全部数据将被永久删除，且无法恢复。",
+        "deleteDialogBodyKeep": "工作区将被移除，但会保留一份数据副本，之后可恢复到新建的工作区",
+        "deleteDialogBodyWipe": "工作区及其全部数据将被永久删除，且无法恢复",
         "deleteKeepLabel": "保留数据以便恢复",
-        "deleteKeepDesc": "删除前先备份 /data，新建工作区时可恢复。",
+        "deleteKeepDesc": "删除前先备份 /data，新建工作区时可恢复",
         "emptyTitle": "尚未创建工作区",
-        "emptyDescription": "创建后即可为这个 Bot 启用运行环境。"
+        "emptyDescription": "创建后即可为这个 Bot 启用运行环境"
       }
     },
     "settings": {
@@ -3360,10 +3339,9 @@
         "multimedia": "多媒体"
       },
       "chatModel": "默认对话模型",
-      "chatModelDescription": "供 Memoh Agent 在 Telegram 等渠道的新对话中使用。在网页对话中选择模型不会修改此默认值。",
       "chatModelPlaceholder": "选择模型",
       "defaultAgent": "默认 Agent",
-      "defaultAgentDescription": "仅用于新建本地聊天，已有会话继续使用原来的 Agent。",
+      "defaultAgentDescription": "仅用于新建本地聊天，已有会话继续使用原来的 Agent",
       "defaultAgentUnavailable": "Agent 不可用",
       "defaultAgentUnavailableDescription": "当前默认 Agent 不可用。保存前请选择 Memoh 或其他可用的 Agent。",
       "searchProvider": "搜索提供方",
@@ -3371,7 +3349,7 @@
       "fetchProvider": "网页抓取提供方",
       "fetchProviderPlaceholder": "选择网页抓取提供方",
       "memory": "记忆",
-      "memoryDescription": "使用内置记忆，跨对话记住事实和偏好。",
+      "memoryDescription": "使用内置记忆，跨对话记住事实和偏好",
       "memoryMarkdownFiles": "Markdown 文件数",
       "memoryGraphEdges": "图谱关联数",
       "memoryIndexedEntries": "索引条目数",
@@ -3385,33 +3363,27 @@
       "videoModelPlaceholder": "选择视频模型（可选）",
       "language": "语言",
       "showToolCallsInIM": "在 IM 中显示工具调用",
-      "showToolCallsInIMDescription": "在聊天中以单条消息实时更新工具的执行状态。默认关闭。",
       "displayEnabled": "启用工作区显示器",
       "displayEnabledDescription": "在工作区中启动 Xvnc 服务。保存并重启工作区后生效。",
       "desktopEnabled": "桌面",
       "desktopEnabledDescription": "为这个 Bot 提供一块可以看到、可以操作的屏幕，用于浏览网页和使用桌面应用。你可以实时观看，并随时接管。",
       "toolApproval": "工具调用审核",
       "toolApprovalDescription": "拦截并人工审核 read、write、exec 三类操作。你可以配置免审核的白名单路径或命令。",
-      "acpSetupMode": "配置方式",
       "acpLaunchSection": "启动配置",
       "acpCommand": "命令入口",
       "acpArguments": "启动参数",
-      "acpSetupApiKey": "API Key",
-      "acpSetupOAuth": "OAuth",
-      "acpSetupSelf": "自行配置",
-      "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的 Agent（例如已登录的凭据）。",
       "acpStatusNeedsConfig": "需要配置",
       "acpStatusOff": "已关闭",
       "acpEmptyTitle": "暂无可用 Agent",
-      "acpEmptyDescription": "当前服务端还没有可分配的 Agent。",
+      "acpEmptyDescription": "当前服务端还没有可分配的 Agent",
       "toolApprovalBypass": "跳过审核",
       "toolApprovalMustReview": "必须审核",
       "networkPageTitle": "网络",
       "networkSDWANSectionTitle": "私有网络",
-      "networkSDWANSectionHint": "把这个 Bot 接入你的私有网络，让你能用一个稳定的地址访问它；也可以选择让它的流量从某个位置出网。",
+      "networkSDWANSectionHint": "把这个 Bot 接入你的私有网络，让你能用一个稳定的地址访问它；也可以选择让它的流量从某个位置出网",
       "overlayProviderFieldLabel": "服务商",
       "overlayProviderPlaceholder": "选择服务商",
-      "overlayProviderRequired": "启用前请先选择服务商。",
+      "overlayProviderRequired": "启用前请先选择服务商",
       "overlayPrimaryConfigTitle": "主要配置",
       "networkState": {
         "connected": "已连接",
@@ -3424,7 +3396,7 @@
       "networkDetailsTitle": "连接详情",
       "networkDetailsWorkspaceGroup": "工作区",
       "networkLogoutConfirm": "退出该网络？Bot 将断开连接，直到重新登录。",
-      "networkStatusPendingSave": "有未保存的更改——保存后生效并显示实时状态。",
+      "networkStatusPendingSave": "有未保存的更改——保存后生效并显示实时状态",
       "networkWorkspaceStateLabel": "状态",
       "networkWorkspaceContainerID": "工作区运行 ID",
       "networkWorkspaceTaskStatus": "任务状态",
@@ -3448,20 +3420,20 @@
       "networkStatusHealth": "健康信息",
       "networkStatusSocket": "LocalAPI Socket",
       "networkStatusExitNode": "出口位置",
-      "networkNeedsLoginDescription": "需要认证，请登录服务商授权。",
+      "networkNeedsLoginDescription": "需要认证，请登录服务商授权",
       "networkOpenLoginPage": "前往登录",
-      "networkNeedsLoginHint": "登录完成后，返回此页刷新状态。",
+      "networkNeedsLoginHint": "登录完成后，返回此页刷新状态",
       "networkLogout": "退出登录",
-      "networkLogoutSuccess": "已退出登录。",
-      "networkLogoutFailed": "退出失败。",
+      "networkLogoutSuccess": "已退出登录",
+      "networkLogoutFailed": "退出失败",
       "networkExitNode": "出口位置",
       "networkExitNodePlaceholder": "选择出口位置",
-      "networkExitNodeDescription": "让这个 Bot 的出站流量从某个可用位置出网。",
-      "networkNodesPendingSave": "刷新前请先保存网络配置。",
+      "networkExitNodeDescription": "让这个 Bot 的出站流量从某个可用位置出网",
+      "networkNodesPendingSave": "刷新前请先保存网络配置",
       "networkNodesEmpty": "暂无可用节点。请确保网络已连通。",
       "networkNodesRefreshFailed": "刷新节点列表失败",
       "allowGuest": "ACL 默认行为",
-      "allowGuestPersonalHint": "ACL 规则将应用于所有类型的 Bot。",
+      "allowGuestPersonalHint": "ACL 规则将应用于所有类型的 Bot",
       "loopDetectionTitle": "自动检测并阻止模型循环输出",
       "searchModel": "搜索模型…",
       "noModel": "暂无可选模型",
@@ -3477,18 +3449,18 @@
       "agentCredentialReplace": "更换密钥",
       "agentCredentialSaved": "API Key 已保存",
       "agentCredentialConnected": "已连接 API Key",
-      "agentCredentialConnectedHint": "此 Agent 使用独立保存的密钥，保存新密钥会替换旧的。",
+      "agentCredentialConnectedHint": "此 Agent 使用独立保存的密钥，保存新密钥会替换旧的",
       "agentCredentialDisconnect": "断开",
       "agentCredentialDisconnectConfirm": "断开此 Agent 的凭证？"
     },
     "access": {
       "title": "访问控制",
-      "subtitle": "控制谁能访问和管理此 Bot —— 包括 IM 渠道和工作区两侧。",
+      "subtitle": "控制谁能访问和管理此 Bot —— 包括 IM 渠道和工作区两侧",
       "channelTab": "渠道成员",
       "workspaceTab": "工作区成员",
       "userAccess": {
         "title": "工作区成员",
-        "subtitle": "控制哪些平台注册用户可以在网页端管理或配置此 Bot。",
+        "subtitle": "控制哪些平台注册用户可以在网页端管理或配置此 Bot",
         "addMember": "添加",
         "subjectQuestion": "谁可以访问",
         "everyone": "全部成员",
@@ -3496,7 +3468,7 @@
         "memberQuestion": "成员",
         "selectMember": "选择成员",
         "searchMember": "搜索成员…",
-        "noMemberCandidates": "没有可选成员。",
+        "noMemberCandidates": "没有可选成员",
         "permissionsQuestion": "权限",
         "permissionChat": "可对话",
         "permissionWorkspaceRead": "可读文件",
@@ -3504,9 +3476,9 @@
         "permissionWorkspaceExec": "可执行命令",
         "permissionManage": "可设置编辑",
         "ownerBadge": "所有者",
-        "empty": "暂无显式授权的工作区成员。",
+        "empty": "暂无显式授权的工作区成员",
         "removeConfirm": "移除该成员的访问权限？",
-        "atLeastOnePermission": "至少需要选择一项权限。",
+        "atLeastOnePermission": "至少需要选择一项权限",
         "saved": "访问权限已更新",
         "saveFailed": "更新访问权限失败",
         "removed": "已移除访问权限",
@@ -3527,7 +3499,7 @@
         "platformMember": "平台成员",
         "platformMemberHint": "该渠道身份已关联到此 Bot 的某个工作区成员，但该成员没有管理权限。勾选「管理」可仅在此渠道单独授予。",
         "inheritedFollowing": "管理权限继承自该成员的工作区角色，跟随工作区设置。取消勾选可仅在此渠道单独覆盖。",
-        "overrideActive": "管理权限已在此渠道单独设置，不再跟随工作区。",
+        "overrideActive": "管理权限已在此渠道单独设置，不再跟随工作区",
         "recoverInherit": "恢复继承",
         "removeConfirm": "移除该身份的全部渠道访问？",
         "removeGroupConfirm": "移除该群聊的访问权限？",
@@ -3541,35 +3513,35 @@
         "updateFailed": "更新失败",
         "removed": "已移除成员",
         "removeFailed": "移除成员失败",
-        "emptyWithRules": "名单为空，另有 {count} 条高级规则在生效，见“当前生效”。"
+        "emptyWithRules": "名单为空，另有 {count} 条高级规则在生效，见“当前生效”"
       },
       "advanced": {
         "entryTitle": "高级规则",
         "activeCount": "{count} 条规则生效"
       },
       "defaultEffectTitle": "默认行为",
-      "defaultEffectDescription": "当没有规则匹配入站消息时应用此策略。",
+      "defaultEffectDescription": "当没有规则匹配入站消息时应用此策略",
       "modeTitle": "访问模式",
       "modeDescription": "选择默认放行还是默认拦截。名单里的规则会覆盖默认模式。",
       "defaultEffectSaved": "访问模式已更新",
       "blacklistMode": "黑名单模式",
-      "blacklistModeDescription": "只要没在名单里，谁都能用。",
+      "blacklistModeDescription": "默认放行所有人，仅拦截黑名单中的条目",
       "blacklistModeHint": "默认为允许。新条目将加入黑名单。",
       "whitelistMode": "白名单模式",
-      "whitelistModeDescription": "只有名单上的人能通过。",
+      "whitelistModeDescription": "默认拦截所有人，仅放行白名单中的条目",
       "whitelistModeHint": "默认为拒绝。新条目将加入白名单。",
       "blacklistTitle": "黑名单",
-      "blacklistDescription": "这个名单里的人都会被拦住。",
+      "blacklistDescription": "这个名单里的人都会被拦住",
       "whitelistTitle": "白名单",
-      "whitelistDescription": "只有这个名单里的人才会被允许。",
+      "whitelistDescription": "只有这个名单里的人才会被允许",
       "addBlacklistEntry": "添加黑名单条目",
       "addWhitelistEntry": "添加白名单条目",
       "blacklistEmpty": "黑名单为空",
       "blacklistEmptyDescription": "目前没设任何拦截规则。没被选中的人都能正常通过。",
       "whitelistEmpty": "白名单为空",
       "whitelistEmptyDescription": "还没添加放行的人。没在这份名单里的都会被拦截。",
-      "platformQuestion": "这条规则在哪用？",
-      "userQuestion": "这条规则针对谁？",
+      "platformQuestion": "平台",
+      "userQuestion": "适用用户",
       "allPlatforms": "所有平台",
       "allUsers": "所有用户",
       "searchPlatform": "搜索平台",
@@ -3588,14 +3560,14 @@
       "addRule": "添加规则",
       "editRule": "编辑规则",
       "rulesEmpty": "暂无规则",
-      "rulesEmptyDescription": "添加规则以在默认行为之外控制访问。",
+      "rulesEmptyDescription": "添加规则以在默认行为之外控制访问",
       "searchRules": "搜索规则…",
-      "searchNoMatch": "没有匹配的规则。",
+      "searchNoMatch": "没有匹配的规则",
       "enabled": "启用",
       "effect": "行为",
       "matchTarget": "匹配对象",
-      "targetQuestion": "这条名单适用于谁？",
-      "scopeQuestion": "在哪些聊天里生效？",
+      "targetQuestion": "适用对象",
+      "scopeQuestion": "生效范围",
       "subjectAll": "所有人",
       "subjectChannelType": "平台",
       "subjectChannelIdentity": "用户",
@@ -3622,7 +3594,7 @@
       "deleteFailed": "删除规则失败",
       "anyConversationScope": "任何聊天范围",
       "chatScope": "聊天范围",
-      "chatScopeDescription": "选一下这条规则在哪些场景生效。",
+      "chatScopeDescription": "选一下这条规则在哪些场景生效",
       "chatScopeAny": "所有聊天",
       "specificConversationTitle": "只针对某个具体聊天",
       "specificConversationDescription": "大多数情况下不需要。除非你只想针对某一个特定的群、私聊或话题。",
@@ -3646,13 +3618,13 @@
       "conversationSource": "会话",
       "existingConversation": "已知会话",
       "selectConversationSource": "找个会话",
-      "searchConversationSource": "搜搜看",
-      "noObservedConversations": "还没在历史记录里找到匹配的聊天。你可以手动填下 ID，或者等 Bot 在那个频道里露个脸。",
+      "searchConversationSource": "搜索会话",
+      "noObservedConversations": "暂未找到匹配的会话记录。你可以手动输入会话 ID，或待 Bot 在该聊天中收到消息后再选择。",
       "manualConversationIds": "找不到？手动填 ID",
       "manualConversationIdsHint": "只有找不到聊天记录时才用这个。你需要从聊天平台里手动复制会话或话题 ID。",
-      "pickTargetForConversationSearch": "先选下平台或用户，然后再搜相关的会话。",
-      "pickIdentityForConversationSearch": "先选个用户，才能搜他的聊天历史。",
-      "pickChannelTypeForConversationSearch": "先选个平台，才能搜这个平台上的聊天历史。",
+      "pickTargetForConversationSearch": "先选下平台或用户，然后再搜相关的会话",
+      "pickIdentityForConversationSearch": "先选个用户，才能搜他的聊天历史",
+      "pickChannelTypeForConversationSearch": "先选个平台，才能搜这个平台上的聊天历史",
       "conversationId": "会话 ID",
       "conversationIdPlaceholder": "输入 ID",
       "threadId": "话题 ID",
@@ -3668,9 +3640,9 @@
         "listed": "仅名单内",
         "exceptListed": "名单外可用",
         "nobody": "不回复任何人",
-        "scopeNote": "仅作用于 IM 渠道，Web 端聊天不受影响。",
-        "scopeNoteWithExempt": "仅作用于 IM 渠道，Web 端聊天和{channels}不受影响。",
-        "modeWithScope": "{mode}{scope}"
+        "scopeNote": "仅作用于 IM 渠道，Web 端聊天不受影响",
+        "scopeNoteWithExempt": "仅作用于 IM 渠道，Web 端聊天和{channels}不受影响",
+        "modeWithScope": "{mode}；{scope}"
       }
     },
     "channels": {
@@ -3698,25 +3670,25 @@
       "deleteSuccess": "平台已移除",
       "deleteFailed": "移除平台失败",
       "webhookCallback": "WebHook 回调地址",
-      "webhookCallbackHint": "请将此地址填入对应平台控制台的 Webhook 配置中。",
+      "webhookCallbackHint": "请将此地址填入对应平台控制台的 Webhook 配置中",
       "lineWebhookCallbackHint": "请将此地址填入 LINE Developers 的 Messaging API Webhook 设置。Base URL 必须是公网 HTTPS，并能把 /channels/... 路由到 Memoh Channel 服务。",
-      "wechatOAWebhookCallbackHint": "请将此地址填入微信服务号平台的回调 URL 配置中。",
-      "webhookCallbackPending": "保存当前配置后即可生成回调地址。",
+      "wechatOAWebhookCallbackHint": "请将此地址填入微信服务号平台的回调 URL 配置中",
+      "webhookCallbackPending": "保存当前配置后即可生成回调地址",
       "webhookCallbackPublicBasePending": "平台配置已保存。请配置公网 HTTPS webhook base，或等待隧道就绪。",
-      "lineWebhookPublicBaseMissing": "请先在 server 配置 MEMOH_WEBHOOK_PUBLIC_BASE_URL，或启用 Cloudflare Quick Tunnel。",
-      "lineWebhookPublicBaseInvalid": "LINE Webhook base 必须是公网 HTTPS origin，不能包含 path、端口、localhost、内网 IP、用户名密码、query 或 fragment。",
-      "lineWebhookTunnelStarting": "正在创建 Cloudflare Quick Tunnel，稍后会自动显示公网回调地址。",
-      "lineWebhookTunnelUnavailable": "Cloudflare Quick Tunnel 当前不可用，请检查 cloudflared 配置或改用公网 HTTPS base。",
+      "lineWebhookPublicBaseMissing": "请先在 server 配置 MEMOH_WEBHOOK_PUBLIC_BASE_URL，或启用 Cloudflare Quick Tunnel",
+      "lineWebhookPublicBaseInvalid": "LINE Webhook base 必须是公网 HTTPS origin，不能包含 path、端口、localhost、内网 IP、用户名密码、query 或 fragment",
+      "lineWebhookTunnelStarting": "正在创建 Cloudflare Quick Tunnel，稍后会自动显示公网回调地址",
+      "lineWebhookTunnelUnavailable": "Cloudflare Quick Tunnel 当前不可用，请检查 cloudflared 配置或改用公网 HTTPS base",
       "lineWebhookSet": "设置到 LINE",
       "lineWebhookSetting": "设置中...",
       "lineWebhookSetSuccess": "LINE Webhook 地址已更新",
       "lineWebhookSetFailed": "更新 LINE Webhook 地址失败",
-      "lineWebhookSaveFirst": "请先保存当前平台配置，再设置 LINE Webhook 地址。",
-      "linePublicMediaLimit": "LINE 出站图片需要配置公网 HTTPS base 或启用 Cloudflare Quick Tunnel；图片必须是 PNG/JPEG，并符合 LINE 大小限制。",
+      "lineWebhookSaveFirst": "请先保存当前平台配置，再设置 LINE Webhook 地址",
+      "linePublicMediaLimit": "LINE 出站图片需要配置公网 HTTPS base 或启用 Cloudflare Quick Tunnel；图片必须是 PNG/JPEG，并符合 LINE 大小限制",
       "showSecretField": "显示{field}",
       "hideSecretField": "隐藏{field}",
-      "feishuWebhookSecurityHint": "为了安全，使用 Webhook 模式时必须配置 Encrypt Key 或 Verification Token；不要将未受保护的回调地址直接暴露。",
-      "feishuWebhookSecretRequired": "为了安全，请至少配置 Encrypt Key 或 Verification Token 其中的一项。",
+      "feishuWebhookSecurityHint": "为了安全，使用 Webhook 模式时必须配置 Encrypt Key 或 Verification Token；不要将未受保护的回调地址直接暴露",
+      "feishuWebhookSecretRequired": "为了安全，请至少配置 Encrypt Key 或 Verification Token 其中的一项",
       "noAvailableTypes": "所有平台类型均已配置",
       "platformKey": "平台标识：{key}",
       "advancedTitle": "高级设置",
@@ -3724,11 +3696,11 @@
       "collapse": "收起",
       "dangerZone": "危险操作",
       "deleteTitle": "删除平台",
-      "deleteWarning": "删除此连接后无法恢复，请谨慎操作。",
+      "deleteWarning": "删除此连接后无法恢复，请谨慎操作",
       "weixinQr": {
-        "startFailed": "无法获取二维码，请重试。",
+        "startFailed": "无法获取二维码，请重试",
         "title": "扫码登录",
-        "description": "使用微信扫描二维码以连接微信账号。",
+        "description": "使用微信扫描二维码以连接微信账号",
         "startScan": "获取二维码",
         "waitingScan": "打开微信扫描此二维码",
         "scanned": "已扫码 — 请在手机上确认",
@@ -3765,18 +3737,18 @@
     },
     "memory": {
       "title": "记忆",
-      "empty": "Bot 会在对话中自动积累记忆，你也可以手动添加。",
+      "empty": "Bot 会在对话中自动积累记忆，你也可以手动添加",
       "emptyTitle": "暂无记忆",
-      "noResults": "没有匹配搜索的记忆。",
-      "searchPlaceholder": "搜索记忆...",
+      "noResults": "没有匹配搜索的记忆",
+      "searchPlaceholder": "搜索记忆…",
       "newMemory": "新建记忆",
       "editMemory": "编辑记忆",
       "contentLabel": "内容",
-      "contentPlaceholder": "在此输入记忆内容（支持 Markdown）...",
+      "contentPlaceholder": "在此输入记忆内容（支持 Markdown）…",
       "totalCount": "记忆总数",
       "lastUpdated": "最近更新",
       "compact": "压缩",
-      "compactConfirm": "系统将利用 AI 合并相似内容，这会减少记忆条目的总数。",
+      "compactConfirm": "系统将利用 AI 合并相似内容，这会减少记忆条目的总数",
       "compactRatio": "压缩率",
       "compactRatioLight": "轻度 (0.8)",
       "compactRatioMedium": "中度 (0.5)",
@@ -3784,7 +3756,7 @@
       "compactDecayDate": "以此日期之前的记忆会被优先压缩",
       "compactSuccess": "记忆压缩成功",
       "compactFailed": "记忆压缩失败",
-      "compactUnsupported": "当前记忆提供方不支持语义记忆压缩。",
+      "compactUnsupported": "当前记忆提供方不支持语义记忆压缩",
       "compactNoMemories": "没有可压缩的记忆",
       "deleteConfirm": "确定要删除这条记忆吗？此操作无法撤销。",
       "saveSuccess": "记忆已保存",
@@ -3800,11 +3772,11 @@
       "advanced": {
         "entryTitle": "高级",
         "memoryModel": "记忆模型",
-        "memoryModelDescription": "用于提取和整理记忆的模型。",
+        "memoryModelDescription": "用于提取和整理记忆的模型",
         "memoryModelPlaceholder": "跟随对话模型（默认）",
         "embeddingModelDescription": "为图谱召回提供语义起点。本团队所有 Bot 共用此设置。",
         "syncAction": "手动同步",
-        "syncSuccess": "同步完成：源条目 {fsCount} 条，修复 {restoredCount} 条，索引现有 {storageCount} 条。",
+        "syncSuccess": "同步完成：源条目 {fsCount} 条，修复 {restoredCount} 条，索引现有 {storageCount} 条",
         "syncFailed": "手动同步失败",
         "healthOk": "正常",
         "healthUnavailable": "暂不可用"
@@ -3826,12 +3798,8 @@
       "advanced": "高级设置",
       "loadFailed": "加载压缩记录失败",
       "empty": "暂无压缩记录",
-      "emptyHint": "机器人压缩会话历史后，这里会出现记录。",
-      "filterEmpty": "没有匹配当前状态筛选条件的记录。",
-      "clearLogs": "清空记录",
-      "clearConfirm": "确定要清空所有压缩记录吗？此操作不可撤销。",
-      "clearSuccess": "压缩记录已清空",
-      "clearFailed": "清空压缩记录失败",
+      "emptyHint": "机器人压缩会话历史后，这里会出现记录",
+      "filterEmpty": "没有匹配当前状态筛选条件的记录",
       "status": "状态",
       "time": "时间",
       "duration": "耗时",
@@ -3845,7 +3813,7 @@
       "title": "定时任务",
       "loadFailed": "加载失败",
       "empty": "暂无定时任务",
-      "emptyDescription": "让这个 Bot 按你设定的时间自动执行一段指令。",
+      "emptyDescription": "让这个 Bot 按你设定的时间自动执行一段指令",
       "name": "名称",
       "pattern": "表达式",
       "enabled": "启用",
@@ -3865,7 +3833,7 @@
       "deleteFailed": "删除失败",
       "saveSuccess": "任务已保存",
       "saveFailed": "保存失败",
-      "dangerZoneDesc": "任务删除后无法恢复，请谨慎操作。",
+      "dangerZoneDesc": "任务删除后无法恢复，请谨慎操作",
       "deleteTitle": "删除任务",
       "moreOptions": "更多选项",
       "sortName": "按名称",
@@ -3878,13 +3846,13 @@
         "existingSession": "在已有会话中",
         "session": "会话",
         "sessionPlaceholder": "选择会话",
-        "sessionRuntimeNative": "该会话使用内置模型运行时，沿用其文件夹。",
-        "sessionRuntimeAgent": "该会话通过 {agent} 运行，沿用其文件夹。",
+        "sessionRuntimeNative": "该会话使用内置模型运行时，沿用其文件夹",
+        "sessionRuntimeAgent": "该会话通过 {agent} 运行，沿用其文件夹",
         "model": "模型",
         "botDefault": "Bot 默认",
         "pickModel": "选择模型",
-        "noBotDefaultModel": "该 Bot 没有设置默认模型，任务会使用这里选择的模型运行。",
-        "noModelAvailable": "该 Bot 没有默认模型，也没有可选的对话模型，请先添加一个。",
+        "noBotDefaultModel": "该 Bot 没有设置默认模型，任务会使用这里选择的模型运行",
+        "noModelAvailable": "该 Bot 没有默认模型，也没有可选的对话模型，请先添加一个",
         "sessionDefault": "会话默认",
         "externalAgents": "外部 Agent",
         "agentDefaultModel": "Agent 默认",
@@ -3915,8 +3883,8 @@
         "enabled": "启用任务",
         "invalidPattern": "表达式无效",
         "maxRunMinutes": "单次执行时限（分钟）",
-        "maxRunMinutesHelp": "每次可运行 5 分钟至 24 小时。",
-        "invalidMaxRunMinutes": "请输入 5 至 1440 的整数。"
+        "maxRunMinutesHelp": "每次可运行 5 分钟至 24 小时",
+        "invalidMaxRunMinutes": "请输入 5 至 1440 的整数"
       },
       "mode": {
         "minutes": "每 N 分钟",
@@ -3928,13 +3896,13 @@
         "advanced": "高级（Cron）"
       },
       "modeHint": {
-        "minutes": "每 N 分钟触发一次。",
-        "hourly": "每小时在指定分钟触发。",
-        "daily": "每天在选定的小时触发。",
-        "weekly": "在选定的星期几触发。",
-        "monthly": "在每月选定的日期触发。",
-        "yearly": "每年在指定月份和日期触发。",
-        "advanced": "直接编写 cron 表达式以获得完全控制。"
+        "minutes": "每 N 分钟触发一次",
+        "hourly": "每小时在指定分钟触发",
+        "daily": "每天在选定的小时触发",
+        "weekly": "在选定的星期几触发",
+        "monthly": "在每月选定的日期触发",
+        "yearly": "每年在指定月份和日期触发",
+        "advanced": "直接编写 cron 表达式以获得完全控制"
       },
       "weekday": {
         "sun": "日",
@@ -4048,14 +4016,14 @@
   },
   "supermarket": {
     "title": "市场",
-    "searchPlaceholder": "搜索应用...",
+    "searchPlaceholder": "搜索应用…",
     "skillsSection": "Skills",
     "noResults": "未找到结果",
     "noAppResults": "未找到应用",
     "install": "安装",
     "installToBot": "安装到 Bot",
     "selectBot": "选择 Bot",
-    "selectBotPlaceholder": "选择要安装到的 Bot...",
+    "selectBotPlaceholder": "选择要安装到的 Bot…",
     "envVariables": "环境变量",
     "envDescription": "配置所需的环境变量",
     "installSuccess": "安装成功",
@@ -4074,7 +4042,7 @@
     "submit": "提交",
     "information": "信息",
     "category": "分类",
-    "registry": "Registry",
+    "registry": "应用源",
     "app": "应用",
     "previousPage": "上一页",
     "nextPage": "下一页",
@@ -4088,13 +4056,13 @@
     "appNotFound": "未找到应用",
     "noDescription": "暂无描述",
     "unnamedSkill": "未命名 Skill",
-    "dependenciesHint": "安装到 Bot 的工作区，并与需要它们的其他应用共享。",
-    "dependenciesLoadError": "依赖信息加载失败，请重试。",
-    "dependencyUnavailable": "暂无此依赖的信息。",
+    "dependenciesHint": "安装到 Bot 的工作区，并与需要它们的其他应用共享",
+    "dependenciesLoadError": "依赖信息加载失败，请重试",
+    "dependencyUnavailable": "暂无此依赖的信息",
     "dependencyPending": "加载中…",
-    "connectorsHint": "安装时即可完成连接器授权。",
-    "connectorsUnavailableHint": "服务器未配置 Connect-It，这些连接器将保持未授权状态。",
-    "connectorAuthHint": "安装时授权。",
+    "connectorsHint": "安装时即可完成连接器授权",
+    "connectorsUnavailableHint": "服务器未配置 Connect-It，这些连接器将保持未授权状态",
+    "connectorAuthHint": "安装时授权",
     "license": "许可证",
     "repository": "仓库",
     "revision": "版本修订",
@@ -4106,7 +4074,7 @@
     "viewAll": "查看全部",
     "sidebar": {
       "installed": "已安装",
-      "manageRequired": "需要此 Bot 的管理权限才能安装应用。",
+      "manageRequired": "需要此 Bot 的管理权限才能安装应用",
       "manage": "管理",
       "discovered": "工作区中已有"
     }
@@ -4122,9 +4090,9 @@
     "toolDiscoveryFailed": "工具不可用：{error}",
     "unknown": "未知连接器",
     "emptyTitle": "还没有连接器",
-    "emptyDescription": "连接服务，让这个 Bot 可以使用服务提供的工具。",
+    "emptyDescription": "连接服务，让这个 Bot 可以使用服务提供的工具",
     "catalogEmptyTitle": "暂无可用连接器",
-    "catalogEmptyDescription": "请先配置 Connect-It，再浏览和连接服务。",
+    "catalogEmptyDescription": "请先配置 Connect-It，再浏览和连接服务",
     "authMethod": "认证方式",
     "selectAuthMethod": "选择认证方式",
     "credentialPlaceholder": "请输入{field}",
@@ -4132,14 +4100,14 @@
     "reauthorize": "重新授权",
     "disconnect": "断开连接",
     "disconnectTitle": "断开这个连接器？",
-    "disconnectDescription": "这会删除已保存的 {name} 连接，使用它的应用需要重新授权。",
+    "disconnectDescription": "这会删除已保存的 {name} 连接，使用它的应用需要重新授权",
     "disconnected": "已断开连接器",
     "disconnectFailed": "断开连接器失败",
     "loadFailed": "加载连接器失败",
     "updateFailed": "更新连接器失败",
     "oauthSuccess": "授权完成",
     "oauthFailed": "授权失败",
-    "oauthPopupBlocked": "授权窗口被浏览器拦截了,请允许此页面的弹出窗口后重试。",
+    "oauthPopupBlocked": "授权窗口被浏览器拦截了,请允许此页面的弹出窗口后重试",
     "connectedSuccess": "{name} 已连接",
     "connectFailed": "连接服务失败",
     "oauthAppNotConfigured": {
@@ -4169,12 +4137,12 @@
     "welcome": {
       "title": "欢迎使用 Memoh",
       "subtitle": "你的私有化 AI 智能体平台",
-      "description": "只需几步，完成你的专属工作空间配置。"
+      "description": "只需几步，完成你的专属工作空间配置"
     },
     "intro": {
       "title": "欢迎使用 Memoh",
       "description": "你的私有化 AI 智能体平台，自托管部署，\n零遥测，为开发者打造",
-      "placeholder": "介绍页内容即将推出。"
+      "placeholder": "介绍页内容即将推出"
     },
     "appearance": {
       "title": "选择你的风格",
@@ -4186,14 +4154,14 @@
     },
     "provider": {
       "title": "配置 AI 服务商",
-      "placeholder": "服务商配置即将推出。",
-      "description": "选择常用服务商，配置 API 密钥即可开始使用。",
+      "placeholder": "服务商配置即将推出",
+      "description": "选择常用服务商，配置 API 密钥即可开始使用",
       "custom": "自定义",
       "form": {
         "name": "名称",
         "namePlaceholder": "例如：我的 OpenAI",
         "apiKey": "API 密钥",
-        "apiKeyPlaceholder": "sk-...",
+        "apiKeyPlaceholder": "sk-…",
         "baseUrl": "Base URL",
         "baseUrlPlaceholder": "https://api.example.com/v1",
         "clientType": "API 格式",
@@ -4204,15 +4172,15 @@
         "cancel": "取消",
         "requiredError": "请填写所有字段",
         "saveFailed": "保存失败",
-        "typeConflict": "已存在同名但 API 格式不同的服务商，请换一个名称。",
+        "typeConflict": "已存在同名但 API 格式不同的服务商，请换一个名称",
         "errorHttpTitle": "连接失败",
-        "errorHttpDescription": "请检查 API 密钥与接口地址是否正确。",
+        "errorHttpDescription": "请检查 API 密钥与接口地址是否正确",
         "errorAuthTitle": "API 密钥无效",
-        "errorAuthDescription": "服务商拒绝了你的 API 密钥，请确认密钥是否正确且未过期。",
+        "errorAuthDescription": "服务商拒绝了你的 API 密钥，请确认密钥是否正确且未过期",
         "errorUnreachableTitle": "无法连接服务商",
-        "errorUnreachableDescription": "无法连接到该服务商，请确认 API 密钥和接口地址是否正确。",
+        "errorUnreachableDescription": "无法连接到该服务商，请确认 API 密钥和接口地址是否正确",
         "errorNoModelsTitle": "未获取到模型",
-        "errorNoModelsDescription": "服务商可能不提供模型列表接口，你可以重试或手动添加模型。",
+        "errorNoModelsDescription": "服务商可能不提供模型列表接口，你可以重试或手动添加模型",
         "retry": "重试",
         "manualAdd": "手动添加",
         "skipStep": "跳过此步",
@@ -4225,30 +4193,30 @@
     },
     "bot": {
       "title": "创建你的第一个 Bot",
-      "placeholder": "Bot 创建即将推出。",
+      "placeholder": "Bot 创建即将推出",
       "preparingEnvironment": "正在准备环境...",
       "randomName": "随机取个名字",
       "model": {
         "selectPlaceholder": "选择模型",
         "hint": "选择 Bot 回复时使用的模型。建议现在选择，之后也可随时在设置中更改。",
         "loading": "正在加载模型...",
-        "loadFailed": "模型列表加载失败，请重试。",
+        "loadFailed": "模型列表加载失败，请重试",
         "retry": "重试"
       },
       "acp": {
-        "deferredHint": "授权将在下一步创建 Bot 并准备好工作区后进行。"
+        "deferredHint": "授权将在下一步创建 Bot 并准备好工作区后进行"
       }
     },
     "im": {
       "title": "接入 IM 渠道",
-      "placeholder": "IM 接入即将推出。"
+      "placeholder": "IM 接入即将推出"
     },
     "complete": {
       "title": "一切就绪",
       "subtitle": "进入 Memoh，开始你的第一段对话",
       "action": "打开 Memoh",
       "saveFailed": "保存失败，请重试",
-      "navigationFailed": "无法打开 Bot，请重试。",
+      "navigationFailed": "无法打开 Bot，请重试",
       "noModelWarning": "尚未为 Bot 选择模型，Bot 将无法回复消息。你可以稍后在 Bot 设置中配置。",
       "examplesHint": "也可以从一个示例开始"
     }
@@ -4273,14 +4241,14 @@
     "checkUpdates": "检查更新",
     "checkUpdatesDone": "更新检查完成",
     "checkUpdatesFailed": "无法检查更新",
-    "checkUpdatesIncomplete": "部分项目未能及时完成检查，仍显示上次的结果，请稍后重试。",
-    "checkUpdatesTimedOut": "检查超时，结果可能不完整，请稍后重试。",
+    "checkUpdatesIncomplete": "部分项目未能及时完成检查，仍显示上次的结果，请稍后重试",
+    "checkUpdatesTimedOut": "检查超时，结果可能不完整，请稍后重试",
     "browse": "浏览市场",
     "emptyTitle": "尚未安装应用",
-    "emptyDescription": "为 Bot 安装应用，增加新的能力。",
+    "emptyDescription": "为 Bot 安装应用，增加新的能力",
     "emptyAction": "打开市场",
     "loadFailed": "无法加载应用",
-    "busy": "此工作区还有另一个应用操作在进行中。",
+    "busy": "此工作区还有另一个应用操作在进行中",
     "viewBotApps": "查看 Bot 应用",
     "components": "{count} 个组件",
     "workspaceNotRunningDescription": "安装和更新应用需要运行中的工作区。列表显示的是最近记录的状态。",
@@ -4308,9 +4276,9 @@
       "optional": "可选",
       "shared": "所有工作区共享",
       "authorize": "去授权",
-      "authDescription": "连接 {name} 使用的服务。",
+      "authDescription": "连接 {name} 使用的服务",
       "unavailableTitle": "连接器不可用",
-      "unavailableDescription": "当前配置的 Connect-It 未提供此类型的连接器。"
+      "unavailableDescription": "当前配置的 Connect-It 未提供此类型的连接器"
     },
     "remove": {
       "title": "卸载 {name}？",
@@ -4338,16 +4306,16 @@
       "failedTitle": "操作失败",
       "failedHint": "已记录为失败，可在应用页重试。完整日志可复制。",
       "unknownTitle": "结果未确认",
-      "unknownHint": "操作结果尚未确认，请刷新应用列表查看状态。",
+      "unknownHint": "操作结果尚未确认，请刷新应用列表查看状态",
       "preparing": "准备中…",
-      "noLog": "没有脚本输出。",
+      "noLog": "没有脚本输出",
       "log": "操作日志",
       "runInBackground": "后台运行",
       "reconnecting": "与服务器的连接中断，正在确认结果…",
       "preparingAuthorization": "正在准备授权…",
-      "awaitingAuthorization": "请在打开的窗口中完成授权。",
-      "authorize": "连接 {name} 以完成安装。",
-      "authorizationLoadFailed": "无法加载授权信息，请重试。"
+      "awaitingAuthorization": "请在打开的窗口中完成授权",
+      "authorize": "连接 {name} 以完成安装",
+      "authorizationLoadFailed": "无法加载授权信息，请重试"
     },
     "steps": {
       "skills": "Skills",
@@ -4375,7 +4343,7 @@
       "failed": "{name}：操作失败"
     },
     "enableFlow": {
-      "installDescription": "将 {name} 应用安装到工作区，然后启用该 Agent。"
+      "installDescription": "将 {name} 应用安装到工作区，然后启用该 Agent"
     },
     "sections": {
       "skills": "Skills",
@@ -4387,10 +4355,10 @@
       "description": "选择要更新的项目。依赖会更新到最新版本，应用发布会替换其 Skills。",
       "release": "应用发布",
       "confirm": "更新 {count} 项",
-      "none": "没有可更新的项目。"
+      "none": "没有可更新的项目"
     },
     "tryIt": {
-      "prompt": "帮我测试 {name} App，演示一下它的功能怎么用，再简单介绍一下它都能做什么。"
+      "prompt": "帮我测试 {name} App，演示一下它的功能怎么用，再简单介绍一下它都能做什么"
     }
   },
   "runtime": {
@@ -4398,23 +4366,23 @@
       "modes": {
         "inherit": {
           "name": "跟随工作区配置",
-          "description": "使用工作区中的权限配置。"
+          "description": "使用工作区中的权限配置"
         },
         "default": {
           "name": "手动确认",
-          "description": "需要授权的操作由你确认。"
+          "description": "需要授权的操作由你确认"
         },
         "acceptEdits": {
           "name": "自动接受编辑",
-          "description": "自动允许工作目录内的编辑和常见文件操作。"
+          "description": "自动允许工作目录内的编辑和常见文件操作"
         },
         "auto": {
           "name": "自动审批",
-          "description": "由 Claude 判断操作是否允许，减少人工审批。"
+          "description": "由 Claude 判断操作是否允许，减少人工审批"
         },
         "bypassPermissions": {
           "name": "跳过权限检查",
-          "description": "跳过普通审批；显式规则和 Memoh 工具权限仍然生效。"
+          "description": "跳过普通审批；显式规则和 Memoh 工具权限仍然生效"
         }
       },
       "commands": {
@@ -4482,15 +4450,15 @@
       "modes": {
         "ask": {
           "name": "每次询问",
-          "description": "执行有副作用的操作前先由你确认。"
+          "description": "执行有副作用的操作前先由你确认"
         },
         "auto": {
           "name": "自动判断",
-          "description": "由 Grok 判断哪些操作可以安全执行，不再逐一询问。"
+          "description": "由 Grok 判断哪些操作可以安全执行，不再逐一询问"
         },
         "alwaysApprove": {
           "name": "全部批准",
-          "description": "所有操作直接批准，不再询问；Memoh 工具权限仍然生效。"
+          "description": "所有操作直接批准，不再询问；Memoh 工具权限仍然生效"
         }
       },
       "commands": {
@@ -4532,7 +4500,7 @@
         "primary": "主要额度已用",
         "secondary": "次要额度已用"
       },
-      "empty": "暂无记录。",
+      "empty": "暂无记录",
       "unknown": "暂无数据",
       "resets": "{time}重置",
       "details": "查看 JSON"
@@ -4541,5 +4509,30 @@
   "elicitation": {
     "done": "已完成",
     "cancel": "取消"
+  },
+  "notifications": {
+    "clearAll": "全部标为已读",
+    "clearAllConfirm": "把 {count} 条都标为已读？",
+    "clearedAll": "已将 {count} 条标为已读",
+    "undo": "撤销",
+    "markUnread": "标记为未读",
+    "markRead": "标记为已读",
+    "updateFailed": "未读状态更新失败",
+    "inbox": "需要你",
+    "justNow": "刚刚",
+    "showAll": "显示全部 ({count})",
+    "showLess": "收起",
+    "otherBots": "其他 Bot 有未读会话",
+    "settingsTitle": "桌面通知",
+    "settingsDescription": "你没在查看的会话收到回复、运行失败或需要确认时提醒",
+    "denied": "通知已被浏览器阻止。请在浏览器设置中允许通知后开启。",
+    "unsupported": "当前浏览器不支持网页通知，未读红点仍然可用",
+    "kind": {
+      "reply": "已回复",
+      "failed": "运行失败",
+      "needs_input": "等待你确认",
+      "marked": "标记为未读"
+    },
+    "browserSettingsTitle": "浏览器通知"
   }
 }

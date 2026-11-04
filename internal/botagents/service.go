@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
-	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
-	"github.com/felinics/memoh/internal/agent/runtime/codex/codexcfg"
-	"github.com/felinics/memoh/internal/agent/runtime/grok/grokcfg"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/external/claudecode/claudecfg"
+	"github.com/felinics/memoh/internal/agent/runtime/external/codex/codexcfg"
+	"github.com/felinics/memoh/internal/agent/runtime/external/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -72,7 +72,8 @@ var directRuntimes = map[string]directRuntime{
 			if cfg.Auth == codexcfg.AuthAPIKey {
 				return agentcredential.AuthKindOpenAIAPIKey, nil
 			}
-			return agentcredential.AuthKindOpenAICodexOAuth, nil
+			// Codex keeps its ChatGPT login in the Agent's workspace.
+			return "", nil
 		},
 	},
 	RuntimeClaudeCode: {
@@ -100,7 +101,8 @@ var directRuntimes = map[string]directRuntime{
 				return "", err
 			}
 			if cfg.Auth == grokcfg.AuthGrokAccount {
-				return agentcredential.AuthKindXAIGrokOAuth, nil
+				// Grok keeps its account login in the Agent's workspace.
+				return "", nil
 			}
 			return agentcredential.AuthKindXAIAPIKey, nil
 		},
@@ -539,7 +541,7 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 			return ErrInvalidMetadata
 		}
 		setup := acpprofile.ParseInstanceSetup(botMetadata, agent.Metadata, descriptor.Provider)
-		if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+		if field, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 			return &ConfigurationError{Field: field.ID}
 		}
 		return nil
@@ -552,7 +554,9 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 	if err != nil {
 		return &ConfigurationError{Field: "auth"}
 	}
-	if credentialAuthKind != expected {
+	// A mode that stores no credential has none to check, whatever an earlier
+	// mode left attached.
+	if expected != "" && credentialAuthKind != expected {
 		return &ConfigurationError{Field: "agent_credential_id"}
 	}
 	return nil

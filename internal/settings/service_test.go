@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 type stubReasoningOptionsResolver struct {
@@ -602,8 +603,8 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 		ChatRuntime:     ChatRuntimeACPAgent,
 		ChatAcpAgentID:  pgtype.Text{String: "Codex", Valid: true},
 	})
-	if borrowed.ChatRuntime != ChatRuntimeCodex || borrowed.ChatACPAgentID != "" {
-		t.Fatalf("borrowed shape projected as (%q, %q), want (%q, \"\")", borrowed.ChatRuntime, borrowed.ChatACPAgentID, ChatRuntimeCodex)
+	if borrowed.ChatRuntime != string(runtimekind.Codex) || borrowed.ChatACPAgentID != "" {
+		t.Fatalf("borrowed shape projected as (%q, %q), want (%q, \"\")", borrowed.ChatRuntime, borrowed.ChatACPAgentID, string(runtimekind.Codex))
 	}
 
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{

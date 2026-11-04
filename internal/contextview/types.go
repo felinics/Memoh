@@ -30,6 +30,10 @@ type BudgetEnvelope struct {
 	// RecentProtectTokens bands the newest droppable history within this many
 	// charged tokens to drop last. Zero disables the window.
 	RecentProtectTokens int
+	// KeepHistory keeps every history fragment whatever the budget: an armed
+	// run folds what does not fit before it dispatches. A tool exchange
+	// missing its other half is still cut.
+	KeepHistory bool
 }
 
 type BuildOptions struct {

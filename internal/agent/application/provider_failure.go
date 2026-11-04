@@ -48,3 +48,17 @@ func providerFailureCode(err error, modelCall bool) apperror.Code {
 	}
 	return ""
 }
+
+// budgetFailureCode names a context the budget could not fit. When the
+// compaction meant to fit it failed because the provider refused the account,
+// for its balance, key or access, that refusal is named instead: no shorter
+// request, new conversation or larger model gets past it, and the user has to
+// go change something at the provider. Any other summarizer failure is still
+// the budget's.
+func budgetFailureCode(cause error) apperror.Code {
+	switch code := providerFailureCode(cause, false); code {
+	case apperror.CodeAgentProviderQuotaExhausted, apperror.CodeAgentProviderAuthFailed, apperror.CodeAgentProviderPermissionDenied:
+		return code
+	}
+	return apperror.CodeContextBudgetUnsatisfied
+}

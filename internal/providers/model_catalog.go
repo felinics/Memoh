@@ -1,6 +1,32 @@
 package providers
 
-import "strings"
+import (
+	"maps"
+	"strings"
+
+	"github.com/felinics/memoh/internal/models"
+)
+
+const openCodeGoBaseURL = "https://opencode.ai/zen/go/v1"
+
+// A Go subscription added in the custom form before that form recorded the
+// gallery entry has no source. On the official endpoint it is that
+// subscription, so it imports the catalog like one added from the gallery; the
+// web matches it the same way (subscriptionForProvider).
+func withLegacyGoSource(clientType string, config, metadata map[string]any) map[string]any {
+	if clientType != string(models.ClientTypeOpenCodeGo) || PublicCatalogSource(metadata) != "" {
+		return metadata
+	}
+	if base := strings.TrimRight(strings.TrimSpace(configString(config, "base_url")), "/"); base != "" && !strings.EqualFold(base, openCodeGoBaseURL) {
+		return metadata
+	}
+	metadata = maps.Clone(metadata)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["source"] = "opencode-go"
+	return metadata
+}
 
 // PublicCatalogSource reads the explicit source or the identity persisted by a
 // shipped YAML template. Gallery IDs are presentation metadata, not source IDs.

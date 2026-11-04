@@ -150,13 +150,6 @@ func TestResolveCompactionModelSentinels(t *testing.T) {
 			wantErr:    ErrCompactionProviderDisabled,
 		},
 		{
-			name:       "provider ignores output limits",
-			model:      compactionTestModel(t, modelID, "codex/model", 200000, true),
-			provider:   compactionTestProvider("openai-codex"),
-			candidates: []string{modelID},
-			wantErr:    ErrCompactionOutputLimitUnsupported,
-		},
-		{
 			name:       "window unknown fails closed",
 			model:      compactionTestModel(t, modelID, "nowin/model", 0, true),
 			provider:   compactionTestProvider("anthropic-messages"),

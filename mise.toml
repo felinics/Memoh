@@ -64,12 +64,8 @@ description = "Generate SQL code"
 run = "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate"
 
 [tasks.codex-protocol-generate]
-description = "Generate Go types for the codex app-server v2 protocol from the vendored schema snapshot"
+description = "Generate Go types for the codex app-server v2 protocol from the local codex CLI"
 run = "go run ./cmd/gen-codex-protocol"
-
-[tasks.codex-schema-sync]
-description = "Refresh the vendored codex app-server schema snapshot from the local codex CLI and report drift"
-run = "bash scripts/codex-schema-sync.sh"
 
 [tasks.grpc-generate]
 description = "Generate internal gRPC protocol code"
@@ -188,6 +184,18 @@ go test \
   -tags=integration \
   -count=1 \
   -timeout=5m \
+  ./internal/agent/runtime/session/acceptance
+"""
+
+[tasks."test:session-runtime:acceptance:single:destructive"]
+description = "Run the isolated decision-restart acceptance against one memory-backend Server"
+env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE = "single", MEMOH_SESSION_RUNTIME_ACCEPTANCE_CRASH = "1" }
+run = """
+go test \
+  -tags=integration \
+  -count=1 \
+  -timeout=5m \
+  -run '^TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart$' \
   ./internal/agent/runtime/session/acceptance
 """
 

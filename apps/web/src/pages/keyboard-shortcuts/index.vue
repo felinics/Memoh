@@ -39,7 +39,6 @@ const hasAnyOverride = computed(() => Object.keys(store.overrides).length > 0)
 <template>
   <PageShell
     :title="t('settings.keyboard.title')"
-    :description="t('settings.keyboard.intro')"
   >
     <template #actions>
       <Button

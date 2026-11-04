@@ -301,7 +301,7 @@ import {
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, MessageSquare,
   ShieldAlert, Database, Link, Server, SlidersHorizontal,
-  Bot as BotIcon, ChevronLeft, Laptop, Package as App
+  Bot as BotIcon, ChevronLeft, Laptop, Package as App,
 } from 'lucide-vue-next'
 import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import { computed, ref, watch, onMounted, toValue, nextTick, type Ref } from 'vue'
@@ -563,8 +563,8 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => [
   { key: 'core', keys: ['overview', 'general', 'channels'] },
-  { key: 'capabilities', keys: ['memory', 'agents', 'apps', 'mcp', 'container', 'remote-runtime'] },
-  { key: 'administration', keys: ['advanced', 'access'] },
+  { key: 'capabilities', keys: ['mcp', 'agents', 'apps', 'memory', 'container', 'remote-runtime'] },
+  { key: 'administration', keys: ['access', 'advanced'] },
 ].map(group => ({
   key: group.key,
   items: group.keys.flatMap(key => tabList.value.filter(tab => tab.value === key)),

@@ -179,6 +179,17 @@ WHERE team_id = public.memoh_current_team_id()
   AND (runtime_fencing_token IS NULL OR runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint)
 RETURNING *;
 
+-- name: CancelToolApprovalRequest :one
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = sqlc.arg(reason),
+    decided_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND status = 'pending'
+  AND (runtime_fencing_token IS NULL OR runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint)
+RETURNING *;
+
 -- name: CancelPendingToolApprovalsBySession :many
 UPDATE tool_approval_requests
 SET status = 'cancelled',
@@ -189,6 +200,22 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
   AND status = 'pending'
   AND (runtime_fencing_token IS NULL OR runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint)
+RETURNING *;
+
+-- name: CancelPendingToolApprovalsByRun :many
+-- A run that ended without its owner's finish path only invalidates the
+-- approvals it created. Session-wide cancellation would also close a newer
+-- run's approval.
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = sqlc.arg(reason),
+    decided_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id)
+  AND status = 'pending'
+  AND runtime_fencing_token IS NOT DISTINCT FROM sqlc.narg(runtime_fencing_token)::bigint
 RETURNING *;
 
 -- name: SupersedePendingToolApprovalsBySession :many
@@ -228,4 +255,12 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
   AND session_id = sqlc.arg(session_id)
   AND tool_call_id = ANY(sqlc.arg(tool_call_ids)::text[])
+ORDER BY created_at ASC, short_id ASC;
+
+-- name: ListToolApprovalsByBotIDs :many
+SELECT *
+FROM tool_approval_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY created_at ASC, short_id ASC;

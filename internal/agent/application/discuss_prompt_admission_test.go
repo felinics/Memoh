@@ -12,7 +12,7 @@ func TestDiscussAgentAdmissionIncludesFinalPromptFraming(t *testing.T) {
 	for i := range messages {
 		messages[i] = turn.DiscussMessage{Role: "user", Content: "abcd"}
 	}
-	messages[0] = turn.DiscussMessage{Role: "user", Content: "summary", CompactionArtifactID: "summary"}
+	messages[0] = turn.DiscussMessage{Role: "user", Content: "summary", CompactionArtifactID: "summary", Pinned: true}
 	admitted, admission := admitDiscussAgentMessages(messages, 1000)
 	if admission.ProtectedOverflow {
 		t.Fatal("summary and newest source fit")
@@ -29,7 +29,7 @@ func TestDiscussAgentAdmissionIncludesFinalPromptFraming(t *testing.T) {
 func TestDiscussAgentAdmissionProtectsFinalPrompt(t *testing.T) {
 	for _, messages := range [][]turn.DiscussMessage{
 		{{Role: "user", Content: "current"}},
-		{{Role: "user", Content: strings.Repeat("s", 4000), CompactionArtifactID: "summary"}, {Role: "user", Content: "current"}},
+		{{Role: "user", Content: strings.Repeat("s", 4000), CompactionArtifactID: "summary", Pinned: true}, {Role: "user", Content: "current"}},
 	} {
 		if admitted, decision := admitDiscussAgentMessages(messages, 10); admitted != nil || !decision.ProtectedOverflow {
 			t.Fatalf("prompt wrapper or protected sources exceed budget: %+v", decision)
@@ -47,7 +47,7 @@ func FuzzDiscussAgentAdmissionBoundsFinalPrompt(f *testing.F) {
 		for i, size := range data {
 			messages[i] = turn.DiscussMessage{Role: " user ", Content: " \n" + strings.Repeat("群", int(size)%13) + "\n "}
 			if i%17 == 0 {
-				messages[i].CompactionArtifactID = "summary"
+				messages[i].CompactionArtifactID, messages[i].Pinned = "summary", true
 			}
 		}
 		budget := int(limit) + 1

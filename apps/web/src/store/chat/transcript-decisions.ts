@@ -138,7 +138,7 @@ export function createTranscriptDecisions(messages: ChatMessage[]) {
 
   function markToolApprovalDecision(
     approvalId: string,
-    status: 'approved' | 'rejected' | 'pending',
+    status: 'approved' | 'rejected' | 'pending' | 'expired',
   ) {
     const id = approvalId.trim()
     if (!id) return
@@ -155,7 +155,7 @@ export function createTranscriptDecisions(messages: ChatMessage[]) {
 
   function markUserInputDecision(
     userInputId: string,
-    status: 'submitted' | 'canceled',
+    status: 'submitted' | 'canceled' | 'expired',
     answers?: WSUserInputAnswer[],
   ) {
     const id = userInputId.trim()

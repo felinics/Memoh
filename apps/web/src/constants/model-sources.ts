@@ -412,7 +412,8 @@ export function providerCatalogEntry(provider: ProviderLike | null | undefined):
 // endpoint before that form recorded the entry, that subscription, so it is not
 // offered again.
 // Only the gallery and the logo read this; what such an older provider
-// imports from stays its own record.
+// imports from stays its own record, where the server reports the source of
+// an older OpenCode Go subscription on its official endpoint.
 export function providerGalleryEntry(provider: ProviderLike | null | undefined): ModelSource | undefined {
   return providerCatalogEntry(provider) ?? subscriptionForProvider(provider?.client_type, provider?.config?.base_url)
 }

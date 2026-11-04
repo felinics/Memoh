@@ -2,6 +2,7 @@ import { loadRemoteIcon } from './remote-icon'
 import {
   app,
   Menu,
+  Notification,
   shell,
   BrowserWindow,
   ipcMain,
@@ -23,6 +24,7 @@ import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } f
 import { attachMenuShortcutOwnership } from './menu-shortcuts'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
+import { createAttentionNotifications } from './attention-notifications'
 import { attachDevelopmentWindowShortcuts } from './window-shortcuts'
 import { macWindowChromeOptions } from './window-chrome'
 import { maybeSelfInstallMacOS } from './self-install'
@@ -30,7 +32,7 @@ import { maybePromptAppleSiliconBuild } from './arch-check'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
 import { isTrustedRendererUrl } from './renderer-trust'
 import { normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
-import { registerDesktopUpdates, installDesktopUpdateOnQuit, recoverDesktopUpdate } from './updates'
+import { registerDesktopUpdates, installDesktopUpdate, installDesktopUpdateOnQuit, recoverDesktopUpdate } from './updates'
 import {
   normalizeBaseUrl,
   normalizeServerInput,
@@ -72,8 +74,25 @@ type TraySettingsItem = {
 }
 
 let chatWindow: BrowserWindow | null = null
+const attentionNotifications = createAttentionNotifications({
+  show(payload, onClick) {
+    if (!Notification.isSupported()) return null
+    const notification = new Notification({ title: payload.title, body: payload.body })
+    notification.on('click', onClick)
+    notification.show()
+    return () => notification.close()
+  },
+  navigate(path) {
+    if (!chatWindow || chatWindow.isDestroyed()) chatWindow = createChatWindow()
+    if (chatWindow.isMinimized()) chatWindow.restore()
+    chatWindow.show()
+    chatWindow.focus()
+    dispatchRendererNavigate(chatWindow, path)
+  },
+})
 let menuShortcuts: ReturnType<typeof attachMenuShortcutOwnership> | null = null
 let appTray: Tray | null = null
+let trayUpdateVersion: string | null = null
 let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
 let sessionBaseUrlOverride = ''
@@ -407,12 +426,20 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
         click: () => openBotWorkspace(bot.id),
       }))
     : [{ label: 'No Bots', enabled: false }]
+  const updateItems: MenuItemConstructorOptions[] = trayUpdateVersion === null ? [] : [
+    {
+      label: `Restart to update${trayUpdateVersion ? ` to ${trayUpdateVersion}` : ''}`,
+      click: () => { void installDesktopUpdate() },
+    },
+    { type: 'separator' },
+  ]
 
   return Menu.buildFromTemplate([
     {
       label: `Show ${DESKTOP_PRODUCT_NAME}`,
       click: revealChatWindow,
     },
+    ...updateItems,
     { type: 'separator' },
     {
       label: 'Bots',
@@ -782,6 +809,15 @@ app.whenReady().then(async () => {
     assertTrustedRenderer(event)
     return openExternalUrl(rawURL)
   })
+  ipcMain.handle('desktop:notify', (event, payload: unknown) => {
+    assertTrustedRenderer(event)
+    attentionNotifications.notify(payload)
+  })
+  ipcMain.handle('desktop:set-badge-count', (event, count: unknown) => {
+    assertTrustedRenderer(event)
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) return
+    app.setBadgeCount(count)
+  })
   ipcMain.handle('desktop:set-tray-bots', (event, payload: unknown) => {
     assertTrustedRenderer(event)
     trayBots = normalizeTrayBots(payload)
@@ -798,6 +834,12 @@ app.whenReady().then(async () => {
   })
   registerDesktopUpdates({
     assertTrustedRenderer,
+    onStateChanged: (state) => {
+      const version = state.status === 'downloaded' ? (state.latestVersion ?? '') : null
+      if (version === trayUpdateVersion) return
+      trayUpdateVersion = version
+      setTrayMenu()
+    },
     installFailed: () => {
       isQuitting = false
       quitCleanupFinished = false

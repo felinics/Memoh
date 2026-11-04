@@ -66,12 +66,16 @@ export function reduceDesktopUpdateState(
   state: DesktopUpdateState,
   event: DesktopUpdateStateEvent,
 ): DesktopUpdateState {
+  // Once a restart is under way, only its own outcome may change the state;
+  // events from a background check that was already running are stale.
+  if (state.status === 'installing' && event.type !== 'error' && event.type !== 'preference') return state
   switch (event.type) {
     case 'preference':
       return { ...state, autoUpdate: event.autoUpdate }
     case 'installing':
       return { ...state, status: 'installing', error: null }
     case 'checking':
+      if (state.status === 'downloaded') return state
       return {
         ...state,
         status: 'checking',
@@ -79,6 +83,7 @@ export function reduceDesktopUpdateState(
         error: null,
       }
     case 'not-available':
+      if (state.status === 'downloaded') return state
       return {
         ...state,
         status: 'up-to-date',
@@ -88,6 +93,7 @@ export function reduceDesktopUpdateState(
         releaseNotes: null,
       }
     case 'available':
+      if (state.status === 'downloaded' && state.latestVersion === event.latestVersion) return state
       return {
         ...state,
         status: 'downloading',

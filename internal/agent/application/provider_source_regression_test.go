@@ -2,9 +2,11 @@ package application
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/felinics/memoh/internal/agent/context/compaction"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
@@ -22,7 +24,7 @@ func TestDiscussComposedInputSurvivesEchoThroughProviderAdmission(t *testing.T) 
 				{MessageID: "current", ReceivedAtMs: 2, Content: []timeline.RenderedContentPiece{{Type: "text", Text: input}}},
 				{MessageID: "echo", ReceivedAtMs: 3, IsSelfSent: true, Content: []timeline.RenderedContentPiece{{Type: "text", Text: "self echo"}}},
 			}
-			composed := timeline.ComposeContext(rc, nil)
+			composed := timeline.ComposeContextWithCheckpoint(rc, nil, timeline.HistoryCheckpoint{})
 			wire, err := json.Marshal(composed.Messages)
 			if err != nil {
 				t.Fatal(err)
@@ -72,6 +74,9 @@ func TestDiscussAdmissionKeepsNewestFittingSuffixOfCurrentBatch(t *testing.T) {
 	}
 }
 
+// A Discuss recovery Channel asks for without materialized messages still
+// names the batch it answers: the fold keeps it newest first while it leaves
+// the summary room, priced with the rest of the history.
 func TestDiscussRecoveryCarriesCurrentSourcesEvenWithoutMaterializedMessages(t *testing.T) {
 	service, runner := newControllerPolicyService(t)
 	sources := []turn.ContextMessageSource{{Kind: "external", ID: "a", Current: true}, {Kind: "external", ID: "b", Current: true}}
@@ -80,7 +85,7 @@ func TestDiscussRecoveryCarriesCurrentSourcesEvenWithoutMaterializedMessages(t *
 		t.Fatalf("recovery did not run: %v", err)
 	}
 	cfg := runner.configs[0]
-	if len(cfg.Anchors) != 1 || cfg.Anchors[0].ID != "b" || len(cfg.ProtectedSources) != 0 || cfg.HistoryBudgetTokens != 900 {
-		t.Fatalf("Channel overflow must protect only the newest input and compact older input: %+v", cfg)
+	if !reflect.DeepEqual(cfg.Anchors, sources) || cfg.AnchorPolicy != compaction.AnchorsFirst || cfg.HistoryBudgetTokens != 1000 {
+		t.Fatalf("Channel overflow must keep the batch newest first and compact what does not fit beside it: %+v", cfg)
 	}
 }

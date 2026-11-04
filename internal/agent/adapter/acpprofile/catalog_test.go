@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
+	"github.com/felinics/memoh/internal/botagents"
 )
 
 func TestCatalogExposesOnlyChannelSafeProfileData(t *testing.T) {
@@ -67,6 +68,14 @@ type recordingSetupResolver struct {
 	setup      runtimeprofile.AgentSetup
 }
 
+func (*recordingSetupResolver) Get(context.Context, string, string) (botagents.BotAgent, error) {
+	return botagents.BotAgent{}, nil
+}
+
+func (*recordingSetupResolver) FindActiveByProvider(context.Context, string, string) (botagents.BotAgent, error) {
+	return botagents.BotAgent{}, botagents.ErrNotFound
+}
+
 func (r *recordingSetupResolver) ResolveACPSetup(_ context.Context, _, botAgentID, _ string, _ map[string]any) (runtimeprofile.AgentSetup, error) {
 	r.botAgentID = botAgentID
 	return r.setup, nil
@@ -76,7 +85,6 @@ func TestCatalogValidatesTheBoundInstanceSetup(t *testing.T) {
 	resolver := &recordingSetupResolver{setup: runtimeprofile.AgentSetup{
 		Enabled: true,
 		Mode:    "api_key",
-		ModeSet: true,
 		Managed: map[string]string{"command": "grok-acp"},
 	}}
 	catalog := NewCatalog(resolver)

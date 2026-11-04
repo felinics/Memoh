@@ -146,3 +146,48 @@ func TestWriteSSEJSON(t *testing.T) {
 		t.Fatalf("expected payload type ping, got %#v", payload["type"])
 	}
 }
+
+// A fork copies history, not the decision ledger: a copied pending snapshot
+// has no row in the new session, so it must render read-only, with the
+// outcome the source session recorded.
+func TestDecisionSnapshotsWithoutSessionRowsAreReadOnly(t *testing.T) {
+	t.Parallel()
+
+	turns := []chatview.UITurn{{
+		Role: "assistant",
+		Messages: []chatview.UIMessage{
+			{
+				Type:       chatview.UIMessageTool,
+				ToolCallID: "call-exec",
+				Approval:   &chatview.UIToolApproval{ApprovalID: "approval-src", Status: toolapproval.StatusPending, CanApprove: true},
+			},
+			{
+				Type:       chatview.UIMessageTool,
+				ToolCallID: "call-ask",
+				UserInput:  &chatview.UIUserInput{UserInputID: "input-src", Status: userinput.StatusPending, CanRespond: true},
+			},
+		},
+	}}
+
+	mergeToolApprovals(turns, nil, nil)
+	mergeUserInputs(turns, nil, nil)
+	approval, input := turns[0].Messages[0].Approval, turns[0].Messages[1].UserInput
+	if approval.CanApprove || input.CanRespond {
+		t.Fatalf("snapshots without session rows stayed actionable: %#v %#v", approval, input)
+	}
+	if got := readOnlyApprovalIDs(turns); len(got) != 1 || got[0] != "approval-src" {
+		t.Fatalf("readOnlyApprovalIDs = %v", got)
+	}
+	if got := readOnlyUserInputIDs(turns); len(got) != 1 || got[0] != "input-src" {
+		t.Fatalf("readOnlyUserInputIDs = %v", got)
+	}
+
+	applyReadOnlyApprovals(turns, []toolapproval.Request{{ID: "approval-src", Status: toolapproval.StatusApproved, SelectedOptionID: "allow"}})
+	applyReadOnlyUserInputs(turns, []userinput.Request{{ID: "input-src", Status: userinput.StatusSubmitted}})
+	if approval.Status != toolapproval.StatusApproved || approval.SelectedOptionID != "allow" || approval.CanApprove {
+		t.Fatalf("approval = %#v, want read-only approved", approval)
+	}
+	if input.Status != userinput.StatusSubmitted || input.CanRespond {
+		t.Fatalf("user input = %#v, want read-only submitted", input)
+	}
+}

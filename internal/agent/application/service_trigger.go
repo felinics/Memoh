@@ -1,6 +1,7 @@
 package application
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,11 +18,15 @@ import (
 	"github.com/felinics/memoh/internal/schedule"
 )
 
-// attachCurrentTurnPrompt routes a trigger's rich prompt through Query so the
-// context view classifies it as the live current request rather than history.
-func attachCurrentTurnPrompt(cfg native.RunConfig, prompt string) native.RunConfig {
+// attachCurrentTurnPrompt makes a trigger's rich prompt the run's input: the
+// context view classifies it as the live current request rather than history,
+// and the turn stores it as sent, so every later request renders the input
+// the way this run sent it. The turn still displays the trigger's own text.
+func attachCurrentTurnPrompt(req ChatRequest, cfg native.RunConfig, prompt string) (ChatRequest, native.RunConfig) {
+	req.RawQuery = cmp.Or(req.RawQuery, req.Query)
+	req.Query = prompt
 	cfg.Query = prompt
-	return cfg
+	return req, cfg
 }
 
 // TriggerSchedule executes a scheduled command via the internal agent.
@@ -132,7 +137,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		MaxCalls:    payload.MaxCalls,
 		Command:     payload.Command,
 	})
-	cfg = attachCurrentTurnPrompt(cfg, schedulePrompt)
+	req, cfg = attachCurrentTurnPrompt(req, cfg, schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error

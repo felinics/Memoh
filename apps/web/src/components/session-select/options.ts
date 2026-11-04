@@ -1,5 +1,5 @@
 import { externalAgentDisplayName } from '@/utils/external-agent'
-import type { SessionSession } from '@memohai/sdk'
+import type { BotagentsBotAgent, SessionSession } from '@memohai/sdk'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import type { SessionKind } from './session-kind-icon.vue'
@@ -29,13 +29,9 @@ export function sessionTitle(session: SessionSession, labels: SessionSelectLabel
   return (session.title ?? '').trim() || routeConversationLabel(session) || labels.untitled
 }
 
-export function sessionMark(session: SessionSession, labels: SessionSelectLabels): SessionMark {
+export function sessionMark(session: SessionSession, labels: SessionSelectLabels, agents?: readonly BotagentsBotAgent[]): SessionMark {
   const runtimeType = normalizedRuntimeType(session)
-  const agentId = sessionAgentProvider(
-    runtimeType,
-    session.runtime_metadata,
-    session.metadata,
-  )
+  const agentId = sessionAgentProvider(runtimeType, session, agents)
   // Schedule wins over the ACP mark here, unlike the sidebar row: this picker
   // exists to tell schedule-owned sessions apart from ordinary chats, and a
   // schedule session that happens to run an agent is still a schedule session.
@@ -57,6 +53,7 @@ export function buildSessionOptions(
   sessions: SessionSession[],
   workdirs: BotWorkdir[],
   labels: SessionSelectLabels,
+  agents?: readonly BotagentsBotAgent[],
 ): SearchableSelectOption[] {
   const nameById = new Map(workdirs.flatMap(wd => (wd.id ? [[wd.id, wd.name ?? '']] : [])))
   const buckets = new Map<string, SessionSession[]>([['', []]])
@@ -86,7 +83,7 @@ export function buildSessionOptions(
         group: key,
         groupLabel,
         keywords: [label, groupLabel, session.id ?? ''],
-        meta: sessionMark(session, labels),
+        meta: sessionMark(session, labels, agents),
       })
     }
   }

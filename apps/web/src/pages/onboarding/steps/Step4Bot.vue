@@ -9,6 +9,7 @@ import {
   InputGroupAddon,
   InputGroupButton,
   Label,
+  LabelSwap,
   Separator,
   SettingsSection,
   Spinner,
@@ -192,13 +193,6 @@ const canSubmit = computed(() => {
   if (selectedDirectRuntime.value || !onboardingProviderId) return true
   if (onboardingModelsStatus.value !== 'success') return false
   return !!form.chat_model_id
-})
-
-const isContainerSubmitting = computed(() => submitting.value)
-
-const ctaLabel = computed(() => {
-  if (isContainerSubmitting.value) return t('onboarding.bot.preparingEnvironment')
-  return t('onboarding.next')
 })
 
 async function handleSubmit() {
@@ -442,33 +436,23 @@ async function handleSubmit() {
           @prev="leave(prevStep)"
         >
           <template #next>
-            <!-- CTA carries its own Transition + Spinner for the label swap
-                 (preparingEnvironment ↔ next) — the owner's default next
-                 button can't express a keyed label transition, so this stays
-                 local via the #next escape hatch. -->
+            <!-- 准备环境期间文案变长,宽度过渡交给 LabelSwap;FooterNav 默认的
+                 next 按钮只接纯文本 label,表达不了换字,所以这里走 #next 插槽。 -->
             <button
               type="button"
               class="inline-flex h-[2.625rem] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
               :disabled="!canSubmit || submitting"
               @click="handleSubmit"
             >
-              <Transition
-                mode="out-in"
-                enter-active-class="transition-all duration-[160ms] ease-out"
-                enter-from-class="opacity-0 translate-y-1"
-                enter-to-class="opacity-100 translate-y-0"
-                leave-active-class="transition-all duration-[140ms] ease-in"
-                leave-from-class="opacity-100 translate-y-0"
-                leave-to-class="opacity-0 -translate-y-1"
-              >
-                <span
-                  :key="ctaLabel"
-                  class="inline-flex items-center gap-2"
-                >
-                  <Spinner v-if="isContainerSubmitting" />
-                  {{ ctaLabel }}
-                </span>
-              </Transition>
+              <LabelSwap :active="submitting ? 'preparing' : 'next'">
+                <template #next>
+                  {{ t('onboarding.next') }}
+                </template>
+                <template #preparing>
+                  <Spinner />
+                  {{ t('onboarding.bot.preparingEnvironment') }}
+                </template>
+              </LabelSwap>
             </button>
           </template>
         </FooterNav>

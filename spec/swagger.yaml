@@ -558,8 +558,6 @@ definitions:
         type: string
       id:
         type: string
-      interval_seconds:
-        type: integer
       runtime:
         type: string
       status:
@@ -567,10 +565,6 @@ definitions:
         - pending
         - ready
         - claimed
-        type: string
-      user_code:
-        type: string
-      verification_url:
         type: string
     required:
     - auth_kind
@@ -635,6 +629,53 @@ definitions:
     - FaultServer
     - FaultDependency
     - FaultCanceled
+  attention.Attention:
+    properties:
+      attention_at:
+        description: |-
+          At is when the session last needed attention, or when it was marked
+          unread if it never did; it orders the inbox.
+        type: string
+      attention_kind:
+        $ref: '#/definitions/attention.Kind'
+      bot_id:
+        type: string
+      marked:
+        description: |-
+          Marked is true when the user marked the session unread themselves; such
+          a session is not read just because it is already on screen.
+        type: boolean
+      read_through:
+        description: |-
+          ReadThrough is the through a client sends to read it: it covers both the
+          attention and a manual unread mark.
+        type: string
+      session_id:
+        type: string
+      title:
+        type: string
+    type: object
+  attention.Kind:
+    enum:
+    - reply
+    - failed
+    - needs_input
+    - marked
+    type: string
+    x-enum-varnames:
+    - KindReply
+    - KindFailed
+    - KindNeedsInput
+    - KindMarked
+  attention.ReadStateChange:
+    properties:
+      session_id:
+        type: string
+      through:
+        type: string
+      unread:
+        type: boolean
+    type: object
   audio.ConfigSchema:
     properties:
       fields:
@@ -2813,26 +2854,35 @@ definitions:
       name:
         type: string
     type: object
-  externalagent.CodexUsageResponse:
+  externalagent.AgentAccountResponse:
+    properties:
+      email:
+        type: string
+      signed_in:
+        type: boolean
+    required:
+    - signed_in
+    type: object
+  externalagent.AgentQuotaResponse:
     properties:
       limit_reached:
         type: boolean
       windows:
         items:
-          $ref: '#/definitions/externalagent.CodexUsageWindow'
+          $ref: '#/definitions/externalagent.AgentQuotaWindow'
         type: array
     required:
     - limit_reached
     - windows
     type: object
-  externalagent.CodexUsageWindow:
+  externalagent.AgentQuotaWindow:
     properties:
       resets_at:
         type: string
       used_percent:
         type: integer
       window_minutes:
-        description: WindowMinutes is 0 when the backend does not report the window
+        description: WindowMinutes is 0 when the runtime does not report the window
           length.
         type: integer
     required:
@@ -4129,6 +4179,20 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.SetReadStateRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/attention.ReadStateChange'
+        type: array
+    type: object
+  handlers.SetReadStateResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/attention.Attention'
+        type: array
+    type: object
   handlers.SiteIconResponse:
     properties:
       dark:
@@ -4833,6 +4897,13 @@ definitions:
     required:
     - items
     type: object
+  handlers.UnreadSessionsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/attention.Attention'
+        type: array
+    type: object
   handlers.UpdateContainerMetricsRequest:
     properties:
       resource_limits:
@@ -5225,18 +5296,6 @@ definitions:
       updated_at:
         type: string
     type: object
-  handlers.acpRuntimeCreateRequest:
-    properties:
-      acp_agent_id:
-        type: string
-      bot_agent_id:
-        description: |-
-          BotAgentID names the Agent instance whose setup launches the runtime;
-          only a session bound to the same instance can later adopt it.
-        type: string
-      project_path:
-        type: string
-    type: object
   handlers.acpRuntimeModeRequest:
     properties:
       mode_id:
@@ -5288,12 +5347,6 @@ definitions:
     type: object
   handlers.createSessionRequest:
     properties:
-      acp_runtime_id:
-        description: |-
-          ACPRuntimeID optionally binds a warm pre-session runtime (created via
-          POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
-          transient in-memory handle reference, never persisted in metadata.
-        type: string
       bot_agent_id:
         type: string
       channel_type:
@@ -6870,6 +6923,7 @@ definitions:
     - bocha
     - duckduckgo
     - yandex
+    - deepseek
     type: string
     x-enum-varnames:
     - ProviderBrave
@@ -6884,6 +6938,7 @@ definitions:
     - ProviderBocha
     - ProviderDuckDuckGo
     - ProviderYandex
+    - ProviderDeepSeek
   searchproviders.UpdateRequest:
     properties:
       config:
@@ -6926,6 +6981,13 @@ definitions:
     type: object
   session.Session:
     properties:
+      attention_at:
+        type: string
+      attention_kind:
+        description: |-
+          AttentionKind and Unread describe the requesting user's unread state.
+          They are filled by the attention service for list responses only.
+        type: string
       bot_agent_id:
         type: string
       bot_id:
@@ -6972,6 +7034,8 @@ definitions:
         type: string
       type:
         type: string
+      unread:
+        type: boolean
       updated_at:
         type: string
       workdir_id:
@@ -7678,11 +7742,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Starts Codex device authorization or Claude browser authorization,
-        or encrypts a supplied API key or Claude OAuth token. A Grok account cannot
-        be staged: it signs in on the Agent itself. No Bot or workspace is created.
-        Ready means the credential has been staged; API keys and manually supplied
-        tokens are not probed against the provider.'
+      description: 'Starts Claude browser authorization, or encrypts a supplied API
+        key or Claude OAuth token. A ChatGPT or Grok account cannot be staged: it
+        signs in on the Agent itself. No Bot or workspace is created. Ready means
+        the credential has been staged; API keys and manually supplied tokens are
+        not probed against the provider.'
       parameters:
       - description: Authorization request
         in: body
@@ -7815,34 +7879,6 @@ paths:
             $ref: '#/definitions/server.Problem'
       summary: Complete Claude browser authorization with the returned authorization
         code
-      tags:
-      - agent-authorizations
-  /agent-authorizations/{id}/poll:
-    post:
-      parameters:
-      - description: Authorization ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/agentcredential.Authorization'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "410":
-          description: Gone
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Poll a pending Agent device authorization
       tags:
       - agent-authorizations
   /auth/login:
@@ -8265,154 +8301,35 @@ paths:
       summary: Update ACL rule
       tags:
       - bots
-  /bots/{bot_id}/acp-runtimes:
-    post:
-      description: Starts an agent runtime before any session exists. The runtime
-        ID is server generated; bind it to a session at creation time via acp_runtime_id.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime spec
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeCreateRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "429":
-          description: Too Many Requests
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Create an unbound ACP runtime (pre-session model picker)
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}:
-    delete:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Close an ACP runtime
-      tags:
-      - acp
+  /bots/{bot_id}/acp-options:
     get:
+      description: Reports the models, reasoning efforts, modes and commands the agent
+        offers before a conversation exists. Choices travel in the new session's runtime_metadata
+        (acp_model_id, acp_reasoning_effort, permission_mode).
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
+      - description: ACP agent ID
+        in: query
+        name: acp_agent_id
         required: true
         type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Get ACP runtime state by runtime ID
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/mode:
-    patch:
-      description: Sends the selected agent-declared mode ID unchanged to session/set_mode
-        before the first chat message binds this runtime to a Session.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
+      - description: Agent instance ID
+        in: query
+        name: bot_agent_id
         type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
+      - description: Project the conversation will run in; /data when omitted
+        in: query
+        name: project_path
         type: string
-      - description: Mode selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeModeRequest'
+      - description: Model whose reasoning efforts to report; the agent's current
+          model when omitted
+        in: query
+        name: model_id
+        type: string
       responses:
         "200":
           description: OK
@@ -8442,110 +8359,7 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/server.Problem'
-      summary: Set an unbound ACP runtime's mode
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/model:
-    patch:
-      description: An empty model_id resets the runtime to the agent default model.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      - description: Model selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeModelRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Set (or reset) an ACP runtime's model
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning:
-    patch:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      - description: Reasoning effort selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeReasoningRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Set an ACP runtime's reasoning effort
+      summary: Get what a new ACP conversation could choose
       tags:
       - acp
   /bots/{bot_id}/agents:
@@ -8724,9 +8538,11 @@ paths:
       summary: Update a bot Agent
       tags:
       - bot-agents
-  /bots/{bot_id}/agents/{id}/codex/usage:
+  /bots/{bot_id}/agents/{id}/account:
     get:
-      description: Available to anyone who can chat with the Bot, so the composer
+      description: For runtimes that keep their own sign-in in the Agent's workspace
+        (Codex with a ChatGPT account, Grok Build with a Grok account). The runtime
+        is asked directly, and started when it is not running.
       parameters:
       - description: Bot ID
         in: path
@@ -8742,7 +8558,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/externalagent.CodexUsageResponse'
+            $ref: '#/definitions/externalagent.AgentAccountResponse'
         "403":
           description: Forbidden
           schema:
@@ -8751,19 +8567,15 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
         "422":
           description: Unprocessable Entity
           schema:
             $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/server.Problem'
-      summary: Get the Codex usage limits of the Agent's ChatGPT account
+      summary: Get the account a direct runtime Agent is signed in to
       tags:
       - external-agents
   /bots/{bot_id}/agents/{id}/credential:
@@ -8994,7 +8806,7 @@ paths:
       - external-agents
   /bots/{bot_id}/agents/{id}/login/device/poll:
     post:
-      description: A successful sign-in has already been stored as the Agent's credential
+      description: A successful sign-in has already been kept by the Agent's runtime
         when this answers success.
       parameters:
       - description: Bot ID
@@ -9074,6 +8886,46 @@ paths:
       summary: List models available to a bot Agent
       tags:
       - bot-agents
+  /bots/{bot_id}/agents/{id}/quota:
+    get:
+      description: For runtimes whose account reports its usage (Codex with a ChatGPT
+        account). Available to anyone who can chat with the Bot, so the composer can
+        warn before a turn runs into the limit.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/externalagent.AgentQuotaResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Get the usage limits of the Agent's account
+      tags:
+      - external-agents
   /bots/{bot_id}/agents/{id}/runtime-controls:
     get:
       parameters:
@@ -9699,28 +9551,6 @@ paths:
       tags:
       - bots
   /bots/{bot_id}/compaction/logs:
-    delete:
-      description: Delete all compaction logs for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Delete compaction logs
-      tags:
-      - compaction
     get:
       description: List compaction logs for a bot
       parameters:
@@ -13585,6 +13415,48 @@ paths:
           schema:
             $ref: '#/definitions/server.Problem'
       summary: Set ACP session runtime model
+      tags:
+      - acp
+  /bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session:
+    delete:
+      description: Forgets the agent session that keeps failing to restore and keeps
+        the messages. The next message opens a new agent session, which does not remember
+        them.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Start the agent over on a new ACP session
       tags:
       - acp
   /bots/{bot_id}/sessions/{session_id}/acp-runtime/reasoning:
@@ -18828,6 +18700,26 @@ paths:
       summary: Update current user profile
       tags:
       - users
+  /users/me/attention/events:
+    get:
+      description: |-
+        SSE addressed to the caller: session_attention when one of
+        their sessions needs them, session_unread when they mark one
+        unread, session_read when their read cursor moves. Starts with attention_ready; never carries message bodies.
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Stream the caller's attention events
+      tags:
+      - sessions
   /users/me/channel-identities:
     get:
       description: List the IM channel identities bound to the current user's account
@@ -18997,6 +18889,36 @@ paths:
       summary: Update current user password
       tags:
       - users
+  /users/me/read-state:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Marks each session read (through the attention time the client
+        displayed) or unread. Read and unread are forward-only marks; the
+        later one wins. Sessions the caller did not create, or that carry no
+        unread state, are skipped. Marking unread never notifies.
+      parameters:
+      - description: Read state changes
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SetReadStateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SetReadStateResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Set the caller's read state of sessions
+      tags:
+      - sessions
   /users/me/runtimes:
     get:
       produces:
@@ -19074,6 +18996,25 @@ paths:
       summary: Revoke a Remote Runtime credential
       tags:
       - user-runtimes
+  /users/me/unread:
+    get:
+      description: |-
+        Sessions the caller created that need their attention, across
+        every bot they can still access, newest first. No message bodies.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.UnreadSessionsResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: List the caller's unread sessions
+      tags:
+      - sessions
   /video-models:
     get:
       produces:

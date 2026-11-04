@@ -125,7 +125,7 @@ SET
   lease_until = now() + make_interval(secs => $2::double precision),
   version     = version + 1,
   updated_at  = now()
-WHERE bot_id IN (
+WHERE bot_id = ANY(ARRAY(
   SELECT bot_id FROM bot_workspaces
   WHERE team_id = public.memoh_current_team_id()
     AND next_attempt_at <= now()
@@ -136,17 +136,19 @@ WHERE bot_id IN (
       OR (desired_state = 'present' AND observed_state IN ('absent', 'failed'))
       OR (desired_state = 'absent' AND observed_state NOT IN ('absent', 'failed'))
     )
+    AND ($3::text IS NULL OR desired_state = $3::text)
   ORDER BY next_attempt_at
-  LIMIT $3::int
+  LIMIT $4::int
   FOR UPDATE SKIP LOCKED
-)
+))
 RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_code, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
 `
 
 type ClaimBotWorkspacesParams struct {
-	LeaseOwner   string  `json:"lease_owner"`
-	LeaseSeconds float64 `json:"lease_seconds"`
-	Lim          int32   `json:"lim"`
+	LeaseOwner   string      `json:"lease_owner"`
+	LeaseSeconds float64     `json:"lease_seconds"`
+	DesiredState pgtype.Text `json:"desired_state"`
+	Lim          int32       `json:"lim"`
 }
 
 // Claim due rows for one reconcile pass. A row is due when it has not yet
@@ -154,9 +156,21 @@ type ClaimBotWorkspacesParams struct {
 // expired, or is a failed provisioning whose backoff elapsed. A failed removal
 // is not due: it waits for a new intent. SKIP LOCKED keeps concurrent Server
 // instances from claiming the same row; an expired lease lets another instance
-// take over a crashed pass.
+// take over a crashed pass. A desired state, when given, limits the pass to
+// the rows that want it: removals can have slots of their own.
+//
+// The due rows are picked by an array subquery, which PostgreSQL runs once.
+// Written as bot_id IN (subquery), the planner may pick a nested loop semi
+// join that runs the subquery again for every row it scans; each run skips
+// the rows this statement already locked and returns the next ones, so the
+// claim takes more rows than the limit, more than the free slots.
 func (q *Queries) ClaimBotWorkspaces(ctx context.Context, arg ClaimBotWorkspacesParams) ([]BotWorkspace, error) {
-	rows, err := q.db.Query(ctx, claimBotWorkspaces, arg.LeaseOwner, arg.LeaseSeconds, arg.Lim)
+	rows, err := q.db.Query(ctx, claimBotWorkspaces,
+		arg.LeaseOwner,
+		arg.LeaseSeconds,
+		arg.DesiredState,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -103,10 +103,9 @@ func (goldenWorkdirLister) List(context.Context, string, bool) ([]workdir.Workdi
 
 type goldenACPPool struct{}
 
-func (goldenACPPool) CreateAgentRuntime(context.Context, string, string, string) (ACPRuntimeSummary, error) {
+func (goldenACPPool) AgentOptions(context.Context, string, string) (ACPRuntimeSummary, error) {
 	return ACPRuntimeSummary{}, nil
 }
-func (goldenACPPool) CloseAgentRuntime(string, string) error { return nil }
 
 func TestToolSchemasMatchGolden(t *testing.T) {
 	t.Parallel()

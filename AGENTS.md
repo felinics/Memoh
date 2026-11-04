@@ -78,9 +78,9 @@ Top-level layout — see `docs/codebase-map.md` for the full annotated tree, con
 Before making changes to a directory, check whether that directory (or its nearest parent application/package directory) contains an `AGENTS.md`. If it does, read it first. Local files contain domain-specific conventions that override or extend this root guide.
 
 Key local developer guides:
-- `apps/web/AGENTS.md` — web frontend architecture, routing, page conventions, and i18n rules.
+- `apps/web/AGENTS.md` — web frontend entry point routing to `.agents/skills/memoh-frontend-rules/SKILL.md` (host rules, architecture, review checklist) and `packages/ui` skills.
 - `apps/desktop/AGENTS.md` — Electron shell, hosted-server bootstrap, tray/menu/preload rules.
-- `packages/ui/AGENTS.md` — UI-owned entry point for the design contract and adjacent Web composition guidance. Read it before Web/UI work; do not duplicate its skills under `.agents/skills/`.
+- `packages/ui/AGENTS.md` — UI-owned entry point for the `@felinic/ui` design token contract, `skills/ui-owners/` (component & primitive vocabulary), and `skills/ui-patterns/` (cross-component interaction patterns). Read it before Web/UI work; do not duplicate `packages/ui` skills under `.agents/skills/`.
 
 Reference docs moved out of this file:
 - `docs/development.md` — prerequisites, `mise` commands, Docker deployment
@@ -180,7 +180,7 @@ The `Human QA` section contains only one status checkbox, `- [ ] Human QA passed
 - `sdk.ProviderMetadata` is `namespace → name → string`. Memoh-owned annotations on tool-call parts (pending approval, user-input request, execution location) live in the `memoh` namespace through `internal/agent/partmeta`; `internal/messageconv` folds them back into the nested objects `bot_history_messages` has always stored, so the row format did not change with the SDK types.
 - **Tool usage lives with the tool, never in the static prompt.** Per-tool usage goes in `toolexec.Tool.Description`; cross-tool workflow guidance goes in an optional `tools.ToolUsage` `Usage()` method that `assembleTools` injects only when that provider registers tools for the session. `internal/agent/runtime/native/prompt_test.go` guards this.
 - Prompt templates are embedded from `internal/agent/runtime/native/prompts/`. Partials are prefixed with `_`; system prompting combines `system_common.md` with mode-specific prompts such as `mode_chat.md` and `mode_discuss.md`.
-- `internal/chat/` owns internal chat state (`thread`, `message`, `timeline`, `view`) and does not orchestrate Agent execution. Inbound adaptation lives in `internal/channel/inbound/`; discuss-mode driving in `internal/channel/discuss/`.
+- `internal/chat/` owns internal chat state (`thread`, `message`, `checkpoint`, `timeline`, `view`) and does not orchestrate Agent execution. Inbound adaptation lives in `internal/channel/inbound/`; discuss-mode driving in `internal/channel/discuss/`.
 - Browser Use tools (`browser_action` / `browser_observe` / `browser_remote_session`) drive the headed workspace Chrome over CDP; Computer Use (`computer_observe` / `computer_action`) drives the GUI desktop via AT-SPI + RFB. Screenshots are saved to a workspace path and must be explicitly read. Prefer Browser Use for web pages; Computer Use for native dialogs and non-browser GUI states.
 - Runtime internals (Twilight `Stream()`/`Generate()`, compaction, loop detection, tag extraction, full Browser/Computer Use details): `docs/agent-runtime.md`.
 

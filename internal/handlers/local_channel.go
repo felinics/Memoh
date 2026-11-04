@@ -1309,6 +1309,18 @@ func sendWSControlAck(writer *wsWriter, ref wsTurnRef, control, controlID string
 	})
 }
 
+// wsUnappliedDecisionCode names a decision response the runtime handled but did
+// not apply: the decision was answered under another control, was closed, or
+// its run ended. The other transports report that as the decision's expired
+// error; the acknowledgement carries the same code, so the client restores the
+// request instead of keeping its optimistic answer.
+func wsUnappliedDecisionCode(result sessionruntime.DecisionResponseResult, expired apperror.Code) string {
+	if result.Applied || !result.Handled {
+		return ""
+	}
+	return string(expired)
+}
+
 // failWSControl answers a control that failed with a control_ack carrying
 // ackCode and writes the control's result record. The ack is what the client
 // branches on and the record carries err, so the two are separate: the ack is
@@ -1997,7 +2009,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(apperror.CodeOf(err)), err)
 				continue
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, "")
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, wsUnappliedDecisionCode(result, apperror.CodeToolApprovalExpired))
 
 		case "user_input_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
@@ -2057,7 +2069,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(apperror.CodeOf(err)), err)
 				continue
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, "")
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, wsUnappliedDecisionCode(result, apperror.CodeUserInputExpired))
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)

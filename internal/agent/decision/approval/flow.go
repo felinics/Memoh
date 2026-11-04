@@ -19,6 +19,7 @@ type FlowService interface {
 	CreatePending(ctx context.Context, input CreatePendingInput) (Request, error)
 	Get(ctx context.Context, approvalID string) (Request, error)
 	Reject(ctx context.Context, approvalID, actorID, reason string) (Request, error)
+	Cancel(ctx context.Context, approvalID, reason string) (Request, error)
 	WaitForDecision(ctx context.Context, approvalID string) (Request, error)
 }
 
@@ -53,12 +54,9 @@ type FlowRequest struct {
 	// UndeliveredReason is recorded when an interactive pending approval could
 	// not be delivered to the live stream.
 	UndeliveredReason string
-	// AbortReason is recorded when the caller is cancelled while waiting.
+	// AbortReason is recorded when the caller is cancelled while waiting; the
+	// request is then cancelled, not rejected: nobody decided against it.
 	AbortReason string
-	// CancelOnAbort optionally supplies a runtime-specific cancellation path.
-	// ACP uses it to persist the distinct cancelled status for a stopped turn;
-	// other callers retain the existing rejected-on-abort behavior.
-	CancelOnAbort func(context.Context, Request, string) (Request, error)
 }
 
 // FlowResult describes how the approval flow concluded.
@@ -205,32 +203,19 @@ func RunRuntimeFlow(ctx context.Context, svc FlowService, flow FlowRequest) (Flo
 			if reason == "" {
 				reason = "tool approval aborted"
 			}
-			rejectCtx, rejectCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer rejectCancel()
-			var rejected Request
-			var rejectErr error
-			if flow.CancelOnAbort != nil {
-				rejected, rejectErr = flow.CancelOnAbort(rejectCtx, req, reason)
-			} else {
-				rejected, rejectErr = svc.Reject(rejectCtx, req.ID, "", reason)
-			}
-			if rejectErr != nil {
-				if recovered, ok := recoverTerminalDecision(rejectCtx, svc, req.ID, rejectErr); ok {
+			cancelCtx, cancelCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancelCancel()
+			cancelled, cancelErr := svc.Cancel(cancelCtx, req.ID, reason)
+			if cancelErr != nil {
+				if recovered, ok := recoverTerminalDecision(cancelCtx, svc, req.ID, cancelErr); ok {
 					return resultFromDecision(req, recovered, emit), nil
 				}
-				return FlowResult{}, rejectErr
+				return FlowResult{}, cancelErr
 			}
-			if recorded := strings.TrimSpace(rejected.DecisionReason); recorded != "" {
-				reason = recorded
+			if strings.TrimSpace(cancelled.DecisionReason) == "" {
+				cancelled.DecisionReason = reason
 			}
-			if strings.TrimSpace(rejected.DecisionReason) == "" {
-				rejected.DecisionReason = reason
-			}
-			// Preserve the actual durable terminal status. A Service with the
-			// session-cancellation capability returns cancelled; a legacy FlowService
-			// may return rejected. resultFromDecision overlays either result onto the
-			// original request so the emitted snapshot keeps its tool metadata.
-			_ = resultFromDecision(req, rejected, emit)
+			_ = resultFromDecision(req, cancelled, emit)
 			return FlowResult{}, err
 		}
 		return FlowResult{}, err

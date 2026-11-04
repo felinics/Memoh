@@ -100,7 +100,7 @@ describe.each([false, true])('tool failure detail (inGroup=%s)', (inGroup) => {
   })
 })
 
-it.each([['en', 'Tool execution failed.'], ['zh', '工具执行失败。'], ['ja', 'ツールの実行に失敗しました。']])('localizes a failure without diagnostics (%s)', async (locale, text) => {
+it.each([['en', 'Tool execution failed.'], ['zh', '工具执行失败'], ['ja', 'ツールの実行に失敗しました。']])('localizes a failure without diagnostics (%s)', async (locale, text) => {
   const { root } = mountTool('web_search', { query: 'review' }, { isError: true }, false, locale)
   await open(root)
   expect(root.textContent).toContain(text)
