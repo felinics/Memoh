@@ -104,7 +104,7 @@ Jetpack Compose 为主；移动壳是 WebView，只取其中讲平台行为的�
 | lucide | 图标 | [lucide.dev](https://lucide.dev/guide/) | 有 | 未发现 |
 | Vite、Vitest | 构建、测试 | [vite.dev](https://vite.dev/guide/)、[vitest.dev](https://vitest.dev/guide/) | 都有 | 未发现 |
 | Electron、electron-vite | 桌面端 | [electronjs.org](https://www.electronjs.org/docs/latest)、[electron-vite.org](https://electron-vite.org/guide/) | 无 | 未发现 |
-| Capacitor | 移动壳 | [capacitorjs.com](https://capacitorjs.com/docs)，返回见 [App](https://capacitorjs.com/docs/apis/app)，系统栏见 [System Bars](https://capacitorjs.com/docs/apis/system-bars) | 无 | [ionic-team/capacitor-skills](https://github.com/ionic-team/capacitor-skills)，由 Capacitor 的维护方 Ionic 团队发布，覆盖插件生成、Cordova 插件迁移与 UIScene 迁移，不涉及导航与返回。Capgo 发布的 Capacitor skills 是第三方的，只当线索 |
+| Capacitor | 移动壳（开发中，尚未合入） | [capacitorjs.com](https://capacitorjs.com/docs)，返回见 [App](https://capacitorjs.com/docs/apis/app)，系统栏见 [System Bars](https://capacitorjs.com/docs/apis/system-bars) | 无 | [ionic-team/capacitor-skills](https://github.com/ionic-team/capacitor-skills)，由 Capacitor 的维护方 Ionic 团队发布，覆盖插件生成、Cordova 插件迁移与 UIScene 迁移，不涉及导航与返回。Capgo 发布的 Capacitor skills 是第三方的，只当线索 |
 
 「未发现」的检索方法：在维护方的 GitHub 组织或账号下检索名称含 skill 的仓库，没有结果。
 
