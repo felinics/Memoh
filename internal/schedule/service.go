@@ -868,8 +868,7 @@ func toUUID(id string) pgtype.UUID {
 // resolveBotLocation returns the bot's effective timezone, the same one agent
 // turns state in the system context, so a pattern fires when the agent meant.
 func (s *Service) resolveBotLocation(ctx context.Context, botID pgtype.UUID) *time.Location {
-	loc, _ := memtimezone.ResolveBot(ctx, s.queries, botID, s.defaultLocation, s.logger)
-	return loc
+	return memtimezone.ResolveBot(ctx, s.queries, botID, s.defaultLocation, s.logger).Location
 }
 
 // locationSchedule wraps a cron.Schedule to evaluate Next() in a specific

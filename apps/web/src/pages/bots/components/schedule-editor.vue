@@ -312,7 +312,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -336,13 +336,13 @@ import {
   TimeInput,
 } from '@felinic/ui'
 import {
-  getBotsByBotIdSettings,
   postBotsByBotIdSchedule,
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleCreateRequest, ScheduleSchedule, ScheduleUpdateRequest } from '@memohai/sdk'
 import ScheduleExecutionFields, { type ScheduleExecutionForm } from './schedule-execution-fields.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useBotEffectiveTimezone } from '@/composables/api/useBotTimezone'
 import { isAgentRuntimeType } from '@/store/chat-list.utils'
 import {
   describeCron,
@@ -410,15 +410,12 @@ const manualCron = computed(() => toCron(patternState.value))
 const submitted = ref(false)
 const isSaving = ref(false)
 const submitError = ref<string | null>(null)
-const botTimezone = ref<string | undefined>(undefined)
 
 const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
 
-const effectiveTimezone = computed(() => {
-  const tz = botTimezone.value?.trim()
-  if (tz) return tz
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
-})
+// The pattern runs in the bot's effective timezone; the preview names it so a
+// viewer in another zone reads the times correctly.
+const { timezone: effectiveTimezone } = useBotEffectiveTimezone(() => props.botId)
 
 function patchState(patch: Partial<ScheduleFormState>) {
   patternState.value = { ...patternState.value, ...patch }
@@ -563,17 +560,6 @@ function hydrateFromProps() {
   }
 }
 
-async function fetchBotSettings() {
-  if (!props.botId) return
-  try {
-    const { data } = await getBotsByBotIdSettings({ path: { bot_id: props.botId }, throwOnError: true })
-    const tz = (data as { timezone?: string } | undefined)?.timezone
-    botTimezone.value = tz?.trim() || undefined
-  } catch {
-    botTimezone.value = undefined
-  }
-}
-
 async function handleSubmit() {
   if (isSaving.value) return
   submitted.value = true
@@ -613,8 +599,4 @@ watch(
   () => hydrateFromProps(),
   { immediate: true },
 )
-
-onMounted(() => {
-  void fetchBotSettings()
-})
 </script>
