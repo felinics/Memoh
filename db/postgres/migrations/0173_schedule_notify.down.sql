@@ -2,9 +2,18 @@
 -- Remove schedule notification settings and the 'update' attention kind. A
 -- session whose latest attention was an update keeps it as a plain reply.
 
+-- bot_sessions is under FORCE row level security keyed on memoh.team_id,
+-- which a migration connection never sets. Lift it for the data step and
+-- restore it after, as 0165 does.
+ALTER TABLE public.bot_sessions NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions DISABLE ROW LEVEL SECURITY;
+
 UPDATE public.bot_sessions
 SET attention_kind = 'reply'
 WHERE attention_kind = 'update';
+
+ALTER TABLE public.bot_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_sessions FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE public.bot_sessions
   DROP CONSTRAINT IF EXISTS bot_sessions_attention_kind_check,
