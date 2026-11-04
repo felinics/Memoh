@@ -7455,9 +7455,28 @@ definitions:
         type: string
       display_enabled:
         type: boolean
+      effective_timezone:
+        description: |-
+          EffectiveTimezone is the timezone the bot runs in: Timezone when set,
+          otherwise InheritedTimezone. Agent turns and the scheduler use the same
+          value, so clients read it instead of deriving one from the browser.
+          Only the settings API fills EffectiveTimezone, InheritedTimezone and
+          InheritedTimezoneSource; they are empty on settings the server reads for
+          its own use.
+        type: string
       fetch_provider_id:
         type: string
       image_model_id:
+        type: string
+      inherited_timezone:
+        description: |-
+          InheritedTimezone is what the bot uses without a Timezone of its own.
+          InheritedTimezoneSource says whose timezone that is.
+        type: string
+      inherited_timezone_source:
+        enum:
+        - owner
+        - system
         type: string
       memory_enabled:
         description: |-

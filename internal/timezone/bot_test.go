@@ -55,18 +55,21 @@ func TestResolveBotPriority(t *testing.T) {
 		ownerErr    error
 		botErr      error
 		want        string
+		wantSource  Source
 		wantLookups int
 	}{
 		{
-			name:    "bot timezone wins over owner",
-			botTZ:   pgtype.Text{String: "Asia/Tokyo", Valid: true},
-			ownerTZ: "Asia/Shanghai",
-			want:    "Asia/Tokyo",
+			name:       "bot timezone wins over owner",
+			botTZ:      pgtype.Text{String: "Asia/Tokyo", Valid: true},
+			ownerTZ:    "Asia/Shanghai",
+			want:       "Asia/Tokyo",
+			wantSource: SourceBot,
 		},
 		{
 			name:        "owner timezone fills unset bot timezone",
 			ownerTZ:     "Asia/Shanghai",
 			want:        "Asia/Shanghai",
+			wantSource:  SourceOwner,
 			wantLookups: 1,
 		},
 		{
@@ -74,6 +77,7 @@ func TestResolveBotPriority(t *testing.T) {
 			botTZ:       pgtype.Text{String: "  ", Valid: true},
 			ownerTZ:     "Asia/Shanghai",
 			want:        "Asia/Shanghai",
+			wantSource:  SourceOwner,
 			wantLookups: 1,
 		},
 		{
@@ -81,35 +85,41 @@ func TestResolveBotPriority(t *testing.T) {
 			botTZ:       pgtype.Text{String: "Not/A_Zone", Valid: true},
 			ownerTZ:     "Europe/Paris",
 			want:        "Europe/Paris",
+			wantSource:  SourceOwner,
 			wantLookups: 1,
 		},
 		{
 			name:        "blank owner timezone uses fallback",
 			ownerTZ:     "  ",
 			want:        "system-default",
+			wantSource:  SourceSystem,
 			wantLookups: 1,
 		},
 		{
 			name:        "invalid owner timezone uses fallback",
 			ownerTZ:     "Not/A_Zone",
 			want:        "system-default",
+			wantSource:  SourceSystem,
 			wantLookups: 1,
 		},
 		{
 			name:        "owner lookup failure uses fallback",
 			ownerErr:    errors.New("lookup failed"),
 			want:        "system-default",
+			wantSource:  SourceSystem,
 			wantLookups: 1,
 		},
 		{
-			name:    "bot without owner uses fallback",
-			noOwner: true,
-			want:    "system-default",
+			name:       "bot without owner uses fallback",
+			noOwner:    true,
+			want:       "system-default",
+			wantSource: SourceSystem,
 		},
 		{
-			name:   "bot lookup failure uses fallback",
-			botErr: errors.New("lookup failed"),
-			want:   "system-default",
+			name:       "bot lookup failure uses fallback",
+			botErr:     errors.New("lookup failed"),
+			want:       "system-default",
+			wantSource: SourceSystem,
 		},
 	}
 
@@ -126,9 +136,9 @@ func TestResolveBotPriority(t *testing.T) {
 				stub.bot.OwnerUserID = pgtype.UUID{}
 			}
 
-			loc, name := ResolveBot(context.Background(), stub, botID, fallback, nil)
-			if name != tt.want || loc.String() != tt.want {
-				t.Fatalf("ResolveBot() = (%q, %q), want %q", loc.String(), name, tt.want)
+			zone := ResolveBot(context.Background(), stub, botID, fallback, nil)
+			if zone.Name != tt.want || zone.Location.String() != tt.want || zone.Source != tt.wantSource {
+				t.Fatalf("ResolveBot() = (%q, %q, %q), want (%q, %q)", zone.Location.String(), zone.Name, zone.Source, tt.want, tt.wantSource)
 			}
 			if stub.ownerHits != tt.wantLookups {
 				t.Fatalf("owner lookups = %d, want %d", stub.ownerHits, tt.wantLookups)
@@ -142,15 +152,87 @@ func TestResolveBotFallbacks(t *testing.T) {
 
 	stub := &botLookupStub{}
 
-	if loc, name := ResolveBot(context.Background(), stub, testUUID(1), nil, nil); loc != time.UTC || name != DefaultName {
-		t.Fatalf("nil fallback = (%v, %q), want UTC", loc, name)
+	if zone := ResolveBot(context.Background(), stub, testUUID(1), nil, nil); zone.Location != time.UTC || zone.Name != DefaultName || zone.Source != SourceSystem {
+		t.Fatalf("nil fallback = %+v, want UTC from system", zone)
 	}
-	if loc, name := ResolveBot(context.Background(), nil, testUUID(1), nil, nil); loc != time.UTC || name != DefaultName {
-		t.Fatalf("nil lookup = (%v, %q), want UTC", loc, name)
+	if zone := ResolveBot(context.Background(), nil, testUUID(1), nil, nil); zone.Location != time.UTC || zone.Name != DefaultName {
+		t.Fatalf("nil lookup = %+v, want UTC", zone)
 	}
 
 	fallback := time.FixedZone("system-default", 3*60*60)
-	if loc, _ := ResolveBot(context.Background(), &botLookupStub{bot: sqlc.GetBotByIDRow{Timezone: pgtype.Text{String: "Asia/Tokyo", Valid: true}}}, pgtype.UUID{}, fallback, nil); loc != fallback {
-		t.Fatalf("invalid bot id = %v, want fallback", loc)
+	if zone := ResolveBot(context.Background(), &botLookupStub{bot: sqlc.GetBotByIDRow{Timezone: pgtype.Text{String: "Asia/Tokyo", Valid: true}}}, pgtype.UUID{}, fallback, nil); zone.Location != fallback {
+		t.Fatalf("invalid bot id = %+v, want fallback", zone)
+	}
+}
+
+func TestResolveBotWithInherited(t *testing.T) {
+	t.Parallel()
+
+	botID := testUUID(1)
+	ownerID := testUUID(2)
+	fallback := time.FixedZone("system-default", -5*60*60)
+
+	tests := []struct {
+		name          string
+		botTZ         pgtype.Text
+		ownerTZ       string
+		botErr        error
+		wantEffective string
+		wantSource    Source
+		wantInherited string
+		wantInhSource Source
+	}{
+		{
+			name:          "bot timezone is effective, owner timezone is inherited",
+			botTZ:         pgtype.Text{String: "Asia/Tokyo", Valid: true},
+			ownerTZ:       "Asia/Shanghai",
+			wantEffective: "Asia/Tokyo",
+			wantSource:    SourceBot,
+			wantInherited: "Asia/Shanghai",
+			wantInhSource: SourceOwner,
+		},
+		{
+			name:          "without a bot timezone both are the owner's",
+			ownerTZ:       "Asia/Shanghai",
+			wantEffective: "Asia/Shanghai",
+			wantSource:    SourceOwner,
+			wantInherited: "Asia/Shanghai",
+			wantInhSource: SourceOwner,
+		},
+		{
+			name:          "bot timezone over the system default",
+			botTZ:         pgtype.Text{String: "Asia/Tokyo", Valid: true},
+			wantEffective: "Asia/Tokyo",
+			wantSource:    SourceBot,
+			wantInherited: "system-default",
+			wantInhSource: SourceSystem,
+		},
+		{
+			name:          "bot lookup failure uses the system default for both",
+			botErr:        errors.New("lookup failed"),
+			wantEffective: "system-default",
+			wantSource:    SourceSystem,
+			wantInherited: "system-default",
+			wantInhSource: SourceSystem,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			stub := &botLookupStub{
+				bot:    sqlc.GetBotByIDRow{ID: botID, OwnerUserID: ownerID, Timezone: tt.botTZ},
+				botErr: tt.botErr,
+				owner:  sqlc.User{ID: ownerID, Timezone: tt.ownerTZ},
+			}
+
+			effective, inherited := ResolveBotWithInherited(context.Background(), stub, botID, fallback, nil)
+			if effective.Name != tt.wantEffective || effective.Source != tt.wantSource {
+				t.Fatalf("effective = (%q, %q), want (%q, %q)", effective.Name, effective.Source, tt.wantEffective, tt.wantSource)
+			}
+			if inherited.Name != tt.wantInherited || inherited.Source != tt.wantInhSource {
+				t.Fatalf("inherited = (%q, %q), want (%q, %q)", inherited.Name, inherited.Source, tt.wantInherited, tt.wantInhSource)
+			}
+		})
 	}
 }

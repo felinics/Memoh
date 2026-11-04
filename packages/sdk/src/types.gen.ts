@@ -4381,8 +4381,23 @@ export type SettingsSettings = {
     default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
+    /**
+     * EffectiveTimezone is the timezone the bot runs in: Timezone when set,
+     * otherwise InheritedTimezone. Agent turns and the scheduler use the same
+     * value, so clients read it instead of deriving one from the browser.
+     * Only the settings API fills EffectiveTimezone, InheritedTimezone and
+     * InheritedTimezoneSource; they are empty on settings the server reads for
+     * its own use.
+     */
+    effective_timezone?: string;
     fetch_provider_id?: string;
     image_model_id?: string;
+    /**
+     * InheritedTimezone is what the bot uses without a Timezone of its own.
+     * InheritedTimezoneSource says whose timezone that is.
+     */
+    inherited_timezone?: string;
+    inherited_timezone_source?: 'owner' | 'system';
     /**
      * MemoryEnabled reports whether the bot uses Built-in Memory. It is derived
      * from MemoryProviderID, which stays internal to the server.
