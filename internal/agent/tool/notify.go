@@ -55,7 +55,7 @@ func (p *NotifyProvider) Tools(ctx context.Context, session SessionContext) ([]t
 	}
 	return []toolexec.Tool{{
 		Name:        ToolNotifyUser().String(),
-		Description: "Tell the user that this scheduled run has something they should see. Without this call the user is not told about the run in Memoh. Call it at most once, after the work is done, and only when, judging by the command, the result is something the user would want to know now; do not call it for routine or empty results. Failures and approvals reach the user without it. The user sees only that the run has an update, so put what matters in your reply.",
+		Description: "Tell the user that this scheduled run has something they should see. Without this call the user is not told about the run in Memoh. Call it at most once, after the work is done, and only when, judging by the command, the result is something the user would want to know now; do not call it for routine or empty results. Replying in the conversation does not notify the user; call this whenever the run found what the command says the user wants to hear about. Failures and approvals reach the user without it. The user sees only that the run has an update, so put what matters in your reply.",
 		Parameters:  toolexec.SchemaFor[notifyUserArgs](),
 		Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, _ notifyUserArgs) (sdk.ToolOutput, error) {
 			fire, ok, err := p.notifier.ActiveScheduleFire(ctx.Context, sessionID)

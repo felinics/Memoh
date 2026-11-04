@@ -952,7 +952,7 @@ func TestScheduleProviderUsageGatesRegisteredTools(t *testing.T) {
 	if !strings.Contains(got, "explicit `platform` and `target`") {
 		t.Fatalf("Usage with create_schedule/send should require explicit delivery target in scheduled commands, got:\n%s", got)
 	}
-	for _, want := range []string{"effective timezone", "end the turn", "do not wait", "poll schedules or messages"} {
+	for _, want := range []string{"effective timezone", "end the turn", "do not wait", "poll schedules or messages", "`notify_policy`", "only inside such runs and not in this conversation"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with create_schedule should contain %q, got:\n%s", want, got)
 		}

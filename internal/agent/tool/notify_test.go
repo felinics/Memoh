@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/sessionmode"
@@ -97,4 +98,33 @@ func TestNotifyUserMarksAnUpdateOncePerFire(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNotifyUserSaysAReplyIsNotANotification(t *testing.T) {
+	tools, err := NewNotifyProvider(nil, &fakeScheduleNotifier{fire: attention.ScheduleFire{NotifyPolicy: attention.NotifyImportant}, found: true}).Tools(t.Context(), scheduleSession())
+	if err != nil || len(tools) != 1 {
+		t.Fatalf("Tools = %d, %v", len(tools), err)
+	}
+	if !strings.Contains(tools[0].Description, "Replying in the conversation does not notify the user") {
+		t.Fatalf("notify_user description must say a reply is not a notification, got:\n%s", tools[0].Description)
+	}
+}
+
+func TestCreateScheduleExplainsWhichNotifyPolicyToPick(t *testing.T) {
+	tools, err := NewScheduleProvider(nil, nativeSourceTestScheduler{}).Tools(t.Context(), SessionContext{BotID: "bot"})
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	for _, tool := range tools {
+		if tool.Name != ToolCreateSchedule().String() {
+			continue
+		}
+		for _, want := range []string{"`important` (default)", "`notify_user`", "even while testing at a short interval", "`every_run`: only when the user wants every result", "do not write \"reply here only\""} {
+			if !strings.Contains(tool.Description, want) {
+				t.Fatalf("create_schedule description should contain %q, got:\n%s", want, tool.Description)
+			}
+		}
+		return
+	}
+	t.Fatal("create_schedule is not registered")
 }
