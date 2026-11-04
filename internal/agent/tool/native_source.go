@@ -32,6 +32,7 @@ type NativeToolApprovalService interface {
 	CreatePending(ctx context.Context, input toolapproval.CreatePendingInput) (toolapproval.Request, error)
 	Get(ctx context.Context, approvalID string) (toolapproval.Request, error)
 	Reject(ctx context.Context, approvalID, actorID, reason string) (toolapproval.Request, error)
+	Cancel(ctx context.Context, approvalID, reason string) (toolapproval.Request, error)
 	WaitForDecision(ctx context.Context, approvalID string) (toolapproval.Request, error)
 	RegisterWaiter(approvalID string) func()
 }
@@ -255,7 +256,7 @@ func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSess
 			ToolName:                     ToolAskUser().String(),
 			Input:                        arguments,
 			ProviderMetadata: map[string]any{
-				"source":     userinput.ProviderSourceACPMCP,
+				"source":     userinput.ProviderSourceMemohTool,
 				"runtime_id": session.RuntimeID,
 				"run_id":     session.RunID,
 			},

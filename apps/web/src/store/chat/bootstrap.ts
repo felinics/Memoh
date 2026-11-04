@@ -165,15 +165,14 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
             && deps.knownSessionSummary(deps.sessionId.value)
           ) {
             deps.draftIntent.value = false
-          } else if (deps.draftIntent.value) {
-            deps.sessionId.value = null
-            deps.clearHistoryView()
           } else {
-            const firstConversation = visibleSessions.find(
-              session => (session.type ?? 'chat') !== 'schedule',
-            )
-            deps.sessionId.value = (firstConversation ?? visibleSessions[0]!).id
+            // Nothing to resume: open on a new conversation instead of picking
+            // the latest session for the user. A pick lands only after the
+            // session list arrives, so the composer would have to wait for it
+            // or jump from the new-chat page to the bottom of a history.
+            deps.sessionId.value = null
             deps.explicitSessionSelection.value = false
+            deps.clearHistoryView()
           }
 
           deps.startWebSocket(botId)

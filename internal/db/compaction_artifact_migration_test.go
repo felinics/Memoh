@@ -41,29 +41,3 @@ func TestCompactionArtifactMigrationPreservesPublished0108Schema(t *testing.T) {
 		}
 	}
 }
-
-func TestCompactionArtifactCanonicalSchemaMatchesPublished0108(t *testing.T) {
-	t.Parallel()
-
-	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
-
-	for _, required := range []string{
-		"superseded_by UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL",
-		"CREATE INDEX IF NOT EXISTS idx_compacts_active_session",
-	} {
-		if !strings.Contains(baseline, required) {
-			t.Fatalf("canonical 0001 schema is missing published 0108 object %q", required)
-		}
-	}
-	for _, deferred := range []string{
-		"bot_history_message_compact_parent_edges",
-		"sync_compaction_artifact_parent_edges",
-		"compacts_supersession_markers_check",
-		"compacts_not_self_superseded_check",
-		"idx_compacts_session_lineage",
-	} {
-		if strings.Contains(baseline, deferred) {
-			t.Fatalf("canonical 0001 schema contains %q, which belongs to the artifact-writer PR", deferred)
-		}
-	}
-}

@@ -1107,6 +1107,9 @@ func (e *streamEngine) endWithFailure(failure StreamEvent) {
 // commits, so the regenerated step reuses its index.
 func (e *streamEngine) commitStep(attemptStep int, sr *step.Record) (StepDirective, error) {
 	stepIndex := e.baseCfg.StepIndexOffset + len(e.steps)
+	if sr != nil {
+		sr.InputEstimateTokens = e.baseCfg.contextSwitch.observe(sr.Result.Usage)
+	}
 	var dir StepDirective
 	if e.baseCfg.OnStepCommitted != nil {
 		additions := e.dynamic.stepAdditions(stepIndex)

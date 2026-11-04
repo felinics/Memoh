@@ -1339,7 +1339,6 @@ func TestChannelInboundProcessorAutoCreatesDefaultACPSession(t *testing.T) {
 		Runtime:     sessionpkg.RuntimeACPAgent,
 		ACPAgentID:  "custom-agent",
 		ProjectPath: "/data/app",
-		ProjectMode: sessionpkg.DefaultACPProjectMode,
 	}})
 	permChecker := &fakeBotPermissionChecker{allowed: true}
 	processor.SetBotPermissionChecker(permChecker)

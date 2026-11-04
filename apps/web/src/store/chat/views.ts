@@ -280,6 +280,11 @@ export function createChatViews(deps: ChatViewsDeps) {
         )
   }
 
+  function isChatViewStopping(target: ChatViewTarget) {
+    const resolved = normalizeTarget(target)
+    return assistantStreams.isSessionStopping(resolved.botId, resolved.sessionId)
+  }
+
   function workspaceTargetSelectionFor(target?: ChatViewTarget) {
     const view = chatView(target)
     return {
@@ -456,6 +461,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     streamingSessionIds,
     streaming,
     isChatViewStreaming,
+    isChatViewStopping,
     workspaceTargetSelectionFor,
     setWorkspaceTargetSelection,
     initializeWorkspaceTargetSelection,

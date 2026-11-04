@@ -1,4 +1,4 @@
-import type { ExternalagentCodexUsageResponse, ExternalagentCodexUsageWindow } from '@memohai/sdk'
+import type { ExternalagentAgentQuotaResponse, ExternalagentAgentQuotaWindow } from '@memohai/sdk'
 import { formatCalendarTime, formatRelativeTime } from './date-time'
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
@@ -9,7 +9,7 @@ export const CODEX_USAGE_WARNING_PERCENT = 90
 
 export interface CodexUsageNotice {
   exhausted: boolean
-  window: ExternalagentCodexUsageWindow
+  window: ExternalagentAgentQuotaWindow
 }
 
 export function codexUsageWindowLabel(minutes: number, t: Translate): string {
@@ -28,7 +28,7 @@ export function codexUsageResetTime(resetsAt: string, locale: string): string {
 
 // When the account is blocked, point at the window that keeps it blocked the
 // longest; otherwise warn about the fullest window once it nears the limit.
-export function codexUsageNotice(usage: ExternalagentCodexUsageResponse | undefined): CodexUsageNotice | null {
+export function codexUsageNotice(usage: ExternalagentAgentQuotaResponse | undefined): CodexUsageNotice | null {
   const windows = usage?.windows ?? []
   if (!windows.length) return null
   if (usage?.limit_reached) {
@@ -45,6 +45,6 @@ export function codexUsageNoticeKey(botAgentId: string, notice: CodexUsageNotice
   return `${botAgentId}:${notice.window.window_minutes}:${notice.window.resets_at ?? ''}`
 }
 
-function resetMillis(window: ExternalagentCodexUsageWindow): number {
+function resetMillis(window: ExternalagentAgentQuotaWindow): number {
   return window.resets_at ? new Date(window.resets_at).getTime() : 0
 }

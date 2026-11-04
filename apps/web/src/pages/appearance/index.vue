@@ -87,12 +87,14 @@
         </SettingsRow>
 
         <SettingsRow
-          :label="t('settings.appearance.showExamplesEntry')"
-          :description="t('settings.appearance.showExamplesEntryDescription')"
+          :label="notificationTitle"
+          :description="notificationDescription"
         >
           <Switch
-            :model-value="!sidebarEntryHidden"
-            @update:model-value="(value) => sidebarEntryHidden = !value"
+            :model-value="notifications.active"
+            :disabled="!notifications.supported || notifications.pending"
+            :aria-label="notificationTitle"
+            @update:model-value="notifications.setEnabled"
           />
         </SettingsRow>
       </SettingsSection>
@@ -100,7 +102,6 @@
       <SettingsSection :title="t('settings.appearance.typography')">
         <SettingsRow
           :label="t('settings.appearance.uiFontSize')"
-          :description="t('settings.appearance.uiFontSizeDescription')"
         >
           <!-- NumberField emits only on commit (blur/Enter/stepper); reka
                clamps to min/max first. An emptied field commits undefined,
@@ -120,7 +121,6 @@
 
         <SettingsRow
           :label="t('settings.appearance.codeFontSize')"
-          :description="t('settings.appearance.codeFontSizeDescription')"
         >
           <NumberField
             id="code-font-size"
@@ -137,7 +137,6 @@
 
         <SettingsRow
           :label="t('settings.appearance.uiFontFamily')"
-          :description="t('settings.appearance.uiFontFamilyDescription')"
         >
           <Input
             id="ui-font-family"
@@ -153,7 +152,6 @@
 
         <SettingsRow
           :label="t('settings.appearance.codeFontFamily')"
-          :description="t('settings.appearance.codeFontFamilyDescription')"
         >
           <Input
             id="code-font-family"
@@ -168,25 +166,16 @@
         </SettingsRow>
       </SettingsSection>
 
-      <!-- Rarely-touched code/diagram theming lives behind an ActionCard that
-           opens a focused DIALOG — not a push-in sub-page. The structural rule
-           from the design pass: a facet of the current page never grows a
-           sub-level (sub-pages are reserved for entities like a Provider); a
-           dialog keeps the page visibly underneath, so "where am I" never
-           arises and no back-button chrome is needed. -->
-      <SectionGroup
+      <!-- Rarely-touched code/diagram theming and auxiliary toggles live behind
+           an ActionCard that opens a focused DIALOG — not a push-in sub-page. -->
+      <ActionCard
         :title="t('settings.appearance.advanced')"
-        tone="muted"
+        @click="advancedOpen = true"
       >
-        <ActionCard
-          :title="t('settings.appearance.advancedEntryTitle')"
-          @click="advancedOpen = true"
-        >
-          <template #icon>
-            <SlidersHorizontal />
-          </template>
-        </ActionCard>
-      </SectionGroup>
+        <template #icon>
+          <SlidersHorizontal />
+        </template>
+      </ActionCard>
     </div>
   </PageShell>
 
@@ -198,17 +187,26 @@
   <Dialog v-model:open="advancedOpen">
     <DialogPanel>
       <DialogHeader>
-        <DialogTitle>{{ t('settings.appearance.advancedEntryTitle') }}</DialogTitle>
+        <DialogTitle>{{ t('settings.appearance.advanced') }}</DialogTitle>
       </DialogHeader>
 
       <DialogBody class="space-y-6">
+        <SettingsRow
+          class="mx-0 min-h-0 py-0"
+          :divider="false"
+          :label="t('settings.appearance.showExamplesEntry')"
+          :description="t('settings.appearance.showExamplesEntryDescription')"
+        >
+          <Switch
+            :model-value="!sidebarEntryHidden"
+            @update:model-value="(value) => sidebarEntryHidden = !value"
+          />
+        </SettingsRow>
+
         <section class="space-y-3">
           <h3 class="text-sm font-medium text-foreground">
             {{ t('settings.appearance.codeHighlight') }}
           </h3>
-          <p class="text-xs text-muted-foreground">
-            {{ t('settings.appearance.codeHighlightDescription') }}
-          </p>
           <div class="grid gap-3 sm:grid-cols-2">
             <div class="space-y-2">
               <SearchableSelectPopover
@@ -269,9 +267,6 @@
               <h3 class="text-sm font-medium text-foreground">
                 {{ t('settings.appearance.mermaidTheme') }}
               </h3>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ t('settings.appearance.mermaidThemeDescription') }}
-              </p>
             </div>
             <div class="shrink-0">
               <Select
@@ -373,8 +368,9 @@ import { Monitor, Moon, SlidersHorizontal, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useNotificationSettings } from '@/store/notification-settings'
 import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-vue'
-import { PageShell, SettingsRow, SettingsSection, SectionGroup } from '@felinic/ui'
+import { PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 import { LOCALE_OPTIONS, type Locale } from '@/i18n'
@@ -414,6 +410,15 @@ const MERMAID_PREVIEW_PROPS = {
 } as const
 
 const { t } = useI18n()
+const notifications = useNotificationSettings()
+const notificationTitle = computed(() =>
+  notifications.desktop ? t('notifications.settingsTitle') : t('notifications.browserSettingsTitle'),
+)
+const notificationDescription = computed(() => {
+  if (!notifications.supported) return t('notifications.unsupported')
+  if (!notifications.desktop && notifications.permission === 'denied') return t('notifications.denied')
+  return t('notifications.settingsDescription')
+})
 const settingsStore = useSettingsStore()
 const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily, isDark } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme, setMermaidTheme } = settingsStore
@@ -432,13 +437,13 @@ watch(advancedOpen, (open) => {
   if (open) mermaidWarmup.value = false
 })
 
-const mermaidThemeLabels: Record<MermaidTheme, string> = {
-  auto: 'Auto',
+const mermaidThemeLabels = computed<Record<MermaidTheme, string>>(() => ({
+  auto: t('settings.appearance.mermaidThemeAuto'),
   default: 'Default',
   dark: 'Dark',
   forest: 'Forest',
   neutral: 'Neutral',
-}
+}))
 
 const allShikiThemes = listBundledShikiThemes()
 const lightShikiThemeOptions = computed<SearchableSelectOption[]>(() =>

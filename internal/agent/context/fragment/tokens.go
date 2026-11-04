@@ -41,6 +41,12 @@ func BudgetBytesForTokens(tokens int) int64 {
 	return int64(max(0, tokens)) * EstimateBytesPerToken
 }
 
+// ProviderBudgetBytesForTokens is the most bytes ProviderBudgetTokensFromBytes
+// prices within tokens: the byte budget of a provider-envelope decision.
+func ProviderBudgetBytesForTokens(tokens int) int64 {
+	return int64(max(0, tokens)) * 100 / ProviderBudgetSafetyFactorPercent * EstimateBytesPerToken
+}
+
 // ProviderBudgetTokensFromBytes converts bytes for provider-envelope decisions,
 // including selection under a provider budget and the summarizer request.
 // Compaction pressure, cache metrics, and other ledger consumers keep the

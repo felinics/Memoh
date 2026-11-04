@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -23,53 +24,111 @@ type MessageProvenance struct {
 }
 
 // ContextSwitch is the compaction event an armed run asks for when the
-// request before a step does not fit its allowance. View is every source the
-// request renders, Anchors the ones it keeps in place, and Tail those of the
-// latest committed step, which stays with everything after it.
-// HistoryBudgetTokens is the room the request leaves for the summary and the
-// history before the tail. Fold applies a pass the event committed to the
-// request and reports the tokens it then takes.
+// request before a step does not fit its allowance. Request is that request
+// and Provenance what each of its messages renders (nil for runtime context
+// the run rebuilds); the event decides what of it stays verbatim. Summarize
+// answers a fork request through the run's own model, with the output
+// settings the request carries, so a fork reads only what WindowTokens holds
+// beside OutputTokens, the run's output allowance, as every request of the
+// run does. Fold applies a pass the event committed to the request and
+// reports the request as it then is. UsageTokens, AllowanceTokens and
+// WindowTokens are in the units the run's estimate prices: the provider
+// counts Density tokens for each of them.
 type ContextSwitch struct {
-	View                []turn.ContextMessageSource
-	Anchors             []turn.ContextMessageSource
-	Tail                []turn.ContextMessageSource
-	HistoryBudgetTokens int
-	UsageTokens         int
-	AllowanceTokens     int
-	Fold                func(ContextFold) int
-	// Previous is the request the run sent last: this one without the
-	// latest step.
-	Previous *sdk.Request
+	Request         sdk.Request
+	Provenance      []*MessageProvenance
+	UsageTokens     int
+	AllowanceTokens int
+	WindowTokens    int
+	OutputTokens    int
+	Density         float64
+	Summarize       func(context.Context, sdk.Request) (sdk.ModelResult, error)
+	Fold            func(ContextFold) ContextSplice
 }
 
-// ContextFold is one pass an event committed: the summary that replaces the
-// messages whose sources it covers, and the earlier summaries it absorbs.
+// ContextSplice is a request after the passes an event applied to it so far.
+type ContextSplice struct {
+	Request    sdk.Request
+	Provenance []*MessageProvenance
+	Tokens     int
+}
+
+// ContextFold is one pass an event committed: its summary, and the request
+// it leaves by the messages of the request it read, the index of each that
+// stays or -1 for the summary.
 type ContextFold struct {
-	Artifact string
-	Summary  sdk.Message
-	Covered  []turn.ContextMessageSource
-	Absorbed []string
+	SummaryID string
+	Summary   sdk.Message
+	Order     []int
 }
 
 // contextSwitchState follows an armed run's request across its dispatches:
-// the provenance of what it renders, the sources of the latest committed
-// step, and, from a splice until the re-dispatch that follows it, where each
-// message of the spliced request was before (-1 for a summary).
+// the provenance of what it renders and, from a splice until the re-dispatch
+// that follows it, where each message of the spliced request was before (-1
+// for a summary). It also calibrates the run's estimate against the provider:
+// density is how many tokens the provider counts for each token the estimate
+// prices, from the latest step that reported its input (dispatched is what
+// the estimate priced the request a step sent at), and starts from the
+// session's last such step (RunConfig.ContextDensity).
 type contextSwitchState struct {
-	known []MessageProvenance
-	tail  []turn.ContextMessageSource
-	moved []int
+	known      []MessageProvenance
+	moved      []int
+	density    float64
+	dispatched int
 }
+
+// maxContextDensity bounds a calibration: a provider count far beyond any
+// tokenizer's (a cumulative or misreported usage) must not fold every request
+// to nothing.
+const maxContextDensity = 4.0
 
 func newContextSwitchState(cfg RunConfig) *contextSwitchState {
 	if cfg.SwitchContext == nil {
 		return nil
 	}
-	s := &contextSwitchState{}
+	s := &contextSwitchState{density: boundedContextDensity(cfg.ContextDensity)}
 	for _, provenance := range cfg.ContextProvenance {
 		s.know(provenance)
 	}
 	return s
+}
+
+// boundedContextDensity is a density a calibration may apply: never below 1,
+// where the estimate already holds, nor above maxContextDensity.
+func boundedContextDensity(density float64) float64 {
+	if !(density > 1) {
+		return 1
+	}
+	return min(density, maxContextDensity)
+}
+
+// calibrated is a provider token count in the units the estimate prices: a
+// request the estimate prices at calibrated(n) is one the provider counts at
+// about n.
+func (s *contextSwitchState) calibrated(tokens int) int {
+	if s == nil || s.density <= 1 || tokens <= 0 {
+		return tokens
+	}
+	return max(int(float64(tokens)/s.density), 1)
+}
+
+// staged records what the estimate prices the request a step sends at.
+func (s *contextSwitchState) staged(params *sdk.Request) {
+	if s == nil || params == nil {
+		return
+	}
+	s.dispatched = contextfrag.ProviderEnvelopeTokens(params.System, params.Messages, params.Tools)
+}
+
+// observe calibrates the estimate by the input tokens the provider counted
+// for the request the step sent, and reports what the estimate priced that
+// request at; zero when either is unknown.
+func (s *contextSwitchState) observe(usage sdk.Usage) int {
+	if s == nil || s.dispatched <= 0 || usage.InputTokens <= 0 {
+		return 0
+	}
+	s.density = boundedContextDensity(float64(usage.InputTokens) / float64(s.dispatched))
+	return s.dispatched
 }
 
 func (s *contextSwitchState) know(provenance MessageProvenance) {
@@ -85,16 +144,9 @@ func (s *contextSwitchState) committed(messages []sdk.Message, provenance []Mess
 	if s == nil || len(provenance) == 0 || len(provenance) != len(messages) {
 		return
 	}
-	var tail []turn.ContextMessageSource
 	for i, p := range provenance {
 		p.Message = messages[i]
 		s.know(p)
-		if !p.Anchor {
-			tail = append(tail, p.Sources...)
-		}
-	}
-	if len(tail) > 0 {
-		s.tail = tail
 	}
 }
 
@@ -116,13 +168,14 @@ func (s *contextSwitchState) align(messages []sdk.Message) []*MessageProvenance 
 	return out
 }
 
-// fold runs one compaction event when params does not fit allowance and the
-// run has committed a step, and splices each pass it commits into params.
-// Every message no pass covers stays as it was. It reports whether params
-// changed; an event that leaves the request over its allowance fails as an
-// unsatisfied budget, or a protected overflow when the event says so.
+// fold runs one compaction event when params does not fit allowance, which
+// is calibrated, and splices each pass it commits into params; the event
+// decides what stays verbatim. Every message no pass covers stays as it was.
+// It reports whether params changed; an event that leaves the request over
+// its allowance fails as the event says. The event works in the estimate's
+// units, so the window a fork reads within is calibrated too.
 func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sdk.Request, allowance int) (bool, error) {
-	if s == nil || len(s.tail) == 0 || allowance <= 0 {
+	if s == nil || allowance <= 0 {
 		return false, nil
 	}
 	usage := contextfrag.ProviderEnvelopeTokens(params.System, params.Messages, params.Tools)
@@ -130,46 +183,37 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 		return false, nil
 	}
 	provenance := s.align(params.Messages)
-	tailStart := slices.IndexFunc(provenance, func(p *MessageProvenance) bool {
-		return p != nil && !p.Anchor && sharesSource(p.Sources, s.tail)
-	})
-	if tailStart < 0 {
-		return false, nil
-	}
-	previous := *params
-	previous.Messages = slices.Clone(params.Messages[:tailStart])
-	sw := ContextSwitch{Tail: slices.Clone(s.tail), UsageTokens: usage, AllowanceTokens: allowance, Previous: &previous}
-	var kept []sdk.Message
-	for i, p := range provenance {
-		if p != nil {
-			sw.View = append(sw.View, p.Sources...)
-			if p.Anchor {
-				sw.Anchors = append(sw.Anchors, p.Sources...)
-			}
-		}
-		if p == nil || p.Anchor || i >= tailStart {
-			kept = append(kept, params.Messages[i])
-		}
-	}
-	sw.HistoryBudgetTokens = allowance - contextfrag.ProviderEnvelopeTokens(params.System, kept, params.Tools)
-	splice := requestSplice{messages: params.Messages, provenance: provenance, from: make([]int, len(params.Messages)), tail: sw.Tail}
+	window, reserve := providerWindow(cfg)
+	window = s.calibrated(window)
+	splice := requestSplice{messages: params.Messages, provenance: provenance, from: make([]int, len(params.Messages))}
 	for i := range splice.from {
 		splice.from[i] = i
 	}
 	tokens := usage
-	sw.Fold = func(fold ContextFold) int {
-		splice.apply(fold)
-		tokens = contextfrag.ProviderEnvelopeTokens(params.System, splice.messages, params.Tools)
-		return tokens
+	sw := ContextSwitch{
+		Request:         *params,
+		Provenance:      provenance,
+		UsageTokens:     usage,
+		AllowanceTokens: allowance,
+		WindowTokens:    window,
+		OutputTokens:    reserve,
+		Density:         s.density,
+		Summarize:       forkSummarizer(cfg.Model, cfg.ModelIdleWindow),
+		Fold: func(fold ContextFold) ContextSplice {
+			splice.apply(fold)
+			tokens = contextfrag.ProviderEnvelopeTokens(params.System, splice.messages, params.Tools)
+			request := *params
+			request.Messages = splice.messages
+			return ContextSplice{Request: request, Provenance: splice.provenance, Tokens: tokens}
+		},
 	}
 	detail, err := cfg.SwitchContext(ctx, sw)
 	if err == nil {
-		switch call := unansweredToolCall(splice.messages); {
+		switch call, result := unpairedToolParts(splice.messages); {
 		case call != "":
 			err, detail = fmt.Errorf("tool call %s lost its result", call), "trigger=in_run reason=postcondition"
-		case tokens > allowance:
-			err = fmt.Errorf("request_tokens=%d allowance=%d", tokens, allowance)
-			detail = fmt.Sprintf("trigger=in_run reason=still_over request_tokens=%d allowance=%d", tokens, allowance)
+		case result != "":
+			err, detail = fmt.Errorf("tool result %s lost its call", result), "trigger=in_run reason=postcondition"
 		}
 	}
 	if detail != "" {
@@ -184,6 +228,7 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 		}
 		return false, fmt.Errorf("%w: context switch: %w", contextfrag.ErrBudgetUnsatisfied, err)
 	}
+	recordFoldedInputImages(cfg.ContextMutations, params.Messages, provenance, splice.from)
 	params.Messages = splice.messages
 	s.known = nil
 	for _, p := range splice.provenance {
@@ -202,42 +247,14 @@ type requestSplice struct {
 	messages   []sdk.Message
 	provenance []*MessageProvenance
 	from       []int
-	tail       []turn.ContextMessageSource
 }
 
-// apply removes the messages whose every source the pass covers and places
-// its summary by turn.PlaceSummary. Anchors and the tail are never removed.
+// apply rewrites the request as the pass left it: the messages fold.Order
+// keeps, in its order, with the summary in its place.
 func (sp *requestSplice) apply(fold ContextFold) {
-	covered := make(map[turn.ContextMessageSource]bool, len(fold.Covered)+len(fold.Absorbed))
-	for _, source := range fold.Covered {
-		covered[turn.ContextMessageSource{Kind: source.Kind, ID: source.ID}] = true
-	}
-	for _, id := range fold.Absorbed {
-		covered[turn.ContextMessageSource{Kind: "summary", ID: id}] = true
-	}
-	removed := func(i int) bool {
-		p := sp.provenance[i]
-		if p == nil || p.Anchor || len(p.Sources) == 0 || sharesSource(p.Sources, sp.tail) {
-			return false
-		}
-		for _, source := range p.Sources {
-			if !covered[turn.ContextMessageSource{Kind: source.Kind, ID: source.ID}] {
-				return false
-			}
-		}
-		return true
-	}
-	order := make([]int, len(sp.messages))
-	for i := range order {
-		order[i] = i
-	}
-	order, placed := turn.PlaceSummary(order, -1, removed)
-	if !placed {
-		return
-	}
-	summary := &MessageProvenance{Message: fold.Summary, Sources: []turn.ContextMessageSource{{Kind: "summary", ID: fold.Artifact}}}
-	next := requestSplice{tail: sp.tail}
-	for _, i := range order {
+	summary := &MessageProvenance{Message: fold.Summary, Sources: []turn.ContextMessageSource{{Kind: "summary", ID: fold.SummaryID}}}
+	var next requestSplice
+	for _, i := range fold.Order {
 		if i < 0 {
 			next.messages, next.provenance, next.from = append(next.messages, fold.Summary), append(next.provenance, summary), append(next.from, -1)
 			continue
@@ -247,12 +264,32 @@ func (sp *requestSplice) apply(fold ContextFold) {
 	*sp = next
 }
 
-func sharesSource(sources, set []turn.ContextMessageSource) bool {
-	return slices.ContainsFunc(sources, func(source turn.ContextMessageSource) bool {
-		return slices.ContainsFunc(set, func(other turn.ContextMessageSource) bool {
-			return source.Kind == other.Kind && source.ID == other.ID
-		})
-	})
+// recordFoldedInputImages records the inputs a fold summarized with their
+// images: a summary carries no image, so they are omitted from then on. from
+// is where each message of the spliced request was in messages.
+func recordFoldedInputImages(ledger *contextfrag.MutationLedger, messages []sdk.Message, provenance []*MessageProvenance, from []int) {
+	kept := make(map[int]bool, len(from))
+	for _, i := range from {
+		kept[i] = true
+	}
+	var omitted []string
+	for i, message := range messages {
+		p := provenance[i]
+		if kept[i] || p == nil || !p.Anchor || !slices.ContainsFunc(message.Content, func(part sdk.MessagePart) bool {
+			_, image := part.(sdk.ImagePart)
+			return image
+		}) {
+			continue
+		}
+		for _, source := range p.Sources {
+			if source.ID != "" {
+				omitted = append(omitted, source.ID)
+			}
+		}
+	}
+	if len(omitted) > 0 && ledger != nil {
+		ledger.Record(contextfrag.MutationCurrentInputImagesOmitted, "sources="+strings.Join(omitted, ","))
+	}
 }
 
 // remap moves dynamic refs of the request before the last splice to the
@@ -332,23 +369,33 @@ func (s *contextSwitchState) movedCount(count int) int {
 	return len(s.moved)
 }
 
-// unansweredToolCall names a tool call in messages that no tool result
-// answers.
-func unansweredToolCall(messages []sdk.Message) string {
-	answered := map[string]bool{}
+// unpairedToolParts names a tool call in messages that no tool result
+// answers, and a tool result whose call no message makes.
+func unpairedToolParts(messages []sdk.Message) (call, result string) {
+	answered, called := map[string]bool{}, map[string]bool{}
 	for _, message := range messages {
 		for _, part := range message.Content {
-			if result, ok := part.(sdk.ToolResultPart); ok {
-				answered[result.ToolCallID] = true
+			switch part := part.(type) {
+			case sdk.ToolResultPart:
+				answered[part.ToolCallID] = true
+			case sdk.ToolCallPart:
+				called[part.ToolCallID] = true
 			}
 		}
 	}
 	for _, message := range messages {
 		for _, part := range message.Content {
-			if call, ok := part.(sdk.ToolCallPart); ok && !answered[call.ToolCallID] {
-				return call.ToolCallID
+			switch part := part.(type) {
+			case sdk.ToolCallPart:
+				if call == "" && !answered[part.ToolCallID] {
+					call = part.ToolCallID
+				}
+			case sdk.ToolResultPart:
+				if result == "" && !called[part.ToolCallID] {
+					result = part.ToolCallID
+				}
 			}
 		}
 	}
-	return ""
+	return call, result
 }

@@ -1,7 +1,6 @@
 DROP TABLE IF EXISTS public.workspace_dependency_catalogs;
 DROP TABLE IF EXISTS public.workspace_dependency_definitions;
 ALTER TABLE IF EXISTS bot_channel_routes DROP CONSTRAINT IF EXISTS fk_bot_channel_routes_active_session;
-ALTER TABLE IF EXISTS bot_history_messages DROP CONSTRAINT IF EXISTS fk_compact_id;
 
 DROP VIEW IF EXISTS public.team_accounts CASCADE;
 DO $drop_team_members_guard$
@@ -19,6 +18,7 @@ DROP TABLE IF EXISTS bot_user_grants CASCADE;
 DROP TABLE IF EXISTS user_provider_oauth_tokens CASCADE;
 DROP TABLE IF EXISTS provider_oauth_tokens CASCADE;
 DROP TABLE IF EXISTS schedule_logs CASCADE;
+DROP TABLE IF EXISTS bot_history_checkpoints CASCADE;
 DROP TABLE IF EXISTS bot_history_message_compacts CASCADE;
 DROP TABLE IF EXISTS bot_history_message_assets CASCADE;
 DROP TABLE IF EXISTS media_assets CASCADE;
@@ -77,6 +77,8 @@ DROP TABLE IF EXISTS channel_identities CASCADE;
 DROP TABLE IF EXISTS team_members CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS teams CASCADE;
+DROP FUNCTION IF EXISTS public.memoh_rewind_history_checkpoint(uuid, bigint, bigint);
+DROP FUNCTION IF EXISTS public.memoh_history_checkpoint_kept(uuid, bigint, bigint);
 DROP FUNCTION IF EXISTS public.memoh_current_team_id() CASCADE;
 DROP TYPE IF EXISTS user_role;
 

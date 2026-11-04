@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/slash"
 )
@@ -226,10 +227,10 @@ func TestResolveRejectsRequestedSkillsBeforeModelResolution(t *testing.T) {
 func TestStreamChatWSRejectsACPRequestedSkillsBeforePool(t *testing.T) {
 	pool := &recordingACPPrompter{}
 	resolver := &Service{
-		acpPool:        pool,
+		runtimes:       testRuntimes(t, acpagent.NewDriver(pool)),
 		sessionService: acpRuntimeSessionServiceForTest("user-1"),
 	}
-	resolver.SetACPSessionPool(pool)
+	resolver.SetRuntimeRegistry(testRuntimes(t, acpagent.NewDriver(pool)))
 
 	_, err := resolver.StreamChatWS(
 		context.Background(),

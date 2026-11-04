@@ -1,14 +1,13 @@
 <template>
   <PageShell
     variant="tab"
-    :title="$t('bots.tabs.settings')"
+    :title="$t('bots.tabs.general')"
   >
     <div class="space-y-8">
       <!-- Bot identity and timezone -->
       <SettingsSection>
         <SettingsRow
           :label="$t('bots.name')"
-          :description="$t('bots.nameHint')"
           stack="sm"
         >
           <div class="w-full sm:w-52 space-y-1">
@@ -48,7 +47,6 @@
         </SettingsRow>
         <SettingsRow
           :label="$t('bots.timezone')"
-          :description="$t('bots.timezoneHint')"
           stack="sm"
         >
           <div class="w-full sm:w-52">

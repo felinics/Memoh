@@ -57,10 +57,10 @@ func (s *Service) SetRuntimeModel(ctx context.Context, request RuntimeControlReq
 	}
 	modelID, effort, err = reconcileDirectPair(catalog, modelID, effort)
 	if err != nil {
-		return out, apperror.Wrap(apperror.CodeACPModelUnavailable, err, nil)
+		return out, apperror.Wrap(apperror.CodeRuntimeControlModeUnavailable, err, nil)
 	}
 	if requested := strings.TrimSpace(request.ReasoningEffort); requested != "" && requested != effort {
-		return out, apperror.New(apperror.CodeACPReasoningUnavailable, nil)
+		return out, apperror.New(apperror.CodeRuntimeControlModeUnavailable, nil)
 	}
 	err = s.compareAndSetModelPreference(ctx, db.ParseUUIDOrEmpty(sess.ID), sess.RuntimeType, pgtype.UUID{},
 		pgtype.Text{String: modelID, Valid: modelID != ""}, effort, sess.ModelPreferenceRevision)
@@ -78,12 +78,9 @@ func (s *Service) SetRuntimeModel(ctx context.Context, request RuntimeControlReq
 // so a write can reconcile against the same snapshot the user was shown.
 func (s *Service) runtimeModelState(ctx context.Context, sess session.Thread) (turn.RuntimeModelState, external.ModelCatalog, error) {
 	out := turn.RuntimeModelState{Models: []turn.RuntimeModelOption{}}
-	if !session.IsDirectRuntime(sess) {
-		return out, external.ModelCatalog{}, nil
-	}
-	provider, ok := s.externalDrivers[sess.RuntimeType].(external.ModelCatalogProvider)
+	provider, ok := external.As[external.ModelCatalogProvider](s.runtimes, session.RuntimeTypeOf(sess))
 	if !ok {
-		return out, external.ModelCatalog{}, external.ErrModelCatalogUnavailable
+		return out, external.ModelCatalog{}, nil
 	}
 	remembered := strings.TrimSpace(sess.PreferredExternalModelID)
 	catalog, err := provider.ModelCatalog(ctx, external.ModelCatalogRequest{

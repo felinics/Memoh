@@ -34,7 +34,7 @@ const docTemplate = `{
         },
         "/agent-authorizations": {
             "post": {
-                "description": "Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.",
+                "description": "Starts Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A ChatGPT or Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.",
                 "consumes": [
                     "application/json"
                 ],
@@ -218,49 +218,6 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "410": {
-                        "description": "Gone",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/agent-authorizations/{id}/poll": {
-            "post": {
-                "tags": [
-                    "agent-authorizations"
-                ],
-                "summary": "Poll a pending Agent device authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Authorization ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.Authorization"
                         }
                     },
                     "403": {
@@ -1141,83 +1098,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/acp-runtimes": {
-            "post": {
-                "description": "Starts an agent runtime before any session exists. The runtime ID is server generated; bind it to a session at creation time via acp_runtime_id.",
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Create an unbound ACP runtime (pre-session model picker)",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Runtime spec",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.acpRuntimeCreateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acpagent.RuntimeStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "429": {
-                        "description": "Too Many Requests",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp-runtimes/{runtime_id}": {
+        "/bots/{bot_id}/acp-options": {
             "get": {
+                "description": "Reports the models, reasoning efforts, modes and commands the agent offers before a conversation exists. Choices travel in the new session's runtime_metadata (acp_model_id, acp_reasoning_effort, permission_mode).",
                 "tags": [
                     "acp"
                 ],
-                "summary": "Get ACP runtime state by runtime ID",
+                "summary": "Get what a new ACP conversation could choose",
                 "parameters": [
                     {
                         "type": "string",
@@ -1228,294 +1115,28 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acpagent.RuntimeStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Close an ACP runtime",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
+                        "description": "ACP agent ID",
+                        "name": "acp_agent_id",
+                        "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp-runtimes/{runtime_id}/mode": {
-            "patch": {
-                "description": "Sends the selected agent-declared mode ID unchanged to session/set_mode before the first chat message binds this runtime to a Session.",
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Set an unbound ACP runtime's mode",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
+                        "description": "Agent instance ID",
+                        "name": "bot_agent_id",
+                        "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Mode selection",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.acpRuntimeModeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acpagent.RuntimeStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp-runtimes/{runtime_id}/model": {
-            "patch": {
-                "description": "An empty model_id resets the runtime to the agent default model.",
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Set (or reset) an ACP runtime's model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
+                        "description": "Project the conversation will run in; /data when omitted",
+                        "name": "project_path",
+                        "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Model selection",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.acpRuntimeModelRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acpagent.RuntimeStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning": {
-            "patch": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Set an ACP runtime's reasoning effort",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Reasoning effort selection",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.acpRuntimeReasoningRequest"
-                        }
+                        "description": "Model whose reasoning efforts to report; the agent's current model when omitted",
+                        "name": "model_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1820,13 +1441,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/agents/{id}/codex/usage": {
+        "/bots/{bot_id}/agents/{id}/account": {
             "get": {
-                "description": "Available to anyone who can chat with the Bot, so the composer",
+                "description": "For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.",
                 "tags": [
                     "external-agents"
                 ],
-                "summary": "Get the Codex usage limits of the Agent's ChatGPT account",
+                "summary": "Get the account a direct runtime Agent is signed in to",
                 "parameters": [
                     {
                         "type": "string",
@@ -1847,7 +1468,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/externalagent.CodexUsageResponse"
+                            "$ref": "#/definitions/externalagent.AgentAccountResponse"
                         }
                     },
                     "403": {
@@ -1862,20 +1483,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/server.Problem"
                         }
                     },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
                     },
-                    "502": {
-                        "description": "Bad Gateway",
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -2217,7 +1832,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents/{id}/login/device/poll": {
             "post": {
-                "description": "A successful sign-in has already been stored as the Agent's credential when this answers success.",
+                "description": "A successful sign-in has already been kept by the Agent's runtime when this answers success.",
                 "tags": [
                     "external-agents"
                 ],
@@ -2324,6 +1939,63 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/quota": {
+            "get": {
+                "description": "For runtimes whose account reports its usage (Codex with a ChatGPT account). Available to anyone who can chat with the Bot, so the composer can warn before a turn runs into the limit.",
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Get the usage limits of the Agent's account",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.AgentQuotaResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -3283,39 +2955,6 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/compaction.ListLogsResponse"
                         }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete all compaction logs for a bot",
-                "tags": [
-                    "compaction"
-                ],
-                "summary": "Delete compaction logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -9092,6 +8731,66 @@ const docTemplate = `{
                     },
                     "502": {
                         "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session": {
+            "delete": {
+                "description": "Forgets the agent session that keeps failing to restore and keeps the messages. The next message opens a new agent session, which does not remember them.",
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Start the agent over on a new ACP session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -16566,6 +16265,32 @@ const docTemplate = `{
                 }
             }
         },
+        "/users/me/attention/events": {
+            "get": {
+                "description": "SSE addressed to the caller: session_attention when one of\ntheir sessions needs them, session_unread when they mark one\nunread, session_read when their read cursor moves. Starts with attention_ready; never carries message bodies.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Stream the caller's attention events",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/channel-identities": {
             "get": {
                 "description": "List the IM channel identities bound to the current user's account",
@@ -16821,6 +16546,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/users/me/read-state": {
+            "put": {
+                "description": "Marks each session read (through the attention time the client\ndisplayed) or unread. Read and unread are forward-only marks; the\nlater one wins. Sessions the caller did not create, or that carry no\nunread state, are skipped. Marking unread never notifies.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Set the caller's read state of sessions",
+                "parameters": [
+                    {
+                        "description": "Read state changes",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetReadStateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetReadStateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/runtimes": {
             "get": {
                 "produces": [
@@ -16928,6 +16693,32 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/unread": {
+            "get": {
+                "description": "Sessions the caller created that need their attention, across\nevery bot they can still access, newest first. No message bodies.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List the caller's unread sessions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UnreadSessionsResponse"
                         }
                     },
                     "500": {
@@ -18334,9 +18125,6 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "interval_seconds": {
-                    "type": "integer"
-                },
                 "runtime": {
                     "type": "string"
                 },
@@ -18347,12 +18135,6 @@ const docTemplate = `{
                         "ready",
                         "claimed"
                     ]
-                },
-                "user_code": {
-                    "type": "string"
-                },
-                "verification_url": {
-                    "type": "string"
                 }
             }
         },
@@ -18435,6 +18217,64 @@ const docTemplate = `{
                 "FaultDependency",
                 "FaultCanceled"
             ]
+        },
+        "attention.Attention": {
+            "type": "object",
+            "properties": {
+                "attention_at": {
+                    "description": "At is when the session last needed attention, or when it was marked\nunread if it never did; it orders the inbox.",
+                    "type": "string"
+                },
+                "attention_kind": {
+                    "$ref": "#/definitions/attention.Kind"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "marked": {
+                    "description": "Marked is true when the user marked the session unread themselves; such\na session is not read just because it is already on screen.",
+                    "type": "boolean"
+                },
+                "read_through": {
+                    "description": "ReadThrough is the through a client sends to read it: it covers both the\nattention and a manual unread mark.",
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "attention.Kind": {
+            "type": "string",
+            "enum": [
+                "reply",
+                "failed",
+                "needs_input",
+                "marked"
+            ],
+            "x-enum-varnames": [
+                "KindReply",
+                "KindFailed",
+                "KindNeedsInput",
+                "KindMarked"
+            ]
+        },
+        "attention.ReadStateChange": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string"
+                },
+                "through": {
+                    "type": "string"
+                },
+                "unread": {
+                    "type": "boolean"
+                }
+            }
         },
         "audio.ConfigSchema": {
             "type": "object",
@@ -21553,7 +21393,21 @@ const docTemplate = `{
                 }
             }
         },
-        "externalagent.CodexUsageResponse": {
+        "externalagent.AgentAccountResponse": {
+            "type": "object",
+            "required": [
+                "signed_in"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "signed_in": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "externalagent.AgentQuotaResponse": {
             "type": "object",
             "required": [
                 "limit_reached",
@@ -21566,12 +21420,12 @@ const docTemplate = `{
                 "windows": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/externalagent.CodexUsageWindow"
+                        "$ref": "#/definitions/externalagent.AgentQuotaWindow"
                     }
                 }
             }
         },
-        "externalagent.CodexUsageWindow": {
+        "externalagent.AgentQuotaWindow": {
             "type": "object",
             "required": [
                 "used_percent",
@@ -21585,7 +21439,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "window_minutes": {
-                    "description": "WindowMinutes is 0 when the backend does not report the window length.",
+                    "description": "WindowMinutes is 0 when the runtime does not report the window length.",
                     "type": "integer"
                 }
             }
@@ -23539,6 +23393,28 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.SetReadStateRequest": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.ReadStateChange"
+                    }
+                }
+            }
+        },
+        "handlers.SetReadStateResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.Attention"
+                    }
+                }
+            }
+        },
         "handlers.SiteIconResponse": {
             "type": "object",
             "properties": {
@@ -24548,6 +24424,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.UnreadSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.Attention"
+                    }
+                }
+            }
+        },
         "handlers.UpdateContainerMetricsRequest": {
             "type": "object",
             "properties": {
@@ -25055,21 +24942,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.acpRuntimeCreateRequest": {
-            "type": "object",
-            "properties": {
-                "acp_agent_id": {
-                    "type": "string"
-                },
-                "bot_agent_id": {
-                    "description": "BotAgentID names the Agent instance whose setup launches the runtime;\nonly a session bound to the same instance can later adopt it.",
-                    "type": "string"
-                },
-                "project_path": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.acpRuntimeModeRequest": {
             "type": "object",
             "required": [
@@ -25150,10 +25022,6 @@ const docTemplate = `{
         "handlers.createSessionRequest": {
             "type": "object",
             "properties": {
-                "acp_runtime_id": {
-                    "description": "ACPRuntimeID optionally binds a warm pre-session runtime (created via\nPOST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a\ntransient in-memory handle reference, never persisted in metadata.",
-                    "type": "string"
-                },
                 "bot_agent_id": {
                     "type": "string"
                 },
@@ -27354,7 +27222,8 @@ const docTemplate = `{
                 "exa",
                 "bocha",
                 "duckduckgo",
-                "yandex"
+                "yandex",
+                "deepseek"
             ],
             "x-enum-varnames": [
                 "ProviderBrave",
@@ -27368,7 +27237,8 @@ const docTemplate = `{
                 "ProviderExa",
                 "ProviderBocha",
                 "ProviderDuckDuckGo",
-                "ProviderYandex"
+                "ProviderYandex",
+                "ProviderDeepSeek"
             ]
         },
         "searchproviders.UpdateRequest": {
@@ -27432,6 +27302,13 @@ const docTemplate = `{
         "session.Session": {
             "type": "object",
             "properties": {
+                "attention_at": {
+                    "type": "string"
+                },
+                "attention_kind": {
+                    "description": "AttentionKind and Unread describe the requesting user's unread state.\nThey are filled by the attention service for list responses only.",
+                    "type": "string"
+                },
                 "bot_agent_id": {
                     "type": "string"
                 },
@@ -27495,6 +27372,9 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                },
+                "unread": {
+                    "type": "boolean"
                 },
                 "updated_at": {
                     "type": "string"

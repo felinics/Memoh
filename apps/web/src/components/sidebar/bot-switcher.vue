@@ -19,19 +19,34 @@
           : 'max-w-full gap-2 rounded-md px-1.5'"
         :aria-label="t('sidebar.switchBot')"
       >
-        <Avatar
-          class="shrink-0 ring-1 ring-[color-mix(in_oklab,var(--foreground)_10%,transparent)]"
-          :class="fullWidth ? 'size-[22px]' : 'size-5'"
-        >
-          <AvatarImage
-            v-if="currentBot?.avatar_url"
-            :src="currentBot.avatar_url"
-            :alt="currentLabel"
-          />
-          <AvatarFallback class="text-[9px]">
-            {{ avatarFallback }}
-          </AvatarFallback>
-        </Avatar>
+        <span class="relative shrink-0">
+          <Avatar
+            class="shrink-0 ring-1 ring-[color-mix(in_oklab,var(--foreground)_10%,transparent)]"
+            :class="fullWidth ? 'size-[22px]' : 'size-5'"
+          >
+            <AvatarImage
+              v-if="currentBot?.avatar_url"
+              :src="currentBot.avatar_url"
+              :alt="currentLabel"
+            />
+            <AvatarFallback class="text-[9px]">
+              {{ avatarFallback }}
+            </AvatarFallback>
+          </Avatar>
+          <span
+            v-if="otherBotKind"
+            class="absolute -right-0.5 -top-0.5 flex"
+            role="img"
+            :aria-label="t('notifications.otherBots')"
+          >
+            <AttentionDot
+              :kind="otherBotKind"
+              :session-id="otherBotNewest?.sessionId"
+              :attention-at="otherBotNewest?.attentionAt"
+              cutout
+            />
+          </span>
+        </span>
         <span
           class="min-w-0 truncate text-[13px] font-[550] tracking-[0.015em] text-foreground dark:text-[color:oklch(0.97_0_0)]"
           :class="fullWidth && 'flex-1 text-left'"
@@ -107,6 +122,11 @@
             v-if="bot.id === currentBotId"
             class="size-3.5 shrink-0 text-muted-foreground"
           />
+          <BadgeCount
+            v-if="bot.id && unread.countByBot[bot.id]"
+            :count="unread.countByBot[bot.id] ?? 0"
+            :variant="botCountVariant(bot.id)"
+          />
         </div>
       </div>
 
@@ -163,9 +183,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   Spinner,
+  BadgeCount,
 } from '@felinic/ui'
 import { Check, ChevronsUpDown, GripVertical, Plus, Settings2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
+import { useUnreadStore } from '@/store/unread'
+import { attentionBadgeVariant, mostUrgentKind } from '@/utils/session-attention'
+import AttentionDot from './attention-dot.vue'
 import { firstAvatarCharacter } from '@/composables/useAvatarInitials'
 import { usePinnedBots } from '@/composables/usePinnedBots'
 import { usePendingBotsRefresh } from '@/composables/usePendingBotsRefresh'
@@ -175,6 +199,13 @@ const router = useRouter()
 const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
+const unread = useUnreadStore()
+/** The dot for other bots speaks for their most urgent unread; the newest arrival drives the pop. */
+const otherBotEntries = computed(() => unread.inbox.filter(entry => entry.botId !== currentBotId.value))
+const otherBotKind = computed(() => mostUrgentKind(otherBotEntries.value.map(entry => entry.kind)))
+/** Per-bot count tone in the menu, by that bot's most urgent unread. */
+const botCountVariant = (botId: string) => attentionBadgeVariant(unread.inbox.filter(entry => entry.botId === botId).map(entry => entry.kind))
+const otherBotNewest = computed(() => otherBotEntries.value[0])
 const { sortBots } = usePinnedBots()
 
 // Full-width shape for web / Windows (no traffic lights); mac desktop passes
@@ -199,11 +230,15 @@ const bots = computed<BotsBot[]>(() =>
 const currentBot = computed(() =>
   bots.value.find((bot) => bot.id === currentBotId.value) ?? null,
 )
-const currentLabel = computed(() =>
-  currentBot.value
-    ? currentBot.value.display_name || currentBot.value.id || ''
-    : t('chat.selectBot'),
+// A bot can be selected before the list arrives (restored at sign-in), so a
+// selection the list cannot name yet reads as loading, not as "Select a Bot".
+const currentBotPending = computed(() =>
+  !currentBot.value && !!currentBotId.value && isLoading.value,
 )
+const currentLabel = computed(() => {
+  if (currentBot.value) return currentBot.value.display_name || currentBot.value.id || ''
+  return currentBotPending.value ? t('common.loading') : t('chat.selectBot')
+})
 
 function initialsOf(bot: BotsBot): string {
   const name = (bot.display_name || bot.id || '').trim()
@@ -217,9 +252,10 @@ function initialsOf(bot: BotsBot): string {
   return initials || 'B'
 }
 
-const avatarFallback = computed(() =>
-  currentBot.value ? initialsOf(currentBot.value) : 'B',
-)
+const avatarFallback = computed(() => {
+  if (currentBot.value) return initialsOf(currentBot.value)
+  return currentBotPending.value ? '' : 'B'
+})
 
 function handleSelect(bot: BotsBot) {
   if (bot.status === 'error') return

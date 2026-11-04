@@ -81,6 +81,10 @@ type Options struct {
 	// source-session notifications. Launcher discovery never starts an install.
 	Background                *background.Manager
 	OperationSessionValidator func(context.Context, string, string) error
+	// LauncherCommands binds the dependencies the external runtimes declare
+	// to the command each executes. Discovery uses it when the remote catalog
+	// is empty or unreachable.
+	LauncherCommands map[string]string
 }
 
 // Service reconciles the catalog, the installation records, and the
@@ -94,6 +98,8 @@ type Service struct {
 	logger    *slog.Logger
 	now       func() time.Time
 	scriptEnv func(ctx context.Context) []string
+	// launcherCommands is Options.LauncherCommands.
+	launcherCommands map[string]string
 	// updateCheckBudget is UpdateCheckBudget; tests shorten it.
 	updateCheckBudget time.Duration
 
@@ -150,6 +156,8 @@ func NewService(opts Options) *Service {
 		now:       opts.Now,
 		scriptEnv: opts.ScriptEnv,
 		probe:     ProbePlatform,
+
+		launcherCommands: opts.LauncherCommands,
 
 		updateCheckBudget: UpdateCheckBudget,
 		discover:          Discover,

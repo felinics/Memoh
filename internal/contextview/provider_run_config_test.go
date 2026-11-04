@@ -50,9 +50,6 @@ func TestApplyProviderRunConfigMergesOnlyMatchingHistoryAuditMetadata(t *testing
 		Namespace: "compaction_log", ID: "compact-1", Version: 1,
 		Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable,
 	}
-	coverage := contextfrag.NewSummaryCoverage(ref, []contextfrag.ContextRef{{
-		Namespace: "bot_history_message", ID: "row-1", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable,
-	}})
 	shadow := contextfrag.MessageFrag(contextfrag.MessageFragInput{
 		ID: "message.000", Message: message, Kind: contextfrag.KindConversationSummary,
 		Slot: contextfrag.SlotHistory, CacheClass: contextfrag.CacheNever, Trust: contextfrag.TrustSystem,
@@ -60,7 +57,6 @@ func TestApplyProviderRunConfigMergesOnlyMatchingHistoryAuditMetadata(t *testing
 		Collector: "history_records", Budget: contextfrag.BudgetPolicy{MaxChars: 1, Overflow: contextfrag.OverflowDrop},
 	})
 	shadow.Ref = ref
-	shadow.Coverage = &coverage
 	shadow.ConflictKey = "stale-policy"
 	shadow.Parts = append(shadow.Parts, contextfrag.Part{Type: contextfrag.PartText, Text: "untrusted extra part"})
 	scope := contextfrag.Scope{BotID: "bot-1", CurrentMessageID: "current"}
@@ -78,7 +74,7 @@ func TestApplyProviderRunConfigMergesOnlyMatchingHistoryAuditMetadata(t *testing
 		t.Fatalf("provider fragments = %#v, want one history fragment", got.ContextFrags)
 	}
 	merged := got.ContextFrags[0]
-	if merged.Kind != contextfrag.KindConversationSummary || merged.Coverage == nil || merged.Ref.ID != ref.ID {
+	if merged.Kind != contextfrag.KindConversationSummary || merged.Ref.ID != ref.ID {
 		t.Fatalf("matching audit metadata was not preserved: %#v", merged)
 	}
 	if merged.Budget != (contextfrag.BudgetPolicy{}) || merged.ConflictKey != "" || merged.CacheClass != contextfrag.CacheStable ||

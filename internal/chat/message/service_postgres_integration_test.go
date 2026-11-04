@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	dbpkg "github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -60,106 +61,6 @@ func TestPostgresReplaceTurnRetryHidesSupersededAssistant(t *testing.T) {
 
 	assertPostgresVisibleMessageIDs(t, ctx, svc, user.ID, replacement.ID)
 	assertPostgresMessageVisibility(t, ctx, tx, assistant.ID, false, true)
-}
-
-func TestPostgresReplaceTurnAdvancesSessionCompactionEpoch(t *testing.T) {
-	ctx := context.Background()
-	tx := beginPostgresMessageTestTx(t, ctx)
-	setupPostgresMessageTestFixtures(t, ctx, tx)
-
-	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
-	user, err := svc.Persist(ctx, PersistInput{
-		BotID:     postgresMessageTestBotID,
-		SessionID: postgresMessageTestSessionID,
-		Role:      "user",
-		Content:   []byte(`{"role":"user","content":"hello"}`),
-	})
-	if err != nil {
-		t.Fatalf("persist user: %v", err)
-	}
-	assistant, err := svc.Persist(ctx, PersistInput{
-		BotID:     postgresMessageTestBotID,
-		SessionID: postgresMessageTestSessionID,
-		Role:      "assistant",
-		Content:   []byte(`{"role":"assistant","content":"old"}`),
-	})
-	if err != nil {
-		t.Fatalf("persist assistant: %v", err)
-	}
-	oldTurn, err := svc.GetVisibleTurnByMessage(ctx, postgresMessageTestSessionID, assistant.ID)
-	if err != nil {
-		t.Fatalf("get old turn: %v", err)
-	}
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
-		VALUES
-			('00000000-0000-0000-0000-000000074131', $1, $2, 'ok', 'covers replaced source'),
-			('00000000-0000-0000-0000-000000074132', $1, $2, 'ok', 'same session frontier')
-	`, postgresMessageTestBotID, postgresMessageTestSessionID); err != nil {
-		t.Fatalf("insert compaction artifacts: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE bot_history_messages
-		SET compact_id = '00000000-0000-0000-0000-000000074131'
-		WHERE id = $1
-	`, assistant.ID); err != nil {
-		t.Fatalf("link assistant to compaction artifact: %v", err)
-	}
-
-	replacement, err := svc.Persist(ctx, PersistInput{
-		BotID:           postgresMessageTestBotID,
-		SessionID:       postgresMessageTestSessionID,
-		Role:            "assistant",
-		Content:         []byte(`{"role":"assistant","content":"new"}`),
-		SkipHistoryTurn: true,
-	})
-	if err != nil {
-		t.Fatalf("persist replacement assistant: %v", err)
-	}
-	replacementTurnID, replacementTurnPosition := postgresReplacementIdentity(oldTurn)
-	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, replacementTurnID, replacementTurnPosition, user.ID, replacement.ID, "retry"); err != nil {
-		t.Fatalf("replace turn: %v", err)
-	}
-
-	var sessionEpoch int64
-	if err := tx.QueryRow(ctx, `SELECT compaction_epoch FROM bot_sessions WHERE id = $1`, postgresMessageTestSessionID).Scan(&sessionEpoch); err != nil {
-		t.Fatalf("read session compaction epoch: %v", err)
-	}
-	if sessionEpoch != 1 {
-		var compactID *string
-		var artifactEpoch *int64
-		if err := tx.QueryRow(ctx, `
-			SELECT message.compact_id::text, compact.compaction_epoch
-			FROM bot_history_messages message
-			LEFT JOIN bot_history_message_compacts compact ON compact.id = message.compact_id
-			WHERE message.id = $1
-		`, assistant.ID).Scan(&compactID, &artifactEpoch); err != nil {
-			t.Fatalf("diagnose unchanged compaction epoch: %v", err)
-		}
-		compactValue := "<nil>"
-		if compactID != nil {
-			compactValue = *compactID
-		}
-		artifactValue := int64(-1)
-		if artifactEpoch != nil {
-			artifactValue = *artifactEpoch
-		}
-		t.Fatalf("session compaction epoch = %d, want 1 (message compact_id=%s artifact_epoch=%d)", sessionEpoch, compactValue, artifactValue)
-	}
-	var currentArtifacts int
-	if err := tx.QueryRow(ctx, `
-		SELECT count(*)
-		FROM bot_history_message_compacts compact
-		JOIN bot_sessions session ON session.id = compact.session_id
-		WHERE compact.session_id = $1
-		  AND compact.compaction_epoch = session.compaction_epoch
-	`, postgresMessageTestSessionID).Scan(&currentArtifacts); err != nil {
-		t.Fatalf("count current compaction artifacts: %v", err)
-	}
-	if currentArtifacts != 0 {
-		t.Fatalf("current compaction artifacts = %d, want 0 after replacement", currentArtifacts)
-	}
 }
 
 func TestPostgresReplaceTurnEditHidesSupersededTurn(t *testing.T) {
@@ -315,6 +216,42 @@ func setupPostgresMessageTestFixtures(t *testing.T, ctx context.Context, tx pgx.
 	`, postgresMessageTestSessionID, postgresMessageTestBotID); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
+}
+
+func persistPostgresTurn(t *testing.T, ctx context.Context, svc *DBService) (Message, Message, HistoryTurn) {
+	t.Helper()
+	user, err := svc.Persist(ctx, PersistInput{
+		BotID:     postgresMessageTestBotID,
+		SessionID: postgresMessageTestSessionID,
+		Role:      "user",
+		Content:   []byte(`{"role":"user","content":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist user: %v", err)
+	}
+	assistant, err := svc.Persist(ctx, PersistInput{
+		BotID:     postgresMessageTestBotID,
+		SessionID: postgresMessageTestSessionID,
+		Role:      "assistant",
+		Content:   []byte(`{"role":"assistant","content":"answer"}`),
+	})
+	if err != nil {
+		t.Fatalf("persist assistant: %v", err)
+	}
+	turn, err := svc.GetVisibleTurnByMessage(ctx, postgresMessageTestSessionID, assistant.ID)
+	if err != nil {
+		t.Fatalf("get history turn: %v", err)
+	}
+	return user, assistant, turn
+}
+
+func mustTestUUID(t *testing.T, value string) pgtype.UUID {
+	t.Helper()
+	parsed, err := dbpkg.ParseUUID(value)
+	if err != nil {
+		t.Fatalf("parse UUID %q: %v", value, err)
+	}
+	return parsed
 }
 
 func assertPostgresVisibleMessageIDs(t *testing.T, ctx context.Context, svc *DBService, want ...string) {

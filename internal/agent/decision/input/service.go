@@ -662,6 +662,37 @@ func (s *Service) ListBySessionToolCalls(ctx context.Context, botID, sessionID s
 	return result, nil
 }
 
+// ListByIDs returns the bot's requests with the given ids, whatever session
+// they belong to. It backs read-only projections of history copied from
+// another session; ids that are not UUIDs are skipped.
+func (s *Service) ListByIDs(ctx context.Context, botID string, ids []string) ([]Request, error) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgIDs := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range normalizeToolCallIDs(ids) {
+		if pgID, err := db.ParseUUID(id); err == nil {
+			pgIDs = append(pgIDs, pgID)
+		}
+	}
+	if len(pgIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.queries.ListUserInputsByBotIDs(ctx, sqlc.ListUserInputsByBotIDsParams{
+		BotID: pgBotID,
+		Ids:   pgIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, requestFromRow(row))
+	}
+	return result, nil
+}
+
 func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pendingOnly bool) ([]Request, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -1040,7 +1071,7 @@ func (s *Service) optionalChannelIdentityUUID(ctx context.Context, value string)
 // on both creation and loading so pending questions from older versions also
 // accept text. External elicitation forms retain their provider's constraints.
 func enableConversationalAnswers(payload *UIPayload, metadata map[string]any) {
-	if source, exists := metadata["source"]; exists && source != "" && source != ProviderSourceACPMCP {
+	if source, exists := metadata["source"]; exists && source != "" && source != ProviderSourceMemohTool {
 		return
 	}
 	for i := range payload.Questions {

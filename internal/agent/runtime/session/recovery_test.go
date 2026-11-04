@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -376,5 +379,290 @@ func TestWaitingDecisionRecoveryDoesNotReplayFrozenCapabilityApproval(t *testing
 	}
 	if run.State != ledger.StateLost || len(fence.recordedReclaims()) != 0 {
 		t.Fatalf("lost frozen plan was reclaimed: %+v", run)
+	}
+}
+
+// parkAskUser admits a run on manager and parks it on one ask_user decision
+// the way a native producer does: the request event, then the producer's
+// return leaves the run waiting_decision.
+func parkAskUser(t *testing.T, manager *Manager, decisions *fakeDecisionStore, invocationID string) RunHandle {
+	t.Helper()
+	ctx := t.Context()
+	admission, err := manager.Admit(ctx, AdmitInput{
+		BotID: testBotID, SessionID: testSessionID, InvocationID: invocationID,
+		Payload: []byte(`{"resume":{"version":1}}`),
+		Execution: Execution{Admission: func(context.Context, RunHandle) (RunAdmissionView, error) {
+			return RunAdmissionView{}, nil
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions.mu.Lock()
+	decisions.parked = []chatview.UIMessage{
+		{ID: 0, Type: chatview.UIMessageText, Content: "Let me ask."},
+		{ID: 1, Type: chatview.UIMessageTool, Name: "ask_user", ToolCallID: "call-" + invocationID, UserInput: &chatview.UIUserInput{UserInputID: "ask-" + invocationID, Status: "pending", CanRespond: true}},
+	}
+	decisions.target = DecisionTarget{
+		Type: CommandUserInputResponse, ID: "ask-" + invocationID, BotID: testBotID,
+		SessionID: testSessionID, RunID: admission.RunID, TurnID: admission.Handle.TurnID,
+		Status: "pending", FencingToken: admission.Handle.FencingToken,
+	}
+	decisionID := decisions.target.ID
+	decisions.mu.Unlock()
+	if _, err := manager.HandleAgentEvent(ctx, admission.Handle, native.StreamEvent{
+		Type: native.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-" + invocationID,
+		UserInputID: decisionID, Status: "pending",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.FinishRun(ctx, admission.Handle, ""); err != nil {
+		t.Fatal(err)
+	}
+	run, err := manager.runs.Get(ctx, admission.RunID)
+	if err != nil || run.State != ledger.StateWaitingDecision {
+		t.Fatalf("park ask_user: state=%s err=%v", run.State, err)
+	}
+	return admission.Handle
+}
+
+// answerAfterRestart starts a fresh memory-backed manager over the same
+// durable stores, waits for its reaper to take the parked run over, and
+// answers the question through it.
+func answerAfterRestart(t *testing.T, runs *fakeLedger, decisions *fakeDecisionStore, fence *waitingDecisionRecoveryFence, handle RunHandle) {
+	t.Helper()
+	ctx := t.Context()
+	next := NewManager(NewMemoryBackend(), Options{Ledger: runs, Fence: fence, OwnerID: "after-restart"})
+	next.SetDecisionStore(decisions)
+	var handled atomic.Int32
+	next.SetCommandHandler(func(context.Context, Command) error {
+		handled.Add(1)
+		decisions.setStatus("submitted")
+		return nil
+	})
+	t.Cleanup(func() { _ = next.Close() })
+	if err := next.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for next.localControlForScope(handle.BotID, handle.SessionID, handle.RunID) == nil {
+		if time.Now().After(deadline) {
+			run, _ := runs.Get(ctx, handle.RunID)
+			t.Fatalf("parked run was not taken over after restart: %+v", run)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	run, err := runs.Get(ctx, handle.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != ledger.StateWaitingDecision || run.FencingToken <= handle.FencingToken || run.OwnerID != "after-restart" {
+		t.Fatalf("recovered run = %+v, want waiting_decision owned by the new process under a newer token", run)
+	}
+	// The restarted backend kept nothing of the run, so it is shown from what
+	// the run persisted: the question stays on screen and answerable.
+	snapshot, ok, err := next.backend.Load(ctx, Key{BotID: handle.BotID, SessionID: handle.SessionID})
+	if err != nil || !ok || snapshot.CurrentRunView == nil {
+		t.Fatalf("recovered snapshot: ok=%v err=%v", ok, err)
+	}
+	view := snapshot.CurrentRunView
+	if view.Status != RunStatusWaitingDecision || len(view.Messages) != 2 || view.Messages[1].UserInput == nil || !view.Messages[1].UserInput.CanRespond {
+		t.Fatalf("recovered view = %+v, want the persisted question as an answerable card", view)
+	}
+	response := DecisionResponse{
+		ControlID: "answer-after-restart", Type: CommandUserInputResponse,
+		DecisionID: decisions.target.ID, BotID: handle.BotID, SessionID: handle.SessionID,
+		RunID: handle.RunID, Payload: []byte(`{"text_answer":"runtime"}`),
+	}
+	result, err := next.RouteDecisionResponse(ctx, response)
+	if err != nil || !result.Applied || handled.Load() != 1 {
+		t.Fatalf("answer after restart = %+v err=%v handled=%d, want applied once", result, err, handled.Load())
+	}
+	replay, err := next.RouteDecisionResponse(ctx, response)
+	if err != nil || !replay.Applied || !replay.Replayed || handled.Load() != 1 {
+		t.Fatalf("repeated answer = %+v err=%v handled=%d, want one replayed application", replay, err, handled.Load())
+	}
+}
+
+// A memory backend has no lease index: the generation stamped on the parked
+// run is what the next process finds. Graceful shutdown must keep the run
+// waiting, hand its fence over, and leave the question pending for the
+// restarted server to continue.
+func TestMemoryParkedDecisionSurvivesGracefulRestart(t *testing.T) {
+	ctx := t.Context()
+	runs := newFakeLedger()
+	decisions := &fakeDecisionStore{}
+	fence := &waitingDecisionRecoveryFence{runs: runs, decisions: decisions}
+	old := NewManager(NewMemoryBackend(), Options{Ledger: runs, Fence: fence, OwnerID: "before-restart"})
+	old.SetDecisionStore(decisions)
+	finalized := 0
+	old.SetDecisionFinalizer(func(context.Context, RunHandle) error {
+		finalized++
+		decisions.setStatus("canceled")
+		return nil
+	})
+	handle := parkAskUser(t, old, decisions, "graceful-restart")
+
+	if err := old.InterruptForShutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.CloseContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.Get(ctx, handle.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != ledger.StateWaitingDecision || run.FencingToken <= handle.FencingToken {
+		t.Fatalf("after shutdown run = %+v, want waiting_decision under a handed-over token", run)
+	}
+	if finalized != 0 || decisions.target.Status != "pending" || decisions.target.FencingToken != run.FencingToken {
+		t.Fatalf("after shutdown decision = %+v finalized=%d, want pending under the run's token", decisions.target, finalized)
+	}
+
+	answerAfterRestart(t, runs, decisions, fence, handle)
+}
+
+// A crash leaves the parked run with the dead process's generation and its
+// original token. The restarted process takes it over the same way.
+func TestMemoryParkedDecisionSurvivesProcessLoss(t *testing.T) {
+	runs := newFakeLedger()
+	decisions := &fakeDecisionStore{}
+	fence := &waitingDecisionRecoveryFence{runs: runs, decisions: decisions}
+	crashed := NewManager(NewMemoryBackend(), Options{Ledger: runs, Fence: fence, OwnerID: "crashed"})
+	crashed.SetDecisionStore(decisions)
+	handle := parkAskUser(t, crashed, decisions, "process-loss")
+	t.Cleanup(func() { _ = crashed.Close() })
+
+	answerAfterRestart(t, runs, decisions, fence, handle)
+}
+
+// Inline waiters live in the exiting process, so shutdown ends their run. The
+// decisions the run leaves pending must close with it.
+func TestShutdownClosesDecisionsOfRunItCannotHandOver(t *testing.T) {
+	ctx := t.Context()
+	runs := newFakeLedger()
+	decisions := &fakeDecisionStore{}
+	fence := &waitingDecisionRecoveryFence{runs: runs, decisions: decisions}
+	manager := NewManager(NewMemoryBackend(), Options{Ledger: runs, Fence: fence})
+	manager.SetDecisionStore(decisions)
+	handle := parkAskUser(t, manager, decisions, "inline-waiter")
+	decisions.mu.Lock()
+	decisions.target.InlineDecision = true
+	decisions.mu.Unlock()
+	type cancellation struct {
+		runID  string
+		token  int64
+		reason string
+	}
+	var canceled []cancellation
+	manager.SetLostRunDecisionCanceller(func(_ context.Context, _, _, runID string, token int64, reason string) error {
+		canceled = append(canceled, cancellation{runID: runID, token: token, reason: reason})
+		return nil
+	})
+
+	if err := manager.InterruptForShutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.Get(ctx, handle.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != ledger.StateLost {
+		t.Fatalf("inline waiter run = %s, want lost", run.State)
+	}
+	if len(canceled) != 1 || canceled[0].runID != handle.RunID || canceled[0].token != handle.FencingToken || canceled[0].reason != string(ledger.StateLost) {
+		t.Fatalf("decision cancellations = %+v, want one for the lost run under its token", canceled)
+	}
+}
+
+// A request can outlive its run when the run's cleanup failed or an older
+// server ended the run. Answering it closes it instead of acknowledging a
+// response nothing will apply.
+func TestRouteDecisionResponseClosesRequestOfTerminalRun(t *testing.T) {
+	ctx := t.Context()
+	runs := newFakeLedger()
+	runs.InsertClaimed("run-ended", testSessionID, 3, "generation-old")
+	if _, _, err := runs.Finalize(ctx, ledger.FinalizeParams{RunID: "run-ended", FencingToken: 3, State: ledger.StateLost}); err != nil {
+		t.Fatal(err)
+	}
+	decisions := &fakeDecisionStore{target: DecisionTarget{
+		Type: CommandUserInputResponse, ID: "ask-run-ended", BotID: testBotID, SessionID: testSessionID,
+		RunID: "run-ended", TurnID: "run-ended-turn", Status: "pending", FencingToken: 3,
+	}}
+	manager := NewManager(NewMemoryBackend(), Options{Ledger: runs})
+	manager.SetDecisionStore(decisions)
+	var canceled []string
+	manager.SetLostRunDecisionCanceller(func(_ context.Context, _, _, runID string, _ int64, _ string) error {
+		canceled = append(canceled, runID)
+		decisions.setStatus("canceled")
+		return nil
+	})
+
+	result, err := manager.RouteDecisionResponse(ctx, DecisionResponse{
+		ControlID: "answer-ended", Type: CommandUserInputResponse, DecisionID: "ask-run-ended",
+		BotID: testBotID, SessionID: testSessionID, RunID: "run-ended", Payload: []byte(`{}`),
+	})
+	if err != nil || !result.Handled || result.Applied {
+		t.Fatalf("answer to ended run = %+v err=%v, want handled and not applied", result, err)
+	}
+	if len(canceled) != 1 || canceled[0] != "run-ended" || decisions.target.Status != "canceled" {
+		t.Fatalf("cancellations = %v status=%s, want the ended run's request closed", canceled, decisions.target.Status)
+	}
+}
+
+// When a replaced Redis loses its lease index, the generation sweep finds the
+// parked run by its stale generation, which the reclaim then replaces. A live
+// reservation that fails afterwards has nothing to retry from, so the run ends
+// and its question closes instead of staying parked with no owner.
+func TestStaleGenerationRecoveryEndsRunItCannotReserve(t *testing.T) {
+	const (
+		runID     = "run-generation-recovery"
+		sessionID = "session-generation-recovery"
+	)
+	runs := newFakeLedger()
+	runs.InsertClaimed(runID, sessionID, 5, "generation-old")
+	if _, applied, err := runs.SetWaitingDecision(context.Background(), runID, 5); err != nil || !applied {
+		t.Fatalf("park run: applied=%v err=%v", applied, err)
+	}
+	runs.Mu.Lock()
+	runs.Token = 5
+	runs.Mu.Unlock()
+	decisions := &fakeDecisionStore{target: DecisionTarget{
+		Type: CommandUserInputResponse, ID: "decision-generation-recovery",
+		BotID: testBotID, SessionID: sessionID, RunID: runID, TurnID: runID + "-turn",
+		Status: "pending", FencingToken: 5,
+	}}
+	backend := newRetryingRecoveryBackend("generation-new", LeaseCandidate{})
+	fence := &waitingDecisionRecoveryFence{runs: runs, decisions: decisions}
+	manager := NewManager(backend, Options{
+		OwnerID: "owner-recovery", OwnerLeaseTTL: time.Hour, Ledger: runs, Fence: fence,
+	})
+	t.Cleanup(func() { _ = backend.Close() })
+	manager.SetDecisionStore(decisions)
+	var canceled []int64
+	manager.SetLostRunDecisionCanceller(func(_ context.Context, _, _, _ string, token int64, _ string) error {
+		canceled = append(canceled, token)
+		decisions.setStatus("canceled")
+		return nil
+	})
+	reaper := newTestReaperWithLiveness(t, runs, backend, "generation-new")
+	reaper.SetWaitingDecisionRecoverer(manager.recoverWaitingDecision)
+	reaper.SetUnfinalizedDecisionCanceller(manager.cancelUnfinalizedDecisions)
+
+	reaper.tick(context.Background())
+
+	run, err := runs.Get(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != ledger.StateLost || run.FencingToken != 6 {
+		t.Fatalf("unreserved run = %+v, want lost under the reclaimed token 6", run)
+	}
+	if len(canceled) != 1 || canceled[0] != 6 || decisions.target.Status != "canceled" {
+		t.Fatalf("decision cancellations = %v status=%s, want one under token 6", canceled, decisions.target.Status)
+	}
+	if manager.localControlForScope(testBotID, sessionID, runID) != nil {
+		t.Fatal("failed reservation left a local owner behind")
 	}
 }

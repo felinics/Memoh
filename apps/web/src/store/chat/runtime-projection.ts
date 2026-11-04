@@ -83,7 +83,7 @@ export function runOwnsTurn(
 ): boolean {
   const target = turnId.trim()
   if (!run || !target) return false
-  if (run.turn_id.trim() === target) return true
+  if (run.turn_id.trim() === target || run.resume_turn?.turn_id.trim() === target) return true
   // userTurnsForRun owns the whole wire-shape chain — user_turns, the legacy
   // request_user_turn, and an edit's replacement turn. Re-deriving it here
   // duplicated two thirds of it and dropped the third, so a retry or edit whose
@@ -174,7 +174,9 @@ function emptyTranscript(): RuntimeTranscriptSlice {
 
 function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptSlice {
   if (!run || run.configuration_only) return emptyTranscript()
-  const turnId = run.turn_id.trim()
+  const turnId = run.resume_turn?.turn_id.trim() || run.turn_id.trim()
+  const turnPosition = run.resume_turn?.turn_position ?? run.turn_position
+  const prefix = run.resume_turn?.messages ?? []
   const turns: UITurn[] = []
   const userTurns = userTurnsForRun(run)
   // A run spans several turns once a steer opens one (SR-TURN-001), so a
@@ -186,7 +188,7 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
     if (!id) return undefined
     const owner = userTurns.find(turn => turn.turn_id.trim() === id)
     if (owner?.turn_position !== undefined) return owner.turn_position
-    if (id === turnId) return run.turn_position
+    if (id === turnId) return turnPosition
     // A claimed steer knows its slot before its row exists.
     return (run.steer_turns ?? []).find(steer => steer.turn_id?.trim() === id)?.turn_position
   }
@@ -215,8 +217,14 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   // streamed blocks).
   // Runtime activity belongs to the current run, even when a steer splits its
   // transcript. Keep it out of the historical segments defined by message IDs.
-  const runtimeStatus = active ? run.messages.find(message => message.type === 'status') : undefined
-  const assistantMessages = run.messages.filter(message => message.type !== 'status')
+  // Keep the committed prefix separate on the wire so a provider retry only
+  // replaces this run's output. Offset live block IDs within the displayed turn.
+  const liveMessages = run.messages.map(message => ({ ...message, id: message.id + prefix.length }))
+  const runtimeStatus = active ? liveMessages.find(message => message.type === 'status') : undefined
+  const assistantMessages = [
+    ...prefix.map((message, id) => ({ ...message, id })),
+    ...liveMessages.filter(message => message.type !== 'status'),
+  ]
   const projectsAssistantContent = active
     || assistantMessages.length > 0
     || Boolean(run.error_code)
@@ -224,7 +232,7 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
     // The block is rendered from the code; the run carries no error text.
     if (run.error_code && !assistantMessages.some(message => message.type === 'error')) {
       assistantMessages.push({
-        id: nextMessageId(run.messages),
+        id: nextMessageId([...assistantMessages, ...liveMessages]),
         type: 'error',
         code: run.error_code,
         content: '',
@@ -232,11 +240,11 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
     }
     let segmentStart = 0
     let segmentTurnId = turnId
-    let segmentTimestamp = run.started_at
+    let segmentTimestamp = run.resume_turn?.timestamp || run.started_at
     for (const steer of steerTurns) {
       let segmentEnd = segmentStart
       while (segmentEnd < assistantMessages.length
-        && assistantMessages[segmentEnd]!.id <= steer.after_message_id) {
+        && assistantMessages[segmentEnd]!.id <= steer.after_message_id + prefix.length) {
         segmentEnd += 1
       }
       const segment = assistantMessages.slice(segmentStart, segmentEnd)
@@ -292,7 +300,7 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   return {
     runId: run.run_id,
     turnId,
-    turnPosition: run.turn_position,
+    turnPosition,
     invocationId: run.invocation_id?.trim() ?? '',
     continuation: false,
     steerTurnIds,

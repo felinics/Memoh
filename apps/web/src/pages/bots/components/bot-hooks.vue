@@ -57,7 +57,6 @@
         </SettingsRow>
         <SettingsRow
           :label="$t('bots.hooks.rules')"
-          :description="$t('bots.hooks.rulesDescription')"
         >
           <div class="flex items-center gap-3 text-sm tabular-nums">
             <span class="text-foreground">{{ enabledHooksCount }}</span>
@@ -67,7 +66,6 @@
         </SettingsRow>
         <SettingsRow
           :label="$t('bots.hooks.actions')"
-          :description="$t('bots.hooks.actionsDescription')"
         >
           <span class="text-sm tabular-nums text-foreground">{{ actionsCount }}</span>
         </SettingsRow>

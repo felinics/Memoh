@@ -165,15 +165,6 @@ func (s *Service) registerExternalAgentActivePrompt(botID, sessionID string) *ex
 	return hub
 }
 
-// hasExternalAgentActivePrompt reports whether a runtime driver call is currently
-// executing for the session; the registration brackets the driver Prompt
-// exactly, so this is the "driver actually stopped" signal deletion waits on.
-func (s *Service) hasExternalAgentActivePrompt(botID, sessionID string) bool {
-	key := sessionTurnKey(strings.TrimSpace(botID), strings.TrimSpace(sessionID))
-	_, ok := s.externalAgentPromptHubs.Load(key)
-	return ok
-}
-
 func (s *Service) unregisterExternalAgentActivePrompt(botID, sessionID string, hub *externalAgentActivePromptHub) {
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)

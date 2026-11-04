@@ -19,10 +19,12 @@ type stopDuringSetupDriver struct{ started chan struct{} }
 
 func (stopDuringSetupDriver) RuntimeType() string { return "codex" }
 
+func (stopDuringSetupDriver) Caps() external.Caps { return stubCaps }
+
 func (d stopDuringSetupDriver) Prompt(ctx context.Context, _ external.PromptInput) (external.PromptResult, error) {
 	close(d.started)
 	<-ctx.Done()
-	return external.PromptResult{}, external.Unavailable(ctx.Err())
+	return external.PromptResult{}, external.Upstream(ctx.Err())
 }
 
 func TestUserStopDuringDriverSetupKeepsTheUserMessage(t *testing.T) {
@@ -98,23 +100,6 @@ func TestIdleTimeoutDuringDriverSetupKeepsAFailedRound(t *testing.T) {
 	}
 }
 
-// The scheduled path keeps the same round for the same reason.
-func TestScheduledIdleTimeoutDuringDriverSetupKeepsAFailedRound(t *testing.T) {
-	messages := &recordingMessageService{}
-	service := newACPLifecycleService(t, &recordingACPPrompter{}, messages, &recordingContextLifecycleStore{})
-	service.streamIdleTimeout = 20 * time.Millisecond
-	driver := stopDuringSetupDriver{started: make(chan struct{})}
-	_, err := service.triggerScheduleRuntime(context.Background(), lifecycleTestBotID, schedule.TriggerPayload{
-		SessionID: lifecycleTestSessionID, Command: "inspect", OwnerUserID: "user-1",
-	}, "", lifecycleTestRunID, driver)
-	if apperror.CodeOf(err) != apperror.CodeAgentResponseTimeout {
-		t.Fatalf("schedule error = %v, want %s", err, apperror.CodeAgentResponseTimeout)
-	}
-	if len(messages.deleted) != 0 || len(messages.persisted) == 0 {
-		t.Fatalf("persisted = %+v deleted = %v, want the failed round kept", messages.persisted, messages.deleted)
-	}
-}
-
 // A scheduled run whose runtime could not start leaves no round in history;
 // a failure the runtime reports after it started keeps one.
 func TestScheduledRuntimeConfigurationFailureLeavesNoRound(t *testing.T) {
@@ -124,9 +109,9 @@ func TestScheduledRuntimeConfigurationFailureLeavesNoRound(t *testing.T) {
 		code      apperror.Code
 		keepRound bool
 	}{
-		{"runtime unavailable", external.Unavailable(errors.New("bridge down")), apperror.CodeExternalRuntimeUnavailable, false},
+		{"sign-in required", external.Fail(external.FailureAuthRequired, nil), apperror.CodeExternalRuntimeAuthRequired, false},
 		{"dependency missing", &external.DependencyMissingError{DependencyID: "codex"}, apperror.CodeAgentDependencyMissing, false},
-		{"control failed", external.Fail(external.FailureControlFailed, errors.New("set mode")), apperror.CodeRuntimeControlFailed, true},
+		{"agent failed", external.Upstream(errors.New("set mode")), apperror.CodeExternalRuntimeReported, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			messages := &recordingMessageService{}
@@ -144,27 +129,5 @@ func TestScheduledRuntimeConfigurationFailureLeavesNoRound(t *testing.T) {
 				t.Fatalf("persisted = %+v deleted = %v, want round kept = %v", messages.persisted, messages.deleted, tc.keepRound)
 			}
 		})
-	}
-}
-
-// A scheduled run that hits its execution budget failed on the budget, even
-// when the runtime reported the stop as being unavailable; the round is kept.
-func TestScheduledExecutionTimeoutIsNotAConfigurationFailure(t *testing.T) {
-	messages := &recordingMessageService{}
-	service := newACPLifecycleService(t, &recordingACPPrompter{}, messages, &recordingContextLifecycleStore{})
-	ctx, cancel := context.WithCancelCause(context.Background())
-	defer cancel(nil)
-	driver := noticeTestDriver{kind: "codex", prompt: func(context.Context, external.PromptInput) (external.PromptResult, error) {
-		cancel(schedule.ErrExecutionTimeout)
-		return external.PromptResult{TurnCompleted: true}, external.Unavailable(context.Canceled)
-	}}
-	_, err := service.triggerScheduleRuntime(ctx, lifecycleTestBotID, schedule.TriggerPayload{
-		SessionID: lifecycleTestSessionID, Command: "inspect", OwnerUserID: "user-1",
-	}, "", lifecycleTestRunID, driver)
-	if got := apperror.CodeOf(err); got != apperror.CodeScheduleExecutionTimeout {
-		t.Fatalf("schedule error code = %q, want %q: %v", got, apperror.CodeScheduleExecutionTimeout, err)
-	}
-	if len(messages.deleted) != 0 || len(messages.persisted) == 0 {
-		t.Fatalf("persisted = %+v deleted = %v, want the failed round kept", messages.persisted, messages.deleted)
 	}
 }

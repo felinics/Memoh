@@ -3,7 +3,7 @@ package turn
 import "context"
 
 // ACPAgentProfile is the channel-safe view of one external agent profile.
-// Runtime launch commands, compatibility quirks, and credential details stay
+// Runtime launch commands and credential details stay
 // behind ACPProfileResolver and never cross the Channel boundary.
 type ACPAgentProfile struct {
 	ID          string

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useResizeObserver } from '@vueuse/core'
-import { splitScriptRuns } from '@/utils/script-runs'
 
 // A long user prompt collapses to ~11 lines with a quiet text toggle in the
 // 12th line's place; expanded it shows everything plus "show less". The toggle
@@ -10,11 +9,6 @@ import { splitScriptRuns } from '@/utils/script-runs'
 // inline affordance on the bubble, not a control.
 const props = defineProps<{ text: string }>()
 const { t } = useI18n()
-
-// Per-script runs so CJK and Latin in the same prompt each take their own weight
-// (see .chat-cjk / .chat-latin in style.css). Joining the runs reproduces the
-// text verbatim, so white-space: pre-wrap still preserves newlines and spacing.
-const runs = computed(() => splitScriptRuns(props.text))
 
 const expanded = ref(false)
 const overflowing = ref(false)
@@ -39,21 +33,17 @@ useResizeObserver(textEl, () => measure())
 <template>
   <div>
     <!-- Collapsed clamp is a literal class so Tailwind's JIT actually emits it
-         (line-clamp-[11] = 11 visible lines; the toggle takes the 12th). Runs
-         are emitted with no whitespace between the <span> tags, so the pre-wrap
-         content stays free of injected whitespace. -->
+         (line-clamp-[11] = 11 visible lines; the toggle takes the 12th). The
+         text is set as one plain run in .chat-user-text — the rule the in-place
+         edit field shares, so entering edit changes no glyph (see style.css). -->
     <!-- eslint-disable vue/multiline-html-element-content-newline -- no breaks
-         between the tags and runs: under white-space: pre-wrap a source newline
-         would render as a literal blank line in the prompt. -->
+         around the text: under white-space: pre-wrap a source newline would
+         render as a literal blank line in the prompt. -->
     <div
       ref="textEl"
-      class="whitespace-pre-wrap break-words"
+      class="chat-user-text whitespace-pre-wrap break-words"
       :class="expanded ? '' : 'line-clamp-[11]'"
-    ><span
-      v-for="(run, i) in runs"
-      :key="i"
-      :class="run.script === 'cjk' ? 'chat-cjk' : 'chat-latin'"
-    >{{ run.text }}</span></div>
+    >{{ text }}</div>
     <!-- eslint-enable vue/multiline-html-element-content-newline -->
     <button
       v-if="overflowing || expanded"

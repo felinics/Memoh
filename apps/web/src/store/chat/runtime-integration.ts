@@ -19,6 +19,7 @@ import type {
 } from './types'
 import type { createChatViewRegistry } from './view-registry'
 import type { FirstSendTracker } from './first-send'
+import { awaitStopOutcome } from './stop-outcome'
 
 // The catalog code of a WS failure frame.
 export function wsFrameErrorCode(event: { code?: string }): string {
@@ -556,18 +557,20 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     }
   }
 
-  function abortRun(invocationId: string) {
+  // Returns whether the stop reached the server or is queued to reach it once
+  // the run or its session is named.
+  function abortRun(invocationId: string): boolean {
     const runId = deps.assistantStreams.requestAbort(invocationId)
-    if (!runId) return
+    if (!runId) return true
     const stream = deps.assistantStreams.getAssistantStream(invocationId)
     if (!stream?.sessionId.trim()) {
       deferredAbortByInvocation.set(invocationId, {
         runId,
         botId: stream?.botId ?? '',
       })
-      return
+      return true
     }
-    sendAbortControl(
+    return sendAbortControl(
       runId,
       stream?.botId,
       stream?.sessionId,
@@ -591,7 +594,9 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     return sent
   }
 
-  function abort(target?: ChatViewTarget) {
+  // awaitOutcome is the user's stop (see stop-outcome.ts). Every other stop
+  // (deleting a session, switching bots) ends the send at once.
+  function abort(target?: ChatViewTarget, options: { awaitOutcome?: boolean } = {}) {
     const resolved = deps.normalizeTarget(target)
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
@@ -618,7 +623,9 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       }
     }
     for (const invocationId of invocationIds) {
-      if (!runtimeAborted) abortRun(invocationId)
+      const stopSent = runtimeAborted || abortRun(invocationId)
+      if (options.awaitOutcome && stopSent && awaitStopOutcome(deps, invocationId, abortError)) continue
+      deps.assistantStreams.clearStopping(invocationId)
       deps.assistantStreams.rejectAssistantStream(invocationId, abortError)
     }
     deps.chatViews.prune()

@@ -6,7 +6,6 @@ import { useAgentAuthorization } from '@/composables/useAgentAuthorization'
 import {
   AGENT_AUTH_MODE_COPY,
   BOT_AGENT_RUNTIME_CLAUDE_CODE,
-  DEVICE_LOGINS,
   DIRECT_BOT_AGENT_API_KEY_AUTH_KIND,
   DIRECT_BOT_AGENT_AUTH_MODES,
   agentAuthForCredentialKind,
@@ -14,7 +13,6 @@ import {
   type AgentAuthMode,
   type DirectBotAgentRuntime,
 } from '@/utils/bot-agent'
-import DeviceLoginPanel from './device-login-panel.vue'
 import AgentCredentialInput from './agent-credential-input.vue'
 
 type Mode = AgentAuthMode | 'claude_account'
@@ -30,15 +28,12 @@ const modes: readonly [Mode, ...Mode[]] = props.runtime === BOT_AGENT_RUNTIME_CL
 const mode = ref(modes[0])
 const secret = ref('')
 const authorizationCode = ref('')
-const { session, ready, pending, busy, loading, error, deviceLogin, start, exchange, cancel, handoff, resume } = useAgentAuthorization(() => props.runtime, props.storageKey)
+const { session, ready, pending, busy, loading, error, start, exchange, cancel, handoff, resume } = useAgentAuthorization(() => props.runtime, props.storageKey)
 const agentAuth = computed(() => mode.value === 'claude_account' ? 'oauth_token' : mode.value)
-const deviceLoginAuth = computed(() => isDeviceLoginAuthMode(mode.value) ? mode.value : undefined)
 // An account that signs in on the Agent's own process has nothing to stage
 // here: the Bot is created first and signs in from its settings.
-const signsInAfterCreate = computed(() => !!deviceLoginAuth.value && !DEVICE_LOGINS[deviceLoginAuth.value].staged)
-const authKind = computed(() => deviceLoginAuth.value
-  ? DEVICE_LOGINS[deviceLoginAuth.value].authKind
-  : agentAuth.value === 'oauth_token' ? 'claude_code_oauth' : DIRECT_BOT_AGENT_API_KEY_AUTH_KIND[props.runtime])
+const deviceLoginAuth = computed(() => isDeviceLoginAuthMode(mode.value) ? mode.value : undefined)
+const authKind = computed(() => agentAuth.value === 'oauth_token' ? 'claude_code_oauth' : DIRECT_BOT_AGENT_API_KEY_AUTH_KIND[props.runtime])
 function modeLabel(value: Mode): string {
   return value === 'claude_account' ? 'bots.agent.claudeAccount' : AGENT_AUTH_MODE_COPY[value].label
 }
@@ -48,8 +43,8 @@ watch(() => session.value?.auth_kind, (kind) => {
   // Both Claude choices store the same credential kind; keep the one in use.
   mode.value = auth === 'oauth_token' && mode.value !== 'oauth_token' ? 'claude_account' : auth
 })
-watch([ready, busy, agentAuth, signsInAfterCreate, () => session.value?.id], () => {
-  emit('status', { ready: signsInAfterCreate.value || ready.value, busy: busy.value, id: session.value?.id ?? '', auth: agentAuth.value })
+watch([ready, busy, agentAuth, deviceLoginAuth, () => session.value?.id], () => {
+  emit('status', { ready: !!deviceLoginAuth.value || ready.value, busy: busy.value, id: session.value?.id ?? '', auth: agentAuth.value })
 }, { immediate: true })
 watch([ready, () => session.value?.id], () => { authorizationCode.value = '' })
 function changeMode(value: unknown) {
@@ -92,20 +87,9 @@ defineExpose({ handoff, resume })
     </Select>
   </SettingsRow>
   <SettingsRow
-    v-if="deviceLoginAuth && signsInAfterCreate"
+    v-if="deviceLoginAuth"
     :label="$t(AGENT_AUTH_MODE_COPY[deviceLoginAuth].label)"
     :description="$t('bots.agent.signInAfterCreate')"
-  />
-  <DeviceLoginPanel
-    v-else-if="deviceLoginAuth"
-    :auth="deviceLoginAuth"
-    :authorized="ready"
-    :authorizing="loading"
-    :expires-at="session?.expires_at"
-    :device-login="deviceLogin"
-    :error="error"
-    @connect="start(authKind)"
-    @cancel="cancel"
   />
   <SettingsRow
     v-else-if="mode === 'claude_account'"

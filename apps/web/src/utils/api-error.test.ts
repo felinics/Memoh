@@ -32,7 +32,7 @@ describe('resolveApiErrorMessage', () => {
       },
     }, 'fallback')
 
-    expect(message).toBe('你没有执行该 Bot 工作区命令的权限。')
+    expect(message).toBe('你没有执行该 Bot 工作区命令的权限')
   })
 
   it('renders ACP feedback when structured payload is nested under message', () => {
@@ -57,7 +57,7 @@ describe('resolveApiErrorMessage', () => {
       message: 'raw backend message',
     }, 'fallback')
 
-    expect(message).toBe('你没有执行该 Bot 工作区命令的权限。')
+    expect(message).toBe('你没有执行该 Bot 工作区命令的权限')
   })
 
   it('does not render copy from an i18n_key without a code', () => {
@@ -147,7 +147,7 @@ describe('resolveApiErrorMessage', () => {
 
   it.each([
     ['en', 'Network connection failed. Check your connection and try again.'],
-    ['zh', '网络连接失败，请检查网络后重试。'],
+    ['zh', '网络连接失败，请检查网络后重试'],
     ['ja', 'ネットワークに接続できません。接続を確認してもう一度お試しください。'],
   ])('localizes native fetch failures for %s', (language, expected) => {
     locale = language
@@ -159,7 +159,7 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
-    ['zh', '启动工作区失败，请重试。'],
+    ['zh', '启动工作区失败，请重试'],
     ['ja', 'Workspace を起動できませんでした。もう一度お試しください。'],
   ])('localizes workspace errors for %s by code, ignoring a legacy i18n_key', (language, expected) => {
     locale = language
@@ -176,7 +176,7 @@ describe('resolveApiErrorMessage', () => {
 
   it.each([
     ['en', 'This name is already taken.'],
-    ['zh', '该名称已被占用。'],
+    ['zh', '该名称已被占用'],
     ['ja', 'この名前はすでに使用されています。'],
   ])('derives the localized message from the stable code for %s', (language, expected) => {
     locale = language
@@ -202,10 +202,10 @@ describe('resolveApiErrorMessage', () => {
 
   it.each([
     ['en', 'request.field_required', 'session_id is required.'],
-    ['zh', 'request.field_required', '缺少 session_id。'],
+    ['zh', 'request.field_required', '缺少 session_id'],
     ['ja', 'request.field_required', 'session_id は必須です。'],
     ['en', 'request.field_invalid', 'session_id is invalid.'],
-    ['zh', 'request.field_invalid', 'session_id 的值无效。'],
+    ['zh', 'request.field_invalid', 'session_id 的值无效'],
     ['ja', 'request.field_invalid', 'session_id の値が無効です。'],
   ])('names the field of a %s %s error', (language, code, expected) => {
     locale = language
@@ -217,25 +217,25 @@ describe('resolveApiErrorMessage', () => {
 
   it.each([
     ['en', 'skill.builtin_read_only', 'Built-in Skills are managed by Memoh and cannot be edited or deleted.'],
-    ['zh', 'skill.builtin_read_only', 'Memoh 自带 Skill 由系统管理，无法编辑或删除。'],
+    ['zh', 'skill.builtin_read_only', 'Memoh 自带 Skill 由系统管理，无法编辑或删除'],
     ['ja', 'skill.builtin_read_only', 'Memoh 組み込みの Skill はシステムによって管理されているため、編集または削除できません。'],
     ['en', 'skill.name_taken', 'A Skill with this name already exists. Choose a different name.'],
-    ['zh', 'skill.name_taken', '已存在同名 Skill，请换一个名称。'],
+    ['zh', 'skill.name_taken', '已存在同名 Skill，请换一个名称'],
     ['ja', 'skill.name_taken', '同じ名前の Skill がすでに存在します。別の名前を使用してください。'],
     ['en', 'skill.save_failed', 'The Skill could not be saved. Please try again.'],
-    ['zh', 'skill.save_failed', 'Skill 保存失败，请重试。'],
+    ['zh', 'skill.save_failed', 'Skill 保存失败，请重试'],
     ['ja', 'skill.save_failed', 'Skill を保存できませんでした。もう一度お試しください。'],
     ['en', 'registry.unavailable', 'The Supermarket is unavailable. Please try again later.'],
-    ['zh', 'registry.unavailable', '暂时无法连接 Supermarket，请稍后重试。'],
+    ['zh', 'registry.unavailable', '暂时无法连接 Supermarket，请稍后重试'],
     ['ja', 'registry.unavailable', 'Supermarket に接続できません。しばらくしてからもう一度お試しください。'],
     ['en', 'registry.app_not_found', 'This app is no longer available.'],
-    ['zh', 'registry.app_not_found', '该应用已不存在。'],
+    ['zh', 'registry.app_not_found', '该应用已不存在'],
     ['ja', 'registry.app_not_found', 'このアプリは現在利用できません。'],
     ['en', 'registry.app_invalid', 'This app is invalid and cannot be installed.'],
-    ['zh', 'registry.app_invalid', '该应用无效，无法安装。'],
+    ['zh', 'registry.app_invalid', '该应用无效，无法安装'],
     ['ja', 'registry.app_invalid', 'このアプリは無効なため、インストールできません。'],
     ['en', 'registry.app_install_failed', 'The app could not be installed. Please try again.'],
-    ['zh', 'registry.app_install_failed', '应用安装失败，请重试。'],
+    ['zh', 'registry.app_install_failed', '应用安装失败，请重试'],
     ['ja', 'registry.app_install_failed', 'アプリをインストールできませんでした。もう一度お試しください。'],
   ])('localizes %s error %s', (language, code, expected) => {
     locale = language
@@ -244,7 +244,7 @@ describe('resolveApiErrorMessage', () => {
 
   it.each([
     ['en', 'The workspace could not be reached.'],
-    ['zh', '暂时无法连接工作区，请稍后重试。'],
+    ['zh', '暂时无法连接工作区，请稍后重试'],
     ['ja', 'Workspace に接続できません。しばらくしてからもう一度お試しください。'],
   ])('localizes workspace.unreachable for %s', (language, expected) => {
     locale = language
@@ -258,7 +258,7 @@ describe('resolveApiErrorMessage', () => {
 
   it.each([
     ['en', 'The channel configuration could not be verified. Check the credentials, then try again.'],
-    ['zh', '无法验证平台配置，请检查凭据后重试。'],
+    ['zh', '无法验证平台配置，请检查凭据后重试'],
     ['ja', 'プラットフォーム設定を検証できませんでした。認証情報を確認して、もう一度お試しください。'],
   ])('localizes channel.verification_failed for %s', (language, expected) => {
     locale = language
@@ -289,27 +289,27 @@ describe('resolveApiErrorMessage', () => {
 
   it.each([
     ['agent.response_timeout', 'en', 'The model did not respond in time. Please try again.'],
-    ['agent.response_timeout', 'zh', '模型未能及时响应，请重试。'],
+    ['agent.response_timeout', 'zh', '模型未能及时响应，请重试'],
     ['agent.response_timeout', 'ja', 'モデルから時間内に応答がありませんでした。もう一度お試しください。'],
     ['agent.response_interrupted', 'en', 'The model response was interrupted. Please try again.'],
-    ['agent.response_interrupted', 'zh', '模型响应意外中断，请重试。'],
+    ['agent.response_interrupted', 'zh', '模型响应意外中断，请重试'],
     ['agent.response_interrupted', 'ja', 'モデルの応答が中断されました。もう一度お試しください。'],
     ['agent.provider_overloaded', 'en', 'The model provider is unavailable or overloaded right now. Please try again in a moment.'],
-    ['agent.provider_overloaded', 'zh', '模型服务暂时不可用或过载，请稍后重试。'],
+    ['agent.provider_overloaded', 'zh', '模型服务暂时不可用或过载，请稍后重试'],
     ['agent.provider_overloaded', 'ja', 'モデルプロバイダーは現在利用できないか、過負荷の状態です。しばらくしてからもう一度お試しください。'],
-    ['agent.provider_rate_limited', 'zh', '已达到模型服务的速率上限，请稍后再发送。'],
+    ['agent.provider_rate_limited', 'zh', '已达到模型服务的速率上限，请稍后再发送'],
     ['agent.provider_quota_exhausted', 'en', 'The model provider account has no remaining balance or quota.'],
-    ['agent.provider_quota_exhausted', 'zh', '模型服务账户的余额或配额已用尽。'],
+    ['agent.provider_quota_exhausted', 'zh', '模型服务账户的余额或配额已用尽'],
     ['agent.provider_auth_failed', 'en', 'The model provider rejected the credentials. Check the provider API key.'],
-    ['agent.provider_auth_failed', 'zh', '模型服务拒绝了当前凭据，请检查该服务商的 API Key。'],
+    ['agent.provider_auth_failed', 'zh', '模型服务拒绝了当前凭据，请检查该服务商的 API Key'],
     ['agent.provider_permission_denied', 'en', 'The model provider denied access to this model or resource. Check that the provider account can use this model.'],
-    ['agent.provider_permission_denied', 'zh', '模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。'],
+    ['agent.provider_permission_denied', 'zh', '模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型'],
     ['agent.provider_permission_denied', 'ja', 'モデルプロバイダーがこのモデルまたはリソースへのアクセスを拒否しました。プロバイダーのアカウントがこのモデルを利用できるか確認してください。'],
     ['agent.provider_request_rejected', 'en', 'The model provider rejected the request. Check the model settings, or try another model.'],
-    ['agent.provider_request_rejected', 'zh', '模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。'],
+    ['agent.provider_request_rejected', 'zh', '模型服务商拒绝了这次请求，请检查模型设置，或换一个模型'],
     ['agent.provider_request_rejected', 'ja', 'モデルプロバイダーがリクエストを拒否しました。モデル設定を確認するか、別のモデルをお試しください。'],
     ['agent.provider_unreachable', 'en', 'Memoh could not reach the model provider. Check the provider address and that the service is running.'],
-    ['agent.provider_unreachable', 'zh', '无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。'],
+    ['agent.provider_unreachable', 'zh', '无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行'],
     ['agent.provider_unreachable', 'ja', 'Memoh からモデルプロバイダーに接続できませんでした。プロバイダーのアドレスとサービスが稼働中か確認してください。'],
   ])('localizes structural stream failure %s for %s', (code, language, expected) => {
     locale = language

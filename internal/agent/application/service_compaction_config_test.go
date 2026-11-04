@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"testing"
 
@@ -99,41 +98,6 @@ func TestBuildCompactionConfigLeavesSelectionToController(t *testing.T) {
 	}
 	if cfg.MaxOutputTokens != 32000 {
 		t.Fatalf("MaxOutputTokens = %d, want the model's declared output cap", cfg.MaxOutputTokens)
-	}
-}
-
-func TestBuildCompactionConfigSkipsProviderWithoutOutputLimit(t *testing.T) {
-	t.Parallel()
-
-	const modelUUID = "00000000-0000-0000-0000-000000000411"
-	const providerUUID = "00000000-0000-0000-0000-000000000412"
-	queries := &compactionConfigQueries{
-		model: sqlc.Model{
-			ID:         compactionConfigUUID(t, modelUUID),
-			ModelID:    "codex-compact-model",
-			ProviderID: compactionConfigUUID(t, providerUUID),
-			Type:       string(models.ModelTypeChat),
-			Enable:     true,
-		},
-		provider: sqlc.Provider{
-			ID:         compactionConfigUUID(t, providerUUID),
-			Name:       "codex-provider",
-			ClientType: string(models.ClientTypeOpenAICodex),
-			Enable:     true,
-		},
-	}
-	service := &Service{
-		logger:        slog.New(slog.DiscardHandler),
-		modelsService: models.NewService(slog.New(slog.DiscardHandler), queries),
-		queries:       queries,
-	}
-
-	cfg, err := service.buildCompactionConfig(context.Background(), ChatRequest{
-		BotID:    "00000000-0000-0000-0000-000000000413",
-		ThreadID: "00000000-0000-0000-0000-000000000414",
-	}, settings.Settings{ChatModelID: modelUUID}, 150000, "")
-	if !errors.Is(err, models.ErrCompactionOutputLimitUnsupported) || cfg.ModelID != "" {
-		t.Fatalf("buildCompactionConfig() = %q, %v; want the unsupported summarizer reported", cfg.ModelID, err)
 	}
 }
 
