@@ -119,7 +119,7 @@ func TestCreateScheduleExplainsWhichNotifyPolicyToPick(t *testing.T) {
 		if tool.Name != ToolCreateSchedule().String() {
 			continue
 		}
-		for _, want := range []string{"`important` (default)", "`notify_user`", "even while testing at a short interval", "`every_run`: only when the user wants every result", "do not write \"reply here only\""} {
+		for _, want := range []string{"`important` (default)", "`notify_user`", "even while testing at a short interval", "`every_run`: only when the user wants every result", "not just to watch test runs", "so do not mention it in `command`", "`notify_user` takes no arguments and carries no text", "do not write \"reply here only\""} {
 			if !strings.Contains(tool.Description, want) {
 				t.Fatalf("create_schedule description should contain %q, got:\n%s", want, tool.Description)
 			}

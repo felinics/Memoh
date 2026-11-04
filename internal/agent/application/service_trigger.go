@@ -137,6 +137,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		MaxCalls:         payload.MaxCalls,
 		Command:          payload.Command,
 		NoChannelContact: payload.NoChannelContact,
+		NotifiesEveryRun: payload.NotifiesEveryRun,
 	})
 	req, cfg = attachCurrentTurnPrompt(req, cfg, schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)

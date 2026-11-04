@@ -146,17 +146,26 @@ func GenerateSchedulePrompt(s Schedule) string {
 		"maxCalls":    maxCallsStr,
 		"pattern":     s.Pattern,
 		"command":     s.Command,
-		"channelNote": scheduleChannelNote(s),
+		"notes":       scheduleNotes(s),
 	})
 }
 
-// scheduleChannelNote is empty unless the owner turned off being reached on
-// social platforms, so a schedule with the default reads exactly as before.
-func scheduleChannelNote(s Schedule) string {
-	if !s.NoChannelContact {
+// scheduleNotes is empty for a schedule with the default settings, so its
+// trigger reads exactly as before. An every_run schedule says its reply is
+// what reaches the user; turning off channel contact says the run need not
+// reach them on social platforms.
+func scheduleNotes(s Schedule) string {
+	var notes []string
+	if s.NotifiesEveryRun {
+		notes = append(notes, "The user is notified when this run finishes; your final reply is what they read.")
+	}
+	if s.NoChannelContact {
+		notes = append(notes, "No need to notify the user through social platforms for this task; they follow it in Memoh.")
+	}
+	if len(notes) == 0 {
 		return ""
 	}
-	return "\n\nNo need to notify the user through social platforms for this task; they follow it in Memoh."
+	return "\n\n" + strings.Join(notes, "\n")
 }
 
 func buildSkillsSection(skills []SkillEntry) string {

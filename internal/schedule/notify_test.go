@@ -3,6 +3,7 @@ package schedule
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/robfig/cron/v3"
@@ -55,5 +56,48 @@ func TestCreateRejectsUnknownNotifyPolicy(t *testing.T) {
 	}
 	if queries.created != nil {
 		t.Fatal("an invalid policy still created the schedule")
+	}
+}
+
+type payloadRecorder struct{ payload *TriggerPayload }
+
+func (r payloadRecorder) TriggerSchedule(_ context.Context, _ string, payload TriggerPayload, _ string) (TriggerResult, error) {
+	*r.payload = payload
+	return TriggerResult{Status: "ok"}, nil
+}
+
+func TestRunSchedulePassesNotifySettingsToTheRun(t *testing.T) {
+	cases := []struct {
+		name        string
+		policy      string
+		contact     bool
+		wantEvery   bool
+		wantNoReach bool
+	}{
+		{name: "defaults", policy: NotifyImportant, contact: true},
+		{name: "every run", policy: NotifyEveryRun, contact: true, wantEvery: true},
+		{name: "no channel contact", policy: NotifyImportant, contact: false, wantNoReach: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := runTestSchedule()
+			row.NotifyPolicy = tc.policy
+			row.ContactViaChannels = tc.contact
+			var got TriggerPayload
+			svc := &Service{
+				queries:        &runQueries{schedule: row},
+				triggerer:      payloadRecorder{payload: &got},
+				sessionCreator: fakeSessionCreator{},
+				events:         &recordingPublisher{},
+				jwtSecret:      "secret",
+				logger:         slog.Default(),
+			}
+			if err := svc.runSchedule(t.Context(), toSchedule(row)); err != nil {
+				t.Fatalf("runSchedule: %v", err)
+			}
+			if got.NotifiesEveryRun != tc.wantEvery || got.NoChannelContact != tc.wantNoReach {
+				t.Fatalf("payload every_run=%v no_channel=%v, want %v %v", got.NotifiesEveryRun, got.NoChannelContact, tc.wantEvery, tc.wantNoReach)
+			}
+		})
 	}
 }

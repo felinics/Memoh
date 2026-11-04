@@ -441,6 +441,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		OwnerUserID:      ownerUserID,
 		SessionID:        sessionID,
 		NoChannelContact: !sched.ContactViaChannels,
+		NotifiesEveryRun: sched.NotifyPolicy == NotifyEveryRun,
 		ModelID:          sched.ModelID,
 		RuntimeModelID:   sched.ACPModelID,
 		ReasoningEffort:  sched.ReasoningEffort,
