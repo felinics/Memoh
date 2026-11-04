@@ -93,8 +93,8 @@ Memoh 前端对用户和维护者的承诺，以及每条承诺在本仓库中�
 
 ## 依据来源
 
-规则和实现的依据按下面的优先级查找。每个领域查哪几篇、每个库的官方文档、llms.txt 与官方
-skill，见 `references/sources.md`。
+规则和实现的依据按下面的优先级查找。`references/sources.md` 列出哪些是官方的权威来源、
+清单里没有时怎么找，以及每个领域该读哪几篇。
 
 1. **平台规范决定行为对不对**：Android 与 Material 3、Apple HIG、Web 标准（WHATWG HTML、
    WCAG 2.2、WAI-ARIA APG）。返回与手势、系统栏、焦点与无障碍这类用户在别的应用里早已习惯
@@ -241,5 +241,5 @@ Agent 与不熟悉本仓的开发者顺手写代码时，最容易写出左列�
 | [rules.md](references/rules.md) | 需要某条规则的完整内容：原因、本仓库的实现、常见错误、边界和自查方法。先阅读它的目录。 |
 | [review.md](references/review.md) | 交接前检查自己的 diff，或审查他人的前端改动。 |
 | [upkeep.md](references/upkeep.md) | 记录违规，或提议新增、修改、升级规则。 |
-| [sources.md](references/sources.md) | 查平台规范、Web 标准，或某个库的官方文档、llms.txt 与官方 skill；为规则或实现找依据。 |
+| [sources.md](references/sources.md) | 为规则或实现找依据：官方来源清单、清单里没有时怎么找、按领域查找，以及各库的 llms.txt 与官方 skill。 |
 | [scripts/check-contrast.mjs](scripts/check-contrast.mjs) | 计算 OKLCH 颜色与半透明叠加后的对比度，或输出深浅色模式与 shadcn 默认主题的基线对比表（重构组件库颜色时直接运行 `node scripts/check-contrast.mjs`）。 |
