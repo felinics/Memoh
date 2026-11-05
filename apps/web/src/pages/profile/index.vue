@@ -10,7 +10,7 @@
           <div
             v-for="i in 6"
             :key="i"
-            class="mx-4 flex items-center justify-between border-b border-border py-3.5 last:border-b-0"
+            class="flex items-center justify-between border-b border-border py-3.5 last:border-b-0"
           >
             <Skeleton class="h-4 w-24" />
             <Skeleton class="h-8 w-64" />

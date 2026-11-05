@@ -17,7 +17,7 @@ import {
   Terminal,
 } from 'lucide-vue-next'
 import { ref } from 'vue'
-import { BackendCard, CalloutBanner, ConfirmDeleteDialog, ExpandableSettingsRow, FieldStack, FormStack, InlineLoadingRow, MetricReadout, PageShell, PanePlaceholder, PersonaTile, SectionGroup, SettingsRow, SettingsSection } from '@felinic/ui'
+import { BackendCard, CalloutBanner, ConfirmDeleteDialog, ExpandableSettingsRow, FieldStack, FormStack, InlineLoadingRow, MetricReadout, PageShell, PanePlaceholder, PersonaTile, SectionGroup, SettingsBleed, SettingsList, SettingsRow, SettingsSection } from '@felinic/ui'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 
@@ -118,7 +118,7 @@ const primitiveRungs = [
           title="Typography"
           class="w-full"
         >
-          <div class="mx-4 border-b border-border py-3 last:border-b-0">
+          <div class="border-b border-border py-3 last:border-b-0">
             <div class="min-w-0">
               <div class="text-sm font-medium text-foreground">
                 Code highlighting
@@ -353,6 +353,72 @@ const primitiveRungs = [
               </FieldStack>
             </template>
           </ExpandableSettingsRow>
+        </SettingsSection>
+      </Specimen>
+
+      <Specimen
+        label="<SettingsList>"
+        note="rows outside a card (a dialog body, a sheet): the list adds row height, padding and hairlines only — the surface it sits on already owns the inset, so the rows line up with the surface's own title"
+      >
+        <div class="w-full">
+          <p class="pb-1 text-label font-medium text-muted-foreground">
+            Network
+          </p>
+          <SettingsList>
+            <SettingsRow label="Accept DNS">
+              <Switch :model-value="true" />
+            </SettingsRow>
+            <SettingsRow label="Userspace networking">
+              <Switch :model-value="false" />
+            </SettingsRow>
+          </SettingsList>
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="<SettingsBleed>"
+        note="the card owns the 16px inset; a table, canvas or whole-row click target that must reach the card edges opts out here and re-pads its own text — row hairlines stay inset, the table's rules run edge to edge"
+      >
+        <SettingsSection
+          title="Compaction logs"
+          class="w-full"
+        >
+          <SettingsRow label="Status">
+            <Button
+              variant="outline"
+              size="sm"
+            >
+              All
+            </Button>
+          </SettingsRow>
+          <SettingsBleed>
+            <table class="w-full text-body">
+              <thead class="text-muted-foreground">
+                <tr>
+                  <th class="px-(--settings-inset) py-2 text-left font-normal">
+                    Time
+                  </th>
+                  <th class="px-(--settings-inset) py-2 text-right font-normal">
+                    Duration
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in [['10:11:53', '4.1s'], ['04:33:03', '4.7s']]"
+                  :key="row[0]"
+                  class="border-t border-border"
+                >
+                  <td class="px-(--settings-inset) py-2 font-mono">
+                    {{ row[0] }}
+                  </td>
+                  <td class="px-(--settings-inset) py-2 text-right font-mono">
+                    {{ row[1] }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </SettingsBleed>
         </SettingsSection>
       </Specimen>
 

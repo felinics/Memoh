@@ -192,8 +192,6 @@
 
       <DialogBody class="space-y-6">
         <SettingsRow
-          class="mx-0 min-h-0 py-0"
-          :divider="false"
           :label="t('settings.appearance.showExamplesEntry')"
           :description="t('settings.appearance.showExamplesEntryDescription')"
         >

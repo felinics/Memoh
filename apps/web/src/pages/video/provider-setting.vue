@@ -118,55 +118,48 @@
         </SettingsSection>
       </form>
 
-      <section class="space-y-2.5">
-        <div class="flex min-h-7 items-center justify-between gap-2 px-2">
-          <h2 class="text-sm font-medium text-muted-foreground">
-            {{ $t('video.models') }}
-          </h2>
-          <div
-            v-if="curProviderId"
-            class="flex items-center gap-2"
+      <SettingsSection :title="$t('video.models')">
+        <template
+          v-if="curProviderId"
+          #actions
+        >
+          <LoadingButton
+            type="button"
+            variant="outline"
+            size="sm"
+            :loading="importLoading"
+            @click="handleImportModels"
           >
-            <LoadingButton
-              type="button"
-              variant="outline"
-              size="sm"
-              :loading="importLoading"
-              @click="handleImportModels"
-            >
-              {{ $t('video.importModels') }}
-            </LoadingButton>
-            <CreateModel
-              :id="curProviderId"
-              default-type="video"
-              hide-type
-              :type-options="videoTypeOptions"
-              :invalidate-keys="['video-provider-models', 'video-models']"
-            />
-          </div>
+            {{ $t('video.importModels') }}
+          </LoadingButton>
+          <CreateModel
+            :id="curProviderId"
+            default-type="video"
+            hide-type
+            :type-options="videoTypeOptions"
+            :invalidate-keys="['video-provider-models', 'video-models']"
+          />
+        </template>
+
+        <div
+          v-if="providerModels.length === 0"
+          class="py-10 text-center text-xs text-muted-foreground"
+        >
+          {{ $t('video.noModels') }}
         </div>
 
-        <SurfaceCard padding="none">
-          <div
-            v-if="providerModels.length === 0"
-            class="px-4 py-10 text-center text-xs text-muted-foreground"
-          >
-            {{ $t('video.noModels') }}
-          </div>
-
-          <template v-else>
-            <ModelListRow
-              v-for="(model, index) in providerModels"
-              :key="model.id || model.model_id"
-              :label="model.name || model.model_id || ''"
-              :meta="model.name && model.name !== model.model_id ? model.model_id : ''"
-              :last="index === providerModels.length - 1"
-              :readonly="!model.id"
-              @click="openModelEditor(model)"
-            />
-          </template>
-        </SurfaceCard>
-      </section>
+        <template v-else>
+          <ModelListRow
+            v-for="(model, index) in providerModels"
+            :key="model.id || model.model_id"
+            :label="model.name || model.model_id || ''"
+            :meta="model.name && model.name !== model.model_id ? model.model_id : ''"
+            :last="index === providerModels.length - 1"
+            :readonly="!model.id"
+            @click="openModelEditor(model)"
+          />
+        </template>
+      </SettingsSection>
 
       <Dialog v-model:open="modelDialogOpen">
         <DialogContent class="sm:max-w-md">
@@ -250,7 +243,7 @@ import {
 } from '@felinic/ui'
 import { computed, inject, reactive, ref } from 'vue'
 import { useServerSyncedRecord, useServerSyncedScalar } from '@/composables/use-server-synced-form'
-import { FieldStack, FormStack, ModelListRow, SettingsRow, SettingsSection, SettingsShell, SurfaceCard, toast } from '@felinic/ui'
+import { FieldStack, FormStack, ModelListRow, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getVideoProvidersById, getVideoProvidersByIdModels, getVideoProvidersMeta, postProvidersFromTemplate, postVideoProvidersByIdImportModels, putProvidersById, putVideoModelsById } from '@memohai/sdk'

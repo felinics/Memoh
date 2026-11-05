@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-8">
     <SettingsSection :title="t('bots.settings.acpLaunchSection')">
-      <div class="space-y-5 p-4">
+      <div class="space-y-5 py-4">
         <AcpManagedFields
           v-if="(profile.managed_fields ?? []).length > 0"
           :profile="profile"

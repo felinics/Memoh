@@ -143,7 +143,7 @@
 
         <div
           v-else-if="runtimeItems.length === 0"
-          class="px-6 py-8 text-center"
+          class="py-8 text-center"
         >
           <p class="text-sm font-medium text-foreground">
             {{ desktopRuntimeBridge ? t('runtimes.emptyOtherTitle') : t('runtimes.emptyTitle') }}

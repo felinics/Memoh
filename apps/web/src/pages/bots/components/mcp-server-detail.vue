@@ -6,7 +6,7 @@
          Rendered ONLY for a saved server: before creation there is no entity to
          badge, toggle, or delete, so the whole card (and its Switch) stays out. -->
     <SettingsSection v-if="serverId">
-      <div class="group/header flex items-center gap-3 px-4 py-3">
+      <div class="group/header flex items-center gap-3 py-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <component
             :is="connectionType === 'stdio' ? Terminal : Globe"
@@ -98,7 +98,7 @@
          server the header card above already names the entity, so a heading
          would echo it; on create the Name field below leads the card. -->
     <SettingsSection>
-      <div class="space-y-5 p-4">
+      <div class="space-y-5 py-4">
         <Field v-if="!serverId">
           <FieldLabel>{{ $t('common.name') }}</FieldLabel>
           <FieldControl>
@@ -272,7 +272,7 @@
              the status lands. -->
         <div
           v-if="oauthStatusLoading && !oauthStatus"
-          class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+          class="flex min-h-[3.75rem] items-center justify-center py-3"
         >
           <Spinner class="size-5 text-muted-foreground" />
         </div>
@@ -406,7 +406,7 @@
       v-if="serverId && status === 'connected'"
       :title="$t('mcp.discoveredTools')"
     >
-      <div class="p-4">
+      <div class="py-4">
         <p
           v-if="tools.length === 0"
           class="text-sm text-muted-foreground"

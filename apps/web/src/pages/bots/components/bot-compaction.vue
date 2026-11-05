@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onDeactivated, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { InlineLoadingRow, SettingsBleed, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import {
   Button, Badge, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle,
   Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -203,129 +203,135 @@ onBeforeUnmount(() => {
             </Empty>
 
             <template v-else>
-              <div class="overflow-x-auto">
-                <table class="w-full text-xs">
-                  <thead>
-                    <tr class="border-b border-border">
-                      <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                        {{ $t('bots.compaction.status') }}
-                      </th>
-                      <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                        {{ $t('bots.compaction.time') }}
-                      </th>
-                      <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                        {{ $t('bots.compaction.duration') }}
-                      </th>
-                      <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                        {{ $t('bots.compaction.error') }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-border">
-                    <template
-                      v-for="log in filteredLogs"
-                      :key="log.id"
-                    >
-                      <tr
-                        class="cursor-pointer transition-colors hover:bg-accent"
-                        @click="toggleExpand(log.id)"
-                      >
-                        <td class="px-4 py-3">
-                          <Badge
-                            :variant="statusVariant(log.status)"
-                            size="sm"
-                          >
-                            {{ statusLabel(log.status) }}
-                          </Badge>
-                        </td>
-                        <td class="px-4 py-3 font-mono text-muted-foreground">
-                          {{ formatDateTime(log.started_at) }}
-                        </td>
-                        <td class="px-4 py-3 font-mono text-muted-foreground">
-                          {{ formatDuration(log.started_at, log.completed_at) }}
-                        </td>
-                        <td class="px-4 py-3">
-                          <span
-                            v-if="log.error_message"
-                            class="block max-w-[200px] truncate text-destructive"
-                          >{{ log.error_message }}</span>
-                          <span
-                            v-else
-                            class="text-muted-foreground"
-                          >—</span>
-                        </td>
+              <!-- The table and its pager span the card edge to edge: row hover
+                   fills and the rules between rows reach both sides, while the
+                   cells re-pad their text to line up with the rows above. -->
+              <SettingsBleed>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-xs">
+                    <thead>
+                      <tr class="border-b border-border">
+                        <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                          {{ $t('bots.compaction.status') }}
+                        </th>
+                        <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                          {{ $t('bots.compaction.time') }}
+                        </th>
+                        <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                          {{ $t('bots.compaction.duration') }}
+                        </th>
+                        <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                          {{ $t('bots.compaction.error') }}
+                        </th>
                       </tr>
-                      <tr
-                        v-if="log.id && expandedIds.has(log.id)"
-                        class="border-t border-border"
+                    </thead>
+                    <tbody class="divide-y divide-border">
+                      <template
+                        v-for="log in filteredLogs"
+                        :key="log.id"
                       >
-                        <td
-                          colspan="4"
-                          class="px-4 py-4"
+                        <tr
+                          class="cursor-pointer transition-colors hover:bg-accent"
+                          @click="toggleExpand(log.id)"
                         >
-                          <div class="space-y-3">
-                            <div
+                          <td class="px-4 py-3">
+                            <Badge
+                              :variant="statusVariant(log.status)"
+                              size="sm"
+                            >
+                              {{ statusLabel(log.status) }}
+                            </Badge>
+                          </td>
+                          <td class="px-4 py-3 font-mono text-muted-foreground">
+                            {{ formatDateTime(log.started_at) }}
+                          </td>
+                          <td class="px-4 py-3 font-mono text-muted-foreground">
+                            {{ formatDuration(log.started_at, log.completed_at) }}
+                          </td>
+                          <td class="px-4 py-3">
+                            <span
                               v-if="log.error_message"
-                              class="rounded-md border border-border bg-card p-3"
-                            >
-                              <p class="whitespace-pre-wrap font-mono text-xs text-destructive">
-                                {{ log.error_message }}
-                              </p>
-                            </div>
-                            <div
-                              v-if="log.usage"
-                              class="space-y-1"
-                            >
-                              <span class="text-xs font-medium text-muted-foreground">{{ $t('common.usage') }}</span>
-                              <div class="whitespace-pre-wrap rounded-md border border-border bg-card p-3 font-mono text-xs text-muted-foreground">
-                                {{ JSON.stringify(log.usage, null, 2) }}
+                              class="block max-w-[200px] truncate text-destructive"
+                            >{{ log.error_message }}</span>
+                            <span
+                              v-else
+                              class="text-muted-foreground"
+                            >—</span>
+                          </td>
+                        </tr>
+                        <tr
+                          v-if="log.id && expandedIds.has(log.id)"
+                          class="border-t border-border"
+                        >
+                          <td
+                            colspan="4"
+                            class="px-4 py-4"
+                          >
+                            <div class="space-y-3">
+                              <div
+                                v-if="log.error_message"
+                                class="rounded-md border border-border bg-card p-3"
+                              >
+                                <p class="whitespace-pre-wrap font-mono text-xs text-destructive">
+                                  {{ log.error_message }}
+                                </p>
+                              </div>
+                              <div
+                                v-if="log.usage"
+                                class="space-y-1"
+                              >
+                                <span class="text-xs font-medium text-muted-foreground">{{ $t('common.usage') }}</span>
+                                <div class="whitespace-pre-wrap rounded-md border border-border bg-card p-3 font-mono text-xs text-muted-foreground">
+                                  {{ JSON.stringify(log.usage, null, 2) }}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    </template>
-                  </tbody>
-                </table>
-              </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </SettingsBleed>
 
-              <div
-                v-if="totalPages > 1"
-                class="flex items-center justify-between border-t border-border p-4"
-              >
-                <span class="text-xs tabular-nums text-muted-foreground">
-                  {{ paginationSummary }}
-                </span>
-                <Pagination
-                  :total="totalCount"
-                  :items-per-page="PAGE_SIZE"
-                  :sibling-count="1"
-                  :page="currentPage"
-                  show-edges
-                  @update:page="currentPage = $event"
+              <SettingsBleed v-if="totalPages > 1">
+                <div
+                  class="flex items-center justify-between border-t border-border px-(--settings-inset) py-4"
                 >
-                  <PaginationContent v-slot="{ items }">
-                    <PaginationFirst />
-                    <PaginationPrevious />
-                    <template
-                      v-for="(item, index) in items"
-                      :key="index"
-                    >
-                      <PaginationEllipsis
-                        v-if="item.type === 'ellipsis'"
-                        :index="index"
-                      />
-                      <PaginationItem
-                        v-else
-                        :value="item.value"
-                        :is-active="item.value === currentPage"
-                      />
-                    </template>
-                    <PaginationNext />
-                    <PaginationLast />
-                  </PaginationContent>
-                </Pagination>
-              </div>
+                  <span class="text-xs tabular-nums text-muted-foreground">
+                    {{ paginationSummary }}
+                  </span>
+                  <Pagination
+                    :total="totalCount"
+                    :items-per-page="PAGE_SIZE"
+                    :sibling-count="1"
+                    :page="currentPage"
+                    show-edges
+                    @update:page="currentPage = $event"
+                  >
+                    <PaginationContent v-slot="{ items }">
+                      <PaginationFirst />
+                      <PaginationPrevious />
+                      <template
+                        v-for="(item, index) in items"
+                        :key="index"
+                      >
+                        <PaginationEllipsis
+                          v-if="item.type === 'ellipsis'"
+                          :index="index"
+                        />
+                        <PaginationItem
+                          v-else
+                          :value="item.value"
+                          :is-active="item.value === currentPage"
+                        />
+                      </template>
+                      <PaginationNext />
+                      <PaginationLast />
+                    </PaginationContent>
+                  </Pagination>
+                </div>
+              </SettingsBleed>
             </template>
           </SettingsSection>
         </DialogBody>

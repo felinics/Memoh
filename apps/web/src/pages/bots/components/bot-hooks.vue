@@ -72,7 +72,7 @@
       </SettingsSection>
 
       <SettingsSection :title="$t('bots.hooks.eventsSection')">
-        <div class="px-4 py-4">
+        <div class="py-4">
           <div
             v-if="eventsLoading"
             class="grid gap-2 sm:grid-cols-2"
@@ -100,7 +100,7 @@
       </SettingsSection>
 
       <SettingsSection :title="$t('bots.hooks.editorSection')">
-        <div class="space-y-3 px-4 py-4">
+        <div class="space-y-3 py-4">
           <div class="flex items-center justify-between gap-3">
             <div class="min-w-0">
               <div class="text-sm font-medium text-foreground">
@@ -154,7 +154,7 @@
             </SelectContent>
           </Select>
         </SettingsRow>
-        <div class="space-y-3 px-4 py-4">
+        <div class="space-y-3 py-4">
           <Textarea
             v-model="testPayload"
             class="min-h-32 resize-y font-mono text-xs leading-5"

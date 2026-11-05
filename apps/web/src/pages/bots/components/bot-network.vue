@@ -291,7 +291,9 @@
 
     <!-- Advanced overlay fields dialog (workbench form). The schema-driven
          rows move here UNCHANGED from the old in-card expand — same
-         SettingsRow renderer, only the container changed. Draft semantics
+         SettingsRow renderer, only the container changed: each group is a
+         SettingsList, which gives the rows their height and hairlines while
+         the dialog body supplies the inset. Draft semantics
          unchanged: edits land in the same config draft; the page's
          Save/Cancel bar remains the commit point. -->
     <Dialog v-model:open="showAdvancedConfig">
@@ -301,11 +303,11 @@
           <DialogDescription>{{ $t('common.allOptional') }}</DialogDescription>
         </DialogHeader>
         <DialogBody>
-          <div
+          <SettingsList
             v-for="group in advancedSchemaGroups"
             :key="group.title"
           >
-            <div class="mx-4 pb-1 pt-3 text-xs font-medium text-muted-foreground">
+            <div class="pb-1 pt-3 text-xs font-medium text-muted-foreground">
               {{ group.title }}
             </div>
 
@@ -417,7 +419,7 @@
                 />
               </div>
             </SettingsRow>
-          </div>
+          </SettingsList>
         </DialogBody>
       </DialogPanel>
     </Dialog>
@@ -564,7 +566,7 @@ import {
 } from '@felinic/ui'
 import { SquarePen, Eye, EyeOff, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
-import { ConfirmPopover, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { ConfirmPopover, InlineLoadingRow, SettingsList, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'

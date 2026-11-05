@@ -50,7 +50,7 @@
       >
         <div
           v-if="isNative"
-          class="px-4 py-3 text-xs text-muted-foreground"
+          class="py-3 text-xs text-muted-foreground"
         >
           {{ $t('webSearch.nativeManaged') }}
         </div>
@@ -94,7 +94,7 @@
             </template>
             <div
               v-else-if="form.values.provider"
-              class="px-4 py-3 text-xs text-muted-foreground"
+              class="py-3 text-xs text-muted-foreground"
             >
               {{ $t('webSearch.unsupportedProvider') }}
             </div>

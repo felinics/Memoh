@@ -146,29 +146,27 @@
           v-if="curProviderId"
           #actions
         >
-          <div class="flex items-center gap-2">
-            <LoadingButton
-              type="button"
-              variant="outline"
-              size="sm"
-              :loading="importLoading"
-              @click="handleImportModels"
-            >
-              {{ $t('transcription.importModels') }}
-            </LoadingButton>
-            <CreateModel
-              :id="curProviderId"
-              default-type="transcription"
-              hide-type
-              :type-options="transcriptionTypeOptions"
-              :invalidate-keys="['transcription-provider-models', 'transcription-models']"
-            />
-          </div>
+          <LoadingButton
+            type="button"
+            variant="outline"
+            size="sm"
+            :loading="importLoading"
+            @click="handleImportModels"
+          >
+            {{ $t('transcription.importModels') }}
+          </LoadingButton>
+          <CreateModel
+            :id="curProviderId"
+            default-type="transcription"
+            hide-type
+            :type-options="transcriptionTypeOptions"
+            :invalidate-keys="['transcription-provider-models', 'transcription-models']"
+          />
         </template>
 
         <div
           v-if="providerModels.length === 0"
-          class="px-4 py-10 text-center text-xs text-muted-foreground"
+          class="py-10 text-center text-xs text-muted-foreground"
         >
           {{ $t('transcription.noModels') }}
         </div>

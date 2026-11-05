@@ -177,7 +177,7 @@
       <!-- Usage: token stat row + daily bar chart — the dashboard's "numbers",
            sitting above memory telemetry so it reads earlier on the page. -->
       <SettingsSection :title="$t('bots.overview.usageTitle')">
-        <div class="space-y-4 p-4">
+        <div class="space-y-4 py-4">
           <div class="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
             <div
               v-for="stat in usageStats"

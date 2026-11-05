@@ -3,7 +3,7 @@
     <!-- Identity card: the platform this connection belongs to, with the
          committing actions (enable/disable, save) on the right. -->
     <SettingsSection>
-      <div class="flex items-center gap-3 p-4">
+      <div class="flex items-center gap-3 py-4">
         <span class="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted">
           <ChannelIcon
             :channel="platformType"
@@ -66,7 +66,7 @@
         v-if="showWebhookCallback"
         :title="$t('bots.channels.webhookCallback')"
       >
-        <div class="mx-4 space-y-3 py-4">
+        <div class="space-y-3 py-4">
           <p class="text-xs text-muted-foreground">
             {{ $t(webhookCallbackHintKey) }}
           </p>
@@ -127,7 +127,7 @@
       >
         <p
           v-if="isFeishuWebhook"
-          class="mx-4 border-b border-border py-3 text-xs text-warning"
+          class="border-b border-border py-3 text-xs text-warning"
         >
           {{ $t('bots.channels.feishuWebhookSecurityHint') }}
         </p>
