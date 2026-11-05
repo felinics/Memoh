@@ -253,7 +253,7 @@
              ui-allow-shape: skeleton borrowing the row height, not a data row. -->
         <div
           v-if="oauthStatusLoading && !oauthStatus"
-          class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+          class="flex min-h-[3.75rem] items-center justify-center py-3"
         >
           <Spinner class="size-5 text-muted-foreground" />
         </div>
@@ -335,7 +335,7 @@
                贴着分隔线的英雄内容需要更大的呼吸(人眼裁决 2026-07-13)。 -->
           <div
             v-if="devicePending"
-            class="mx-4 border-b border-border py-6 last:border-b-0"
+            class="border-b border-border py-6 last:border-b-0"
           >
             <DeviceCodePanel
               :code="oauthStatus?.device?.user_code ?? ''"

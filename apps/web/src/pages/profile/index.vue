@@ -3,7 +3,7 @@
     <div class="space-y-8">
       <!-- Stay-local (not SettingsRow): skeleton screens have no owner yet —
            skeleton-shimmer isn't on the four-rung loading ladder. These rows
-           borrow SettingsRow's geometry (mx-4/border-b/py-3.5/last:border-b-0)
+           borrow SettingsRow's geometry (border-b/py-3.5/last:border-b-0)
            only so the real content doesn't reflow once it swaps in. -->
       <template v-if="loadingInitial">
         <SettingsSection>

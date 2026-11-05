@@ -337,7 +337,7 @@
                discovery attempt found no registration endpoint. -->
           <div
             v-if="oauthNeedsClientId"
-            class="mx-4 space-y-4 border-b border-border pb-4 last:border-b-0"
+            class="space-y-4 border-b border-border pb-4 last:border-b-0"
           >
             <Field>
               <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>

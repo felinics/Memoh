@@ -1531,7 +1531,7 @@ watch([activeTab, botId], ([tab]) => {
               class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border"
             >
               <!-- ui-allow-shape: a row INSIDE a self-contained bordered card
-                   (px-4 within the card, not the section's mx-4). SettingsRow is a
+                   (px-4 within the card, not the section's inset). SettingsRow is a
                    direct child of a section surface; these snapshot rows live one
                    level in, inside their own rounded frame — a different container
                    relationship, so they stay hand-written. -->
