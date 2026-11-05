@@ -82,6 +82,8 @@ DROP FUNCTION IF EXISTS public.memoh_history_checkpoint_kept(uuid, bigint, bigin
 DROP FUNCTION IF EXISTS public.memoh_current_team_id() CASCADE;
 DROP TYPE IF EXISTS user_role;
 
+DROP TABLE IF EXISTS template.workspace_dependency_catalogs CASCADE;
+DROP TABLE IF EXISTS template.workspace_dependency_definitions CASCADE;
 DROP TABLE IF EXISTS template.provider_template_models CASCADE;
 DROP TABLE IF EXISTS template.provider_templates CASCADE;
 DROP SCHEMA IF EXISTS template;

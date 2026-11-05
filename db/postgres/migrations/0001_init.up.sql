@@ -51,10 +51,37 @@ CREATE TABLE IF NOT EXISTS template.provider_template_models (
 CREATE INDEX IF NOT EXISTS idx_provider_template_models_template_active_order
   ON template.provider_template_models (provider_template_id, active, sort_order, model_id);
 
+-- Workspace dependency definitions and the cached catalog, one copy per
+-- Supermarket source. Definitions are immutable, digest-verified publications
+-- and are never deleted.
+CREATE TABLE IF NOT EXISTS template.workspace_dependency_definitions (
+  source_url TEXT NOT NULL,
+  registry_id TEXT NOT NULL CHECK (registry_id = 'memoh'),
+  dependency_id TEXT NOT NULL,
+  revision TEXT NOT NULL CHECK (revision ~ '^[a-f0-9]{64}$'),
+  release_bytes BYTEA NOT NULL CHECK (octet_length(release_bytes) BETWEEN 1 AND 1048576),
+  artifact_bytes BYTEA NOT NULL CHECK (octet_length(artifact_bytes) BETWEEN 1 AND 1048576),
+  icon_digest TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_url, registry_id, dependency_id, revision)
+);
+
+CREATE INDEX IF NOT EXISTS idx_template_workspace_dependency_definitions_icon
+  ON template.workspace_dependency_definitions (source_url, icon_digest);
+
+CREATE TABLE IF NOT EXISTS template.workspace_dependency_catalogs (
+  source_url TEXT PRIMARY KEY,
+  catalog_bytes BYTEA NOT NULL CHECK (octet_length(catalog_bytes) BETWEEN 1 AND 4194304),
+  generation BIGINT NOT NULL DEFAULT 1 CHECK (generation > 0),
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 GRANT USAGE ON SCHEMA template TO CURRENT_USER;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   template.provider_templates,
-  template.provider_template_models
+  template.provider_template_models,
+  template.workspace_dependency_definitions,
+  template.workspace_dependency_catalogs
 TO CURRENT_USER;
 
 DO $$
@@ -3095,8 +3122,9 @@ DROP POLICY IF EXISTS bot_dependency_installations_team_delete ON public.bot_dep
 CREATE POLICY bot_dependency_installations_team_delete ON public.bot_dependency_installations
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
--- Immutable dependency definitions and the independently refreshed catalog.
--- Entries are shared only within a team and one configured Supermarket origin.
+-- Per-team dependency definitions and catalogs read by the release before
+-- 0173. Current Servers use the template.workspace_dependency_* tables; these
+-- remain until no deployed release reads them.
 CREATE TABLE IF NOT EXISTS public.workspace_dependency_definitions (
     team_id UUID NOT NULL DEFAULT public.memoh_current_team_id() REFERENCES public.teams(id) ON DELETE RESTRICT,
     source_url TEXT NOT NULL,

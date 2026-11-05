@@ -135,9 +135,10 @@ type groupKey struct {
 // RunOnce performs one round: installed, unpinned dependencies with a
 // check_update script on running native workspaces are grouped by
 // (dependency, platform), each group runs check_update once, and the result
-// fans out to every member. It returns how many upstream checks ran.
+// fans out to every member. It returns how many upstream checks ran. It reads
+// the stored catalog; the catalog worker keeps it within one refresh interval.
 func (w *UpdateWorker) RunOnce(ctx context.Context) (int, error) {
-	ctx, _, catalogErr := w.service.prepareCatalog(ctx, true, false)
+	ctx, _, catalogErr := w.service.prepareCatalog(ctx, false, false)
 	if catalogErr != nil {
 		return 0, catalogErr
 	}

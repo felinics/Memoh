@@ -110,7 +110,7 @@ func TestProviderTemplateSchemaIsGlobal(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 
-	for _, table := range []string{"provider_templates", "provider_template_models"} {
+	for _, table := range []string{"provider_templates", "provider_template_models", "workspace_dependency_definitions", "workspace_dependency_catalogs"} {
 		t.Run(table, func(t *testing.T) {
 			var exists, hasTeamID, rowSecurity, forceRowSecurity bool
 			if err := pool.QueryRow(ctx, `
