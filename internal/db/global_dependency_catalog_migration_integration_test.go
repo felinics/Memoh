@@ -153,7 +153,8 @@ func TestGlobalDependencyCatalogMigrationCopiesVerifiedRows(t *testing.T) {
 		}
 	}
 
-	stepUp(t, dsn, steps)
+	// Stop at 0173: later migrations drop the per-team tables read below.
+	stepUp(t, dsn, 1)
 	assertGlobalDependencyCatalog(t, pool, source, otherSource, oldest, newest, []migratedDependencyRef{
 		{ID: "alpha", Revision: a2.revision},
 		{ID: "beta", Revision: b1.revision, Retired: true},
@@ -270,5 +271,80 @@ func assertGlobalDependencyCatalog(
 	}
 	if otherCatalogs != 0 {
 		t.Fatalf("source without verified entries got a catalog row")
+	}
+}
+
+func TestDropTeamDependencyCatalogMigration(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+	dsn := teamMigrationDSN(t)
+	stepDown(t, dsn, countMigrationsFrom(t, "0173_global_dependency_catalog.up.sql"))
+	stepUp(t, dsn, 1)
+
+	const source = "https://supermarket.example"
+	late := newDependencyPublication(t, "late", "1")
+	corrupt := newDependencyPublication(t, "corrupt", "1")
+	corrupt.archive = []byte("tampered archive")
+	// A Server of the previous release writes into the per-team table while 0173
+	// is already applied.
+	for _, row := range []struct {
+		id  string
+		pub dependencyPublication
+	}{{"late", late}, {"corrupt", corrupt}} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO public.workspace_dependency_definitions
+				(team_id, source_url, registry_id, dependency_id, revision, release_bytes, artifact_bytes, icon_digest)
+			VALUES ($1, $2, 'memoh', $3, $4, $5, $6, '')`,
+			team.DefaultTeamID, source, row.id, row.pub.revision, row.pub.release, row.pub.archive,
+		); err != nil {
+			t.Fatalf("seed definition %s: %v", row.id, err)
+		}
+	}
+
+	publicTables := func() int {
+		var n int
+		if err := pool.QueryRow(ctx, `
+			SELECT (to_regclass('public.workspace_dependency_definitions') IS NOT NULL)::int
+			     + (to_regclass('public.workspace_dependency_catalogs') IS NOT NULL)::int`).Scan(&n); err != nil {
+			t.Fatalf("inspect public tables: %v", err)
+		}
+		return n
+	}
+
+	stepUp(t, dsn, 1)
+	var lateCount, corruptCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE dependency_id = 'late'),
+		       count(*) FILTER (WHERE dependency_id = 'corrupt')
+		FROM template.workspace_dependency_definitions WHERE source_url = $1`, source).Scan(&lateCount, &corruptCount); err != nil {
+		t.Fatalf("inspect template definitions: %v", err)
+	}
+	if lateCount != 1 || corruptCount != 0 {
+		t.Fatalf("copied definitions: verified=%d corrupt=%d, want 1 and 0", lateCount, corruptCount)
+	}
+	if n := publicTables(); n != 0 {
+		t.Fatalf("public tables after up = %d, want 0", n)
+	}
+
+	stepDown(t, dsn, 1)
+	if n := publicTables(); n != 2 {
+		t.Fatalf("public tables after down = %d, want 2", n)
+	}
+	var forced, policies int
+	if err := pool.QueryRow(ctx, `
+		SELECT (SELECT count(*) FROM pg_class
+		        WHERE oid IN ('public.workspace_dependency_definitions'::regclass, 'public.workspace_dependency_catalogs'::regclass)
+		          AND relrowsecurity AND relforcerowsecurity),
+		       (SELECT count(*) FROM pg_policies
+		        WHERE schemaname = 'public' AND tablename IN ('workspace_dependency_definitions', 'workspace_dependency_catalogs'))`).Scan(&forced, &policies); err != nil {
+		t.Fatalf("inspect restored RLS: %v", err)
+	}
+	if forced != 2 || policies != 8 {
+		t.Fatalf("after down: FORCE RLS tables=%d policies=%d, want 2 and 8", forced, policies)
+	}
+
+	stepUp(t, dsn, 1)
+	if n := publicTables(); n != 0 {
+		t.Fatalf("public tables after re-up = %d, want 0", n)
 	}
 }

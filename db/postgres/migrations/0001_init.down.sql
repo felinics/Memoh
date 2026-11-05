@@ -1,5 +1,3 @@
-DROP TABLE IF EXISTS public.workspace_dependency_catalogs;
-DROP TABLE IF EXISTS public.workspace_dependency_definitions;
 ALTER TABLE IF EXISTS bot_channel_routes DROP CONSTRAINT IF EXISTS fk_bot_channel_routes_active_session;
 
 DROP VIEW IF EXISTS public.team_accounts CASCADE;
