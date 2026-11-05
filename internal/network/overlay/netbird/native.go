@@ -23,6 +23,7 @@ func newNativeDriver(cfg netctl.BotOverlayConfig, runtime sidecar.Runtime, state
 		Kind:      "netbird",
 		Runtime:   runtime,
 		BuildSpec: d.buildSpec,
+		DataDir:   stateRoot,
 	}
 	return d
 }
@@ -93,10 +94,11 @@ func (d *nativeDriver) buildSpec(req netctl.AttachmentRequest) (sidecar.Spec, er
 		addedCaps = append(addedCaps, "CAP_NET_ADMIN")
 	}
 	return sidecar.Spec{
-		Image:     "netbirdio/netbird:latest",
-		Env:       env,
-		Mounts:    mounts,
-		AddedCaps: addedCaps,
+		Image:          "netbirdio/netbird:latest",
+		Env:            env,
+		Mounts:         mounts,
+		AddedCaps:      addedCaps,
+		ResolvConfPath: filepath.Join(d.root, req.BotID, "netbird-resolv.conf"),
 		Details: map[string]any{
 			"userspace": userspace,
 			"state_dir": stateDir,

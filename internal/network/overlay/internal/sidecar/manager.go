@@ -3,6 +3,7 @@ package sidecar
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,9 @@ type Manager struct {
 	Runtime      Runtime
 	BuildSpec    BuildSpecFunc
 	EnrichStatus EnrichStatusFunc
+	// DataDir holds the fallback resolver config used when the host has no
+	// systemd-resolved config to copy into Spec.ResolvConfPath.
+	DataDir string
 }
 
 func (m Manager) SidecarID(req netctl.AttachmentRequest) string {
@@ -146,7 +150,7 @@ func (m Manager) ensureSidecarContainer(ctx context.Context, sidecarID string, r
 				Cmd:    spec.Cmd,
 				Env:    spec.Env,
 				User:   "0",
-				Mounts: spec.Mounts,
+				Mounts: containerMounts(spec),
 				NetworkJoinTarget: ctr.NetworkJoinTarget{
 					Kind:  req.Runtime.JoinTarget.Kind,
 					Value: req.Runtime.JoinTarget.Path,
@@ -168,7 +172,43 @@ func (m Manager) ensureSidecarContainer(ctx context.Context, sidecarID string, r
 			return err
 		}
 	}
+	if err := m.writeResolvConf(spec); err != nil {
+		return err
+	}
 	return m.Runtime.StartContainer(ctx, sidecarID, nil)
+}
+
+func containerMounts(spec Spec) []ctr.MountSpec {
+	if spec.ResolvConfPath == "" {
+		return spec.Mounts
+	}
+	return append(append([]ctr.MountSpec(nil), spec.Mounts...), ctr.MountSpec{
+		Destination: "/etc/resolv.conf",
+		Type:        "bind",
+		Source:      spec.ResolvConfPath,
+		Options:     []string{"rbind", "rw"},
+	})
+}
+
+// writeResolvConf refills the sidecar's resolv.conf from the host resolver
+// config. It runs only while the task is down, so it never overwrites DNS
+// settings the client applied to a running sidecar.
+func (m Manager) writeResolvConf(spec Spec) error {
+	if spec.ResolvConfPath == "" {
+		return nil
+	}
+	source, err := ctr.ResolveConfSource(m.DataDir)
+	if err != nil {
+		return fmt.Errorf("resolve %s sidecar resolv.conf source: %w", m.Kind, err)
+	}
+	data, err := os.ReadFile(source) //nolint:gosec // source is the host resolver config chosen by ResolveConfSource.
+	if err != nil {
+		return fmt.Errorf("read %s sidecar resolv.conf source: %w", m.Kind, err)
+	}
+	if err := os.WriteFile(spec.ResolvConfPath, data, 0o644); err != nil { //nolint:gosec // resolv.conf must be world-readable inside the sidecar.
+		return fmt.Errorf("write %s sidecar resolv.conf: %w", m.Kind, err)
+	}
+	return nil
 }
 
 func MergeStatusDetails(base map[string]any, extra map[string]any) map[string]any {

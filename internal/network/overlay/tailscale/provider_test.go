@@ -189,3 +189,20 @@ func startUnixJSONServer(t *testing.T, socketPath string, payload map[string]any
 		_ = listener.Close()
 	}
 }
+
+func TestNativeDriverBuildSpecGivesEachBotItsOwnResolvConf(t *testing.T) {
+	root := t.TempDir()
+	driver := newNativeDriver(netctl.BotOverlayConfig{Enabled: true, Provider: "tailscale", Config: map[string]any{}}, nil, root)
+	spec, err := driver.buildSpec(netctl.AttachmentRequest{BotID: "bot-1", Overlay: netctl.BotOverlayConfig{Enabled: true, Provider: "tailscale", Config: map[string]any{}}})
+	if err != nil {
+		t.Fatalf("buildSpec returned error: %v", err)
+	}
+	if want := filepath.Join(root, "bot-1", "tailscale-resolv.conf"); spec.ResolvConfPath != want {
+		t.Fatalf("ResolvConfPath = %q, want %q", spec.ResolvConfPath, want)
+	}
+	for _, m := range spec.Mounts {
+		if rel, err := filepath.Rel(m.Source, spec.ResolvConfPath); err == nil && !strings.HasPrefix(rel, "..") {
+			t.Fatalf("ResolvConfPath %q is reachable through mount %q", spec.ResolvConfPath, m.Destination)
+		}
+	}
+}
