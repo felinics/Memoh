@@ -7602,6 +7602,172 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/network/actions/{action_id}": {
+            "post": {
+                "description": "Run a provider action such as test_connection or logout",
+                "tags": [
+                    "network"
+                ],
+                "summary": "Run a bot network action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Action ID",
+                        "name": "action_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Action input",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/network.BotActionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/network.ProviderActionExecution"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/network/nodes": {
+            "get": {
+                "description": "List the peers the bot can use as exit nodes",
+                "tags": [
+                    "network"
+                ],
+                "summary": "List bot network nodes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/network.NodeListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/network/status": {
+            "get": {
+                "description": "Get the state of the bot's network overlay and of the workspace it attaches to",
+                "tags": [
+                    "network"
+                ],
+                "summary": "Get bot network status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/network.BotStatus"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/quick-actions/execute": {
             "post": {
                 "description": "Runs a typed Web quick action such as help or skill.list and returns a command_result or command_error envelope.",
@@ -13399,6 +13565,38 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/network/meta": {
+            "get": {
+                "description": "List the network providers a bot can use, with their config schema, capabilities and actions",
+                "tags": [
+                    "network"
+                ],
+                "summary": "List network providers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/network.ProviderDescriptor"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -26158,6 +26356,457 @@ const docTemplate = `{
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
+                }
+            }
+        },
+        "network.ActionType": {
+            "type": "string",
+            "enum": [
+                "test_connection"
+            ],
+            "x-enum-varnames": [
+                "ActionTypeTestConnection"
+            ]
+        },
+        "network.BotActionRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
+        "network.BotStatus": {
+            "type": "object",
+            "required": [
+                "attached",
+                "state"
+            ],
+            "properties": {
+                "attached": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "message": {
+                    "type": "string"
+                },
+                "network_ip": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "proxy_address": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/network.OverlayState"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "workspace": {
+                    "$ref": "#/definitions/network.WorkspaceRuntimeStatus"
+                }
+            }
+        },
+        "network.ConfigConstraint": {
+            "type": "object",
+            "properties": {
+                "max": {
+                    "type": "number"
+                },
+                "min": {
+                    "type": "number"
+                },
+                "step": {
+                    "type": "number"
+                }
+            }
+        },
+        "network.ConfigField": {
+            "type": "object",
+            "required": [
+                "key",
+                "type"
+            ],
+            "properties": {
+                "collapsed": {
+                    "type": "boolean"
+                },
+                "constraint": {
+                    "$ref": "#/definitions/network.ConfigConstraint"
+                },
+                "default": {},
+                "description": {
+                    "type": "string"
+                },
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "example": {},
+                "key": {
+                    "type": "string"
+                },
+                "multiline": {
+                    "type": "boolean"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "placeholder": {
+                    "type": "string"
+                },
+                "readonly": {
+                    "type": "boolean"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "secret": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/network.FieldType"
+                }
+            }
+        },
+        "network.ConfigSchema": {
+            "type": "object",
+            "required": [
+                "fields",
+                "version"
+            ],
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/network.ConfigField"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "network.FieldType": {
+            "type": "string",
+            "enum": [
+                "string",
+                "secret",
+                "number",
+                "bool",
+                "enum",
+                "textarea"
+            ],
+            "x-enum-varnames": [
+                "FieldTypeString",
+                "FieldTypeSecret",
+                "FieldTypeNumber",
+                "FieldTypeBool",
+                "FieldTypeEnum",
+                "FieldTypeTextarea"
+            ]
+        },
+        "network.NodeListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/network.NodeOption"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.NodeOption": {
+            "type": "object",
+            "required": [
+                "can_exit_node",
+                "display_name",
+                "id",
+                "online",
+                "selected",
+                "value"
+            ],
+            "properties": {
+                "addresses": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "can_exit_node": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "online": {
+                    "type": "boolean"
+                },
+                "selected": {
+                    "type": "boolean"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.OverlayState": {
+            "type": "string",
+            "enum": [
+                "ready",
+                "starting",
+                "needs_login",
+                "degraded",
+                "stopped",
+                "missing",
+                "unsupported",
+                "disabled",
+                "workspace_missing",
+                "needs_config",
+                "unauthorized",
+                "unknown"
+            ],
+            "x-enum-varnames": [
+                "OverlayStateReady",
+                "OverlayStateStarting",
+                "OverlayStateNeedsLogin",
+                "OverlayStateDegraded",
+                "OverlayStateStopped",
+                "OverlayStateMissing",
+                "OverlayStateUnsupported",
+                "OverlayStateDisabled",
+                "OverlayStateWorkspaceMissing",
+                "OverlayStateNeedsConfig",
+                "OverlayStateUnauthorized",
+                "OverlayStateUnknown"
+            ]
+        },
+        "network.ProviderAction": {
+            "type": "object",
+            "required": [
+                "id",
+                "label",
+                "type"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "primary": {
+                    "type": "boolean"
+                },
+                "status": {
+                    "$ref": "#/definitions/network.ProviderActionStatus"
+                },
+                "type": {
+                    "$ref": "#/definitions/network.ActionType"
+                }
+            }
+        },
+        "network.ProviderActionExecution": {
+            "type": "object",
+            "required": [
+                "action_id",
+                "status"
+            ],
+            "properties": {
+                "action_id": {
+                    "type": "string"
+                },
+                "output": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "status": {
+                    "$ref": "#/definitions/network.ProviderStatus"
+                }
+            }
+        },
+        "network.ProviderActionStatus": {
+            "type": "object",
+            "required": [
+                "enabled"
+            ],
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.ProviderCapabilities": {
+            "type": "object",
+            "required": [
+                "egress_proxy",
+                "exit_node",
+                "kernel_tun",
+                "mesh",
+                "native_client",
+                "private_dns",
+                "service_proxy",
+                "sidecar_worker",
+                "transparent_proxy",
+                "userspace"
+            ],
+            "properties": {
+                "egress_proxy": {
+                    "type": "boolean"
+                },
+                "exit_node": {
+                    "type": "boolean"
+                },
+                "kernel_tun": {
+                    "type": "boolean"
+                },
+                "mesh": {
+                    "type": "boolean"
+                },
+                "native_client": {
+                    "type": "boolean"
+                },
+                "private_dns": {
+                    "type": "boolean"
+                },
+                "service_proxy": {
+                    "type": "boolean"
+                },
+                "sidecar_worker": {
+                    "type": "boolean"
+                },
+                "transparent_proxy": {
+                    "type": "boolean"
+                },
+                "userspace": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "network.ProviderDescriptor": {
+            "type": "object",
+            "required": [
+                "capabilities",
+                "config_schema",
+                "display_name",
+                "kind"
+            ],
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/network.ProviderAction"
+                    }
+                },
+                "capabilities": {
+                    "$ref": "#/definitions/network.ProviderCapabilities"
+                },
+                "config_schema": {
+                    "$ref": "#/definitions/network.ConfigSchema"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.ProviderStatus": {
+            "type": "object",
+            "required": [
+                "state"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "state": {
+                    "$ref": "#/definitions/network.OverlayState"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.WorkspaceRuntimeStatus": {
+            "type": "object",
+            "required": [
+                "state"
+            ],
+            "properties": {
+                "container_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "network_attached": {
+                    "type": "boolean"
+                },
+                "network_target": {
+                    "type": "string"
+                },
+                "network_target_kind": {
+                    "type": "string"
+                },
+                "pid": {
+                    "type": "integer"
+                },
+                "state": {
+                    "description": "workspace_missing | runtime_unavailable | task_stopped | network_target_ready | unknown",
+                    "type": "string"
+                },
+                "task_status": {
+                    "type": "string"
                 }
             }
         },

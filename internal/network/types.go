@@ -7,7 +7,7 @@ type BotActionRequest struct {
 // WorkspaceRuntimeStatus describes the bot workspace runtime state (foundation
 // before SD-WAN overlay).
 type WorkspaceRuntimeStatus struct {
-	State             string `json:"state"` // workspace_missing | runtime_unavailable | task_stopped | network_target_ready | unknown
+	State             string `json:"state" validate:"required"` // workspace_missing | runtime_unavailable | task_stopped | network_target_ready | unknown
 	ContainerID       string `json:"container_id,omitempty"`
 	TaskStatus        string `json:"task_status,omitempty"`
 	PID               uint32 `json:"pid,omitempty"`
@@ -19,8 +19,8 @@ type WorkspaceRuntimeStatus struct {
 
 type BotStatus struct {
 	Provider     string                  `json:"provider,omitempty"`
-	Attached     bool                    `json:"attached"`
-	State        OverlayState            `json:"state,omitempty"`
+	Attached     bool                    `json:"attached" validate:"required"`
+	State        OverlayState            `json:"state" validate:"required"`
 	Title        string                  `json:"title,omitempty"`
 	Description  string                  `json:"description,omitempty"`
 	Message      string                  `json:"message,omitempty"`
@@ -31,14 +31,14 @@ type BotStatus struct {
 }
 
 type NodeOption struct {
-	ID          string         `json:"id"`
-	Value       string         `json:"value"`
-	DisplayName string         `json:"display_name"`
+	ID          string         `json:"id" validate:"required"`
+	Value       string         `json:"value" validate:"required"`
+	DisplayName string         `json:"display_name" validate:"required"`
 	Description string         `json:"description,omitempty"`
-	Online      bool           `json:"online"`
+	Online      bool           `json:"online" validate:"required"`
 	Addresses   []string       `json:"addresses,omitempty"`
-	CanExitNode bool           `json:"can_exit_node"`
-	Selected    bool           `json:"selected"`
+	CanExitNode bool           `json:"can_exit_node" validate:"required"`
+	Selected    bool           `json:"selected" validate:"required"`
 	Details     map[string]any `json:"details,omitempty"`
 }
 

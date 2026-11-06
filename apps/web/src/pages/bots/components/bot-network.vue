@@ -569,22 +569,21 @@ import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
 import { ConfirmPopover, InlineLoadingRow, SettingsList, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'
-import type { SettingsUpsertRequest } from '@memohai/sdk'
+import {
+  getBotsByBotIdNetworkNodes,
+  getBotsByBotIdNetworkStatus,
+  getBotsByBotIdSettings,
+  getNetworkMeta,
+  postBotsByBotIdNetworkActionsByActionId,
+  putBotsByBotIdSettings,
+} from '@memohai/sdk'
+import type { NetworkProviderDescriptor, SettingsUpsertRequest } from '@memohai/sdk'
 import { cloneConfig, getPathValue, setPathValue } from '@/components/config-schema-form/utils'
 import type { ConfigSchema, ConfigSchemaField } from '@/components/config-schema-form/types'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
-import {
-  getBotNetworkStatus,
-  executeBotNetworkAction,
-  listBotNetworkNodes,
-  listOverlayProviderMeta,
-  type NetworkBotStatus,
-  type OverlayProviderMeta,
-} from '@/pages/network/api'
 
 const props = defineProps<{
   botId: string
@@ -607,7 +606,10 @@ const { data: settings } = useQuery({
 
 const { data: overlayProviderMetaData } = useQuery({
   key: ['network-providers-meta'],
-  query: () => listOverlayProviderMeta(),
+  query: async () => {
+    const { data } = await getNetworkMeta({ throwOnError: true })
+    return data
+  },
 })
 
 const overlayProviderMeta = computed(() => overlayProviderMetaData.value ?? [])
@@ -619,7 +621,7 @@ const form = reactive({
 })
 
 const selectedOverlayProviderMeta = computed(() =>
-  overlayProviderMeta.value.find((meta: OverlayProviderMeta) => meta.kind === form.overlay_provider),
+  overlayProviderMeta.value.find((meta: NetworkProviderDescriptor) => meta.kind === form.overlay_provider),
 )
 const selectedNetworkCapabilities = computed(() =>
   selectedOverlayProviderMeta.value?.capabilities ?? null,
@@ -793,7 +795,13 @@ const {
   isLoading: isNetworkStatusLoading,
 } = useQuery({
   key: () => ['bot-network-status', props.botId],
-  query: () => getBotNetworkStatus(props.botId),
+  query: async () => {
+    const { data } = await getBotsByBotIdNetworkStatus({
+      path: { bot_id: props.botId },
+      throwOnError: true,
+    })
+    return data
+  },
   enabled: () => !!props.botId,
   refetchOnWindowFocus: true,
 })
@@ -804,7 +812,13 @@ const {
   refetch: refetchNodeList,
 } = useQuery({
   key: () => ['bot-network-nodes', props.botId, persistedOverlayProvider.value],
-  query: () => listBotNetworkNodes(props.botId),
+  query: async () => {
+    const { data } = await getBotsByBotIdNetworkNodes({
+      path: { bot_id: props.botId },
+      throwOnError: true,
+    })
+    return data
+  },
   enabled: () => shouldLoadNodeOptions.value,
 })
 
@@ -825,8 +839,14 @@ const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({
 })
 
 const { mutateAsync: runNetworkAction, isLoading: isLoggingOut } = useMutation({
-  mutation: (actionID: string) =>
-    executeBotNetworkAction(props.botId, actionID, {}),
+  mutation: async (actionID: string) => {
+    const { data } = await postBotsByBotIdNetworkActionsByActionId({
+      path: { bot_id: props.botId, action_id: actionID },
+      body: {},
+      throwOnError: true,
+    })
+    return data
+  },
   onSettled: () => {
     queryCache.invalidateQueries({ key: ['bot-network-status', props.botId] })
   },
@@ -872,12 +892,12 @@ function handleEditorSave() {
 // ---------------------------------------------------------------------------
 
 const overlayState = computed(() => {
-  const status = networkStatusData.value as NetworkBotStatus | null
+  const status = networkStatusData.value
   return status?.state ?? ''
 })
 
 const overlayAuthURL = computed(() => {
-  const status = networkStatusData.value as NetworkBotStatus | null
+  const status = networkStatusData.value
   return (status?.details?.auth_url as string | undefined) ?? ''
 })
 
@@ -931,7 +951,7 @@ type NetworkStatusTone = 'success' | 'warning' | 'muted' | 'destructive'
 // fields live behind Details (§13: let one status carry the surface, hide diagnostics).
 const networkStatusLine = computed<{ tone: NetworkStatusTone; label: string; detail?: string } | null>(() => {
   if (!showOverlayStatusInNetworkCard.value) return null
-  const status = networkStatusData.value as NetworkBotStatus | null
+  const status = networkStatusData.value
   const details = status?.details ?? {}
   const address = status?.network_ip || (details.dns_name as string | undefined) || ''
   switch (overlayState.value) {

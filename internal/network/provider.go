@@ -25,23 +25,23 @@ type OverlayDriver interface {
 }
 
 type ProviderDescriptor struct {
-	Kind         string               `json:"kind"`
-	DisplayName  string               `json:"display_name"`
+	Kind         string               `json:"kind" validate:"required"`
+	DisplayName  string               `json:"display_name" validate:"required"`
 	Description  string               `json:"description,omitempty"`
-	ConfigSchema ConfigSchema         `json:"config_schema"`
-	Capabilities ProviderCapabilities `json:"capabilities"`
+	ConfigSchema ConfigSchema         `json:"config_schema" validate:"required"`
+	Capabilities ProviderCapabilities `json:"capabilities" validate:"required"`
 	Actions      []ProviderAction     `json:"actions,omitempty"`
 }
 
 type ProviderCapabilities struct {
-	Mesh             bool `json:"mesh"`
-	PrivateDNS       bool `json:"private_dns"`
-	ServiceProxy     bool `json:"service_proxy"`
-	EgressProxy      bool `json:"egress_proxy"`
-	TransparentProxy bool `json:"transparent_proxy"`
-	ExitNode         bool `json:"exit_node"`
-	Userspace        bool `json:"userspace"`
-	KernelTUN        bool `json:"kernel_tun"`
-	NativeClient     bool `json:"native_client"`
-	SidecarWorker    bool `json:"sidecar_worker"`
+	Mesh             bool `json:"mesh" validate:"required"`
+	PrivateDNS       bool `json:"private_dns" validate:"required"`
+	ServiceProxy     bool `json:"service_proxy" validate:"required"`
+	EgressProxy      bool `json:"egress_proxy" validate:"required"`
+	TransparentProxy bool `json:"transparent_proxy" validate:"required"`
+	ExitNode         bool `json:"exit_node" validate:"required"`
+	Userspace        bool `json:"userspace" validate:"required"`
+	KernelTUN        bool `json:"kernel_tun" validate:"required"`
+	NativeClient     bool `json:"native_client" validate:"required"`
+	SidecarWorker    bool `json:"sidecar_worker" validate:"required"`
 }

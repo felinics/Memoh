@@ -72,27 +72,27 @@ func (*Provider) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 func (p *Provider) Status(_ context.Context, cfg netctl.BotOverlayConfig) (netctl.ProviderStatus, error) {
 	if !cfg.Enabled {
 		return netctl.ProviderStatus{
-			State:       netctl.StatusStateNeedsConfig,
+			State:       netctl.OverlayStateNeedsConfig,
 			Title:       "Disabled",
 			Description: "This network provider is disabled.",
 		}, nil
 	}
 	if _, err := p.NormalizeConfig(cfg.Config); err != nil {
 		return netctl.ProviderStatus{
-			State:       netctl.StatusStateNeedsConfig,
+			State:       netctl.OverlayStateNeedsConfig,
 			Title:       "Config Required",
 			Description: err.Error(),
 		}, nil
 	}
 	if err := validateConfig(cfg); err != nil {
 		return netctl.ProviderStatus{
-			State:       netctl.StatusStateNeedsConfig,
+			State:       netctl.OverlayStateNeedsConfig,
 			Title:       "Config Required",
 			Description: err.Error(),
 		}, nil
 	}
 	return netctl.ProviderStatus{
-		State:       netctl.StatusStateReady,
+		State:       netctl.OverlayStateReady,
 		Title:       "Ready",
 		Description: "Provider configuration is valid.",
 	}, nil
