@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -81,12 +82,20 @@ type Speech struct {
 // where the caller collects events after generation).
 type StreamEmitter func(ToolStreamEvent)
 
-// MessageSnapshot exposes an immutable copy of the messages currently visible
-// to the model. Agent steps update the snapshot before each model call; tools
-// can safely read it while sibling tool calls execute concurrently.
+// MessageSnapshot holds the messages currently visible to the model. Agent
+// steps update the snapshot before each model call; tools can safely read it
+// while sibling tool calls execute concurrently.
+//
+// Storing costs one provider-neutral copy of the message and part headers: the
+// payloads (text, tool argument and output bytes) are shared with the request,
+// which treats them as immutable values. A step, a retry or an in-run fold
+// replaces messages and parts; none writes into a payload. Store replaces the
+// held slices and never writes into them, so a reader may keep using what it
+// loaded. Readers receive an independent copy, paid only when a forked
+// subagent asks for it.
 type MessageSnapshot struct {
 	mu               sync.RWMutex
-	raw              json.RawMessage
+	messages         []sdk.Message
 	sourceMessageIDs []string
 }
 
@@ -98,71 +107,44 @@ func NewMessageSnapshot(messages []sdk.Message) *MessageSnapshot {
 // backing each message. Runtime-only messages use an empty source ID. Later
 // Store calls preserve IDs only for unchanged messages that remain in order.
 func NewMessageSnapshotWithSources(messages []sdk.Message, sourceMessageIDs []string) *MessageSnapshot {
-	s := &MessageSnapshot{}
-	_ = s.StoreWithSources(messages, sourceMessageIDs)
-	return s
-}
-
-// StoreWithSources replaces the history basis before provider dispatch.
-// Later provider steps use Store to retain only unchanged sources.
-func (s *MessageSnapshot) StoreWithSources(messages []sdk.Message, sourceMessageIDs []string) error {
-	if messages == nil {
-		messages = []sdk.Message{}
-	}
 	clean := providerNeutralMessages(messages)
-	raw, err := json.Marshal(clean)
-	if err != nil {
-		return err
-	}
 	sources := make([]string, len(clean))
 	copy(sources, sourceMessageIDs)
-	s.mu.Lock()
-	s.raw = append(s.raw[:0], raw...)
-	s.sourceMessageIDs = sources
-	s.mu.Unlock()
-	return nil
+	return &MessageSnapshot{messages: clean, sourceMessageIDs: sources}
 }
 
-func (s *MessageSnapshot) Store(messages []sdk.Message) error {
+// Store records the messages of the provider attempt about to be dispatched.
+func (s *MessageSnapshot) Store(messages []sdk.Message) {
 	if s == nil {
-		return nil
-	}
-	if messages == nil {
-		messages = []sdk.Message{}
+		return
 	}
 	clean := providerNeutralMessages(messages)
-	raw, err := json.Marshal(clean)
-	if err != nil {
-		return err
-	}
 	s.mu.Lock()
-	oldMessages, decodeErr := decodeSnapshotMessages(s.raw)
-	if decodeErr != nil {
-		s.mu.Unlock()
-		return decodeErr
-	}
-	sources := retainSnapshotSources(oldMessages, s.sourceMessageIDs, clean)
-	s.raw = append(s.raw[:0], raw...)
-	s.sourceMessageIDs = sources
+	s.sourceMessageIDs = retainSnapshotSources(s.messages, s.sourceMessageIDs, clean)
+	s.messages = clean
 	s.mu.Unlock()
-	return nil
 }
 
-func decodeSnapshotMessages(raw json.RawMessage) ([]sdk.Message, error) {
-	if len(raw) == 0 {
-		return []sdk.Message{}, nil
-	}
-	var messages []sdk.Message
-	if err := json.Unmarshal(raw, &messages); err != nil {
-		return nil, err
-	}
-	return messages, nil
-}
-
-func retainSnapshotSources(oldMessages []sdk.Message, oldSources []string, messages []sdk.Message) []string {
+// retainSnapshotSources carries a source ID forward to each new message whose
+// provider-neutral JSON equals an old one, matching in order and taking the
+// earliest unmatched old message. An attempt usually extends the previous
+// request, and the in-order match of an identical prefix pairs each message
+// with its own position, so the prefix is compared field by field and only
+// messages after the first difference are compared as JSON.
+func retainSnapshotSources(old []sdk.Message, oldSources []string, messages []sdk.Message) []string {
 	sources := make([]string, len(messages))
-	positions := make(map[string][]int, len(oldMessages))
-	for i, message := range oldMessages {
+	prefix := 0
+	for prefix < len(old) && prefix < len(messages) && sameNeutralMessage(old[prefix], messages[prefix]) {
+		sources[prefix] = oldSources[prefix]
+		prefix++
+	}
+	old, oldSources = old[prefix:], oldSources[prefix:]
+	messages, rest := messages[prefix:], sources[prefix:]
+	if len(old) == 0 || len(messages) == 0 {
+		return sources
+	}
+	positions := make(map[string][]int, len(old))
+	for i, message := range old {
 		key, ok := snapshotMessageKey(message)
 		if ok {
 			positions[key] = append(positions[key], i)
@@ -187,9 +169,7 @@ func retainSnapshotSources(oldMessages []sdk.Message, oldSources []string, messa
 		oldIndex := candidates[cursor]
 		cursors[key] = cursor + 1
 		lastMatched = oldIndex
-		if oldIndex < len(oldSources) {
-			sources[i] = oldSources[oldIndex]
-		}
+		rest[i] = oldSources[oldIndex]
 	}
 	return sources
 }
@@ -197,6 +177,56 @@ func retainSnapshotSources(oldMessages []sdk.Message, oldSources []string, messa
 func snapshotMessageKey(message sdk.Message) (string, bool) {
 	raw, err := json.Marshal(message)
 	return string(raw), err == nil
+}
+
+// sameNeutralMessage reports whether two provider-neutral messages hold equal
+// fields, which always encode to equal JSON. Payloads shared with the previous
+// request compare by pointer, so an unchanged prefix costs no byte scan.
+func sameNeutralMessage(a, b sdk.Message) bool {
+	if a.Role != b.Role || len(a.Content) != len(b.Content) {
+		return false
+	}
+	for i := range a.Content {
+		if !sameNeutralPart(a.Content[i], b.Content[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameNeutralPart(a, b sdk.MessagePart) bool {
+	switch x := a.(type) {
+	case sdk.TextPart:
+		y, ok := b.(sdk.TextPart)
+		return ok && x.Text == y.Text
+	case sdk.ReasoningPart:
+		y, ok := b.(sdk.ReasoningPart)
+		return ok && x.Text == y.Text
+	case sdk.ImagePart:
+		y, ok := b.(sdk.ImagePart)
+		return ok && x.Image == y.Image && x.MediaType == y.MediaType
+	case sdk.FilePart:
+		y, ok := b.(sdk.FilePart)
+		return ok && x.Data == y.Data && x.MediaType == y.MediaType && x.Filename == y.Filename
+	case sdk.ToolCallPart:
+		y, ok := b.(sdk.ToolCallPart)
+		return ok && x.ToolCallID == y.ToolCallID && x.ToolName == y.ToolName &&
+			x.Input.Text == y.Input.Text && bytes.Equal(x.Input.JSON, y.Input.JSON)
+	case sdk.ToolResultPart:
+		y, ok := b.(sdk.ToolResultPart)
+		return ok && x.ToolCallID == y.ToolCallID && x.ToolName == y.ToolName && x.IsError == y.IsError &&
+			x.Result.Text == y.Result.Text && bytes.Equal(x.Result.JSON, y.Result.JSON) &&
+			sameCacheControl(x.CacheControl, y.CacheControl)
+	default:
+		return false
+	}
+}
+
+func sameCacheControl(a, b *sdk.CacheControl) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func providerNeutralMessages(messages []sdk.Message) []sdk.Message {
@@ -250,24 +280,15 @@ func providerNeutralMessages(messages []sdk.Message) []sdk.Message {
 	return out
 }
 
+// Messages returns an independent copy of the provider-neutral messages.
 func (s *MessageSnapshot) Messages() ([]sdk.Message, error) {
 	if s == nil {
 		return []sdk.Message{}, nil
 	}
 	s.mu.RLock()
-	raw := append(json.RawMessage(nil), s.raw...)
+	messages := s.messages
 	s.mu.RUnlock()
-	if len(raw) == 0 {
-		return []sdk.Message{}, nil
-	}
-	var messages []sdk.Message
-	if err := json.Unmarshal(raw, &messages); err != nil {
-		return nil, err
-	}
-	if messages == nil {
-		messages = []sdk.Message{}
-	}
-	return messages, nil
+	return copySnapshotMessages(messages)
 }
 
 // Entries returns the provider-neutral messages together with any persisted
@@ -277,25 +298,37 @@ func (s *MessageSnapshot) Entries() ([]MessageSnapshotEntry, error) {
 		return []MessageSnapshotEntry{}, nil
 	}
 	s.mu.RLock()
-	raw := append(json.RawMessage(nil), s.raw...)
-	sources := append([]string(nil), s.sourceMessageIDs...)
+	messages, sources := s.messages, s.sourceMessageIDs
 	s.mu.RUnlock()
-	messages, err := decodeSnapshotMessages(raw)
+	copied, err := copySnapshotMessages(messages)
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]MessageSnapshotEntry, 0, len(messages))
-	for i, message := range messages {
-		sourceMessageID := ""
-		if i < len(sources) {
-			sourceMessageID = sources[i]
-		}
+	entries := make([]MessageSnapshotEntry, 0, len(copied))
+	for i, message := range copied {
 		entries = append(entries, MessageSnapshotEntry{
 			Message:         message,
-			SourceMessageID: sourceMessageID,
+			SourceMessageID: sources[i],
 		})
 	}
 	return entries, nil
+}
+
+// copySnapshotMessages decodes a JSON copy, so the reader owns every part and
+// payload it receives.
+func copySnapshotMessages(messages []sdk.Message) ([]sdk.Message, error) {
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		return nil, err
+	}
+	var copied []sdk.Message
+	if err := json.Unmarshal(raw, &copied); err != nil {
+		return nil, err
+	}
+	if copied == nil {
+		copied = []sdk.Message{}
+	}
+	return copied, nil
 }
 
 // MessageSnapshotEntry describes one message in a forkable model context.

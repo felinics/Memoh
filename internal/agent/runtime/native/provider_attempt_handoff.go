@@ -90,13 +90,7 @@ func (h *providerAttemptHandoff) publish(params sdk.Request) error {
 	}
 
 	pending := *h.pending
-	if h.cfg.ForkContext != nil {
-		if err := h.cfg.ForkContext.Store(params.Messages); err != nil {
-			h.pending = nil
-			h.cfg.dynamicInputs.revoke()
-			return err
-		}
-	}
+	h.cfg.ForkContext.Store(params.Messages)
 
 	h.cfg.dynamicInputs.commit(pending.admitted)
 	hash := contextfrag.ProviderPayloadHash(params.System, params.Messages, params.Tools)
