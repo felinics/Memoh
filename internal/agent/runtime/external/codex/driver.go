@@ -46,7 +46,19 @@ type Driver struct {
 	// procs owns the app-server lifecycle: one per Bot Agent, shared by its
 	// conversations.
 	procs *agentproc.Supervisor
+	// heldWait bounds how long a turn waits for another process to let go of
+	// its thread.
+	heldWait time.Duration
 }
+
+// heldThreadWait covers the bridge keepalive window: the bridge kills a
+// process whose stream is gone once its keepalive notices, which is what
+// frees a thread held by a process no Server can reach or stop.
+const (
+	heldThreadWait   = 90 * time.Second
+	heldRetryInitial = 250 * time.Millisecond
+	heldRetryMax     = 5 * time.Second
+)
 
 // NewDriver constructs the codex runtime driver.
 func NewDriver(
@@ -70,6 +82,7 @@ func NewDriver(
 		launchers:   launchers,
 		procs:       procs,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
+		heldWait:    heldThreadWait,
 	}
 }
 
@@ -461,7 +474,7 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	if rolloutPath := external.MetadataString(input.RuntimeMetadata, metadataRolloutPathKey); rolloutPath != "" {
 		params.Path = &rolloutPath
 	}
-	resp, err := srv.resumeThread(ctx, params)
+	resp, err := d.resumeWhenReleased(ctx, srv, params)
 	if err == nil && resp.Thread.ID == threadID {
 		bindTools(threadID)
 		srv.markThreadLoaded(threadID)
@@ -493,6 +506,45 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 		})
 	}
 	return d.startThread(ctx, srv, cfg, input, cwd, preset)
+}
+
+// resumeWhenReleased resumes the thread, waiting while another process holds
+// it: one whose stream ended but has not been killed yet, or a retired
+// server finishing its turns. A thread still held when the wait runs out is
+// intact, so the turn fails busy rather than starting over.
+func (d *Driver) resumeWhenReleased(ctx context.Context, srv *appServer, params protocol.ThreadResumeParams) (protocol.ThreadResumeResponse, error) {
+	deadline := time.Now().Add(d.heldWait)
+	for delay := heldRetryInitial; ; delay = min(2*delay, heldRetryMax) {
+		resp, err := srv.resumeThread(ctx, params)
+		var refused *protocol.RPCError
+		if !errors.As(err, &refused) || !threadHeld(refused, params.ThreadID) {
+			return resp, err
+		}
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			d.logger.WarnContext(ctx, "codex thread is still held by another app-server",
+				slog.String("thread_id", params.ThreadID), slog.Any("error", err))
+			return resp, external.Fail(external.FailureRuntimeBusy, err)
+		}
+		select {
+		case <-ctx.Done():
+			return resp, ctx.Err()
+		case <-time.After(min(delay, wait)):
+		}
+	}
+}
+
+// threadHeld reports Codex refusing threadID because another owner has it
+// loaded, or a copy is still closing. Codex gives these refusals no data and
+// varying codes, so this matches its messages (the same in Codex 0.154.0
+// through 0.166.0).
+func threadHeld(err *protocol.RPCError, threadID string) bool {
+	for _, held := range []string{"already has an active writer", "already has a live local writer", "is closing; retry"} {
+		if strings.Contains(err.Message, "thread "+threadID+" "+held) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Driver) startThread(ctx context.Context, srv *appServer, cfg Config, input external.PromptInput, cwd string, preset permissionPreset) (string, error) {
