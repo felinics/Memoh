@@ -205,21 +205,22 @@ WHERE m.team_id = public.memoh_current_team_id()
     OR (m.turn_position, m.turn_message_seq) < (sqlc.narg(before_turn_position)::bigint, sqlc.narg(before_turn_message_seq)::bigint))
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
 
--- name: ListHistoryMessagesAfterWithinBytes :many
+-- name: ListHistoryWindow :many
 -- The raw history after a checkpoint (CM-ADM-001): the context rows after its
 -- position, before the cutoff position when set, admitted newest-first until
 -- their running content byte total crosses max_bytes (the crossing row is
--- kept, so the newest row always loads) and returned in ascending order. The
--- walk follows the visible-session-order index and stops at the budget, so
--- older rows are never measured, however much history the checkpoint leaves
--- raw. truncated reports that the budget, not the window, ended the walk:
--- context rows of the window remain older than the oldest it admitted. Only
--- content is budgeted: full rows, metadata included, still load, so callers
--- that need content alone use ListTurnResponseSourcesAfterWithinBytes.
+-- kept, so the newest row always loads), as ids in ascending order. The walk
+-- follows the visible-session-order index and stops at the budget, so older
+-- rows are never measured, however much history the checkpoint leaves raw.
+-- truncated reports that the budget, not the window, ended the walk: context
+-- rows of the window remain older than the oldest it admitted. Callers load
+-- the projection they need by id. Each step selects keys only and measures
+-- the content of the row it took, so a plan that sorts a step instead of
+-- walking the index sorts keys, never decodes every row it passes.
 WITH RECURSIVE history_window AS (
   (
     SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
-      octet_length(m.content::text)::bigint AS total_bytes
+      (SELECT octet_length(c.content::text) FROM bot_history_messages c WHERE c.id = m.id)::bigint AS total_bytes
     FROM bot_history_messages m
     WHERE m.team_id = public.memoh_current_team_id()
       AND m.session_id = sqlc.arg(session_id)
@@ -237,11 +238,10 @@ WITH RECURSIVE history_window AS (
   )
   UNION ALL
   SELECT older.id, older.turn_position, older.turn_message_seq, older.created_at,
-    previous.total_bytes + older.content_bytes AS total_bytes
+    previous.total_bytes + (SELECT octet_length(c.content::text) FROM bot_history_messages c WHERE c.id = older.id)::bigint AS total_bytes
   FROM history_window previous
   CROSS JOIN LATERAL (
-    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
-      octet_length(m.content::text)::bigint AS content_bytes
+    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at
     FROM bot_history_messages m
     WHERE m.team_id = public.memoh_current_team_id()
       AND m.session_id = sqlc.arg(session_id)
@@ -279,34 +279,9 @@ WITH RECURSIVE history_window AS (
       AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
   ) AS truncated
 )
-SELECT
-  m.id,
-  m.bot_id,
-  m.session_id,
-  m.sender_channel_identity_id,
-  m.sender_account_user_id AS sender_user_id,
-  m.source_message_id AS external_message_id,
-  m.source_reply_to_message_id,
-  m.role,
-  m.content,
-  m.metadata,
-  m.usage,
-  m.session_mode,
-  m.runtime_type,
-  m.event_id,
-  m.display_text,
-  m.created_at,
-  ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url,
-  s.channel_type AS platform,
-  budget_cut.truncated
+SELECT admitted.id, budget_cut.truncated
 FROM history_window admitted
-JOIN bot_history_messages m ON m.id = admitted.id
-  AND m.team_id = public.memoh_current_team_id()
-  AND m.session_id = sqlc.arg(session_id)
 CROSS JOIN budget_cut
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
 ORDER BY admitted.turn_position ASC, admitted.turn_message_seq ASC, admitted.created_at ASC, admitted.id ASC;
 
 -- name: ListHistoryRowsBySources :many
@@ -352,97 +327,6 @@ WHERE m.team_id = public.memoh_current_team_id()
   AND m.id = ANY(sqlc.arg(ids)::uuid[])
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
-
--- name: MeasureHistoryMessagesAfter :one
--- Metadata-only context admission measure (CM-ADM-001) of the raw history
--- after a checkpoint: counts and content bytes aggregate on the database
--- side, so admission can size it without shipping any payload.
-SELECT
-  COUNT(*)::BIGINT AS message_count,
-  COALESCE(SUM(octet_length(m.content::text)), 0)::BIGINT AS content_bytes
-FROM bot_visible_history_messages m
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.session_id = sqlc.arg(session_id)
-  AND (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
-  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
-
--- name: ListTurnResponseSourcesAfterWithinBytes :many
--- Turn-response (TR) composition, in Discuss and in pipeline chat, only needs
--- content, the interrupted-checkpoint flag and the Discuss step flag. Never
--- return full metadata: legacy context_lifecycle snapshots can dwarf the
--- content budget. Walk as ListHistoryMessagesAfterWithinBytes walks,
--- including its crossing row, turn order and truncated.
-WITH RECURSIVE history_window AS (
-  (
-    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
-      octet_length(m.content::text)::bigint AS total_bytes
-    FROM bot_history_messages m
-    WHERE m.team_id = public.memoh_current_team_id()
-      AND m.session_id = sqlc.arg(session_id)
-      AND m.turn_visible = true
-      AND m.turn_id IS NOT NULL
-      AND m.turn_position IS NOT NULL
-      AND m.turn_message_seq IS NOT NULL
-      AND (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
-      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-      AND sqlc.arg(max_bytes)::bigint > 0
-    ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-    LIMIT 1
-  )
-  UNION ALL
-  SELECT older.id, older.turn_position, older.turn_message_seq, older.created_at,
-    previous.total_bytes + older.content_bytes AS total_bytes
-  FROM history_window previous
-  CROSS JOIN LATERAL (
-    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
-      octet_length(m.content::text)::bigint AS content_bytes
-    FROM bot_history_messages m
-    WHERE m.team_id = public.memoh_current_team_id()
-      AND m.session_id = sqlc.arg(session_id)
-      AND m.turn_visible = true
-      AND m.turn_id IS NOT NULL
-      AND m.turn_position IS NOT NULL
-      AND m.turn_message_seq IS NOT NULL
-      AND (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
-      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-      AND (m.turn_position, m.turn_message_seq, m.created_at, m.id)
-        < (previous.turn_position, previous.turn_message_seq, previous.created_at, previous.id)
-    ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-    LIMIT 1
-  ) older
-  WHERE previous.total_bytes < sqlc.arg(max_bytes)::bigint
-), oldest AS (
-  SELECT admitted.turn_position, admitted.turn_message_seq, admitted.created_at, admitted.id
-  FROM history_window admitted
-  ORDER BY admitted.turn_position ASC, admitted.turn_message_seq ASC, admitted.created_at ASC, admitted.id ASC
-  LIMIT 1
-), budget_cut AS (
-  SELECT EXISTS (
-    SELECT 1
-    FROM oldest
-    JOIN bot_history_messages m
-      ON m.team_id = public.memoh_current_team_id()
-     AND m.session_id = sqlc.arg(session_id)
-     AND (m.turn_position, m.turn_message_seq, m.created_at, m.id)
-       < (oldest.turn_position, oldest.turn_message_seq, oldest.created_at, oldest.id)
-    WHERE m.turn_visible = true
-      AND m.turn_id IS NOT NULL
-      AND m.turn_position IS NOT NULL
-      AND m.turn_message_seq IS NOT NULL
-      AND (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
-      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-  ) AS truncated
-)
-SELECT m.id, m.role, m.content, m.created_at,
-  COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
-  COALESCE(m.metadata->'discuss_step' = 'true'::jsonb, false)::boolean AS discuss_step,
-  budget_cut.truncated
-FROM history_window admitted
-JOIN bot_history_messages m ON m.id = admitted.id
-  AND m.team_id = public.memoh_current_team_id()
-  AND m.session_id = sqlc.arg(session_id)
-CROSS JOIN budget_cut
-ORDER BY admitted.turn_position ASC, admitted.turn_message_seq ASC, admitted.created_at ASC, admitted.id ASC;
 
 -- name: ListTurnResponseSourcesByIDs :many
 -- The turn-response projection of the rows a checkpoint keeps by reference,

@@ -21,6 +21,24 @@ type preparedHistoryContext struct {
 	// truncated reports that the load's byte budget left rows after the
 	// checkpoint out.
 	truncated bool
+	// memoryQuery is the memory recall query built from the first load, as
+	// it read the recent user messages: recall reuses the load instead of
+	// reading history again.
+	memoryQuery memoryQuery
+}
+
+// historyScope names who a history load renders for: the fallback scope of
+// records that carry none, and the scope of the summaries it renders.
+type historyScope struct {
+	fallback historyfrag.ScopeFallback
+	summary  contextfrag.Scope
+}
+
+func chatHistoryScope(req ChatRequest) historyScope {
+	return historyScope{
+		fallback: historyScopeFallbackFromChatRequest(req),
+		summary:  compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget),
+	}
 }
 
 // loadChatHistory loads the history a chat request renders, composed from
@@ -29,24 +47,26 @@ type preparedHistoryContext struct {
 // position, so the rows it left out are folded from rows first
 // (compactForBudget) and the history loads again; one still truncated after
 // that fails the request.
-func (s *Service) loadChatHistory(ctx context.Context, req ChatRequest, usePipeline bool, contextTokenBudget int, modelID string) (preparedHistoryContext, error) {
+func (s *Service) loadChatHistory(ctx context.Context, req ChatRequest, scope historyScope, usePipeline bool, contextTokenBudget int, modelID string) (preparedHistoryContext, error) {
 	load := func() (preparedHistoryContext, error) {
 		if usePipeline {
 			messages, pressure, truncated, err := s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
-			return preparedHistoryContext{messages: messages, pressureTokens: pressure, truncated: truncated}, err
+			return preparedHistoryContext{messages: messages, pressureTokens: pressure, truncated: truncated, memoryQuery: memoryQueryFromMessages(req, messages)}, err
 		}
-		return s.prepareHistoryContext(ctx, req, historyScopeFallbackFromChatRequest(req), contextTokenBudget)
+		return s.prepareHistoryContext(ctx, req, scope, contextTokenBudget)
 	}
 	history, err := load()
 	if err != nil || !history.truncated {
 		return history, err
 	}
+	query := history.memoryQuery
 	if err := s.compactForBudget(ctx, req, history.pressureTokens, contextTokenBudget, modelID); err != nil {
 		return preparedHistoryContext{}, truncatedLoadFailure(err)
 	}
 	if history, err = load(); err == nil && history.truncated {
 		err = truncatedLoadFailure(errors.New("compacted history still exceeds the load budget"))
 	}
+	history.memoryQuery = query
 	return history, err
 }
 
@@ -61,21 +81,16 @@ func truncatedLoadFailure(cause error) error {
 // under the session's checkpoint, with what it must keep raw and without
 // what never replays. An edit or retry renders the history as it stood at
 // its cutoff, under the checkpoint its replacement keeps.
-func (s *Service) prepareHistoryContext(
-	ctx context.Context,
-	req ChatRequest,
-	fallback historyfrag.ScopeFallback,
-	contextTokenBudget int,
-) (preparedHistoryContext, error) {
+func (s *Service) prepareHistoryContext(ctx context.Context, req ChatRequest, scope historyScope, contextTokenBudget int) (preparedHistoryContext, error) {
 	cut, err := s.loadHistoryCut(ctx, req)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
-	scope := compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget)
-	loaded, truncated, err := s.loadHistoryRecords(ctx, fallback, scope, contextTokenBudget, cut)
+	loaded, truncated, err := s.loadHistoryRecords(ctx, scope.fallback, scope.summary, contextTokenBudget, cut)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	query := memoryQueryFromRecords(req, loaded)
 	loaded = pruneHistoryForGateway(loaded)
 	loaded = dropPreflightFailureTurns(loaded)
 	loaded = dropEmptyHistoryFailures(loaded)
@@ -91,6 +106,7 @@ func (s *Service) prepareHistoryContext(
 		records:        records,
 		pressureTokens: estimateMessagesTokens(loaded),
 		truncated:      truncated,
+		memoryQuery:    query,
 	}, nil
 }
 
