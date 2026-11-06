@@ -296,8 +296,11 @@ normal persistence failure/rollback contract.
 Codex, Claude Code and Grok Build keep their own conversation record on the
 bot's data volume: Codex writes rollouts under `CODEX_HOME`
 (`/data/.codex/agents/<agent>/`), Claude Code writes transcripts under
-`/data/.claude/projects/`, Grok Build writes sessions under `GROK_HOME`
-(`/data/.grok/agents/<agent>/`). These files are
+`CLAUDE_CONFIG_DIR` (`/data/.claude-code/agents/<agent>/projects/`), Grok
+Build writes sessions under `GROK_HOME` (`/data/.grok/agents/<agent>/`).
+Claude Code Agents used to share `/data/.claude`; nothing is carried over from
+it, so a conversation from before resumes on a new native session with the
+`native_history_lost` notice. These files are
 the authoritative native conversation record; Memoh does not snapshot them into the
 database. Chat history stays in PostgreSQL as usual, so losing the native file
 costs the model its own memory of tool details, not the visible conversation.
@@ -386,22 +389,36 @@ before they restored native sessions; nothing reads or writes it now.
 
 ## Account sign-in of direct runtimes
 
-Codex and Grok Build sign their account in inside the Agent's own process,
-through `POST /bots/{bot_id}/agents/{id}/login/device/{authorize,poll,cancel}`
-(`external.DeviceLoginProvider`). The runtime obtains the device code, the
-user opens the URL and confirms it, and the runtime writes its own login file
-in the Agent's home on the bot's data volume, where it keeps and refreshes
-it. Memoh stores no copy; a finished sign-in retires the Agent's process so
-the next turn starts from the new login. On a Grok home that already holds a
+Codex, Claude Code and Grok Build sign their account in inside the Agent's
+own process, through `POST /bots/{bot_id}/agents/{id}/login/device/{authorize,poll,cancel}`
+(`external.DeviceLoginProvider`). The runtime starts the sign-in, the user
+confirms it in the browser, and the runtime writes its own login file in the
+Agent's home on the bot's data volume, where it keeps and refreshes it.
+Memoh stores no copy; a finished sign-in retires the Agent's process so the
+next turn starts from the new login. On a Grok home that already holds a
 login, ACP `authenticate` answers from it without asking anyone, so signing
 in again first removes it. Grok hands the device URL out through its
 `_x.ai/auth/get_url` request while `authenticate` waits for the user.
 
-A ChatGPT or Grok account can therefore not be staged before the Bot exists:
-the Agent is created without a credential and signs in from its settings.
-The staged authorizations (`/agent-authorizations`) cover API keys and the
-Claude browser login only. Starting a sign-in ends the Agent's earlier ones,
-approved or not, and a disconnect or Agent deletion ends them too.
+A Claude account has no device code. Claude Code's `claude_authenticate`
+control request returns the authorization page; that page shows a code, which
+the user pastes back to `POST .../login/device/code`
+(`external.LoginCodeSubmitter`), and `claude_oauth_callback` hands it to the
+same CLI process, which holds the sign-in's PKCE verifier and exchanges it.
+Memoh passes the code through without keeping it. The account and its plan
+usage are read from Claude Code itself (`initialize`'s `account`, the
+experimental `get_usage` request), never from Anthropic directly. These control-only Claude Code
+processes (sign-in, account, usage, model and command lists) are Supervisor
+leases like the Agent's conversation processes, each in a scope of its own, so
+a sign-out closes a sign-in waiting for its code and starts nothing until the
+login file is gone.
+
+An account can therefore not be staged before the Bot exists: the Agent is
+created without a credential and signs in from its settings, where Bot
+creation (onboarding included) lands until it has. The staged
+authorizations (`/agent-authorizations`) cover API keys only. Starting a
+sign-in ends the Agent's earlier ones, approved or not, and a disconnect or
+Agent deletion ends them too.
 
 ## Execution timeouts and budgets
 

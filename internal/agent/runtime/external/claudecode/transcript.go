@@ -31,11 +31,11 @@ type transcriptFS interface {
 // path relative to the config dir. The project directory name encodes the
 // working directory in a CLI-private way, so discovery goes by file name
 // instead of reimplementing that encoding.
-func locateSessionTranscript(ctx context.Context, fs transcriptFS, sessionID string) (string, bool, error) {
+func locateSessionTranscript(ctx context.Context, fs transcriptFS, home, sessionID string) (string, bool, error) {
 	if err := validateClaudeSessionID(sessionID); err != nil {
 		return "", false, err
 	}
-	projectsRoot := path.Join(configDir, projectsDirName)
+	projectsRoot := path.Join(home, projectsDirName)
 	if _, err := fs.Stat(ctx, projectsRoot); err != nil {
 		if errors.Is(err, bridge.ErrNotFound) {
 			return "", false, nil

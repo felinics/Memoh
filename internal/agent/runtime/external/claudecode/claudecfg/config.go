@@ -14,13 +14,9 @@ type AuthMode string
 const (
 	// AuthAPIKey injects an Anthropic API key.
 	AuthAPIKey AuthMode = "api_key"
-	// AuthOAuthToken injects a Claude subscription OAuth token
-	// (claude setup-token / claude.ai authorization).
-	AuthOAuthToken AuthMode = "oauth_token" //nolint:gosec // mode name, not a credential
-	// AuthWorkspace injects no credential: the CLI reads whatever the
-	// workspace's CLAUDE_CONFIG_DIR already holds (e.g. credentials
-	// established by a previous self-managed login).
-	AuthWorkspace AuthMode = "workspace"
+	// AuthClaudeAccount is a Claude account the Agent's own Claude Code signs
+	// in to and keeps in the Agent's config directory in the workspace.
+	AuthClaudeAccount AuthMode = "claude_account"
 )
 
 // ErrNotConfigured reports that the bot has no usable Claude Code configuration.
@@ -28,10 +24,9 @@ var ErrNotConfigured = errors.New("claude code runtime is not configured for thi
 
 // Config is one Claude Code Bot Agent's runtime configuration.
 type Config struct {
-	Auth       AuthMode
-	APIKey     string //nolint:gosec // decrypted runtime credential, not a hardcoded secret
-	OAuthToken string //nolint:gosec // decrypted runtime credential, not a hardcoded secret
-	BaseURL    string
+	Auth    AuthMode
+	APIKey  string //nolint:gosec // decrypted runtime credential, not a hardcoded secret
+	BaseURL string
 	// A per-turn model override wins over this value.
 	Model          string
 	PermissionMode string
@@ -48,7 +43,7 @@ func ParseAgentConfig(metadata map[string]any) (Config, error) {
 		return Config{}, ErrNotConfigured
 	}
 	switch cfg.Auth {
-	case AuthAPIKey, AuthOAuthToken, AuthWorkspace:
+	case AuthAPIKey, AuthClaudeAccount:
 	default:
 		return Config{}, ErrNotConfigured
 	}

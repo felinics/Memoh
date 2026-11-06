@@ -62,16 +62,18 @@ func (f *fakeTranscriptFS) Stat(_ context.Context, target string) (*pb.FileEntry
 	return nil, errors.New("not found")
 }
 
+const testBotAgentID = "agent-1"
+
 func transcriptFullPath() string {
-	return path.Join(configDir, projectsDirName, "-data-project", claudeTestSession+".jsonl")
+	return path.Join(claudeHome(testBotAgentID), projectsDirName, "-data-project", claudeTestSession+".jsonl")
 }
 
 func TestLocateSessionTranscript(t *testing.T) {
 	fs := newFakeTranscriptFS()
 	fs.addFile(transcriptFullPath(), `{"type":"user"}`+"\n")
-	fs.addFile(path.Join(configDir, projectsDirName, "-data-project", "other.jsonl"), "{}\n")
+	fs.addFile(path.Join(claudeHome(testBotAgentID), projectsDirName, "-data-project", "other.jsonl"), "{}\n")
 
-	rel, found, err := locateSessionTranscript(t.Context(), fs, claudeTestSession)
+	rel, found, err := locateSessionTranscript(t.Context(), fs, claudeHome(testBotAgentID), claudeTestSession)
 	if err != nil || !found {
 		t.Fatalf("locate = (%q, %t, %v), want found", rel, found, err)
 	}
@@ -79,12 +81,12 @@ func TestLocateSessionTranscript(t *testing.T) {
 		t.Fatalf("rel = %q", rel)
 	}
 
-	_, found, err = locateSessionTranscript(t.Context(), fs, "00000000-0000-0000-0000-000000000000")
+	_, found, err = locateSessionTranscript(t.Context(), fs, claudeHome(testBotAgentID), "00000000-0000-0000-0000-000000000000")
 	if err != nil || found {
 		t.Fatalf("missing session: found=%t err=%v", found, err)
 	}
 
-	if _, _, err := locateSessionTranscript(t.Context(), fs, "../escape"); err == nil {
+	if _, _, err := locateSessionTranscript(t.Context(), fs, claudeHome(testBotAgentID), "../escape"); err == nil {
 		t.Fatal("traversal session id must be rejected")
 	}
 }
@@ -93,7 +95,7 @@ func TestLocateSessionTranscript(t *testing.T) {
 // so; a lookup that merely failed still hands the CLI the stored id.
 func TestEnsureResumableSession(t *testing.T) {
 	sink := &recordingSink{}
-	input := external.PromptInput{Sink: sink}
+	input := external.PromptInput{BotAgentID: testBotAgentID, Sink: sink}
 	d := &Driver{logger: slog.Default()}
 
 	fs := newFakeTranscriptFS()
@@ -107,7 +109,7 @@ func TestEnsureResumableSession(t *testing.T) {
 	}
 
 	fs = newFakeTranscriptFS()
-	fs.addFile(path.Join(configDir, projectsDirName, "-data-project", "other.jsonl"), "{}\n")
+	fs.addFile(path.Join(claudeHome(testBotAgentID), projectsDirName, "-data-project", "other.jsonl"), "{}\n")
 	if got := d.ensureResumableSession(t.Context(), fs, input, claudeTestSession); got != "" {
 		t.Fatalf("missing transcript resumed %q", got)
 	}

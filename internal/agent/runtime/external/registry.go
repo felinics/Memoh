@@ -59,6 +59,9 @@ type QuotaWindow struct {
 	UsedPercent   int
 	WindowMinutes int
 	ResetsAt      *time.Time
+	// Model names the models a window counts alone; empty for one that
+	// counts every model.
+	Model string
 }
 
 // ErrQuotaUnavailable: the runtime could not read the account's usage.

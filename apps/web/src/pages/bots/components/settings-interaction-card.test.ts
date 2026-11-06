@@ -118,7 +118,7 @@ function createForm(overrides: Record<string, unknown> = {}) {
 
 const botAgents = [
   { id: 'agent-codex', name: 'Codex', runtime: 'codex', enabled: true, agent_credential_id: 'credential-codex', metadata: { provider: 'codex', auth: 'api_key' } },
-  { id: 'agent-claude', name: 'Claude Code', runtime: 'claude-code', enabled: true, metadata: { provider: 'claude-code', auth: 'workspace' } },
+  { id: 'agent-claude', name: 'Claude Code', runtime: 'claude-code', enabled: true, metadata: { provider: 'claude-code', auth: 'claude_account' } },
   { id: 'agent-custom', name: 'Custom', runtime: 'acp', enabled: true, metadata: { provider: 'custom-agent', managed: { api_key: 'custom-key' } } },
 ]
 

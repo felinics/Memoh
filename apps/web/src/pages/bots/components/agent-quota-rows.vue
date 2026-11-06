@@ -22,8 +22,8 @@
   <template v-else>
     <SettingsRow
       v-for="window in usage.data.value?.windows ?? []"
-      :key="window.window_minutes"
-      :label="codexUsageWindowLabel(window.window_minutes, t)"
+      :key="`${window.window_minutes}:${window.model ?? ''}`"
+      :label="agentQuotaWindowLabel(window, t)"
       :description="windowDescription(window)"
       stack="sm"
     >
@@ -40,9 +40,9 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Progress, SettingsRow, Skeleton } from '@felinic/ui'
 import type { ExternalagentAgentQuotaWindow } from '@memohai/sdk'
-import { useCodexUsage } from '@/composables/useCodexUsage'
+import { useAgentQuota } from '@/composables/useAgentQuota'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { codexUsageResetTime, codexUsageWindowLabel } from '@/utils/codex-usage'
+import { agentQuotaResetTime, agentQuotaWindowLabel } from '@/utils/agent-quota'
 
 const props = defineProps<{
   botId: string
@@ -50,7 +50,7 @@ const props = defineProps<{
 }>()
 const { t, locale } = useI18n()
 
-const usage = useCodexUsage({
+const usage = useAgentQuota({
   botId: computed(() => props.botId),
   botAgentId: computed(() => props.botAgentId),
   enabled: () => true,
@@ -59,7 +59,7 @@ const usage = useCodexUsage({
 function windowDescription(window: ExternalagentAgentQuotaWindow): string {
   const exhausted = window.used_percent >= 100
   if (!window.resets_at) return exhausted ? t('bots.agent.usage.exhaustedNoReset') : ''
-  const time = codexUsageResetTime(window.resets_at, locale.value)
+  const time = agentQuotaResetTime(window.resets_at, locale.value)
   return exhausted ? t('bots.agent.usage.exhausted', { time }) : t('bots.agent.usage.resets', { time })
 }
 </script>

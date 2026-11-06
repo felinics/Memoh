@@ -1315,8 +1315,8 @@ import { isNotifyNotice } from './notify-notice'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver, useLocalStorage } from '@vueuse/core'
 import { useRuntimeControls } from '@/composables/useRuntimeControls'
-import { useCodexUsage } from '@/composables/useCodexUsage'
-import { codexUsageNotice, codexUsageNoticeKey, codexUsageResetTime, codexUsageWindowLabel } from '@/utils/codex-usage'
+import { useAgentQuota } from '@/composables/useAgentQuota'
+import { agentQuotaNotice, agentQuotaNoticeKey, agentQuotaResetTime, agentQuotaWindowLabel } from '@/utils/agent-quota'
 import { useQuery } from '@pinia/colada'
 import { deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession, getAcpProfiles, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
@@ -2253,7 +2253,7 @@ const codexUsageAgentId = computed(() => {
 // Reading usage starts Codex when it is not running, so it is read only once a
 // turn of this Agent has ended here, while Codex is still up.
 const codexUsageTurnAgentId = ref('')
-const codexUsage = useCodexUsage({
+const codexUsage = useAgentQuota({
   botId: computed(() => currentBotId.value ?? ''),
   botAgentId: codexUsageAgentId,
   enabled: () => isVisible.value && codexUsageTurnAgentId.value === codexUsageAgentId.value,
@@ -2266,8 +2266,8 @@ watch(streaming, (now, was) => {
 // Dismissal holds until the window resets: a new reset time is a new key.
 const dismissedCodexUsageNotices = useLocalStorage<Record<string, string>>('memoh:codex-usage-dismissed', {})
 const codexUsageNoticeState = computed(() => {
-  const notice = codexUsageNotice(codexUsage.data.value)
-  return notice ? { notice, key: codexUsageNoticeKey(codexUsageAgentId.value, notice) } : null
+  const notice = agentQuotaNotice(codexUsage.data.value)
+  return notice ? { notice, key: agentQuotaNoticeKey(codexUsageAgentId.value, notice) } : null
 })
 const composerUsageNotice = computed(() => {
   const state = codexUsageNoticeState.value
@@ -2275,9 +2275,9 @@ const composerUsageNotice = computed(() => {
   const { exhausted, window } = state.notice
   if (!exhausted && dismissedCodexUsageNotices.value[codexUsageAgentId.value] === state.key) return null
   const params = {
-    window: codexUsageWindowLabel(window.window_minutes, t),
+    window: agentQuotaWindowLabel(window, t),
     percent: window.used_percent,
-    time: window.resets_at ? codexUsageResetTime(window.resets_at, locale.value) : '',
+    time: window.resets_at ? agentQuotaResetTime(window.resets_at, locale.value) : '',
   }
   const message = exhausted
     ? t(window.resets_at ? 'chat.codexUsage.exhausted' : 'chat.codexUsage.exhaustedNoReset', params)

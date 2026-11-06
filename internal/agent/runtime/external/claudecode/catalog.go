@@ -120,7 +120,11 @@ func (c *commandCatalog) entry(key commandCatalogKey) commandCatalogEntry {
 // discoverCommands asks a CLI that is never given a prompt: initialize lists
 // the invocable commands and reload_skills tells which of them are skills.
 func (d *Driver) discoverCommands(ctx context.Context, input external.PromptInput) (observedCommands, error) {
-	_, turn, stop, err := d.startControlCLI(ctx, input.BotID, input.BotAgentID, external.MetadataString(input.RuntimeMetadata, "project_path"))
+	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID)
+	if err != nil {
+		return observedCommands{}, err
+	}
+	turn, stop, err := d.controlTurn(ctx, cfg, input.BotID, input.BotAgentID, external.MetadataString(input.RuntimeMetadata, "project_path"))
 	if err != nil {
 		return observedCommands{}, err
 	}

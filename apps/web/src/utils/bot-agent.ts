@@ -30,14 +30,14 @@ export interface BotAgentRuntimeOption {
   keywords: string[]
 }
 
-export type AgentAuthMode = 'chatgpt' | 'grok_account' | 'workspace' | 'oauth_token' | 'api_key'
-export type DeviceLoginAuthMode = Extract<AgentAuthMode, 'chatgpt' | 'grok_account'>
+export type AgentAuthMode = 'chatgpt' | 'grok_account' | 'claude_account' | 'api_key'
+export type DeviceLoginAuthMode = Exclude<AgentAuthMode, 'api_key'>
 
 // Each runtime's auth modes as an existing Agent offers them. The first is the
 // one a new Agent starts in.
 export const DIRECT_BOT_AGENT_AUTH_MODES: Record<DirectBotAgentRuntime, readonly [AgentAuthMode, ...AgentAuthMode[]]> = {
   [BOT_AGENT_RUNTIME_CODEX]: ['chatgpt', 'api_key'],
-  [BOT_AGENT_RUNTIME_CLAUDE_CODE]: ['workspace', 'api_key', 'oauth_token'],
+  [BOT_AGENT_RUNTIME_CLAUDE_CODE]: ['claude_account', 'api_key'],
   [BOT_AGENT_RUNTIME_GROK_BUILD]: ['grok_account', 'api_key'],
 }
 
@@ -45,8 +45,7 @@ export const DIRECT_BOT_AGENT_AUTH_MODES: Record<DirectBotAgentRuntime, readonly
 export const AGENT_AUTH_MODE_COPY: Record<AgentAuthMode, { label: string, description: string }> = {
   chatgpt: { label: 'bots.agent.authChatGPT', description: 'bots.agent.authChatGPTDescription' },
   grok_account: { label: 'bots.agent.grokAccount', description: 'bots.agent.authGrokAccountDescription' },
-  workspace: { label: 'bots.agent.authWorkspace', description: 'bots.agent.authWorkspaceDescription' },
-  oauth_token: { label: 'bots.agent.authOAuthToken', description: 'bots.agent.authOAuthTokenDescription' },
+  claude_account: { label: 'bots.agent.claudeAccount', description: 'bots.agent.authClaudeAccountDescription' },
   api_key: { label: 'bots.agent.apiKey', description: 'bots.agent.authApiKeyDescription' },
 }
 
@@ -60,11 +59,10 @@ export const DIRECT_BOT_AGENT_API_KEY_AUTH_KIND: Record<DirectBotAgentRuntime, s
   [BOT_AGENT_RUNTIME_GROK_BUILD]: 'xai_api_key',
 }
 
-// Account sign-ins completed with a device code, by auth mode: the i18n keys
-// each one shows. The sign-in runs in the Agent's own runtime process, so it
-// happens after the Bot is created. An existing Agent's settings already
-// explain the auth mode, so its account row says where the account is kept
-// instead (agentDescription).
+// Account sign-ins, by auth mode: the i18n keys each one shows. The sign-in
+// runs in the Agent's own runtime process, so it happens after the Bot is
+// created. An existing Agent's settings already explain the auth mode, so its
+// account row says where the account is kept instead (agentDescription).
 export const DEVICE_LOGINS: Record<DeviceLoginAuthMode, {
   agentDescription: string
   connectedDescription: string
@@ -86,22 +84,17 @@ export const DEVICE_LOGINS: Record<DeviceLoginAuthMode, {
     success: 'bots.agent.grokLoginSuccess',
     failed: 'bots.agent.grokLoginFailed',
   },
-}
-
-// The managed workspace dependency that provides each runtime's CLI.
-export const DIRECT_BOT_AGENT_DEPENDENCY_ID: Record<DirectBotAgentRuntime, string> = {
-  [BOT_AGENT_RUNTIME_CODEX]: 'codex',
-  [BOT_AGENT_RUNTIME_CLAUDE_CODE]: 'claude-code',
-  [BOT_AGENT_RUNTIME_GROK_BUILD]: 'grok',
+  claude_account: {
+    agentDescription: 'bots.agent.claudeAccountDescription',
+    connectedDescription: 'bots.agent.claudeAccountConnectedDescription',
+    hint: 'bots.agent.claudeAuthorizationHint',
+    success: 'bots.agent.claudeLoginSuccess',
+    failed: 'bots.agent.claudeLoginFailed',
+  },
 }
 
 export function isDeviceLoginAuthMode(value: string): value is DeviceLoginAuthMode {
   return Object.hasOwn(DEVICE_LOGINS, value)
-}
-
-// The auth mode an Agent needs for a staged credential of this kind to be accepted.
-export function agentAuthForCredentialKind(authKind: string): AgentAuthMode {
-  return authKind === 'claude_code_oauth' ? 'oauth_token' : 'api_key'
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
@@ -160,10 +153,9 @@ export function isDirectBotAgentConfigured(
   if (!isDirectBotAgentRuntime(runtime)) return null
   const auth = normalizeAgentID(objectValue(agent?.metadata)?.auth)
   if (!isAgentAuthMode(auth) || !DIRECT_BOT_AGENT_AUTH_MODES[runtime].includes(auth)) return false
-  // A Claude Code workspace login and the device-code sign-ins (Codex's
-  // ChatGPT account, a Grok account) are kept by the CLI in the workspace;
-  // Memoh stores no credential for them.
-  return auth === 'workspace' || isDeviceLoginAuthMode(auth) || !!agent?.agent_credential_id
+  // An account sign-in (ChatGPT, Claude, Grok) is kept by the CLI in the
+  // workspace; Memoh stores no credential for it.
+  return isDeviceLoginAuthMode(auth) || !!agent?.agent_credential_id
 }
 
 export function botAgentProvider(agent: Pick<BotagentsBotAgent, 'runtime' | 'metadata'> | null | undefined): string {

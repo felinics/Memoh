@@ -13,8 +13,7 @@ const ( //nolint:gosec // Stable authentication-kind identifiers, not credential
 
 	AuthKindOpenAIAPIKey    = "openai_api_key"    //nolint:gosec // Stable authentication-kind identifier.
 	AuthKindAnthropicAPIKey = "anthropic_api_key" //nolint:gosec // Stable authentication-kind identifier.
-	AuthKindClaudeCodeOAuth = "claude_code_oauth"
-	AuthKindXAIAPIKey       = "xai_api_key" //nolint:gosec // Stable authentication-kind identifier.
+	AuthKindXAIAPIKey       = "xai_api_key"       //nolint:gosec // Stable authentication-kind identifier.
 )
 
 // authKinds keeps what an auth kind means in one table so a new credential
@@ -29,7 +28,6 @@ type authKindSpec struct {
 var authKinds = map[string]authKindSpec{
 	AuthKindOpenAIAPIKey:    {provider: ProviderOpenAI, runtime: runtimekind.Codex, secret: []string{"api_key"}, label: "API key"},
 	AuthKindAnthropicAPIKey: {provider: ProviderAnthropic, runtime: runtimekind.ClaudeCode, secret: []string{"api_key"}, label: "API key"},
-	AuthKindClaudeCodeOAuth: {provider: ProviderAnthropic, runtime: runtimekind.ClaudeCode, secret: []string{"oauth_token"}, label: "Claude Code"},
 	AuthKindXAIAPIKey:       {provider: ProviderXAI, runtime: runtimekind.GrokBuild, secret: []string{"api_key"}, label: "API key"},
 }
 

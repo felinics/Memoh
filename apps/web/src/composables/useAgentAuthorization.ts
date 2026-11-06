@@ -1,8 +1,7 @@
 import { computed, onDeactivated, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  deleteAgentAuthorizationsById, getAgentAuthorizationsById, postAgentAuthorizations,
-  postAgentAuthorizationsByIdExchange, type AgentcredentialAuthorization,
+  deleteAgentAuthorizationsById, getAgentAuthorizationsById, postAgentAuthorizations, type AgentcredentialAuthorization,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
@@ -24,10 +23,8 @@ export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, s
   let generation = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   let transferred = false
-  const pending = computed(() => session.value?.status === 'pending')
   const ready = computed(() => session.value?.status === 'ready'
     && session.value.runtime === getRuntime() && Date.parse(session.value.expires_at) > now.value)
-  const busy = computed(() => loading.value || pending.value)
 
   function clearTimer() { clearTimeout(timer); timer = undefined }
   async function discard(id: string) {
@@ -58,7 +55,7 @@ export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, s
       error.value = t('errors.agent_authorization.expired')
     }, remaining)
   }
-  async function start(authKind: string, secret?: string) {
+  async function start(authKind: string, apiKey: string) {
     if (loading.value) return
     cancel()
     transferred = false
@@ -66,8 +63,7 @@ export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, s
     loading.value = true
     try {
       const { data } = await postAgentAuthorizations({
-        body: { runtime: getRuntime(), auth_kind: authKind,
-          ...(secret && { secret: { [authKind === 'claude_code_oauth' ? 'oauth_token' : 'api_key']: secret } }) },
+        body: { runtime: getRuntime(), auth_kind: authKind, secret: { api_key: apiKey } },
         throwOnError: true,
       })
       if (current !== generation) { void discard(data.id); return }
@@ -92,19 +88,6 @@ export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, s
       error.value = resolveApiErrorMessage(cause, t('errors.agent_authorization.expired'))
     } finally { if (current === generation) loading.value = false }
   }
-  async function exchange(code: string) {
-    const id = session.value?.id
-    if (!id || loading.value || !pending.value || !code.trim()) return
-    const current = generation
-    loading.value = true
-    error.value = ''
-    try {
-      const { data } = await postAgentAuthorizationsByIdExchange({ path: { id }, body: { code: code.trim() }, throwOnError: true })
-      if (current === generation) accept(data)
-    } catch (cause) {
-      if (current === generation) error.value = resolveApiErrorMessage(cause, t('errors.agent_authorization.failed'))
-    } finally { if (current === generation) loading.value = false }
-  }
   // The create-progress store owns this ID after navigation. No secret is ever
   // handed to the store or browser storage, and leaving the form must not revoke it.
   function handoff() {
@@ -121,5 +104,5 @@ export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, s
   onDeactivated(dispose)
   onUnmounted(dispose)
   void restore()
-  return { session, ready, pending, busy, loading, error, start, exchange, cancel, handoff, resume }
+  return { session, ready, loading, error, start, cancel, handoff, resume }
 }

@@ -42,11 +42,6 @@ type turnRunner struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// onCLIVersion, when set, receives the version the CLI reports in its
-	// system/init handshake so the launcher resolver can correct its cache.
-	// It runs on the read loop and must return quickly.
-	onCLIVersion func(ctx context.Context, version string)
-
 	submissionMu sync.Mutex
 
 	done chan struct{}
@@ -98,11 +93,6 @@ type turnRunner struct {
 	thinkingOpen     bool
 	streamedThinking strings.Builder
 	textOpen         bool
-}
-
-// newTurnRunner attaches a turn to a process of its own.
-func newTurnRunner(parent context.Context, input external.PromptInput, proc cliProcess, approvalSvc approval.FlowService, waiter func(string) func(), logger *slog.Logger) *turnRunner {
-	return newCLISession(proc, logger).beginTurn(parent, input, approvalSvc, waiter)
 }
 
 func newTurn(parent context.Context, s *cliSession, input external.PromptInput, approvalSvc approval.FlowService, waiter func(string) func()) *turnRunner {
@@ -290,13 +280,6 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			t.s.nativeID = msg.SessionID
 			t.s.mu.Unlock()
 			t.readyOnce.Do(func() { close(t.ready) })
-			if msg.ClaudeCodeVersion != "" && msg.ClaudeCodeVersion != PinnedCLIVersion {
-				t.logger.Warn("claude CLI version differs from the pinned wire contract",
-					slog.String("cli_version", msg.ClaudeCodeVersion), slog.String("pinned", PinnedCLIVersion))
-			}
-			if msg.ClaudeCodeVersion != "" && t.onCLIVersion != nil {
-				t.onCLIVersion(t.ctx, msg.ClaudeCodeVersion)
-			}
 		}
 	case messageTypeAssistant:
 		if msg.ParentToolUseID != nil {
@@ -481,8 +464,6 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		}
 	case messageTypeControlCancel:
 		t.cancelInboundControl(msg.RequestID)
-	case messageTypeControlResponse:
-		t.s.resolveControl(msg)
 	}
 }
 

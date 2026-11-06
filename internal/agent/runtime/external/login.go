@@ -2,14 +2,26 @@ package external
 
 import (
 	"context"
+	"errors"
 )
 
-// DeviceLoginStart is a device-code sign-in the runtime has begun: the user
-// opens the URL and confirms the code there.
+// DeviceLoginStart is a sign-in the runtime has begun: the user opens the URL
+// and confirms the code there, or, when CodeRequired, the page shows a code
+// the user hands back through LoginCodeSubmitter.
 type DeviceLoginStart struct {
 	LoginID         string
 	UserCode        string
 	VerificationURL string
+	CodeRequired    bool
+}
+
+// ErrLoginCodeInvalid: the runtime did not accept the code the user pasted.
+var ErrLoginCodeInvalid = errors.New("sign-in code is invalid")
+
+// LoginCodeSubmitter is implemented by runtimes whose sign-in page hands the
+// user a code to paste back. A sign-in it accepts is complete.
+type LoginCodeSubmitter interface {
+	SubmitLoginCode(ctx context.Context, botID, botAgentID, loginID, code string) error
 }
 
 // Device-code sign-in states. Unknown: the login is not tracked, e.g. the

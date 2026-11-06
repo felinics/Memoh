@@ -11,9 +11,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"golang.org/x/mod/semver"
+	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
@@ -40,8 +41,6 @@ const (
 	// interruptGraceTimeout bounds how long an interrupted turn waits for the
 	// CLI to flush its result before the process is terminated.
 	interruptGraceTimeout = 10 * time.Second
-
-	controlCLIDrainTimeout = 5 * time.Second
 )
 
 // ApprovalService is the decision flow the driver routes approvals through.
@@ -66,6 +65,9 @@ type Driver struct {
 	launchers external.LauncherResolver
 
 	commands *commandCatalog
+
+	signInsMu sync.Mutex
+	signIns   map[string]*signIn
 }
 
 // NewDriver constructs the Claude Code runtime driver.
@@ -90,6 +92,7 @@ func NewDriver(
 		launchers:   launchers,
 		procs:       procs,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
+		signIns:     map[string]*signIn{},
 	}
 	d.commands = newCommandCatalog(d.discoverCommands, d.logger)
 	return d
@@ -117,25 +120,17 @@ func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID strin
 	if err != nil {
 		return claudecfg.Config{}, err
 	}
-	if cfg.Auth == claudecfg.AuthWorkspace {
+	if cfg.Auth == claudecfg.AuthClaudeAccount {
 		return cfg, nil
 	}
 	credential, err := d.credentials.ResolveForBotAgent(ctx, botID, botAgentID)
 	if err != nil {
 		return claudecfg.Config{}, external.CredentialError(err)
 	}
-	switch cfg.Auth {
-	case claudecfg.AuthAPIKey:
-		if credential.AuthKind != agentcredential.AuthKindAnthropicAPIKey {
-			return claudecfg.Config{}, external.CredentialError(agentcredential.ErrIncompatible)
-		}
-		cfg.APIKey = credential.Secret["api_key"]
-	case claudecfg.AuthOAuthToken:
-		if credential.AuthKind != agentcredential.AuthKindClaudeCodeOAuth {
-			return claudecfg.Config{}, external.CredentialError(agentcredential.ErrIncompatible)
-		}
-		cfg.OAuthToken = credential.Secret["oauth_token"]
+	if credential.AuthKind != agentcredential.AuthKindAnthropicAPIKey {
+		return claudecfg.Config{}, external.CredentialError(agentcredential.ErrIncompatible)
 	}
+	cfg.APIKey = credential.Secret["api_key"]
 	return cfg, nil
 }
 
@@ -144,7 +139,11 @@ func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID strin
 func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalogRequest) (external.ModelCatalog, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	cfg, turn, stop, err := d.startControlCLI(ctx, request.BotID, request.BotAgentID, request.ProjectPath)
+	cfg, err := d.resolveAgentConfig(ctx, request.BotID, request.BotAgentID)
+	if err != nil {
+		return external.ModelCatalog{}, err
+	}
+	turn, stop, err := d.controlTurn(ctx, cfg, request.BotID, request.BotAgentID, request.ProjectPath)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
@@ -170,49 +169,78 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	return catalog, nil
 }
 
-// startControlCLI starts a CLI that only answers control requests. It is
-// never given a prompt, so it reaches no model and writes no session.
-func (d *Driver) startControlCLI(ctx context.Context, botID, botAgentID, projectPath string) (claudecfg.Config, *turnRunner, func(), error) {
-	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID)
-	if err != nil {
-		return cfg, nil, nil, err
-	}
+// controlCLI is a CLI that only answers control requests. It is never given
+// a prompt, so it reaches no model and writes no session. Like every process
+// of the Agent it is held under the Supervisor, in a scope of its own, so a
+// sign-out closes it with the rest and holds new ones off.
+type controlCLI struct {
+	sess  *cliSession
+	input external.PromptInput
+	d     *Driver
+	// close retires the process and gives up the lease: it exits once idle.
+	close func()
+}
+
+func (d *Driver) startControlCLI(ctx context.Context, cfg claudecfg.Config, botID, botAgentID, projectPath string) (*controlCLI, error) {
 	if _, err := external.ContainerWorkspace(ctx, d.workspaces, botID, RuntimeType); err != nil {
-		return cfg, nil, nil, err
-	}
-	client, err := d.workspaces.MCPClient(ctx, botID)
-	if err != nil {
-		return cfg, nil, nil, err
+		return nil, err
 	}
 	// A missing dependency returns as external.DependencyMissingError; it
 	// must not be re-wrapped into a generic runtime error.
 	launcher, err := agentproc.ResolveLauncher(ctx, d.launchers, botID, dependencyID, defaultLauncherPath)
 	if err != nil {
-		return cfg, nil, nil, err
+		return nil, err
 	}
-	// The stop func ends the process, after the caller has returned.
-	proc, err := startCLI(context.WithoutCancel(ctx), client, projectPath, controlCLIArgs(cfg, launcher.Version), cliEnv(cfg), launcher.Path)
+	return d.leaseControlCLI(ctx, botID, botAgentID, func(ctx context.Context) (cliProcess, error) {
+		client, err := d.workspaces.MCPClient(ctx, botID)
+		if err != nil {
+			return nil, err
+		}
+		return startCLI(context.WithoutCancel(ctx), client, botAgentID, projectPath, controlCLIArgs(cfg), cliEnv(cfg, botAgentID), launcher.Path)
+	})
+}
+
+func (d *Driver) leaseControlCLI(ctx context.Context, botID, botAgentID string, start func(context.Context) (cliProcess, error)) (*controlCLI, error) {
+	key := agentproc.Key{Runtime: RuntimeType, BotID: botID, BotAgentID: botAgentID, Scope: "control:" + uuid.NewString()}
+	proc, release, err := d.procs.Lease(ctx, key, "", func(ctx context.Context) (agentproc.Process, string, error) {
+		proc, err := start(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+		sess := newCLISession(proc, d.logger)
+		go sess.readLoop() //nolint:contextcheck // the session owns its read loop
+		return sess, "", nil
+	})
 	if err != nil {
-		return cfg, nil, nil, err
+		return nil, err
 	}
-	input := external.PromptInput{
-		BotID:      botID,
-		BotAgentID: botAgentID,
-		Sink:       external.EventSinkFunc(func(event.StreamEvent) {}),
+	return &controlCLI{
+		sess:  proc.(*cliSession),
+		input: external.PromptInput{BotID: botID, BotAgentID: botAgentID, Sink: external.EventSinkFunc(func(event.StreamEvent) {})},
+		d:     d,
+		close: func() {
+			d.procs.Retire(func(k agentproc.Key) bool { return k == key })
+			release()
+		},
+	}, nil
+}
+
+// turn attaches one exchange of control requests. The process counts as at
+// work until the turn closes; between turns a drain closes it.
+func (c *controlCLI) turn(ctx context.Context) *turnRunner {
+	return c.sess.beginTurn(ctx, c.input, c.d.approval, c.d.approval.RegisterWaiter)
+}
+
+// controlTurn starts a control CLI for a single exchange; stop ends both.
+func (d *Driver) controlTurn(ctx context.Context, cfg claudecfg.Config, botID, botAgentID, projectPath string) (*turnRunner, func(), error) {
+	cli, err := d.startControlCLI(ctx, cfg, botID, botAgentID, projectPath)
+	if err != nil {
+		return nil, nil, err
 	}
-	sess := newCLISession(proc, d.logger)
-	turn := sess.beginTurn(ctx, input, d.approval, d.approval.RegisterWaiter)
-	turn.onCLIVersion = d.versionObserver(botID)
-	go sess.readLoop() //nolint:contextcheck // the session owns its read loop
-	return cfg, turn, func() {
-		// EOF lets the CLI exit on its own: a killed CLI leaves its session
-		// registry behind. Exiting takes longer than the reads, so nobody waits.
-		go func() {
-			turn.observeExit(drainCLI(proc, controlCLIDrainTimeout))
-			<-sess.Done()
-			turn.close()
-			_ = proc.Close()
-		}()
+	turn := cli.turn(ctx)
+	return turn, func() {
+		turn.close()
+		cli.close()
 	}, nil
 }
 
@@ -339,7 +367,6 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	}
 
 	turn := sess.beginTurn(ctx, input, d.approval, d.approval.RegisterWaiter)
-	turn.onCLIVersion = d.versionObserver(input.BotID)
 	turn.userInput = d.userInput
 	defer turn.close()
 	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, turn.emit)
@@ -433,7 +460,7 @@ func sessionKey(input external.PromptInput) agentproc.Key {
 // it needs a new process. Model, effort and permission mode change through
 // the control channel and are not part of it. Secrets are hashed, never kept.
 func fingerprint(cfg claudecfg.Config, launcher external.Launcher, workDir string, allowBypass bool) string {
-	secret := sha256.Sum256([]byte(cfg.APIKey + "\x00" + cfg.OAuthToken))
+	secret := sha256.Sum256([]byte(cfg.APIKey))
 	return strings.Join([]string{
 		string(cfg.Auth), strings.TrimSpace(cfg.BaseURL), hex.EncodeToString(secret[:]),
 		launcher.Path, string(launcher.Source), launcher.Version,
@@ -498,9 +525,9 @@ func (d *Driver) startSession(ctx context.Context, client *bridge.Client, info b
 	var sess *cliSession
 	mcpConfig, mount := d.mountSessionTools(ctx, client, info, input, func() *turnRunner { return sess.currentTurn() })
 	model, effort := external.FirstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort)
-	args := cliArgs(model, effort, resume, mcpConfig, launcher.Version, allowBypass)
+	args := cliArgs(model, effort, resume, mcpConfig, allowBypass)
 	// The process outlives the turn that started it.
-	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, cliEnv(cfg), launcher.Path)
+	proc, err := startCLI(context.WithoutCancel(ctx), client, input.BotAgentID, workDir, args, cliEnv(cfg, input.BotAgentID), launcher.Path)
 	if err != nil {
 		if mount != nil {
 			mount.Stop()
@@ -519,8 +546,7 @@ func (d *Driver) startSession(ctx context.Context, client *bridge.Client, info b
 		_ = sess.Close()
 		return nil, external.Upstream(err)
 	}
-	// The version decides whether a later turn may keep this process; the
-	// handshake that also reports it comes only with a turn.
+	// The version decides whether a later turn may keep this process.
 	if raw, err := sess.callControl(ctx, "get_binary_version", nil); err == nil {
 		var answer struct {
 			Version string `json:"version"`
@@ -529,6 +555,17 @@ func (d *Driver) startSession(ctx context.Context, client *bridge.Client, info b
 			sess.version = strings.TrimSpace(answer.Version)
 			agentproc.ObserveVersion(ctx, d.launchers, input.BotID, dependencyID, sess.version)
 		}
+	}
+	if sess.version != PinnedCLIVersion {
+		// Unknown fields and messages are tolerated, so a drifted CLI usually
+		// still works; warn rather than refuse.
+		d.logger.WarnContext(ctx, "claude CLI version differs from the pinned wire contract",
+			slog.String("bot_id", input.BotID),
+			slog.String("cli_version", sess.version),
+			slog.String("pinned", PinnedCLIVersion),
+			slog.String("launcher", launcher.Path),
+			slog.String("launcher_source", string(launcher.Source)),
+		)
 	}
 	return sess, nil
 }
@@ -542,7 +579,7 @@ func (d *Driver) ensureResumableSession(ctx context.Context, client transcriptFS
 	if storedSessionID == "" {
 		return ""
 	}
-	_, found, err := locateSessionTranscript(ctx, client, storedSessionID)
+	_, found, err := locateSessionTranscript(ctx, client, claudeHome(input.BotAgentID), storedSessionID)
 	if err != nil {
 		d.logger.WarnContext(ctx, "claude transcript lookup failed; attempting resume anyway",
 			slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID), slog.Any("error", err))
@@ -563,27 +600,18 @@ func (d *Driver) ensureResumableSession(ctx context.Context, client transcriptFS
 	return ""
 }
 
-// thinkingDisplaySince is the first CLI that accepts --thinking-display; older
-// ones exit on the unknown option before the handshake.
-const thinkingDisplaySince = "v2.1.94"
-
-// cliArgs builds the pinned stream-json invocation for the CLI at cliVersion
-// (empty when unknown). model and effort are where the process starts; later
-// turns change them through the control channel.
-func cliArgs(model, effort, sessionID, mcpConfig, cliVersion string, allowBypass bool) []string {
+// cliArgs builds the pinned stream-json invocation. model and effort are where
+// the process starts; later turns change them through the control channel.
+func cliArgs(model, effort, sessionID, mcpConfig string, allowBypass bool) []string {
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
 		"--input-format", "stream-json",
 		"--include-partial-messages",
 		"--permission-prompt-tool", "stdio",
-	}
-	// Without it the CLI leaves the display to the API (or asks for progress
-	// updates only), and current models then stream thinking blocks with empty
-	// text. An unknown version goes without: hidden thinking beats a CLI that
-	// exits, and the handshake reports the version for the next launch.
-	if v := "v" + strings.TrimPrefix(cliVersion, "v"); semver.IsValid(v) && semver.Compare(v, thinkingDisplaySince) >= 0 {
-		args = append(args, "--thinking-display", "summarized")
+		// Without it the CLI leaves the display to the API, and current models
+		// then stream thinking blocks with empty text.
+		"--thinking-display", "summarized",
 	}
 	if allowBypass {
 		args = append(args, "--allow-dangerously-skip-permissions")
@@ -605,35 +633,29 @@ func cliArgs(model, effort, sessionID, mcpConfig, cliVersion string, allowBypass
 
 // Startup alone runs the workspace's hooks and starts its MCP servers. They
 // belong to sessions; a catalog read must not run the user's scripts.
-func controlCLIArgs(cfg claudecfg.Config, cliVersion string) []string {
-	return append(cliArgs(cfg.Model, "", "", "", cliVersion, cfg.PermissionMode == "bypassPermissions"),
+func controlCLIArgs(cfg claudecfg.Config) []string {
+	return append(cliArgs(cfg.Model, "", "", "", cfg.PermissionMode == "bypassPermissions"),
 		"--settings", agentproc.ShellQuote(`{"disableAllHooks":true}`), "--strict-mcp-config")
 }
 
-// cliEnv builds the process environment: durable state under the bot volume
-// plus the configured credential.
-func cliEnv(cfg claudecfg.Config) []string {
+// cliEnv builds the process environment: the Agent's own config directory on
+// the bot volume plus the configured credential. A Claude account login is
+// in that directory.
+func cliEnv(cfg claudecfg.Config, botAgentID string) []string {
 	env := agentproc.BaseEnv(
-		"CLAUDE_CONFIG_DIR="+configDir,
+		"CLAUDE_CONFIG_DIR="+claudeHome(botAgentID),
 		"CLAUDE_CODE_ENTRYPOINT=sdk-go",
 		// Both callers require a container workspace. Declare that existing
 		// isolation so the CLI accepts bypass mode when the container runs as root.
 		"IS_SANDBOX=1",
 	)
-	switch cfg.Auth {
-	case claudecfg.AuthAPIKey:
-		if cfg.BaseURL == "" {
-			env = append(env, "ANTHROPIC_API_KEY="+cfg.APIKey)
-		} else {
-			env = append(env, "ANTHROPIC_AUTH_TOKEN="+cfg.APIKey)
-		}
-	case claudecfg.AuthOAuthToken:
-		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+cfg.OAuthToken)
-	case claudecfg.AuthWorkspace:
-		// Credentials come from CLAUDE_CONFIG_DIR on the bot volume.
+	if cfg.Auth != claudecfg.AuthAPIKey {
+		return env
 	}
-	if cfg.Auth != claudecfg.AuthWorkspace && cfg.BaseURL != "" {
-		env = append(env, "ANTHROPIC_BASE_URL="+cfg.BaseURL)
+	if cfg.BaseURL == "" {
+		env = append(env, "ANTHROPIC_API_KEY="+cfg.APIKey)
+	} else {
+		env = append(env, "ANTHROPIC_AUTH_TOKEN="+cfg.APIKey, "ANTHROPIC_BASE_URL="+cfg.BaseURL)
 	}
 	return env
 }

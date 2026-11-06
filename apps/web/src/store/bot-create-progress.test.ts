@@ -14,7 +14,6 @@ const installAgent = vi.fn()
 const patchAgent = vi.fn()
 const getAgent = vi.fn()
 const getAgents = vi.fn()
-const getAuthorization = vi.fn()
 const getBot = vi.fn()
 const getBotChecks = vi.fn()
 const grantAccess = vi.fn()
@@ -33,7 +32,6 @@ vi.mock('@memohai/sdk', () => ({
   patchBotsByBotIdAgentsById: (...args: unknown[]) => patchAgent(...args),
   getBotsByBotIdAgentsById: (...args: unknown[]) => getAgent(...args),
   getBotsByBotIdAgents: (...args: unknown[]) => getAgents(...args),
-  getAgentAuthorizationsById: (...args: unknown[]) => getAuthorization(...args),
   getBotsById: (...args: unknown[]) => getBot(...args),
   getBotsByIdChecks: (...args: unknown[]) => getBotChecks(...args),
   postBotsByBotIdAgents: (...args: unknown[]) => postBotsByBotIdAgents(...args),
@@ -69,7 +67,6 @@ describe('useBotCreateProgressStore', () => {
     patchAgent.mockReset().mockResolvedValue({})
     getAgent.mockReset().mockResolvedValue({ data: { id: 'agent-1', runtime: 'codex', enabled: false, agent_credential_id: 'credential-1' } })
     getAgents.mockReset().mockResolvedValue({ data: { items: [] } })
-    getAuthorization.mockReset().mockResolvedValue({ data: { auth_kind: 'openai_codex_oauth' } })
     getBot.mockReset().mockResolvedValue({ data: { id: 'bot-1', name: 'ada', display_name: 'Ada', status: 'ready' } })
     getBotChecks.mockReset().mockResolvedValue({ data: { items: [] } })
     grantAccess.mockReset().mockResolvedValue({ data: {} })

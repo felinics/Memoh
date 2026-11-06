@@ -41,9 +41,12 @@ type BotAgent struct {
 	// Dependency comes from the runtime driver at read time. It is not
 	// persisted and is omitted for runtimes without a declaration (ACP).
 	Dependency *DependencyRequirement `json:"dependency,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
-	UpdatedAt  time.Time              `json:"updated_at"`
-	DeletedAt  *time.Time             `json:"deleted_at,omitempty"`
+	// ReportsQuota is decided at read time: the Agent's own account login
+	// reports its plan usage (GET .../quota).
+	ReportsQuota bool       `json:"reports_quota,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }
 
 // DependencyRequirement names the managed workspace dependency a direct

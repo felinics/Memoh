@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"io"
+	"path"
 	"strings"
 	"time"
 
@@ -18,9 +19,19 @@ const (
 	// custom images that provide one; with a resolver the copy to execute
 	// follows source precedence (managed → toolkit → PATH).
 	defaultLauncherPath = "/opt/memoh/toolkit/bin/claude"
-	configDir           = "/data/.claude"
-	defaultProjectPath  = "/data"
+	// homeRoot holds each Agent's own config directory: its login, sessions
+	// and settings. It is not under /data/.claude/agents, which a Claude Code
+	// run from the workspace terminal reads as subagent definitions.
+	homeRoot = "/data/.claude-code/agents"
+	// credentialsFile is where Claude Code keeps its login in a config
+	// directory on Linux.
+	credentialsFile    = ".credentials.json"
+	defaultProjectPath = "/data"
 )
+
+func claudeHome(botAgentID string) string {
+	return path.Join(homeRoot, botAgentID)
+}
 
 type cliProcess interface {
 	io.Reader
@@ -33,14 +44,16 @@ type cliProcess interface {
 	Close() error
 }
 
-// startCLI spawns one Claude Code process from the resolved launcher path.
-func startCLI(ctx context.Context, client *bridge.Client, workDir string, args, env []string, launcher string) (cliProcess, error) {
+// startCLI spawns one Claude Code process of the Agent from the resolved
+// launcher path, in the Agent's config directory.
+func startCLI(ctx context.Context, client *bridge.Client, botAgentID, workDir string, args, env []string, launcher string) (cliProcess, error) {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
 		workDir = defaultProjectPath
 	}
-	if err := client.Mkdir(ctx, configDir); err != nil {
-		return nil, errs.WrapDependency(err, "create claude config directory "+configDir)
+	home := claudeHome(botAgentID)
+	if err := client.Mkdir(ctx, home); err != nil {
+		return nil, errs.WrapDependency(err, "create claude config directory "+home)
 	}
 	proc, err := agentproc.Spawn(ctx, client, cliCommand(launcher, args), workDir, env)
 	if err != nil {

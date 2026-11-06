@@ -82,6 +82,11 @@ func (s *recordingSink) snapshot() []event.StreamEvent {
 	return append([]event.StreamEvent(nil), s.events...)
 }
 
+// newTurnRunner attaches a turn to a process of its own.
+func newTurnRunner(parent context.Context, input external.PromptInput, proc cliProcess, approvalSvc approval.FlowService, waiter func(string) func(), logger *slog.Logger) *turnRunner {
+	return newCLISession(proc, logger).beginTurn(parent, input, approvalSvc, waiter)
+}
+
 func newTestRunner(sink *recordingSink) *turnRunner {
 	return newTurnRunner(context.Background(), external.PromptInput{
 		BotID:    "bot-1",
@@ -96,6 +101,11 @@ func feed(t *testing.T, r *turnRunner, line string) {
 	msg, err := decodeInbound([]byte(line))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	// Routed as cliSession.readLoop routes it: control responses go to the session.
+	if msg.Type == messageTypeControlResponse {
+		r.s.resolveControl(msg)
+		return
 	}
 	r.handleMessage(msg)
 }
@@ -294,11 +304,11 @@ func TestClaudeModelCatalogFromInitialize(t *testing.T) {
 }
 
 func TestClaudeControlCLIRunsNoWorkspaceHooksOrMCPServers(t *testing.T) {
-	args := strings.Join(controlCLIArgs(claudecfg.Config{}, ""), " ")
+	args := strings.Join(controlCLIArgs(claudecfg.Config{}), " ")
 	if !strings.Contains(args, `--settings '{"disableAllHooks":true}'`) || !strings.Contains(args, "--strict-mcp-config") {
 		t.Fatalf("args = %q", args)
 	}
-	if args := strings.Join(cliArgs("", "", "", "", "", false), " "); strings.Contains(args, "disableAllHooks") || strings.Contains(args, "--strict-mcp-config") {
+	if args := strings.Join(cliArgs("", "", "", "", false), " "); strings.Contains(args, "disableAllHooks") || strings.Contains(args, "--strict-mcp-config") {
 		t.Fatalf("a turn must keep the workspace's hooks and MCP servers: %q", args)
 	}
 }

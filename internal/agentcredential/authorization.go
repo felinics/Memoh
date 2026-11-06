@@ -3,7 +3,6 @@ package agentcredential
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,33 +10,24 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	"github.com/felinics/memoh/internal/providers"
 )
 
 var (
-	ErrAuthorizationExpired     = errors.New("authorization session expired or unavailable")
-	ErrAuthorizationNotReady    = errors.New("authorization is not complete")
-	ErrAuthorizationLimit       = errors.New("too many pending authorizations")
-	ErrAuthorizationFailed      = errors.New("authorization failed")
-	ErrAuthorizationCodeInvalid = errors.New("authorization code is invalid")
+	ErrAuthorizationExpired  = errors.New("authorization session expired or unavailable")
+	ErrAuthorizationNotReady = errors.New("authorization is not complete")
+	ErrAuthorizationLimit    = errors.New("too many pending authorizations")
 )
 
 const authorizationTTL = 30 * time.Minute
 
-type agentAuthorizer interface {
-	StartClaudeCodeAuthorization() (providers.ClaudeCodeAuthorization, error)
-	ExchangeClaudeCodeAuthorization(context.Context, string, string, string) (string, error)
-}
-
 // AuthorizationService stages encrypted credentials independently of a Bot.
-// Row locks serialize polling and one-time claims across server instances.
+// Row locks serialize one-time claims across server instances.
 type AuthorizationService struct {
 	credentials *Service
-	oauth       agentAuthorizer
 }
 
-func NewAuthorizationService(credentials *Service, oauth *providers.Service) *AuthorizationService {
-	return &AuthorizationService{credentials: credentials, oauth: oauth}
+func NewAuthorizationService(credentials *Service) *AuthorizationService {
+	return &AuthorizationService{credentials: credentials}
 }
 
 // A struct tag cannot be computed, so the runtime enum repeats the runtimes of
@@ -50,12 +40,11 @@ type AuthorizationRequest struct {
 
 // Authorization contains only the public handoff, never credentials or provider device IDs.
 type Authorization struct {
-	ID               string    `json:"id" validate:"required"`
-	Runtime          string    `json:"runtime" validate:"required"`
-	AuthKind         string    `json:"auth_kind" validate:"required"`
-	Status           string    `json:"status" validate:"required" enums:"pending,ready,claimed"`
-	ExpiresAt        time.Time `json:"expires_at" validate:"required"`
-	AuthorizationURL string    `json:"authorization_url,omitempty"`
+	ID        string    `json:"id" validate:"required"`
+	Runtime   string    `json:"runtime" validate:"required"`
+	AuthKind  string    `json:"auth_kind" validate:"required"`
+	Status    string    `json:"status" validate:"required" enums:"ready,claimed"`
+	ExpiresAt time.Time `json:"expires_at" validate:"required"`
 }
 
 func (s *AuthorizationService) Create(ctx context.Context, owner string, req AuthorizationRequest) (Authorization, error) {
@@ -70,8 +59,7 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 	if !Compatible(req.Runtime, req.AuthKind) {
 		return Authorization{}, ErrInvalidRequest
 	}
-	claudeBrowser := req.AuthKind == AuthKindClaudeCodeOAuth && len(req.Secret) == 0
-	if !claudeBrowser && !validSecret(req.AuthKind, req.Secret) {
+	if !validSecret(req.AuthKind, req.Secret) {
 		return Authorization{}, ErrInvalidRequest
 	}
 	var result Authorization
@@ -90,30 +78,20 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 		if count >= 5 {
 			return ErrAuthorizationLimit
 		}
-		payload := req.Secret
-		status := "ready"
 		expires := time.Now().Add(authorizationTTL)
-		if claudeBrowser {
-			auth, err := s.oauth.StartClaudeCodeAuthorization()
-			if err != nil {
-				return fmt.Errorf("%w: %w", ErrAuthorizationFailed, err)
-			}
-			status = "pending"
-			payload = map[string]string{"authorization_url": auth.AuthorizationURL, "state": auth.State, "code_verifier": auth.CodeVerifier}
-		}
-		ciphertext, nonce, err := s.credentials.encrypt(payload)
+		ciphertext, nonce, err := s.credentials.encrypt(req.Secret)
 		if err != nil {
 			return err
 		}
 		row, err := q.CreateAgentAuthorization(ctx, dbsqlc.CreateAgentAuthorizationParams{
-			OwnerUserID: ownerID, Runtime: req.Runtime, AuthKind: req.AuthKind, Status: status,
+			OwnerUserID: ownerID, Runtime: req.Runtime, AuthKind: req.AuthKind, Status: "ready",
 			EncryptedPayload: ciphertext, EncryptionNonce: nonce, ExpiresAt: timestamptz(&expires),
 			PollAfter: timestamptz(timePtr(time.Now())),
 		})
 		if err != nil {
 			return err
 		}
-		result = authorizationView(row, payload)
+		result = authorizationView(row)
 		return nil
 	})
 	return result, err
@@ -122,58 +100,7 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 func (s *AuthorizationService) Get(ctx context.Context, owner, id string) (Authorization, error) {
 	var result Authorization
 	err := s.withSession(ctx, owner, id, func(_ dbstore.Queries, row dbsqlc.AgentAuthorization) error {
-		if row.Status == "claimed" {
-			result = authorizationView(row, nil)
-			return nil
-		}
-		payload, err := s.credentials.decrypt(row.EncryptedPayload, row.EncryptionNonce, 1)
-		if err != nil {
-			return err
-		}
-		result = authorizationView(row, payload)
-		return nil
-	})
-	return result, err
-}
-
-// Exchange completes a pending Claude authorization. Failed exchanges remain
-// retryable; concurrent retries cannot exchange a one-time code twice.
-func (s *AuthorizationService) Exchange(ctx context.Context, owner, id, code string) (Authorization, error) {
-	var result Authorization
-	err := s.withSession(ctx, owner, id, func(q dbstore.Queries, row dbsqlc.AgentAuthorization) error {
-		if row.AuthKind != AuthKindClaudeCodeOAuth {
-			return ErrInvalidRequest
-		}
-		if row.Status != "pending" {
-			result = authorizationView(row, nil)
-			return nil
-		}
-		payload, err := s.credentials.decrypt(row.EncryptedPayload, row.EncryptionNonce, 1)
-		if err != nil {
-			return err
-		}
-		token, err := s.oauth.ExchangeClaudeCodeAuthorization(ctx, code, payload["state"], payload["code_verifier"])
-		if errors.Is(err, providers.ErrClaudeCodeAuthorizationCodeInvalid) {
-			return ErrAuthorizationCodeInvalid
-		}
-		if err != nil {
-			return fmt.Errorf("%w: %w", ErrAuthorizationFailed, err)
-		}
-		secret := map[string]string{"oauth_token": token}
-		if !validSecret(row.AuthKind, secret) {
-			return ErrAuthorizationFailed
-		}
-		row.EncryptedPayload, row.EncryptionNonce, err = s.credentials.encrypt(secret)
-		if err != nil {
-			return err
-		}
-		row.Status = "ready"
-		row.ExpiresAt = timestamptz(timePtr(time.Now().Add(authorizationTTL)))
-		row, err = q.UpdateAgentAuthorization(ctx, authorizationUpdate(row))
-		if err != nil {
-			return err
-		}
-		result = authorizationView(row, nil)
+		result = authorizationView(row)
 		return nil
 	})
 	return result, err
@@ -247,12 +174,8 @@ func (s *AuthorizationService) withSession(ctx context.Context, owner, id string
 	})
 }
 
-func authorizationView(row dbsqlc.AgentAuthorization, payload map[string]string) Authorization {
-	result := Authorization{ID: row.ID.String(), Runtime: row.Runtime, AuthKind: row.AuthKind, Status: row.Status, ExpiresAt: row.ExpiresAt.Time}
-	if row.Status == "pending" {
-		result.AuthorizationURL = payload["authorization_url"]
-	}
-	return result
+func authorizationView(row dbsqlc.AgentAuthorization) Authorization {
+	return Authorization{ID: row.ID.String(), Runtime: row.Runtime, AuthKind: row.AuthKind, Status: row.Status, ExpiresAt: row.ExpiresAt.Time}
 }
 
 func authorizationUpdate(row dbsqlc.AgentAuthorization) dbsqlc.UpdateAgentAuthorizationParams {

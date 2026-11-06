@@ -1,24 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, ref, type App } from 'vue'
-const actions = vi.hoisted(() => ({ start: vi.fn(), exchange: vi.fn(), cancel: vi.fn(), handoff: vi.fn(), resume: vi.fn() }))
-const session = ref<{ id: string, auth_kind: string, authorization_url?: string } | null>(null)
-const ready = ref(false)
-const pending = ref(false)
-const loading = ref(false)
+const actions = vi.hoisted(() => ({ start: vi.fn(), cancel: vi.fn(), handoff: vi.fn(), resume: vi.fn() }))
 vi.mock('@/composables/useAgentAuthorization', () => ({ useAgentAuthorization: () => ({
-  session, ready, pending, busy: loading, loading, error: ref(''), ...actions,
+  session: ref(null), ready: ref(false), loading: ref(false), error: ref(''), ...actions,
 }) }))
-vi.mock('./device-login-panel.vue', () => ({ default: { template: '<div data-device-login />' } }))
-vi.mock('./agent-credential-input.vue', () => ({ default: { template: '<input data-manual-token />' } }))
+vi.mock('./agent-credential-input.vue', () => ({ default: { template: '<input data-api-key />' } }))
 vi.mock('@felinic/ui', () => {
   const slot = { template: '<div><slot /></div>' }
   return {
-    Button: { props: ['loading'], template: '<button><slot /></button>' },
-    Dialog: { props: ['open'], template: '<div v-if="open"><slot /></div>' },
-    DialogBody: slot, DialogFooter: slot, DialogHeader: slot, DialogPanel: slot, DialogTitle: slot,
-    Input: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
-    Label: { template: '<label><slot /></label>' },
     Select: { props: ['modelValue'], emits: ['update:modelValue'], template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><slot /></select>' },
     SelectContent: { template: '<slot />' }, SelectItem: { props: ['value'], template: '<option :value="value"><slot /></option>' },
     SelectTrigger: { template: '<span />' }, SelectValue: slot, SettingsRow: slot,
@@ -35,58 +25,24 @@ function mount(runtime: string) {
 }
 beforeEach(() => {
   vi.resetAllMocks()
-  session.value = null; ready.value = false; pending.value = false; loading.value = false
   root = document.createElement('div')
-  mount('claude-code')
 })
-afterEach(() => { app.unmount(); vi.restoreAllMocks() })
-function button(label: string) {
-  return Array.from(root.querySelectorAll('button')).find(el => el.textContent?.includes(label))!
-}
+afterEach(() => { app.unmount() })
 
-it('offers browser authorization before Bot creation and lets the user open Claude and submit its code', async () => {
-  const open = vi.spyOn(window, 'open').mockReturnValue(null)
-  button('provider.oauth.connect').click()
-  expect(actions.start).toHaveBeenCalledWith('claude_code_oauth')
-  session.value = { id: 'authorization', auth_kind: 'claude_code_oauth', authorization_url: 'https://claude.ai/oauth/authorize?state=test' }
-  pending.value = true
-  await nextTick()
-  button('bots.agent.openAuthorizationPage').click()
-  expect(open).toHaveBeenCalledWith(session.value.authorization_url, '_blank', 'noopener,noreferrer')
-  const input = root.querySelector<HTMLInputElement>('#claude-authorization-code')!
-  input.value = 'returned-code#state'; input.dispatchEvent(new Event('input'))
-  await nextTick()
-  root.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }))
-  expect(actions.exchange).toHaveBeenCalledWith('returned-code#state')
-  pending.value = false; ready.value = true
-  await nextTick()
-  expect(root.querySelector('#claude-authorization-code')).toBeNull()
-  expect(status).toHaveBeenLastCalledWith({ ready: true, busy: false, id: 'authorization', auth: 'oauth_token' })
-})
-
-it('keeps manual OAuth token entry as a separate choice', async () => {
-  expect(root.querySelector('[data-manual-token]')).toBeNull()
+// The account signs in on the Agent's own process: nothing to stage, nothing
+// to wait for before the Bot can be created.
+it.each([
+  ['claude-code', 'claude_account', 'anthropic_api_key'],
+  ['grok-build', 'grok_account', 'xai_api_key'],
+])('offers %s an account that signs in after creation by default and an API key as the other choice', async (runtime, account, apiKeyKind) => {
+  mount(runtime)
   const select = root.querySelector('select')!
-  select.value = 'oauth_token'; select.dispatchEvent(new Event('change'))
-  await nextTick()
-  expect(actions.cancel).toHaveBeenCalled()
-  expect(root.querySelector('[data-manual-token]')).not.toBeNull()
-  expect(actions.start).not.toHaveBeenCalled()
-})
-
-it('offers Grok Build an account that signs in after creation by default and an API key as the other choice', async () => {
-  app.unmount()
-  mount('grok-build')
-  const select = root.querySelector('select')!
-  expect(Array.from(select.options).map(option => option.value)).toEqual(['grok_account', 'api_key'])
-  // Only Grok writes its login, on the Agent's own process: nothing to stage,
-  // nothing to wait for before the Bot can be created.
-  expect(root.querySelector('[data-device-login]')).toBeNull()
-  expect(actions.start).not.toHaveBeenCalled()
-  expect(status).toHaveBeenLastCalledWith({ ready: true, busy: false, id: '', auth: 'grok_account' })
+  expect(Array.from(select.options).map(option => option.value)).toEqual([account, 'api_key'])
+  expect(root.querySelector('[data-api-key]')).toBeNull()
+  expect(status).toHaveBeenLastCalledWith({ ready: true, busy: false, id: '', auth: account })
   select.value = 'api_key'; select.dispatchEvent(new Event('change'))
   await nextTick()
-  root.querySelector('[data-manual-token]')!.dispatchEvent(new Event('save'))
-  expect(actions.start).toHaveBeenLastCalledWith('xai_api_key', '')
+  root.querySelector('[data-api-key]')!.dispatchEvent(new Event('save'))
+  expect(actions.start).toHaveBeenLastCalledWith(apiKeyKind, '')
   expect(status).toHaveBeenLastCalledWith({ ready: false, busy: false, id: '', auth: 'api_key' })
 })

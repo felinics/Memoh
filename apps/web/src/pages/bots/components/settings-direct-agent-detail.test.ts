@@ -22,7 +22,7 @@ vi.mock('./device-login-panel.vue', () => ({ default: {
 } }))
 vi.mock('./agent-credential-input.vue', () => ({ default: { template: '<input />' } }))
 vi.mock('./agent-credential-disconnect.vue', () => ({ default: { template: '<button />' } }))
-vi.mock('./codex-usage-rows.vue', () => ({ default: { template: '<div data-codex-usage />' } }))
+vi.mock('./agent-quota-rows.vue', () => ({ default: { template: '<div data-agent-quota />' } }))
 vi.mock('@felinic/ui', () => {
   const slot = { template: '<div><slot /></div>' }
   return {
@@ -41,8 +41,8 @@ const agent = ref<Record<string, unknown>>({})
 const login = { login_id: 'login-1', user_code: 'ABCD-1234', verification_url: 'https://auth.openai.com/codex/device?user_code=ABCD-1234' }
 function panel() { return root.querySelector('[data-device-login]') as HTMLElement | null }
 function connect() { panel()!.dispatchEvent(new Event('connect')) }
-function mount(runtime: string, auth: string, connected = false) {
-  agent.value = { id: 'agent', runtime, metadata: { provider: runtime, auth }, ...(connected && { agent_credential_id: 'cred' }) }
+function mount(runtime: string, auth: string, connected = false, extra: Record<string, unknown> = {}) {
+  agent.value = { id: 'agent', runtime, metadata: { provider: runtime, auth }, ...(connected && { agent_credential_id: 'cred' }), ...extra }
   root = document.createElement('div')
   app = createApp(() => h(SettingsDirectAgentDetail, { botId: 'bot', agent: agent.value }))
   app.config.globalProperties.$t = (key: string) => key
@@ -87,10 +87,10 @@ it('cancels a pending sign-in through the Agent', async () => {
 })
 
 it('takes the ChatGPT sign-in from Codex itself, not from a stored credential', async () => {
-  mount('codex', 'chatgpt', true)
-  expect(root.querySelector('[data-codex-usage]')).toBeNull()
+  mount('codex', 'chatgpt', true, { reports_quota: true })
+  expect(root.querySelector('[data-agent-quota]')).toBeNull()
   runtimeAccount.value = { signed_in: true, email: 'user@example.com' }
   await vi.advanceTimersByTimeAsync(0)
   expect(panel()!.dataset.auth).toBe('chatgpt')
-  expect(root.querySelector('[data-codex-usage]')).not.toBeNull()
+  expect(root.querySelector('[data-agent-quota]')).not.toBeNull()
 })
