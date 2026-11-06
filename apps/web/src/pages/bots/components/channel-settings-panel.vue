@@ -3,7 +3,7 @@
     <!-- Identity card: the platform this connection belongs to, with the
          committing actions (enable/disable, save) on the right. -->
     <SettingsSection>
-      <div class="flex items-center gap-3 p-4">
+      <div class="flex items-center gap-3 py-4">
         <span class="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted">
           <ChannelIcon
             :channel="platformType"
@@ -66,7 +66,7 @@
         v-if="showWebhookCallback"
         :title="$t('bots.channels.webhookCallback')"
       >
-        <div class="mx-4 space-y-3 py-4">
+        <div class="space-y-3 py-4">
           <p class="text-xs text-muted-foreground">
             {{ $t(webhookCallbackHintKey) }}
           </p>
@@ -127,7 +127,7 @@
       >
         <p
           v-if="isFeishuWebhook"
-          class="mx-4 border-b border-border py-3 text-xs text-warning"
+          class="border-b border-border py-3 text-xs text-warning"
         >
           {{ $t('bots.channels.feishuWebhookSecurityHint') }}
         </p>
@@ -161,13 +161,17 @@
             <DialogTitle>{{ $t('bots.channels.advancedTitle') }}</DialogTitle>
           </DialogHeader>
           <DialogBody>
-            <ChannelField
-              v-for="[key, field] in optionalFields"
-              :key="key"
-              v-model="form.credentials[key]"
-              :field="field"
-              :field-key="key"
-            />
+            <!-- The dialog body already pads its content, so the fields take
+                 only the list's row rhythm, not a card's inset. -->
+            <SettingsList>
+              <ChannelField
+                v-for="[key, field] in optionalFields"
+                :key="key"
+                v-model="form.credentials[key]"
+                :field="field"
+                :field-key="key"
+              />
+            </SettingsList>
           </DialogBody>
         </DialogPanel>
       </Dialog>
@@ -208,7 +212,7 @@
 </template>
 
 <script setup lang="ts">
-import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
+import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, SettingsList, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@felinic/ui'

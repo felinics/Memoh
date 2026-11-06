@@ -29,7 +29,7 @@
            list and the live code on screen, so this keys off isPending, not isLoading. -->
       <div
         v-else-if="loadingBindings"
-        class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+        class="flex min-h-[3.75rem] items-center justify-center py-3"
       >
         <Spinner class="size-5 text-muted-foreground/50" />
       </div>
@@ -105,7 +105,7 @@
         <!-- Active link code with live countdown -->
         <div
           v-if="activeCode"
-          class="mx-4 space-y-2.5 border-b border-border py-4 last:border-b-0"
+          class="space-y-2.5 border-b border-border py-4 last:border-b-0"
         >
           <div class="flex items-center justify-between gap-2">
             <p class="text-xs text-muted-foreground">

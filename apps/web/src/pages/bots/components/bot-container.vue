@@ -980,7 +980,7 @@ watch([activeTab, botId], ([tab]) => {
         v-if="botLifecyclePending"
         class="mb-8"
       >
-        <div class="flex items-center gap-3 px-4 py-3">
+        <div class="flex items-center gap-3 py-3">
           <AlertCircle class="size-4 shrink-0 text-muted-foreground" />
           <p class="text-sm text-muted-foreground">
             {{ $t('bots.container.botNotReady') }}
@@ -996,7 +996,7 @@ watch([activeTab, botId], ([tab]) => {
              (flex-col, py-12) title + description + single CTA that fills the card
              frame. A SettingsRow is a horizontal label↔control pair; this is a
              different relationship (a vertical empty state), so it stays hand-written. -->
-        <div class="flex min-h-[3.75rem] flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+        <div class="flex min-h-[3.75rem] flex-col items-center justify-center gap-4 py-12 text-center">
           <div>
             <p class="text-sm font-medium text-foreground">
               {{ $t('bots.container.refactored.emptyTitle') }}
@@ -1164,7 +1164,7 @@ watch([activeTab, botId], ([tab]) => {
           <SettingsSection v-else>
             <!-- ui-allow-shape: single empty-state message, not a label/control row;
                  SettingsSection owns the surface in both themes. -->
-            <div class="flex min-h-[3.75rem] items-center px-4 py-3 text-sm text-muted-foreground">
+            <div class="flex min-h-[3.75rem] items-center py-3 text-sm text-muted-foreground">
               {{ runtimeMetricsNote || $t('bots.container.refactored.runtimeUnavailable') }}
             </div>
           </SettingsSection>
@@ -1531,7 +1531,7 @@ watch([activeTab, botId], ([tab]) => {
               class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border"
             >
               <!-- ui-allow-shape: a row INSIDE a self-contained bordered card
-                   (px-4 within the card, not the section's mx-4). SettingsRow is a
+                   (px-4 within the card, not the section's inset). SettingsRow is a
                    direct child of a section surface; these snapshot rows live one
                    level in, inside their own rounded frame — a different container
                    relationship, so they stay hand-written. -->

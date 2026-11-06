@@ -1427,6 +1427,9 @@
     & [data-settings-section-footer] {
       padding-bottom: --spacing(4);
     }
+    /* Rows that keep their divider; a row with divider=false never matched
+       the old .border-b and keeps its own padding. */
+    & [data-settings-row]:not([data-divider="false"]),
     & .border-b {
       border-bottom-width: 0;
       padding-block: --spacing(2);

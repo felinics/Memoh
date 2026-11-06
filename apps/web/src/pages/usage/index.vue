@@ -2,7 +2,7 @@
   <PageShell :title="$t('usage.title')">
     <div class="space-y-8">
       <SettingsSection :title="$t('usage.filters')">
-        <div class="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+        <div class="grid grid-cols-1 gap-4 py-4 sm:grid-cols-2">
           <div class="space-y-1.5">
             <p class="text-xs text-muted-foreground">
               {{ $t('usage.selectBot') }}
@@ -146,7 +146,7 @@
             </template>
             <VChart
               :key="modelChartType"
-              class="p-4"
+              class="py-4"
               style="height: 300px; width: 100%"
               :option="modelChartOption"
               autoresize
@@ -155,7 +155,7 @@
 
           <SettingsSection :title="$t('usage.dailyTokens')">
             <VChart
-              class="p-4"
+              class="py-4"
               style="height: 300px; width: 100%"
               :option="dailyTokensOption"
               autoresize
@@ -164,7 +164,7 @@
 
           <SettingsSection :title="$t('usage.cacheBreakdown')">
             <VChart
-              class="p-4"
+              class="py-4"
               style="height: 300px; width: 100%"
               :option="cacheBreakdownOption"
               autoresize
@@ -173,7 +173,7 @@
 
           <SettingsSection :title="$t('usage.cacheHitRate')">
             <VChart
-              class="p-4"
+              class="py-4"
               style="height: 300px; width: 100%"
               :option="cacheHitRateOption"
               autoresize

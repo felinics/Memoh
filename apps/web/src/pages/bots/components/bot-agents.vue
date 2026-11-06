@@ -31,7 +31,7 @@
       </SettingsSection>
 
       <SettingsSection v-else-if="agents.length === 0">
-        <div class="flex flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+        <div class="flex flex-col items-center justify-center gap-4 py-12 text-center">
           <div>
             <p class="text-control font-medium text-foreground">
               {{ t('bots.agent.emptyTitle') }}

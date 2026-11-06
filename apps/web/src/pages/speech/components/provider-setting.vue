@@ -162,7 +162,7 @@
 
         <div
           v-if="providerModels.length === 0"
-          class="px-4 py-10 text-center text-xs text-muted-foreground"
+          class="py-10 text-center text-xs text-muted-foreground"
         >
           {{ $t('speech.noModels') }}
         </div>

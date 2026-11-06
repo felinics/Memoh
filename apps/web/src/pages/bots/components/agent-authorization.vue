@@ -191,7 +191,7 @@ defineExpose({ handoff, resume })
   <p
     v-if="mode === 'claude_account' && error && !pending"
     role="alert"
-    class="px-4 text-sm text-destructive"
+    class="text-sm text-destructive"
   >
     {{ error }}
   </p>

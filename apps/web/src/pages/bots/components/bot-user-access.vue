@@ -1,9 +1,10 @@
 <template>
   <!-- `embedded` hands the card to the caller: the bot-creation form folds this
        list into its own Access Control section, so a SettingsSection here would
-       draw a second card inside the first. A plain <div> keeps the rows'
-       mx-4/py-3/border-b rhythm intact, and their last:border-b-0 still lands
-       because the members list is the last block in that card. -->
+       draw a second card inside the first. A plain <div> still sits inside the
+       caller's card, so the rows keep the card's inset and list rhythm, and the
+       last row still drops its hairline because the members list is the last
+       block in that card. -->
   <component :is="embedded ? 'div' : SettingsSection">
     <SettingsRow
       :label="$t('bots.access.userAccess.title')"
@@ -26,7 +27,7 @@
          are the house form column (FormStack → FieldStack). -->
     <div
       v-if="formVisible"
-      class="mx-4 border-b border-border py-4"
+      class="border-b border-border py-4"
     >
       <FormStack>
         <!-- Muted question-style labels are this form's own voice, so they ride

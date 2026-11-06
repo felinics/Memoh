@@ -319,7 +319,7 @@ function dependencyName(dep: AppDependencyItem): string {
         {{ t('apps.sections.dependencies') }}
         <span class="ml-1.5 font-normal text-muted-foreground">{{ dependencies.length }}</span>
       </h3>
-      <div class="divide-y divide-border rounded-lg border border-border bg-background">
+      <SettingsSection>
         <template
           v-for="dep in dependencies"
           :key="dep.id"
@@ -334,16 +334,17 @@ function dependencyName(dep: AppDependencyItem): string {
             @primary="emit('dependencyPrimary', dep.dependency, $event)"
             @menu="emit('dependencyMenu', dep.dependency, $event)"
           />
-          <div
-            v-else
-            class="flex items-center gap-2 px-3 py-2 text-body text-muted-foreground"
-          >
-            <AppIcon class="size-4" />
-            {{ dependencyName(dep) }}
-            <span class="text-caption">{{ t('apps.dependency.unknown') }}</span>
-          </div>
+          <SettingsRow v-else>
+            <template #content>
+              <div class="flex items-center gap-2 text-body text-muted-foreground">
+                <AppIcon class="size-4" />
+                {{ dependencyName(dep) }}
+                <span class="text-caption">{{ t('apps.dependency.unknown') }}</span>
+              </div>
+            </template>
+          </SettingsRow>
         </template>
-      </div>
+      </SettingsSection>
     </section>
 
     <section

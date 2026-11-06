@@ -418,9 +418,11 @@ onMounted(() => {
             v-else
             class="grid gap-3 grid-cols-1 sm:grid-cols-2"
           >
+            <!-- 这里是普通网格而非设置卡片,没有外壳提供行缩进,左右 16px 由调用处自己留 -->
             <ModelItem
               v-for="model in providerModels"
               :key="model.id || `${model.provider_id}:${model.model_id}`"
+              class="mx-4"
               :model="model"
               :delete-loading="deleteModelLoading"
               @edit="handleEditModel"

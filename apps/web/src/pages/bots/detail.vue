@@ -49,7 +49,7 @@
                 v-if="!botUnavailable"
                 class="mt-3"
               >
-                <div class="flex items-center gap-3 p-3">
+                <div class="flex items-center gap-3 py-3">
                   <!-- Avatar -->
                   <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
                     <Avatar class="size-12 rounded-full">

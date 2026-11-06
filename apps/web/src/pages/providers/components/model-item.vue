@@ -3,7 +3,7 @@
        right, separated from the next model by an inset hairline (the last row
        drops it). Same row language as the Configuration card above. -->
   <div
-    class="mx-4 flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-border py-2.5 last:border-b-0"
+    class="flex min-h-[3.25rem] items-center justify-between gap-3 border-b border-border py-2.5 last:border-b-0"
     :class="{ 'opacity-60': !enabled }"
   >
     <!-- A hair of left padding so the name doesn't sit dead-flush on the row's
