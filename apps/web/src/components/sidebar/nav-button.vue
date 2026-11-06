@@ -5,7 +5,7 @@
        "experiment" 版本证明它已经变过一次,趁 0 漂移锁住。
        几何契约:容器 px-2 + 按钮 px-[11px] + 18px 图标把 glyph 放在 x=19、
        label 放在 x=45,与 nav tab / session 行共享图标列;图标由调用方以
-       size-[18px] stroke-width 1.75 传入默认插槽。 -->
+       size-[18px] 传入默认插槽。 -->
   <Button
     variant="ghost"
     block

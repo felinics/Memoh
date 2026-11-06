@@ -2,9 +2,13 @@ import { h } from 'vue'
 import type { LucideIcon } from 'lucide-vue-next'
 import { createLucideIcon, Paperclip, SquareArrowOutUpRight, Plus, ChevronDown, ChevronLeft, ChevronRight, PanelLeftOpen, PanelLeftClose, Terminal, Globe, Columns2, Rows2, Gauge, Info, Users } from 'lucide-vue-next'
 
-// Keep the default visual weight consistent across authored and Lucide glyphs.
+// Stroke for interface line icons, in units of the 24-unit viewBox. Set here
+// rather than inherited from lucide's default: the weight is a design decision
+// (README), and every glyph this module exports reads it.
+export const uiIconStrokeWidth = 2
+
 function withUiStroke(icon: LucideIcon): LucideIcon {
-  return (props, { attrs, slots }) => h(icon, { strokeWidth: 1.75, ...attrs, ...props }, slots)
+  return (props, { attrs, slots }) => h(icon, { strokeWidth: uiIconStrokeWidth, ...attrs, ...props }, slots)
 }
 
 // Heroicons cog-8-tooth; path data preserved from optimized/24/outline.
@@ -26,7 +30,7 @@ export const ConnectorIcon = withUiStroke(createLucideIcon('Connector', [
 export const UploadIcon = withUiStroke(Paperclip)
 
 // Download into a rounded tray. The open silhouette spans 18 units so it
-// remains legible in a 12px slot, with the shared 1.75-unit stroke weight.
+// remains legible in a 12px slot at the shared stroke weight.
 export const UpdateIcon = withUiStroke(createLucideIcon('Update', [
   ['path', { d: 'M3 15v1c0 3.6 1.4 5 5 5h8c3.6 0 5-1.4 5-5v-1' }],
   ['path', { d: 'M12 3v12m-4.5-4.5L12 15l4.5-4.5' }],
@@ -51,13 +55,14 @@ export const ComputerIcon = withUiStroke(createLucideIcon('Computer', [
 // inside the same r=10 circle the settings nav's Account / Appearance / About
 // use, so the Personal group reads as one family instead of one wide keyboard.
 // The arrowhead is a touch shorter and heavier than the shaft so it reads as
-// the point of the glyph at 16px instead of a second, equal-weight corner.
-// Its stroke-width is fixed in viewBox units, so the 1.75 : 2 ratio holds at
-// every size only while callers leave absoluteStrokeWidth off (none use it).
+// the point of the glyph at 16px instead of a second, equal-weight corner: its
+// stroke is the shared stroke × 8/7. That width is fixed in viewBox units, so
+// the ratio holds at every size only while callers leave absoluteStrokeWidth
+// off (none use it).
 export const ShortcutIcon = withUiStroke(createLucideIcon('Shortcut', [
   ['circle', { cx: '12', cy: '12', r: '10' }],
   ['path', { d: 'M8.75 15.25 15.25 8.75' }],
-  ['path', { 'd': 'M10.5 8.75h4.75v4.75', 'stroke-width': '2' }],
+  ['path', { 'd': 'M10.5 8.75h4.75v4.75', 'stroke-width': (uiIconStrokeWidth * 8 / 7).toFixed(2) }],
 ]))
 
 export const TerminalIcon = withUiStroke(Terminal)
@@ -76,8 +81,8 @@ export const SidebarCloseIcon = withUiStroke(PanelLeftClose)
 // The window outline anchors the opening gesture at small control sizes.
 export const OpenInTabIcon = withUiStroke(SquareArrowOutUpRight)
 
-// Account-menu set (sidebar footer): plain lucide glyphs lifted to the shared
-// 1.75 stroke so the menu matches surfaces built from this module.
+// Account-menu set (sidebar footer): plain lucide glyphs taken through the
+// shared stroke so the menu matches surfaces built from this module.
 // Usage is the same gauge the settings sidebar uses for its Usage page, so the
 // menu entry and the page it leads to carry one mark.
 export const UsageIcon = withUiStroke(Gauge)
@@ -87,7 +92,7 @@ export const UsersIcon = withUiStroke(Users)
 // (18u → 15.75u span — the door-plus-arrow silhouette filled the 24-unit
 // frame edge to edge and read a size up from its row siblings), then
 // mirrored horizontally (x → 24 − x) so the door opens left and the arrow
-// exits left. Geometry changes, stroke stays 1.75.
+// exits left. Only the geometry changes; the stroke is the shared one.
 export const LogoutIcon = withUiStroke(createLucideIcon('Logout', [
   ['path', { d: 'M8.5 16.375l-4.375-4.375 4.375-4.375' }],
   ['path', { d: 'M4.125 12H14.625' }],
@@ -100,11 +105,12 @@ export const LogoutIcon = withUiStroke(createLucideIcon('Logout', [
 // as a colon. Here the "!" floats centered with air above and below, the stem
 // is parallel-sided and a hair lighter than the ring (it is short, so at the
 // ring's width it read heavier), and the dot is only slightly wider than the
-// stem so both read as one weight. The ring keeps lucide's stroke 2 rather
-// than the shared 1.75: the mark was tuned at 14px against lucide's
-// warning/info glyphs that sit beside it in the same banners.
-export const ErrorIcon = createLucideIcon('Error', [
+// stem so both read as one weight. Proportions were tuned at 14px against
+// lucide's warning/info glyphs that sit beside it in the same banners. The
+// stem and dot are fills sized against a ring stroked at 2; re-tune them if
+// the shared stroke changes.
+export const ErrorIcon = withUiStroke(createLucideIcon('Error', [
   ['circle', { cx: '12', cy: '12', r: '10.29' }],
   ['rect', { x: '11.06', y: '7.37', width: '1.89', height: '5.66', rx: '0.94', fill: 'currentColor', stroke: 'none' }],
   ['circle', { cx: '12', cy: '16.29', r: '1.11', fill: 'currentColor', stroke: 'none' }],
-])
+]))
