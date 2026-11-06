@@ -28,6 +28,17 @@ import { DEFAULT_MERMAID_THEME, isMermaidTheme, type MermaidTheme } from './merm
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 
+// Which keystroke sends from the chat composer. 'enter' sends on a bare Enter
+// (Shift+Enter breaks the line); 'mod-enter' makes Enter a line break and sends
+// on Ctrl+Enter / ⌘+Enter.
+export const COMPOSER_SEND_KEYS = ['enter', 'mod-enter'] as const
+export type ComposerSendKey = typeof COMPOSER_SEND_KEYS[number]
+export const DEFAULT_COMPOSER_SEND_KEY: ComposerSendKey = 'enter'
+
+export function isComposerSendKey(value: unknown): value is ComposerSendKey {
+  return typeof value === 'string' && (COMPOSER_SEND_KEYS as readonly string[]).includes(value)
+}
+
 export interface Settings {
   language: Locale;
   theme: ThemePreference;
@@ -39,6 +50,7 @@ export interface Settings {
   shikiThemeLight: BundledTheme;
   shikiThemeDark: BundledTheme;
   mermaidTheme: MermaidTheme;
+  composerSendKey: ComposerSendKey;
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -60,6 +72,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const shikiThemeLight = useStorage<BundledTheme>('shiki-theme-light', DEFAULT_SHIKI_THEME_LIGHT)
   const shikiThemeDark = useStorage<BundledTheme>('shiki-theme-dark', DEFAULT_SHIKI_THEME_DARK)
   const mermaidTheme = useStorage<MermaidTheme>('mermaid-theme', DEFAULT_MERMAID_THEME)
+  const composerSendKey = useStorage<ComposerSendKey>('composer-send-key', DEFAULT_COMPOSER_SEND_KEY)
   const uiFontStack = computed(() => cssFontFamilyDeclaration(uiFontFamily.value, DEFAULT_UI_FONT_FAMILY))
   const codeFontStack = computed(() => cssCodeFontFamilyStyleValue(codeFontFamily.value))
   const shikiThemes = computed(() => ({ light: shikiThemeLight.value, dark: shikiThemeDark.value }))
@@ -101,6 +114,9 @@ export const useSettingsStore = defineStore('settings', () => {
   shikiThemeDark.value = normalizeShikiTheme(shikiThemeDark.value, 'dark')
   if (!isMermaidTheme(mermaidTheme.value)) {
     mermaidTheme.value = DEFAULT_MERMAID_THEME
+  }
+  if (!isComposerSendKey(composerSendKey.value)) {
+    composerSendKey.value = DEFAULT_COMPOSER_SEND_KEY
   }
   normalizeTypographySettings()
 
@@ -195,6 +211,11 @@ export const useSettingsStore = defineStore('settings', () => {
     mermaidTheme.value = value
   }
 
+  const setComposerSendKey = (value: ComposerSendKey) => {
+    if (!isComposerSendKey(value)) return
+    composerSendKey.value = value
+  }
+
   return {
     language,
     theme,
@@ -209,6 +230,7 @@ export const useSettingsStore = defineStore('settings', () => {
     resolvedColorMode,
     isDark,
     mermaidTheme,
+    composerSendKey,
     defaultUiFontFamily,
     defaultCodeFontFamily,
     uiFontStack,
@@ -222,6 +244,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setCodeFontSizePx,
     setShikiTheme,
     setMermaidTheme,
+    setComposerSendKey,
   }
 })
 

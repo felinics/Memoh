@@ -651,7 +651,7 @@
     "usage": "Usage",
     "people": "Members",
     "appearance": "Appearance",
-    "keyboard": "Keyboard Shortcuts",
+    "keyboard": "Keyboard",
     "supermarket": "Supermarket",
     "about": "About",
     "userMenu": "Account menu",
@@ -828,7 +828,10 @@
       "mermaidThemeAuto": "Follow appearance"
     },
     "keyboard": {
-      "title": "Keyboard Shortcuts",
+      "title": "Keyboard",
+      "chat": "Chat",
+      "sendKey": "Send with",
+      "sendKeyDescription": "{key} inserts a line break",
       "resetAll": "Reset all",
       "scopes": {
         "workspace": "Workspace",
