@@ -575,7 +575,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ,
   CONSTRAINT bot_sessions_attention_kind_check
-    CHECK (attention_kind IS NULL OR attention_kind IN ('reply', 'failed', 'needs_input')),
+    CHECK (attention_kind IS NULL OR attention_kind IN ('reply', 'failed', 'needs_input', 'update')),
   CONSTRAINT bot_sessions_runtime_reset_pair_check CHECK (
     (runtime_reset_token IS NULL) = (runtime_reset_expires_at IS NULL)
   )
@@ -896,6 +896,13 @@ CREATE INDEX IF NOT EXISTS idx_lifecycle_events_event_type ON lifecycle_events(e
 
 CREATE TABLE IF NOT EXISTS schedule (
   max_run_seconds integer NOT NULL DEFAULT 3600 CHECK (max_run_seconds BETWEEN 300 AND 86400),
+  -- Who a fire tells. notify_policy 'important' raises the owner's unread
+  -- attention only when the run asks for it (notify_user), fails or waits for a
+  -- decision; 'every_run' also raises it on every completed run.
+  -- contact_via_channels lets the run reach the owner on the bot's social
+  -- platforms; off adds a note to the trigger prompt saying it need not.
+  notify_policy TEXT NOT NULL DEFAULT 'important' CHECK (notify_policy IN ('important', 'every_run')),
+  contact_via_channels BOOLEAN NOT NULL DEFAULT true,
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   description TEXT NOT NULL,
@@ -1024,6 +1031,7 @@ CREATE TABLE IF NOT EXISTS schedule_logs (
 
 CREATE INDEX IF NOT EXISTS idx_schedule_logs_schedule ON schedule_logs(schedule_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_schedule_logs_bot ON schedule_logs(bot_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_schedule_logs_session ON schedule_logs(session_id) WHERE session_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_providers_provider_template_id ON providers(provider_template_id);
 

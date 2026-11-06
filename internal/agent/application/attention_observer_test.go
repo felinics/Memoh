@@ -90,3 +90,48 @@ func TestAttentionWithoutMarkerIsNoop(_ *testing.T) {
 	service.markTerminalAttention(context.Background(), sessionruntime.TerminalRun{RunID: "r1", SessionID: "s1", State: "completed", Applied: true})
 	service.markWaitingAttention(context.Background(), "bot", "s1")
 }
+
+// scheduledAttentionMarker also answers whether a run is a quiet scheduled
+// completion, as the attention service does.
+type scheduledAttentionMarker struct {
+	recordingAttentionMarker
+	quietRuns map[string]bool
+	err       error
+}
+
+func (m *scheduledAttentionMarker) QuietCompletion(_ context.Context, runID string) (bool, error) {
+	return m.quietRuns[runID], m.err
+}
+
+func TestScheduledRunsReplyOnlyWhenTheirScheduleAsks(t *testing.T) {
+	cases := []struct {
+		name     string
+		terminal sessionruntime.TerminalRun
+		readErr  error
+		want     []markCall
+	}{
+		{"quiet scheduled completion", sessionruntime.TerminalRun{RunID: "quiet", SessionID: "s1", State: "completed", Applied: true}, nil, nil},
+		{"user run in the same session", sessionruntime.TerminalRun{RunID: "user", SessionID: "s1", State: "completed", Applied: true}, nil, []markCall{{"s1", attention.KindReply}}},
+		{"quiet scheduled run that failed", sessionruntime.TerminalRun{RunID: "quiet", SessionID: "s1", State: "failed", Applied: true}, nil, []markCall{{"s1", attention.KindFailed}}},
+		{"policy unreadable", sessionruntime.TerminalRun{RunID: "quiet", SessionID: "s1", State: "completed", Applied: true}, errors.New("db down"), []markCall{{"s1", attention.KindReply}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			marker := &scheduledAttentionMarker{quietRuns: map[string]bool{"quiet": true}, err: tc.readErr}
+			logger, _ := captureLogs()
+			service := &Service{logger: logger}
+			service.SetAttentionMarker(marker)
+
+			service.markTerminalAttention(context.Background(), tc.terminal)
+
+			if len(marker.calls) != len(tc.want) {
+				t.Fatalf("Mark calls = %+v, want %+v", marker.calls, tc.want)
+			}
+			for i := range tc.want {
+				if marker.calls[i] != tc.want[i] {
+					t.Fatalf("Mark call %d = %+v, want %+v", i, marker.calls[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

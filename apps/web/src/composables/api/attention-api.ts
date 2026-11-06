@@ -5,7 +5,7 @@ import {
 } from '@memohai/sdk'
 import { fetchSSEProblem } from './sse-error'
 
-export type AttentionKind = 'reply' | 'failed' | 'needs_input' | 'marked'
+export type AttentionKind = 'reply' | 'failed' | 'needs_input' | 'update' | 'marked'
 
 /** One unread session as the server reports it. Never carries message text. */
 export interface UnreadSessionWire {
@@ -18,6 +18,8 @@ export interface UnreadSessionWire {
   read_through?: string
   /** The user marked it unread themselves. */
   marked?: boolean
+  /** The schedule whose run created the session, when a schedule did. */
+  schedule_id?: string
 }
 
 /** One session's desired read state; `through` is required to read. */

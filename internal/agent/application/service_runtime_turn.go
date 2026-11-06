@@ -630,12 +630,14 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		return schedule.TriggerResult{}, err
 	}
 	schedulePrompt := native.GenerateSchedulePrompt(native.Schedule{
-		ID:          payload.ID,
-		Name:        payload.Name,
-		Description: payload.Description,
-		Pattern:     payload.Pattern,
-		MaxCalls:    payload.MaxCalls,
-		Command:     payload.Command,
+		ID:               payload.ID,
+		Name:             payload.Name,
+		Description:      payload.Description,
+		Pattern:          payload.Pattern,
+		MaxCalls:         payload.MaxCalls,
+		Command:          payload.Command,
+		NoChannelContact: payload.NoChannelContact,
+		NotifiesEveryRun: payload.NotifiesEveryRun,
 	})
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, s.runtimeContextAgentID(ctx, runtimeType, sess), projectPath)
 	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)

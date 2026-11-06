@@ -5,7 +5,7 @@ import { useUnreadStore, type UnreadEntry } from '@/store/unread'
 import { useChatStore } from '@/store/chat-list'
 import { useNotificationSettings } from '@/store/notification-settings'
 import { isSessionViewed } from './useSessionViewing'
-import { sessionAttentionPath } from '@/utils/session-attention'
+import { attentionFocusOf, sessionAttentionPath } from '@/utils/session-attention'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 
 /** Only live attention is eligible. Other tabs may be viewing it, even when this tab is hidden. */
@@ -53,7 +53,8 @@ export function useSessionNotifications() {
     const title = `${bot?.display_name || bot?.name || 'Memoh'} · ${entry.title || t('chat.untitledSession')}`.slice(0, 256)
     const body = t(`notifications.kind.${entry.kind}`)
     if (settings.desktop) {
-      await window.api?.desktop?.notify?.({ ...entry, title, body })
+      const focus = attentionFocusOf(entry)
+      await window.api?.desktop?.notify?.({ ...entry, title, body, notice: focus.notice, scheduleId: focus.scheduleId })
       return
     }
     const send = () => {
@@ -69,7 +70,7 @@ export function useSessionNotifications() {
       notification.onclick = () => {
         notification.close()
         window.focus()
-        void router.push(sessionAttentionPath(entry.botId, entry.sessionId))
+        void router.push(sessionAttentionPath(entry.botId, entry.sessionId, attentionFocusOf(entry)))
       }
     }
     if (navigator.locks) await navigator.locks.request('memoh-system-notification', send)

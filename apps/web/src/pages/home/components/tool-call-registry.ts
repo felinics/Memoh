@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   AudioLines,
+  BellRing,
   Bot,
   Boxes,
   Braces,
@@ -169,7 +170,7 @@ const BUCKETS: Array<[ToolBucket, Set<string>]> = [
   ])],
   ['edit', new Set(['write', 'edit', 'apply_patch'])],
   ['run', new Set(['exec'])],
-  ['message', new Set(['send', 'react', 'speak'])],
+  ['message', new Set(['send', 'react', 'speak', 'notify_user'])],
   ['schedule', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
   ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
   ['agent', new Set(['spawn_agent', 'send_message', 'list_agents'])],
@@ -197,7 +198,7 @@ export type SummaryFragment = 'fileOperations' | 'searches' | 'commands' | 'mess
 const FRAGMENT_TOOLS: Array<[SummaryFragment, Set<string>]> = [
   ['fileOperations', new Set(['read', 'list', 'write', 'edit', 'apply_patch'])],
   ['commands', new Set(['exec'])],
-  ['messages', new Set(['send', 'react', 'speak'])],
+  ['messages', new Set(['send', 'react', 'speak', 'notify_user'])],
   ['schedules', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
   ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
   ['agents', new Set(['spawn_agent', 'send_message', 'list_agents'])],
@@ -1033,6 +1034,9 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         target: pickString(input, 'name', 'id'),
         expandable: true,
       }
+    case 'notify_user':
+      // No arguments: the call itself is the whole message ("told you about this run").
+      return { icon: BellRing, actionKey: 'notify_user', target: '', expandable: true }
     case 'delete_schedule':
       return {
         icon: CalendarMinus,

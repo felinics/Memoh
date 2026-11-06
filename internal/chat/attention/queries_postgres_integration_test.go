@@ -127,7 +127,7 @@ func TestPostgresMarkSessionAttentionEligibility(t *testing.T) {
 		{"web chat", sessionSpec{creator: creator}, true},
 		{"local channel", sessionSpec{creator: creator, channelType: strp("local")}, true},
 		{"external agent", sessionSpec{sessionType: "acp_agent", creator: creator}, true},
-		{"schedule", sessionSpec{sessionType: "schedule", creator: creator}, false},
+		{"schedule run", sessionSpec{sessionType: "schedule", creator: creator}, true},
 		{"discuss", sessionSpec{sessionType: "discuss", creator: creator}, false},
 		{"subagent", sessionSpec{sessionType: "subagent", creator: creator}, false},
 		{"internal", sessionSpec{visibility: "internal", creator: creator}, false},

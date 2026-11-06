@@ -18061,6 +18061,10 @@ const docTemplate = `{
                     "description": "ReadThrough is the through a client sends to read it: it covers both the\nattention and a manual unread mark.",
                     "type": "string"
                 },
+                "schedule_id": {
+                    "description": "ScheduleID names the schedule whose run created the session, so a\nclient can show one schedule's unread runs as one entry.",
+                    "type": "string"
+                },
                 "session_id": {
                     "type": "string"
                 },
@@ -18075,12 +18079,14 @@ const docTemplate = `{
                 "reply",
                 "failed",
                 "needs_input",
+                "update",
                 "marked"
             ],
             "x-enum-varnames": [
                 "KindReply",
                 "KindFailed",
                 "KindNeedsInput",
+                "KindUpdate",
                 "KindMarked"
             ]
         },
@@ -26571,6 +26577,10 @@ const docTemplate = `{
                 "command": {
                     "type": "string"
                 },
+                "contact_via_channels": {
+                    "description": "ContactViaChannels defaults to true.",
+                    "type": "boolean"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -26590,6 +26600,14 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "notify_policy": {
+                    "description": "NotifyPolicy defaults to important.",
+                    "type": "string",
+                    "enum": [
+                        "important",
+                        "every_run"
+                    ]
                 },
                 "pattern": {
                     "type": "string"
@@ -26806,6 +26824,10 @@ const docTemplate = `{
                 "command": {
                     "type": "string"
                 },
+                "contact_via_channels": {
+                    "description": "ContactViaChannels leaves the bot free to reach the owner on its social\nplatforms when a run has something for them.",
+                    "type": "boolean"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -26834,6 +26856,14 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "notify_policy": {
+                    "description": "NotifyPolicy is when a run tells the owner in Memoh: important (only\nwhen the run asks to, fails or waits for a decision) or every_run.",
+                    "type": "string",
+                    "enum": [
+                        "important",
+                        "every_run"
+                    ]
                 },
                 "pattern": {
                     "type": "string"
@@ -26869,6 +26899,9 @@ const docTemplate = `{
                 "command": {
                     "type": "string"
                 },
+                "contact_via_channels": {
+                    "type": "boolean"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -26888,6 +26921,14 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "notify_policy": {
+                    "description": "NotifyPolicy and ContactViaChannels keep their stored value when absent.",
+                    "type": "string",
+                    "enum": [
+                        "important",
+                        "every_run"
+                    ]
                 },
                 "pattern": {
                     "type": "string"

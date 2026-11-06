@@ -45,6 +45,7 @@ import { Button, PanePlaceholder } from '@felinic/ui'
 import { CHAT_ROUTE_NAMES } from '@/constants/chat-routes'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore } from '@/store/unread'
+import { useAttentionFocusStore } from '@/store/attention-focus'
 import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useComposerPrefillStore } from '@/store/composer-prefill'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
@@ -60,6 +61,7 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const unread = useUnreadStore()
 const workspaceTabs = useWorkspaceTabsStore()
+const attentionFocus = useAttentionFocusStore()
 const { currentBotId, bots, activeSession } = storeToRefs(chatStore)
 const composerPrefill = useComposerPrefillStore()
 
@@ -351,8 +353,19 @@ watch(
     if (botName !== botId && botName !== bot?.name) return
     workspaceTabs.openSessionChat({ sessionId })
     workspaceTabs.closeMobileNav()
+    // The link was opened by the user, so it may bring what it points at into
+    // view: the notice the run raised, and a schedule run's place in the
+    // schedule panel.
+    if (route.query.notice === '1') attentionFocus.noticeSessionId = sessionId
+    const scheduleId = typeof route.query.schedule === 'string' ? route.query.schedule.trim() : ''
+    if (scheduleId) {
+      workspaceTabs.selectSidebarView('schedule')
+      attentionFocus.scheduleRun = { scheduleId, sessionId }
+    }
     const query = { ...route.query }
     delete query.session
+    delete query.notice
+    delete query.schedule
     await router.replace({ query })
   },
   { flush: 'post' },

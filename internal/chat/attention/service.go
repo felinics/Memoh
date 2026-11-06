@@ -29,6 +29,9 @@ const (
 	KindReply      Kind = "reply"
 	KindFailed     Kind = "failed"
 	KindNeedsInput Kind = "needs_input"
+	// KindUpdate is a scheduled run that called notify_user: it has something
+	// the user should see, unasked.
+	KindUpdate Kind = "update"
 	// KindMarked is a session the user marked unread that never needed
 	// attention on its own.
 	KindMarked Kind = "marked"
@@ -65,6 +68,9 @@ type Attention struct {
 	// Marked is true when the user marked the session unread themselves; such
 	// a session is not read just because it is already on screen.
 	Marked bool `json:"marked"`
+	// ScheduleID names the schedule whose run created the session, so a
+	// client can show one schedule's unread runs as one entry.
+	ScheduleID string `json:"schedule_id,omitempty"`
 } // @name attention.Attention
 
 // ReadStateChange is one session's desired read state. Through is required
@@ -89,6 +95,8 @@ type Queries interface {
 	MarkSessionsUnread(ctx context.Context, arg dbsqlc.MarkSessionsUnreadParams) ([]dbsqlc.MarkSessionsUnreadRow, error)
 	ListUnreadSessionsForUser(ctx context.Context, arg dbsqlc.ListUnreadSessionsForUserParams) ([]dbsqlc.ListUnreadSessionsForUserRow, error)
 	ListSessionAttentionForUser(ctx context.Context, arg dbsqlc.ListSessionAttentionForUserParams) ([]dbsqlc.ListSessionAttentionForUserRow, error)
+	GetActiveScheduleFireForSession(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.GetActiveScheduleFireForSessionRow, error)
+	GetScheduleNotifyPolicyForRun(ctx context.Context, runID pgtype.UUID) (dbsqlc.GetScheduleNotifyPolicyForRunRow, error)
 }
 
 type Service struct {
@@ -106,8 +114,7 @@ func NewService(queries Queries, publisher event.Publisher, now func() time.Time
 
 // Mark records that a session needs its creator's attention now and tells
 // that user. changed is false, with no event, when the session is not one
-// that raises attention (schedule, discuss, IM, internal, deleted, no
-// creator) or was already marked at least as late — which makes replays of
+// that raises attention (discuss, IM, internal, deleted, no creator) or was already marked at least as late — which makes replays of
 // the same run harmless.
 func (s *Service) Mark(ctx context.Context, sessionID string, kind Kind) (bool, error) {
 	id, err := db.ParseUUID(sessionID)
@@ -132,6 +139,7 @@ func (s *Service) Mark(ctx context.Context, sessionID string, kind Kind) (bool, 
 		Kind:        Kind(row.AttentionKind.String),
 		At:          row.AttentionAt.Time,
 		ReadThrough: row.AttentionAt.Time,
+		ScheduleID:  uuidString(row.ScheduleID),
 	})
 	return true, nil
 }
@@ -197,6 +205,7 @@ func (s *Service) SetReadState(ctx context.Context, userID string, changes []Rea
 			At:          r.AttentionAt.Time,
 			ReadThrough: r.ReadThrough.Time,
 			Marked:      r.Marked,
+			ScheduleID:  uuidString(r.ScheduleID),
 		}
 		out = append(out, item)
 		s.publish(userID, event.EventTypeSessionUnread, item)
@@ -224,6 +233,7 @@ func (s *Service) ListUnread(ctx context.Context, userID string) ([]Attention, e
 			At:          r.AttentionAt.Time,
 			ReadThrough: r.ReadThrough.Time,
 			Marked:      r.Marked,
+			ScheduleID:  uuidString(r.ScheduleID),
 		})
 	}
 	return out, nil
@@ -261,6 +271,13 @@ func (s *Service) Annotate(ctx context.Context, userID string, threads []thread.
 		}
 	}
 	return threads, nil
+}
+
+func uuidString(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return id.String()
 }
 
 func (s *Service) publish(userID string, typ event.EventType, payload any) {

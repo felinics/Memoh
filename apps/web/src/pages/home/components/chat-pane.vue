@@ -1310,6 +1310,8 @@ import { useWorkdirsStore } from '@/store/workdirs'
 import { useSettingsStore } from '@/store/settings'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useAttentionFocusStore } from '@/store/attention-focus'
+import { isNotifyNotice } from './notify-notice'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver, useLocalStorage } from '@vueuse/core'
 import { useRuntimeControls } from '@/composables/useRuntimeControls'
@@ -4063,6 +4065,31 @@ onActivated(() => {
 onDeactivated(() => {
   onDeactivatedResetScroll()
 })
+
+// Opening a notification the run raised with notify_user lands on its notice,
+// so the user sees what pointed them here. The request comes only from their
+// click (home's route watcher) and is honoured once this pane shows that
+// session's messages; the newest notice wins, as it is the one that notified.
+const attentionFocus = useAttentionFocusStore()
+watch(
+  () => [attentionFocus.noticeSessionId, props.sessionId, canReadSession.value, loadingMessages.value, messages.value.length] as const,
+  async ([target, sessionId, shown, loading, count]) => {
+    if (!target || target !== sessionId || !shown || loading || !count) return
+    attentionFocus.noticeSessionId = null
+    const message = messages.value.findLast(item => item.role === 'assistant' && item.messages.some(isNotifyNotice))
+    if (!message) return
+    await nextTick()
+    const notice = findMessageElement(message.id)?.querySelector<HTMLElement>('[data-slot="notify-notice"]')
+    if (!notice) {
+      await scrollToMessage(message.id)
+      return
+    }
+    markEscaped()
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    notice.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' })
+  },
+  { flush: 'post' },
+)
 
 async function handleReplyJump(messageId: string) {
   const target = messageId.trim()

@@ -1,6 +1,7 @@
 -- name: MarkSessionAttention :one
 -- Records that a session needs its creator's attention. The WHERE clause is
--- the whole eligibility rule (user-visible web chat sessions with a creator)
+-- the whole eligibility rule (user-visible web chat and schedule run sessions
+-- with a creator)
 -- plus a forward-only guard, so replays of the same run never re-notify: no
 -- row back means the session is ineligible or already marked at least as late.
 -- updated_at is deliberately left alone.
@@ -11,11 +12,14 @@ WHERE s.team_id = public.memoh_current_team_id()
   AND s.id = sqlc.arg(id)
   AND s.deleted_at IS NULL
   AND s.visibility = 'user'
-  AND s.type IN ('chat', 'acp_agent')
+  AND s.type IN ('chat', 'acp_agent', 'schedule')
   AND COALESCE(s.channel_type, '') IN ('', 'local')
   AND s.created_by_user_id IS NOT NULL
   AND (s.attention_at IS NULL OR s.attention_at < sqlc.arg(at)::timestamptz)
-RETURNING s.id, s.bot_id, s.created_by_user_id, s.title, s.attention_kind, s.attention_at;
+RETURNING s.id, s.bot_id, s.created_by_user_id, s.title, s.attention_kind, s.attention_at,
+  (SELECT l.schedule_id FROM schedule_logs l
+   WHERE s.type = 'schedule' AND l.team_id = s.team_id AND l.session_id = s.id
+   LIMIT 1) AS schedule_id;
 
 -- name: MarkSessionRead :one
 -- Moves a user's read cursor forward on a session they created; an older
@@ -37,14 +41,14 @@ RETURNING read_at;
 -- session keeps its own attention kind and time; one that never needed
 -- attention shows as "marked" at the moment it was marked.
 WITH eligible AS (
-  SELECT s.id, s.bot_id, s.title, s.attention_kind, s.attention_at
+  SELECT s.id, s.bot_id, s.team_id, s.type, s.title, s.attention_kind, s.attention_at
   FROM bot_sessions s
   WHERE s.team_id = public.memoh_current_team_id()
     AND s.id = ANY(sqlc.arg(session_ids)::uuid[])
     AND s.created_by_user_id = sqlc.arg(user_id)
     AND s.deleted_at IS NULL
     AND s.visibility = 'user'
-    AND s.type IN ('chat', 'acp_agent')
+    AND s.type IN ('chat', 'acp_agent', 'schedule')
     AND COALESCE(s.channel_type, '') IN ('', 'local')
 ), marked AS (
   INSERT INTO session_reads (user_id, session_id, marked_unread_at)
@@ -59,7 +63,10 @@ SELECT e.id AS session_id,
        COALESCE(e.attention_kind, 'marked')::text AS attention_kind,
        COALESCE(e.attention_at, m.marked_unread_at)::timestamptz AS attention_at,
        GREATEST(e.attention_at, m.marked_unread_at)::timestamptz AS read_through,
-       (m.marked_unread_at > COALESCE(m.read_at, '-infinity'))::bool AS marked
+       (m.marked_unread_at > COALESCE(m.read_at, '-infinity'))::bool AS marked,
+       (SELECT l.schedule_id FROM schedule_logs l
+        WHERE e.type = 'schedule' AND l.team_id = e.team_id AND l.session_id = e.id
+        LIMIT 1) AS schedule_id
 FROM eligible e
 JOIN marked m ON m.session_id = e.id;
 
@@ -73,7 +80,10 @@ SELECT s.id AS session_id,
        COALESCE(s.attention_kind, 'marked')::text AS attention_kind,
        COALESCE(s.attention_at, r.marked_unread_at)::timestamptz AS attention_at,
        GREATEST(s.attention_at, r.marked_unread_at)::timestamptz AS read_through,
-       COALESCE(r.marked_unread_at > COALESCE(r.read_at, '-infinity'), false)::bool AS marked
+       COALESCE(r.marked_unread_at > COALESCE(r.read_at, '-infinity'), false)::bool AS marked,
+       (SELECT l.schedule_id FROM schedule_logs l
+        WHERE s.type = 'schedule' AND l.team_id = s.team_id AND l.session_id = s.id
+        LIMIT 1) AS schedule_id
 FROM bot_sessions s
 LEFT JOIN session_reads r
   ON r.team_id = s.team_id AND r.session_id = s.id AND r.user_id = sqlc.arg(user_id)
@@ -81,7 +91,7 @@ WHERE s.team_id = public.memoh_current_team_id()
   AND s.created_by_user_id = sqlc.arg(user_id)
   AND s.deleted_at IS NULL
   AND s.visibility = 'user'
-  AND s.type IN ('chat', 'acp_agent')
+  AND s.type IN ('chat', 'acp_agent', 'schedule')
   AND COALESCE(s.channel_type, '') IN ('', 'local')
   AND (s.attention_at > COALESCE(r.read_at, '-infinity')
        OR r.marked_unread_at > COALESCE(r.read_at, '-infinity'))

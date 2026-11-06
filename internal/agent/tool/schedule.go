@@ -70,6 +70,9 @@ func (*ScheduleProvider) Usage(_ context.Context, _ SessionContext, available Av
 			parts = append(parts, "Scheduled tasks can also run with "+strings.Join(execHints, ", ")+", a `reasoning_effort` override, or inside an existing session (`session_id`).")
 		}
 	}
+	if _, ok := available.Ref(ToolCreateSchedule()); ok {
+		parts = append(parts, "Memoh tells the user about a scheduled run by its `notify_policy`: with `important`, the run decides for itself through `notify_user`, a tool that exists only inside such runs and not in this conversation; with `every_run`, every finished run tells them. Failures and approvals always reach the user.")
+	}
 	if ref, ok := available.Ref(ToolListSchedule()); ok {
 		parts = append(parts, "Use "+ref+" to list scheduled tasks.")
 	}
@@ -129,9 +132,9 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]t
 			}),
 		},
 		{
-			Name: ToolCreateSchedule().String(), Description: "Create a new cron-scheduled task. Fill `command` with a natural-language instruction; when the cron `pattern` fires, the task runs and you receive a message containing that `command`. Include explicit platform and target in delivery instructions when results should be sent to a person or channel. Set `max_calls` to null for unlimited runs. " +
+			Name: ToolCreateSchedule().String(), Description: "Create a new cron-scheduled task. Fill `command` with a natural-language instruction; when the cron `pattern` fires, the task runs and you receive a message containing that `command`. Include explicit platform and target in delivery instructions when results should be sent to a person or channel. Set `max_calls` to null for unlimited runs. `notify_policy` decides when Memoh tells the user about a run. `important` (default): the run itself calls `notify_user` — a tool every such run has — when the result is worth telling, and failures or approvals always reach the user. Use it for any task whose result matters only sometimes (\"tell me if…\", monitoring, alerts), even while testing at a short interval. `every_run`: only when the user wants every result, such as a daily digest — not just to watch test runs; the end of each run is what tells the user, the run has no `notify_user`, so do not mention it in `command`. `notify_user` takes no arguments and carries no text: it only marks the run as having an update, and the user reads the run's reply. In `command`, say when the user should be told; do not write \"reply here only\" or \"don't send elsewhere\" for the user. Leave `contact_via_channels` (true) at its default unless the user asks otherwise. " +
 				"By default each fire runs in a fresh session with the bot's default model. Optional execution parameters: `session_id` runs every fire inside that existing session (its runtime and workdir are inherited; only model/effort overrides apply). For fresh sessions, `acp_agent_id` (from list_acp_agents) runs fires through an ACP agent — combine with `acp_model_id`; `model_id` (a model_uuid from list_models) picks a native model instead; `workdir_id` (from list_workdirs) pins the session's working directory. `reasoning_effort` overrides the effort in both modes.",
-			Parameters: toolexec.SchemaFor[createScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema("Optional max calls, null means unlimited")), toolexec.Range("max_run_seconds", 300, 86400)),
+			Parameters: toolexec.SchemaFor[createScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema("Optional max calls, null means unlimited")), toolexec.Range("max_run_seconds", 300, 86400), toolexec.Enum("notify_policy", sched.NotifyImportant, sched.NotifyEveryRun)),
 			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args createScheduleArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
@@ -150,6 +153,8 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]t
 				if args.Enabled != nil {
 					req.Enabled = args.Enabled
 				}
+				req.NotifyPolicy = strings.TrimSpace(args.NotifyPolicy)
+				req.ContactViaChannels = args.ContactViaChannels
 				item, err := p.service.Create(ctx.Context, botID, req)
 				if err != nil {
 					return sdk.ToolOutput{}, err
@@ -159,7 +164,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]t
 		},
 		{
 			Name: ToolUpdateSchedule().String(), Description: "Update an existing schedule. To change execution parameters (session_id / model_id / acp_agent_id / acp_model_id / reasoning_effort / workdir_id), set `update_execution` to true and pass the FULL desired execution state — the whole block is replaced as one unit, and omitted execution fields reset to their defaults.",
-			Parameters: toolexec.SchemaFor[updateScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema("")), toolexec.Range("max_run_seconds", 300, 86400)),
+			Parameters: toolexec.SchemaFor[updateScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema("")), toolexec.Range("max_run_seconds", 300, 86400), toolexec.Enum("notify_policy", sched.NotifyImportant, sched.NotifyEveryRun)),
 			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args updateScheduleArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
@@ -195,6 +200,10 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]t
 				if args.Enabled != nil {
 					req.Enabled = args.Enabled
 				}
+				if v := strings.TrimSpace(args.NotifyPolicy); v != "" {
+					req.NotifyPolicy = &v
+				}
+				req.ContactViaChannels = args.ContactViaChannels
 				if args.UpdateExecution {
 					exec := args.executionConfig()
 					req.Execution = &exec
@@ -313,37 +322,41 @@ type scheduleIDArgs struct {
 }
 
 type createScheduleArgs struct {
-	ACPAgentID      string           `json:"acp_agent_id,omitempty" jsonschema:"Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions."`
-	ACPModelID      string           `json:"acp_model_id,omitempty" jsonschema:"ACP agent model id (from list_acp_agents with agent_id). Requires acp_agent_id or an ACP session_id."`
-	Command         string           `json:"command"`
-	Description     string           `json:"description"`
-	Enabled         *bool            `json:"enabled,omitempty"`
-	MaxCalls        scheduleMaxCalls `json:"max_calls,omitempty" jsonschema:"Optional max calls, null means unlimited"`
-	MaxRunSeconds   int              `json:"max_run_seconds,omitempty" jsonschema:"Per-fire execution budget, default 3600 seconds. Overlapping fires are skipped."`
-	ModelID         string           `json:"model_id,omitempty" jsonschema:"Native model override: a model_uuid from list_models. Not valid together with acp_agent_id/acp_model_id."`
-	Name            string           `json:"name"`
-	Pattern         string           `json:"pattern"`
-	ReasoningEffort string           `json:"reasoning_effort,omitempty" jsonschema:"Reasoning effort override (native: none|minimal|low|medium|high|xhigh|max as supported by the model; ACP: the agent's effort ids)."`
-	SessionID       string           `json:"session_id,omitempty" jsonschema:"Run every fire in this existing session instead of a fresh one. The session's runtime and workdir are inherited."`
-	WorkdirID       string           `json:"workdir_id,omitempty" jsonschema:"Bind fresh sessions to this workdir (id from list_workdirs)."`
+	ACPAgentID         string           `json:"acp_agent_id,omitempty" jsonschema:"Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions."`
+	ACPModelID         string           `json:"acp_model_id,omitempty" jsonschema:"ACP agent model id (from list_acp_agents with agent_id). Requires acp_agent_id or an ACP session_id."`
+	Command            string           `json:"command"`
+	Description        string           `json:"description"`
+	Enabled            *bool            `json:"enabled,omitempty"`
+	MaxCalls           scheduleMaxCalls `json:"max_calls,omitempty" jsonschema:"Optional max calls, null means unlimited"`
+	MaxRunSeconds      int              `json:"max_run_seconds,omitempty" jsonschema:"Per-fire execution budget, default 3600 seconds. Overlapping fires are skipped."`
+	ModelID            string           `json:"model_id,omitempty" jsonschema:"Native model override: a model_uuid from list_models. Not valid together with acp_agent_id/acp_model_id."`
+	Name               string           `json:"name"`
+	NotifyPolicy       string           `json:"notify_policy,omitempty" jsonschema:"When Memoh tells the user about a run: important (default, recommended) only when the run calls notify_user, fails or waits for a decision; every_run after every run."`
+	ContactViaChannels *bool            `json:"contact_via_channels,omitempty" jsonschema:"Whether runs that have something for the user may also reach them on the bot's configured social platforms. Default true (recommended)."`
+	Pattern            string           `json:"pattern"`
+	ReasoningEffort    string           `json:"reasoning_effort,omitempty" jsonschema:"Reasoning effort override (native: none|minimal|low|medium|high|xhigh|max as supported by the model; ACP: the agent's effort ids)."`
+	SessionID          string           `json:"session_id,omitempty" jsonschema:"Run every fire in this existing session instead of a fresh one. The session's runtime and workdir are inherited."`
+	WorkdirID          string           `json:"workdir_id,omitempty" jsonschema:"Bind fresh sessions to this workdir (id from list_workdirs)."`
 }
 
 type updateScheduleArgs struct {
-	ACPAgentID      string           `json:"acp_agent_id,omitempty" jsonschema:"Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions."`
-	ACPModelID      string           `json:"acp_model_id,omitempty" jsonschema:"ACP agent model id (from list_acp_agents with agent_id)."`
-	Command         string           `json:"command,omitempty"`
-	Description     string           `json:"description,omitempty"`
-	Enabled         *bool            `json:"enabled,omitempty"`
-	ID              string           `json:"id"`
-	MaxCalls        scheduleMaxCalls `json:"max_calls,omitempty"`
-	MaxRunSeconds   int              `json:"max_run_seconds,omitempty" jsonschema:"Per-fire execution budget, default 3600 seconds. Overlapping fires are skipped."`
-	ModelID         string           `json:"model_id,omitempty" jsonschema:"Native model override: a model_uuid from list_models."`
-	Name            string           `json:"name,omitempty"`
-	Pattern         string           `json:"pattern,omitempty"`
-	ReasoningEffort string           `json:"reasoning_effort,omitempty" jsonschema:"Reasoning effort override."`
-	SessionID       string           `json:"session_id,omitempty" jsonschema:"Run every fire in this existing session. The session's runtime and workdir are inherited."`
-	UpdateExecution bool             `json:"update_execution,omitempty" jsonschema:"Set true to replace the execution parameter block with the values below."`
-	WorkdirID       string           `json:"workdir_id,omitempty" jsonschema:"Bind fresh sessions to this workdir (id from list_workdirs)."`
+	ACPAgentID         string           `json:"acp_agent_id,omitempty" jsonschema:"Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions."`
+	ACPModelID         string           `json:"acp_model_id,omitempty" jsonschema:"ACP agent model id (from list_acp_agents with agent_id)."`
+	Command            string           `json:"command,omitempty"`
+	Description        string           `json:"description,omitempty"`
+	Enabled            *bool            `json:"enabled,omitempty"`
+	ID                 string           `json:"id"`
+	MaxCalls           scheduleMaxCalls `json:"max_calls,omitempty"`
+	MaxRunSeconds      int              `json:"max_run_seconds,omitempty" jsonschema:"Per-fire execution budget, default 3600 seconds. Overlapping fires are skipped."`
+	ModelID            string           `json:"model_id,omitempty" jsonschema:"Native model override: a model_uuid from list_models."`
+	Name               string           `json:"name,omitempty"`
+	NotifyPolicy       string           `json:"notify_policy,omitempty" jsonschema:"When Memoh tells the user about a run: important only when the run calls notify_user, fails or waits for a decision; every_run after every run."`
+	ContactViaChannels *bool            `json:"contact_via_channels,omitempty" jsonschema:"Whether runs that have something for the user may also reach them on the bot's configured social platforms."`
+	Pattern            string           `json:"pattern,omitempty"`
+	ReasoningEffort    string           `json:"reasoning_effort,omitempty" jsonschema:"Reasoning effort override."`
+	SessionID          string           `json:"session_id,omitempty" jsonschema:"Run every fire in this existing session. The session's runtime and workdir are inherited."`
+	UpdateExecution    bool             `json:"update_execution,omitempty" jsonschema:"Set true to replace the execution parameter block with the values below."`
+	WorkdirID          string           `json:"workdir_id,omitempty" jsonschema:"Bind fresh sessions to this workdir (id from list_workdirs)."`
 }
 
 type deleteScheduleArgs struct {

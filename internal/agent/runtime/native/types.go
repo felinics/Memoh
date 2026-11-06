@@ -65,6 +65,12 @@ type Schedule struct {
 	Pattern     string `json:"pattern"`
 	MaxCalls    *int   `json:"maxCalls,omitempty"`
 	Command     string `json:"command"`
+	// NoChannelContact is a schedule whose owner turned off being reached on
+	// social platforms; the trigger says so.
+	NoChannelContact bool `json:"noChannelContact,omitempty"`
+	// NotifiesEveryRun is a schedule that tells its owner after every run;
+	// the trigger says the run's reply is what reaches them.
+	NotifiesEveryRun bool `json:"notifiesEveryRun,omitempty"`
 }
 
 // LoopDetectionConfig controls loop detection behavior.

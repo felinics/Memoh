@@ -60,6 +60,26 @@ describe('unread store', () => {
     expect(live).not.toHaveBeenCalled()
   })
 
+  it('folds live runs of one schedule into the row the summary already has', async () => {
+    const run = { bot_id: 'bot-a', title: 'Daily news', attention_kind: 'update', schedule_id: 'sch-1' } as const
+    api.fetchUnreadSessions.mockResolvedValue([{ ...run, session_id: 'r1', attention_at: '2026-10-16T08:00:00Z' }])
+    const stream = captureStream()
+    const store = useUnreadStore()
+    store.start()
+    await flush()
+
+    stream.emit({ type: 'session_attention', ...run, session_id: 'r2', attention_at: '2026-10-16T09:00:00Z' })
+    stream.emit({ type: 'session_attention', ...reply, attention_at: '2026-10-16T08:30:00Z' })
+    stream.emit({ type: 'session_attention', ...run, session_id: 'r3', attention_kind: 'failed', attention_at: '2026-10-16T10:00:00Z' })
+
+    expect(store.total).toBe(4)
+    expect(store.inboxGroups.map(group => [group.key, group.latest.sessionId, group.entries.length])).toEqual([
+      ['schedule:sch-1', 'r3', 3],
+      ['s1', 's1', 1],
+    ])
+    expect(store.bySchedule['sch-1']!.map(entry => entry.kind)).toEqual(['failed', 'update', 'update'])
+  })
+
   it('adds live attention and tells listeners', async () => {
     const stream = captureStream()
     const store = useUnreadStore()
@@ -288,6 +308,24 @@ describe('unread store', () => {
     api.setReadState.mockResolvedValue([{ ...reply, read_through: '2026-10-16T10:00:00Z', marked: true }, { ...second, read_through: '2026-10-16T10:00:00Z', marked: true }])
     await store.markUnread(cleared)
     expect(store.total).toBe(2)
+  })
+
+  it('reads only the sessions it is given', async () => {
+    const second = { ...reply, session_id: 's2', attention_at: '2026-10-16T09:00:00Z' }
+    api.fetchUnreadSessions.mockResolvedValue([reply, second])
+    captureStream()
+    const store = useUnreadStore()
+    store.start()
+    await flush()
+
+    expect(await store.markSessionsRead(['s2', 'gone'])).toEqual(['s2'])
+    expect(api.setReadState).toHaveBeenCalledWith([{ session_id: 's2', unread: false, through: second.attention_at }])
+    expect(store.isUnread('s1')).toBe(true)
+    expect(store.isUnread('s2')).toBe(false)
+
+    api.setReadState.mockClear()
+    expect(await store.markSessionsRead(['gone'])).toEqual([])
+    expect(api.setReadState).not.toHaveBeenCalled()
   })
 
   it('restores the inbox when reading everything fails', async () => {

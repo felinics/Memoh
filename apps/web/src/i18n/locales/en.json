@@ -1291,6 +1291,7 @@
       "update_schedule_disable": "Disable schedule",
       "update_schedule_execution": "Replace schedule execution",
       "delete_schedule": "Delete schedule",
+      "notify_user": "Notified you",
       "speak": "Speak",
       "transcribe_audio": "Transcribe",
       "generate_image": "Generate image",
@@ -1836,6 +1837,10 @@
         "budgetLimited": "Token budget reached",
         "complete": "Goal completed"
       }
+    },
+    "notifyNotice": {
+      "title": "Notified you",
+      "description": "This run shows in Needs you"
     }
   },
   "chatExamples": {
@@ -3936,6 +3941,17 @@
         "failed": "This run failed",
         "notStarted": "This run did not start, so it has no conversation",
         "empty": "No runs yet"
+      },
+      "notify": {
+        "title": "Notifications",
+        "inApp": "Notify me in Memoh",
+        "important": "When it needs me",
+        "everyRun": "After every run",
+        "importantHelp": "The bot decides whether a run is worth telling you. Failures and confirmations always notify you.",
+        "everyRunHelp": "Every finished run notifies you.",
+        "contact": "Reach me on configured platforms when there is an update",
+        "noPlatforms": "This bot is not on any platform yet",
+        "configurePlatforms": "Configure platforms"
       }
     },
     "history": {
@@ -4534,8 +4550,11 @@
       "reply": "Reply ready",
       "failed": "Run failed",
       "needs_input": "Waiting for your input",
+      "update": "Update",
       "marked": "Marked unread"
     },
-    "browserSettingsTitle": "Browser notifications"
+    "browserSettingsTitle": "Browser notifications",
+    "unreadRuns": "{count} unread",
+    "fromSchedule": "Scheduled task"
   }
 }

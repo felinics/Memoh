@@ -284,13 +284,11 @@ import {
   getBotsByBotIdTokenUsage,
   getBotsByBotIdContainer,
   getBotsByBotIdContainerMetrics,
-  getChannels,
-  getBotsByIdChannelByPlatform,
   type HandlersChannelMeta,
-  type ChannelChannelConfig,
   type HandlersDailyTokenUsage,
 } from '@memohai/sdk'
 import { useBotQuery } from '@/composables/api/useBot'
+import { useBotChannels } from '@/composables/api/useBotChannels'
 import BotChecksPanel from './bot-checks-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
@@ -300,12 +298,6 @@ import { buildRuntimeMetricCards } from '@/utils/format-bytes'
 import { formatDateTime } from '@/utils/date-time'
 
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
-
-interface BotChannelItem {
-  meta: HandlersChannelMeta
-  config: ChannelChannelConfig | null
-  configured: boolean
-}
 
 const route = useRoute()
 const router = useRouter()
@@ -337,27 +329,9 @@ const { data: memoryStatus, isLoading: memoryLoading } = useQuery({
   enabled: () => !!botId.value,
 })
 
-// Shares the colada key with bot-channels.vue, so visiting Platforms after
+// Shares one query with bot-channels.vue, so visiting Platforms after
 // Overview (or vice versa) reuses the cached probe instead of refetching.
-const { data: channels, isLoading: channelsLoading } = useQuery({
-  key: () => ['bot-channels', botId.value],
-  query: async (): Promise<BotChannelItem[]> => {
-    const { data: metas } = await getChannels({ throwOnError: true })
-    if (!metas) return []
-    const configurableTypes = metas.filter((m) => !m.configless)
-    return Promise.all(
-      configurableTypes.map(async (meta) => {
-        try {
-          const { data: config } = await getBotsByIdChannelByPlatform({ path: { id: botId.value, platform: meta.type ?? '' }, throwOnError: true })
-          return { meta, config: config ?? null, configured: true }
-        } catch {
-          return { meta, config: null, configured: false }
-        }
-      }),
-    )
-  },
-  enabled: () => !!botId.value,
-})
+const { data: channels, isLoading: channelsLoading } = useBotChannels(botId)
 
 const configuredChannels = computed(() => (channels.value ?? []).filter((c) => c.configured))
 

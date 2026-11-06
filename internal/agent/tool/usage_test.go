@@ -212,6 +212,7 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolListACPAgents():   "self-describing two-tier listing tool; schedule Usage references it",
 		ToolGenerateVideo():   "self-describing media generation tool",
 		ToolTranscribeAudio(): "self-describing media transcription tool",
+		ToolNotifyUser():      "self-describing parameterless tool, registered only in a schedule run that tells its owner on request",
 	}
 
 	for _, name := range BuiltInToolNames() {
@@ -951,7 +952,7 @@ func TestScheduleProviderUsageGatesRegisteredTools(t *testing.T) {
 	if !strings.Contains(got, "explicit `platform` and `target`") {
 		t.Fatalf("Usage with create_schedule/send should require explicit delivery target in scheduled commands, got:\n%s", got)
 	}
-	for _, want := range []string{"effective timezone", "end the turn", "do not wait", "poll schedules or messages"} {
+	for _, want := range []string{"effective timezone", "end the turn", "do not wait", "poll schedules or messages", "`notify_policy`", "only inside such runs and not in this conversation"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with create_schedule should contain %q, got:\n%s", want, got)
 		}

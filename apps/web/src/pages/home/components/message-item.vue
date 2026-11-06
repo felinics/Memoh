@@ -290,6 +290,9 @@
               :block="node.block"
             />
 
+            <!-- A run's notify_user call: what the user was pointed at. -->
+            <ChatNotifyNotice v-else-if="node.kind === 'notice'" />
+
             <template v-else>
               <!-- Text block -->
               <!-- Block rhythm is owned by style.css (.markstream-vue
@@ -504,6 +507,8 @@ import CollapsibleUserText from './collapsible-user-text.vue'
 import MessageActions from './message-actions.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import DependencyMissingBlock from './dependency-missing-block.vue'
+import ChatNotifyNotice from './chat-notify-notice.vue'
+import { isNotifyNotice } from './notify-notice'
 import { isDependencyMissingBlock } from './dependency-missing'
 import { errorBlockText } from './error-block'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
@@ -1031,8 +1036,9 @@ function noticeBlockContent(block: { name?: string; content: string; args?: Reco
 // Text, errors, attachments and completed questions retain their own positions.
 type ProcessNode = { kind: 'process'; key: string; items: ContentBlock[]; lastIndex: number }
 type AnswersNode = { kind: 'answers'; key: string; block: ToolCallBlockType; index: number }
+type NoticeNode = { kind: 'notice'; key: string; index: number }
 type BlockNode = { kind: 'block'; key: string; block: ContentBlock; index: number }
-type RenderNode = ProcessNode | AnswersNode | BlockNode
+type RenderNode = ProcessNode | AnswersNode | NoticeNode | BlockNode
 
 // A completed ask_user is content, not process: it carries the Q&A record, so
 // it breaks out of the tool group and renders as an answers card in the text
@@ -1062,6 +1068,11 @@ const renderNodes = computed<RenderNode[]>(() => {
     if (block.type === 'tool' && isCompletedAskUser(block)) {
       run = null
       nodes.push({ kind: 'answers', key: `a${block.id}`, block, index })
+      return
+    }
+    if (isNotifyNotice(block)) {
+      run = null
+      nodes.push({ kind: 'notice', key: `n${block.id}`, index })
       return
     }
     if (block.type === 'tool' || block.type === 'reasoning') {

@@ -25,6 +25,16 @@ export interface UnreadEntry {
   readThrough: string
   /** Marked unread by the user; only reopening the session reads it. */
   marked: boolean
+  /** The schedule whose run created the session; its unread runs share one inbox row. */
+  scheduleId?: string
+}
+
+/** One "Needs you" row: a session, or every unread run of one schedule. */
+export interface InboxGroup {
+  key: string
+  /** The newest entry; the row opens it and shows its title and time. */
+  latest: UnreadEntry
+  entries: UnreadEntry[]
 }
 
 
@@ -37,6 +47,7 @@ function fromWire(item: UnreadSessionWire): UnreadEntry {
     attentionAt: item.attention_at,
     readThrough: item.read_through || item.attention_at,
     marked: item.marked === true,
+    scheduleId: item.schedule_id || undefined,
   }
 }
 
@@ -71,6 +82,34 @@ export const useUnreadStore = defineStore('unread', () => {
   })
   const inbox = computed(() => Object.values(entries.value)
     .sort((a, b) => Date.parse(b.attentionAt) - Date.parse(a.attentionAt)))
+  /** The inbox with each schedule's unread runs folded into one row, newest first. */
+  const inboxGroups = computed<InboxGroup[]>(() => {
+    const groups: InboxGroup[] = []
+    const bySchedule = new Map<string, InboxGroup>()
+    for (const entry of inbox.value) {
+      if (!entry.scheduleId) {
+        groups.push({ key: entry.sessionId, latest: entry, entries: [entry] })
+        continue
+      }
+      const group = bySchedule.get(entry.scheduleId)
+      if (group) {
+        group.entries.push(entry)
+        continue
+      }
+      const created = { key: `schedule:${entry.scheduleId}`, latest: entry, entries: [entry] }
+      bySchedule.set(entry.scheduleId, created)
+      groups.push(created)
+    }
+    return groups
+  })
+  /** Unread run sessions per schedule, for the schedule cards. */
+  const bySchedule = computed(() => {
+    const out: Record<string, UnreadEntry[]> = {}
+    for (const entry of inbox.value) {
+      if (entry.scheduleId) (out[entry.scheduleId] ??= []).push(entry)
+    }
+    return out
+  })
 
   function isUnread(sessionId: string) {
     return sessionId in entries.value
@@ -220,7 +259,16 @@ export const useUnreadStore = defineStore('unread', () => {
    * back if the request fails; the returned ids feed markUnread for an undo.
    */
   async function markAllRead(): Promise<string[]> {
-    const cleared = Object.values(entries.value)
+    return markSessionsRead(Object.keys(entries.value))
+  }
+
+  /**
+   * Reads the given unread sessions in one request, the way markAllRead reads
+   * all of them; sessions that are not unread are skipped. Returns the ids it
+   * read, for an undo through markUnread.
+   */
+  async function markSessionsRead(sessionIds: string[]): Promise<string[]> {
+    const cleared = sessionIds.map(id => entries.value[id]).filter((entry): entry is UnreadEntry => !!entry)
     if (!cleared.length) return []
     for (const entry of cleared) remove(entry.sessionId)
     try {
@@ -248,5 +296,5 @@ export const useUnreadStore = defineStore('unread', () => {
     return () => listeners.delete(listener)
   }
 
-  return { entries, total, countByBot, inbox, isUnread, kindOf, isFresh, start, stop, reset, markRead, markAllRead, markUnread, onAttention }
+  return { entries, total, countByBot, inbox, inboxGroups, bySchedule, isUnread, kindOf, isFresh, start, stop, reset, markRead, markAllRead, markSessionsRead, markUnread, onAttention }
 })

@@ -650,6 +650,11 @@ definitions:
           ReadThrough is the through a client sends to read it: it covers both the
           attention and a manual unread mark.
         type: string
+      schedule_id:
+        description: |-
+          ScheduleID names the schedule whose run created the session, so a
+          client can show one schedule's unread runs as one entry.
+        type: string
       session_id:
         type: string
       title:
@@ -660,12 +665,14 @@ definitions:
     - reply
     - failed
     - needs_input
+    - update
     - marked
     type: string
     x-enum-varnames:
     - KindReply
     - KindFailed
     - KindNeedsInput
+    - KindUpdate
     - KindMarked
   attention.ReadStateChange:
     properties:
@@ -6589,6 +6596,9 @@ definitions:
         type: string
       command:
         type: string
+      contact_via_channels:
+        description: ContactViaChannels defaults to true.
+        type: boolean
       description:
         type: string
       enabled:
@@ -6603,6 +6613,12 @@ definitions:
         description: ModelID is a native model UUID override (models.id).
         type: string
       name:
+        type: string
+      notify_policy:
+        description: NotifyPolicy defaults to important.
+        enum:
+        - important
+        - every_run
         type: string
       pattern:
         type: string
@@ -6778,6 +6794,11 @@ definitions:
         type: string
       command:
         type: string
+      contact_via_channels:
+        description: |-
+          ContactViaChannels leaves the bot free to reach the owner on its social
+          platforms when a run has something for them.
+        type: boolean
       created_at:
         type: string
       current_calls:
@@ -6798,6 +6819,14 @@ definitions:
         description: ModelID is a native model UUID override (models.id).
         type: string
       name:
+        type: string
+      notify_policy:
+        description: |-
+          NotifyPolicy is when a run tells the owner in Memoh: important (only
+          when the run asks to, fails or waits for a decision) or every_run.
+        enum:
+        - important
+        - every_run
         type: string
       pattern:
         type: string
@@ -6829,6 +6858,8 @@ definitions:
     properties:
       command:
         type: string
+      contact_via_channels:
+        type: boolean
       description:
         type: string
       enabled:
@@ -6845,6 +6876,13 @@ definitions:
       max_calls:
         $ref: '#/definitions/schedule.NullableInt'
       name:
+        type: string
+      notify_policy:
+        description: NotifyPolicy and ContactViaChannels keep their stored value when
+          absent.
+        enum:
+        - important
+        - every_run
         type: string
       pattern:
         type: string

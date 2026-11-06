@@ -22,6 +22,13 @@
           <p class="truncate text-control font-normal leading-snug text-foreground">
             {{ item.name }}
           </p>
+          <!-- Unread runs show on the card, so a folded card still says it has news. -->
+          <BadgeCount
+            v-if="unreadCount"
+            :count="unreadCount"
+            :variant="attentionBadgeVariant(unreadKinds)"
+            class="shrink-0"
+          />
           <span
             v-if="timeLabel || running"
             class="flex shrink-0 items-center gap-1 text-caption tabular-nums text-muted-foreground"
@@ -68,6 +75,15 @@
               <Pencil />
               {{ t('bots.schedule.edit') }}
             </DropdownMenuItem>
+            <!-- Runs that each made a session pile up as unread; reading one
+                 leaves the rest, so the card offers to read them all. -->
+            <DropdownMenuItem
+              v-if="expandable && unreadCount"
+              @select="$emit('readAll')"
+            >
+              <CheckCheck />
+              {{ t('notifications.clearAll') }}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
@@ -98,9 +114,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { CheckCheck, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import {
   AutoHeight,
+  BadgeCount,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -111,6 +128,8 @@ import {
   Switch,
 } from '@felinic/ui'
 import type { ScheduleSchedule } from '@memohai/sdk'
+import type { AttentionKind } from '@/composables/api/attention-api'
+import { attentionBadgeVariant } from '@/utils/session-attention'
 
 withDefaults(defineProps<{
   item: ScheduleSchedule
@@ -124,6 +143,9 @@ withDefaults(defineProps<{
   pinnedSession?: boolean
   /** A run of this schedule is executing right now. */
   running?: boolean
+  /** Unread sessions of this schedule's runs (or its one conversation). */
+  unreadCount?: number
+  unreadKinds?: AttentionKind[]
 }>(), {
   timeLabel: '',
   busy: false,
@@ -131,11 +153,14 @@ withDefaults(defineProps<{
   expanded: false,
   pinnedSession: false,
   running: false,
+  unreadCount: 0,
+  unreadKinds: () => [],
 })
 
 defineEmits<{
   open: []
   edit: []
+  readAll: []
   delete: []
   toggle: [enabled: boolean]
 }>()
