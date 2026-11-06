@@ -688,3 +688,9 @@ func TestResolveOpenCodeGoReasoningKeepsProviderPolicy(t *testing.T) {
 func (*modelSelectionFakeQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
 	return 0, nil
 }
+
+// SaveSessionRunResumeContext accepts the resume intent every fenced run
+// records.
+func (*modelSelectionFakeQueries) SaveSessionRunResumeContext(context.Context, sqlc.SaveSessionRunResumeContextParams) (int64, error) {
+	return 1, nil
+}

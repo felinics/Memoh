@@ -24,7 +24,6 @@ const (
 	ToolHeaderSessionType        = "X-Memoh-Session-Type"
 	ToolHeaderRouteID            = "X-Memoh-Route-Id"
 	ToolHeaderChannelIdentityID  = "X-Memoh-Channel-Identity-Id"
-	ToolHeaderSessionToken       = "X-Memoh-Session-Token" //nolint:gosec // G101: HTTP header name, not a credential.
 	ToolHeaderCurrentPlatform    = "X-Memoh-Current-Platform"
 	ToolHeaderReplyTarget        = "X-Memoh-Reply-Target"
 	ToolHeaderConversationType   = "X-Memoh-Conversation-Type"
@@ -60,7 +59,6 @@ func ToolSessionContextFromHTTP(req *http.Request, fallbackBotID string) ToolSes
 		SessionType:        firstNonEmptyHTTPHeader(req, ToolHeaderSessionType),
 		RouteID:            firstNonEmptyHTTPHeader(req, ToolHeaderRouteID),
 		ChannelIdentityID:  firstNonEmptyHTTPHeader(req, ToolHeaderChannelIdentityID),
-		SessionToken:       strings.TrimSpace(req.Header.Get(ToolHeaderSessionToken)),
 		CurrentPlatform:    strings.TrimSpace(req.Header.Get(ToolHeaderCurrentPlatform)),
 		ReplyTarget:        strings.TrimSpace(req.Header.Get(ToolHeaderReplyTarget)),
 		ConversationType:   strings.TrimSpace(req.Header.Get(ToolHeaderConversationType)),

@@ -16,7 +16,6 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/felinics/memoh/internal/apperror"
-	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/boot"
 	"github.com/felinics/memoh/internal/botagents"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
@@ -73,7 +72,6 @@ type Service struct {
 	workdirs        WorkdirValidator
 	botAgents       *botagents.Service
 	events          messageevent.Publisher
-	jwtSecret       string
 	logger          *slog.Logger
 	defaultLocation *time.Location
 	mu              sync.Mutex
@@ -109,7 +107,6 @@ func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, 
 		triggerer:       triggerer,
 		sessionCreator:  sessionCreator,
 		workdirs:        workdirs,
-		jwtSecret:       runtimeConfig.JwtSecret,
 		logger:          log.With(slog.String("service", "schedule")),
 		defaultLocation: location,
 		jobs:            map[string]cron.EntryID{},
@@ -348,8 +345,6 @@ func (s *Service) Trigger(ctx context.Context, scheduleID string) error {
 	return s.runSchedule(ctx, sched)
 }
 
-const scheduleTokenTTL = 10 * time.Minute
-
 // Execution budgets are independent of the runtime selected by a schedule.
 func runTimeoutFor(sched Schedule) time.Duration {
 	if sched.MaxRunSeconds > 0 {
@@ -413,12 +408,6 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		return sessionErr
 	}
 
-	token, err := s.generateTriggerToken(ownerUserID, time.Until(deadline)+5*time.Minute)
-	if err != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", failureCode(err), nil, pgtype.UUID{})
-		return fmt.Errorf("generate trigger token: %w", err)
-	}
-
 	result, triggerErr := s.triggerer.TriggerSchedule(ctx, sched.BotID, TriggerPayload{
 		ID:              sched.ID,
 		FireID:          logRow.ID.String(),
@@ -432,7 +421,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		ModelID:         sched.ModelID,
 		RuntimeModelID:  sched.ACPModelID,
 		ReasoningEffort: sched.ReasoningEffort,
-	}, token)
+	})
 	triggerErr = withExecutionTimeout(ctx, triggerErr)
 	if triggerErr != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", failureCode(triggerErr), nil, pgtype.UUID{})
@@ -719,22 +708,6 @@ func (s *Service) resolveBotOwner(ctx context.Context, botID string) (string, er
 		return "", errors.New("bot owner not found")
 	}
 	return ownerID, nil
-}
-
-// generateTriggerToken creates a short-lived JWT for schedule trigger callbacks.
-func (s *Service) generateTriggerToken(userID string, durations ...time.Duration) (string, error) {
-	if strings.TrimSpace(s.jwtSecret) == "" {
-		return "", errors.New("jwt secret not configured")
-	}
-	ttl := scheduleTokenTTL
-	if len(durations) > 0 && durations[0] > ttl {
-		ttl = durations[0]
-	}
-	signed, _, err := auth.GenerateToken(userID, s.jwtSecret, ttl)
-	if err != nil {
-		return "", err
-	}
-	return "Bearer " + signed, nil
 }
 
 func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error {

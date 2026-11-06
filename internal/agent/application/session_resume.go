@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/accounts"
@@ -28,23 +27,28 @@ import (
 // original admission input. It contains no JWTs, provider keys or tool outputs.
 // The admission fingerprint still names the original request, unchanged.
 type resumeContext struct {
-	Version           int               `json:"version"`
-	Query             string            `json:"query"`
-	ChatID            string            `json:"chat_id"`
-	UserID            string            `json:"user_id"`
-	ChannelIdentityID string            `json:"channel_identity_id,omitempty"`
-	CurrentChannel    string            `json:"current_channel,omitempty"`
-	ReplyTarget       string            `json:"reply_target,omitempty"`
-	ConversationType  string            `json:"conversation_type,omitempty"`
-	Model             string            `json:"model,omitempty"`
-	ReasoningEffort   string            `json:"reasoning_effort,omitempty"`
-	WorkspaceTargetID string            `json:"workspace_target_id,omitempty"`
-	SessionType       string            `json:"session_type,omitempty"`
-	ToolHTTPURL       string            `json:"tool_http_url,omitempty"`
-	TokenClaims       map[string]string `json:"token_claims,omitempty"`
-	ChatClaims        map[string]string `json:"chat_claims,omitempty"`
-	DeadlineAt        *time.Time        `json:"deadline_at,omitempty"`
-	RequestMessageID  string            `json:"request_message_id,omitempty"`
+	Version           int    `json:"version"`
+	Query             string `json:"query"`
+	ChatID            string `json:"chat_id"`
+	UserID            string `json:"user_id"`
+	ChannelIdentityID string `json:"channel_identity_id,omitempty"`
+	CurrentChannel    string `json:"current_channel,omitempty"`
+	ReplyTarget       string `json:"reply_target,omitempty"`
+	ConversationType  string `json:"conversation_type,omitempty"`
+	Model             string `json:"model,omitempty"`
+	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
+	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
+	SessionType       string `json:"session_type,omitempty"`
+	ToolHTTPURL       string `json:"tool_http_url,omitempty"`
+	// ActorAccountID is the account the run acted for; a resume authorizes
+	// it again before it runs.
+	ActorAccountID string `json:"actor_account_id,omitempty"`
+	// TokenClaims and ChatClaims are what earlier releases recorded instead:
+	// the scope of the bearer the run carried. They are read, never written.
+	TokenClaims      map[string]string `json:"token_claims,omitempty"`
+	ChatClaims       map[string]string `json:"chat_claims,omitempty"`
+	DeadlineAt       *time.Time        `json:"deadline_at,omitempty"`
+	RequestMessageID string            `json:"request_message_id,omitempty"`
 	// Version 2 carries an External Discuss batch instead of a query: the
 	// resume admits it again behind its instructions.
 	DiscussMessages       []turn.DiscussMessage       `json:"discuss_messages,omitempty"`
@@ -70,15 +74,13 @@ func decodeRunAdmission(raw []byte) (runAdmission, error) {
 // that may clear (workspace readiness, database errors) stay unwrapped.
 var errResumeUnrecoverable = errors.New("interrupted session cannot resume")
 
-func (s *Service) SetResumeSecret(secret string) { s.resumeSecret = secret }
-
 // SetResumeReadiness checks workspace transport before claiming a continuation.
 func (s *Service) SetResumeReadiness(check func(context.Context, string, string) error) {
 	s.resumeReady = check
 }
 
 func (s *Service) recordRunResumeContext(ctx context.Context, req ChatRequest) error {
-	if s.resumeSecret == "" || s.queries == nil || req.RunID == "" || req.ShutdownResume {
+	if s.queries == nil || req.RunID == "" || req.ShutdownResume {
 		return nil
 	}
 	fence, ok := runtimefence.FromContext(ctx)
@@ -91,16 +93,10 @@ func (s *Service) recordRunResumeContext(ctx context.Context, req ChatRequest) e
 		CurrentChannel: req.CurrentChannel, ReplyTarget: req.ReplyTarget,
 		ConversationType: req.ConversationType, Model: req.Model, ReasoningEffort: req.ReasoningEffort,
 		WorkspaceTargetID: req.WorkspaceTargetID, SessionType: req.SessionType, ToolHTTPURL: req.ToolHTTPURL,
+		ActorAccountID: strings.TrimSpace(req.ActorAccountID),
 	}
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		data.RequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
-	}
-	var err error
-	if data.TokenClaims, err = s.resumeClaims(req.Token); err != nil {
-		return err
-	}
-	if data.ChatClaims, err = s.resumeClaims(req.ChatToken); err != nil {
-		return err
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		data.DeadlineAt = &deadline
@@ -125,78 +121,57 @@ func (s *Service) recordRunResumeContext(ctx context.Context, req ChatRequest) e
 	return nil
 }
 
-// Persist only an allowlisted scope after authenticating the original token.
-// Expiration and signatures are renewed after restart, never copied to storage.
-func (s *Service) resumeClaims(bearer string) (map[string]string, error) {
-	raw := strings.TrimSpace(strings.TrimPrefix(bearer, "Bearer "))
-	if raw == "" {
-		return nil, nil
+// actorAccountID is the account a resume authorizes: the one the run
+// recorded, or for a run recorded by an earlier release the account of the
+// bearer it carried.
+func (data resumeContext) actorAccountID() string {
+	if actor := strings.TrimSpace(data.ActorAccountID); actor != "" {
+		return actor
 	}
-	token, err := jwt.Parse(raw, func(_ *jwt.Token) (any, error) { return []byte(s.resumeSecret), nil }, jwt.WithValidMethods([]string{"HS256"}))
-	if err != nil || !token.Valid {
-		return nil, errors.New("invalid session credential for resume")
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, errors.New("invalid session credential claims")
-	}
-	out := map[string]string{}
-	for _, key := range []string{"sub", "user_id", "typ", "bot_id", "chat_id", "route_id", "channel_identity_id"} {
-		if value, ok := claims[key].(string); ok && value != "" {
-			out[key] = value
+	if data.TokenClaims["typ"] != "chat_route" {
+		if actor := strings.TrimSpace(data.TokenClaims["user_id"]); actor != "" {
+			return actor
 		}
+		return strings.TrimSpace(data.TokenClaims["sub"])
 	}
-	return out, nil
+	return ""
 }
 
-func (s *Service) renewResumeCredential(ctx context.Context, botID string, claims map[string]string) (string, error) {
-	if len(claims) == 0 {
-		return "", nil
+// authorizeResume checks again, before a resume runs, that the account the
+// run acted for is active and may still chat with the bot. A run of an
+// earlier release that carried only a chat-route scope must name this bot.
+func (s *Service) authorizeResume(ctx context.Context, botID string, data resumeContext) error {
+	actor := data.actorAccountID()
+	if actor == "" {
+		if claims := data.ChatClaims; len(claims) > 0 && (claims["bot_id"] != botID || claims["chat_id"] == "") {
+			return fmt.Errorf("%w: resume credential scope mismatch", errResumeUnrecoverable)
+		}
+		return nil
 	}
-	if claims["typ"] == "chat_route" {
-		if claims["bot_id"] != botID || claims["chat_id"] == "" {
-			return "", fmt.Errorf("%w: resume credential scope mismatch", errResumeUnrecoverable)
-		}
-	} else {
-		accountID := claims["user_id"]
-		if accountID == "" {
-			accountID = claims["sub"]
-		}
-		if s.accountService == nil || s.botPermissions == nil {
-			return "", errors.New("resume authorization unavailable")
-		}
-		if err := s.accountService.ValidateSession(ctx, accountID); err != nil {
-			if errors.Is(err, accounts.ErrInactiveAccount) {
-				return "", fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
-			}
-			return "", err
-		}
-		allowed, err := s.botPermissions.HasBotPermission(ctx, botID, accountID, bots.PermissionChat)
-		if err != nil {
-			return "", err
-		}
-		if !allowed {
-			return "", fmt.Errorf("%w: resume permission revoked", errResumeUnrecoverable)
-		}
+	if s.accountService == nil || s.botPermissions == nil {
+		return errors.New("resume authorization unavailable")
 	}
-	renewed := jwt.MapClaims{}
-	for key, value := range claims {
-		renewed[key] = value
+	if err := s.accountService.ValidateSession(ctx, actor); err != nil {
+		if errors.Is(err, accounts.ErrInactiveAccount) {
+			return fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
+		}
+		return err
 	}
-	renewed["iat"] = time.Now().Unix()
-	renewed["exp"] = time.Now().Add(24 * time.Hour).Unix()
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, renewed).SignedString([]byte(s.resumeSecret))
+	allowed, err := s.botPermissions.HasBotPermission(ctx, botID, actor, bots.PermissionChat)
 	if err != nil {
-		return "", err
+		return err
 	}
-	return "Bearer " + token, nil
+	if !allowed {
+		return fmt.Errorf("%w: resume permission revoked", errResumeUnrecoverable)
+	}
+	return nil
 }
 
 // StartSessionResume probes the scope catalog before launching a bounded worker.
 // The worker retains a cursor per current tenant instead of querying tenant data
 // from the startup context. Run contexts retain the same binding after detaching.
 func (s *Service) StartSessionResume(ctx context.Context) error {
-	if s.queries == nil || s.sessionManager == nil || s.resumeSecret == "" {
+	if s.queries == nil || s.sessionManager == nil {
 		return nil
 	}
 	scopes := s.sessionResumeScopes()
@@ -390,12 +365,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 			return nil, err
 		}
 	}
-	token, err := s.renewResumeCredential(ctx, row.BotID.String(), data.TokenClaims)
-	if err != nil {
-		return nil, err
-	}
-	chatToken, err := s.renewResumeCredential(ctx, row.BotID.String(), data.ChatClaims)
-	if err != nil {
+	if err := s.authorizeResume(ctx, row.BotID.String(), *data); err != nil {
 		return nil, err
 	}
 	if ctx.Err() != nil {
@@ -430,7 +400,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		BotID: row.BotID.String(), ThreadID: row.SessionID.String(), ChatID: data.ChatID,
 		RunID: admission.RunID, RunHandle: admission.Handle, TurnID: admission.TurnID, TurnPosition: &admission.TurnPosition,
 		Query: resumeInstruction + data.Query, UserID: data.UserID, SourceChannelIdentityID: data.ChannelIdentityID,
-		Token: token, ChatToken: chatToken, CurrentChannel: data.CurrentChannel, ReplyTarget: data.ReplyTarget,
+		ActorAccountID: data.actorAccountID(), CurrentChannel: data.CurrentChannel, ReplyTarget: data.ReplyTarget,
 		ConversationType: data.ConversationType, Model: data.Model, ReasoningEffort: data.ReasoningEffort,
 		WorkspaceTargetID: data.WorkspaceTargetID, SessionType: data.SessionType, ToolHTTPURL: data.ToolHTTPURL,
 		UserMessagePersisted: true, SkipMemoryExtraction: true, SkipTitleGeneration: true, ShutdownResume: true,
@@ -479,7 +449,7 @@ func (s *Service) RecordSubagentResume(ctx context.Context, session tools.Sessio
 	return s.recordRunResumeContext(ctx, ChatRequest{
 		BotID: session.BotID, ThreadID: sessionID, RunID: handle.RunID,
 		ChatID: session.ChatID, UserID: session.UserID, SourceChannelIdentityID: session.ChannelIdentityID,
-		ChatToken: session.SessionToken, CurrentChannel: session.CurrentPlatform, ReplyTarget: session.ReplyTarget,
+		ActorAccountID: session.ActorAccountID, CurrentChannel: session.CurrentPlatform, ReplyTarget: session.ReplyTarget,
 		ConversationType: session.ConversationType, WorkspaceTargetID: session.WorkspaceTargetID, Query: query, Model: model, SessionType: "subagent",
 	})
 }

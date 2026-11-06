@@ -59,7 +59,6 @@ func (h wsStepHistoryHarness) startProcess(t *testing.T) resumeProcess {
 	t.Helper()
 	manager := h.restarted(t)
 	service, _ := newWSStepHistoryService(t, wsStepHistorySuccess, postgresstore.NewQueriesWithPool(h.pool, dbsqlc.New(h.pool)), manager)
-	service.SetResumeSecret("history-reset-resume")
 	service.SetSessionResumeScopeProvider(singletonSessionResumeScopes{teamID: team.DefaultTeamID})
 	service.queries = resumeLedgerQueries{noDecisionQueries: service.queries.(noDecisionQueries), db: dbsqlc.New(h.pool)}
 	return resumeProcess{manager: manager, service: service}

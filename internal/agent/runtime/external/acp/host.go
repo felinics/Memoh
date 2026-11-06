@@ -489,7 +489,6 @@ func toolSessionContext(ctx context.Context, input PromptInput, b *Binding) clie
 		SessionType:       external.FirstNonEmpty(input.SessionType, sessionmode.ACPAgent),
 		RouteID:           input.RouteID,
 		ChannelIdentityID: input.ChannelIdentityID,
-		SessionToken:      input.SessionToken,
 		CurrentPlatform:   input.CurrentPlatform,
 		ReplyTarget:       input.ReplyTarget,
 		ConversationType:  input.ConversationType,

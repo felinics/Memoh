@@ -304,7 +304,7 @@ func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) 
 			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "route-1"}}
 			gateway := &fakeChatGateway{}
 			ensurer := &fakeSessionEnsurer{}
-			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{})
 			processor.SetACLService(&fakeChatACL{allowed: true})
 			processor.SetSessionEnsurer(ensurer)
 			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))

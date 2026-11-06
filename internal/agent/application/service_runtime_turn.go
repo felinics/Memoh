@@ -418,7 +418,6 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		RuntimeMetadata:          runtimeMeta,
 		RuntimeOwnerAccountID:    runtimeOwnerAccountID,
 		ChannelIdentityID:        req.SourceChannelIdentityID,
-		SessionToken:             req.Token,
 		ToolHTTPURL:              req.ToolHTTPURL,
 		// Elicitation rides each runtime's own protocol (ACP elicitation,
 		// codex requestUserInput), independent of the MCP tool gateway.
@@ -594,7 +593,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 
 // triggerScheduleRuntime runs one scheduled External Agent turn without an
 // interactive stream and returns the persisted round's plain-text result.
-func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payload schedule.TriggerPayload, token, runID string, driver external.Driver) (schedule.TriggerResult, error) {
+func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payload schedule.TriggerPayload, runID string, driver external.Driver) (schedule.TriggerResult, error) {
 	if s.sessionRuntime != nil {
 		// Same inline-decision declaration as streamRuntimeWS.
 		s.sessionRuntime.MarkInlineDecisionRun(botID, payload.SessionID, runID)
@@ -621,7 +620,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		Query:           payload.Command,
 		RawQuery:        payload.Command,
 		UserID:          payload.OwnerUserID,
-		Token:           token,
+		ActorAccountID:  payload.OwnerUserID,
 		Model:           payload.RuntimeModelID,
 		ReasoningEffort: payload.ReasoningEffort,
 		SessionType:     sessionmode.Schedule,
@@ -686,7 +685,6 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		RuntimeMetadata:        runtimeMeta,
 		RuntimeOwnerAccountID:  runtimeOwner,
 		ChannelIdentityID:      strings.TrimSpace(payload.OwnerUserID),
-		SessionToken:           token,
 		ToolOutputLimit:        s.toolOutputLimit(),
 		// Nobody is on the other end of a scheduled run.
 		CanRequestUserInput: false,

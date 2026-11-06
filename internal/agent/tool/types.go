@@ -314,7 +314,7 @@ type SessionContext struct {
 	SessionType            string
 	UserID                 string
 	ChannelIdentityID      string
-	SessionToken           string //nolint:gosec // carries session credential material at runtime
+	ActorAccountID         string
 	CurrentPlatform        string
 	ReplyTarget            string
 	ConversationType       string

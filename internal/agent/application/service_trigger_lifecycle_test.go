@@ -170,7 +170,7 @@ func triggerDirectSchedule(t *testing.T, service *Service) (schedule.TriggerResu
 		SessionID:   lifecycleTestSessionID,
 		Command:     directLifecyclePrompt,
 		OwnerUserID: "user-1",
-	}, "")
+	})
 }
 
 func TestTriggerScheduleResolveFailurePersistsAdmittedMinimalLifecycle(t *testing.T) {
@@ -350,7 +350,6 @@ func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {
 			RuntimeModelID:  "test-model",
 			ReasoningEffort: "medium",
 		},
-		"",
 		lifecycleTestRunID,
 		acpagent.NewDriver(pool),
 	)
@@ -397,7 +396,6 @@ func TestTriggerScheduleRuntimeRejectsIncompleteTurn(t *testing.T) {
 		ctx,
 		lifecycleTestBotID,
 		schedule.TriggerPayload{FireID: "test-fire", SessionID: lifecycleTestSessionID, Command: "run scheduled task", OwnerUserID: "user-1"},
-		"",
 		lifecycleTestRunID,
 		driver,
 	)

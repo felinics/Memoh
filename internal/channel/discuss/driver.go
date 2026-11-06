@@ -46,20 +46,15 @@ type DiscussSessionConfig struct {
 	CurrentPlatform   string
 	ConversationType  string
 	ConversationName  string
-	// Credentials mints the session and chat tokens a turn dispatches with.
-	// The tokens are short-lived, so the worker mints them when it starts
-	// the turn, after the history it loaded and the queue it waited in.
-	Credentials CredentialsFunc
-	ToolHTTPURL string
+	// ActorAccountID is the account the session's turns act for (the bot
+	// owner, or the runtime owner of an external-runtime session).
+	ActorAccountID string
+	ToolHTTPURL    string
 	// StartProcessing shows the platform processing indicator ("typing")
 	// for one addressed run; nil when the channel has none. It is bound to
 	// the inbound message that last woke the session.
 	StartProcessing StartProcessingFunc
 }
-
-// CredentialsFunc returns the session bearer and chat tokens for one turn,
-// issued for the inbound message that last woke the session.
-type CredentialsFunc func(ctx context.Context) (sessionToken, chatToken string)
 
 // StartProcessingFunc starts the processing indicator and returns the
 // function that ends it: a nil cause reports completion, a non-nil cause a

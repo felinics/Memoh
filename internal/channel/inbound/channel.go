@@ -23,7 +23,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/attachment"
-	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
@@ -214,8 +213,6 @@ type ChannelInboundProcessor struct {
 	queueCommandHandler QueueCommandHandler
 	registry            *channel.Registry
 	logger              *slog.Logger
-	jwtSecret           string
-	tokenTTL            time.Duration
 	identity            *IdentityResolver
 	policy              PolicyService
 	acl                 chatACL
@@ -251,14 +248,9 @@ func NewChannelInboundProcessor(
 	turnSvc turn.Service,
 	channelIdentityService ChannelIdentityService,
 	policyService PolicyService,
-	jwtSecret string,
-	tokenTTL time.Duration,
 ) *ChannelInboundProcessor {
 	if log == nil {
 		log = slog.Default()
-	}
-	if tokenTTL <= 0 {
-		tokenTTL = 5 * time.Minute
 	}
 	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, policyService, "")
 	return &ChannelInboundProcessor{
@@ -267,8 +259,6 @@ func NewChannelInboundProcessor(
 		message:       messageWriter,
 		registry:      registry,
 		logger:        log.With(slog.String("component", "channel_router")),
-		jwtSecret:     strings.TrimSpace(jwtSecret),
-		tokenTTL:      tokenTTL,
 		identity:      identityResolver,
 		policy:        policyService,
 	}
@@ -920,12 +910,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			CurrentPlatform:   msg.Channel.String(),
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
-			Credentials: func(ctx context.Context) (string, string) {
-				chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
-				return p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken), chatToken
-			},
-			ToolHTTPURL:     acpMCPToolsURLFromEnv(identity.BotID),
-			StartProcessing: p.discussProcessingStarter(cfg, msg, identity, statusInfo),
+			ActorAccountID:    p.runActorAccountID(ctx, identity, runtimeSession, sessionRuntimeOwner),
+			ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
+			StartProcessing:   p.discussProcessingStarter(cfg, msg, identity, statusInfo),
 		})
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		return nil
@@ -972,26 +959,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return nil
 	}
 
-	// Issue chat token for reply routing.
-	chatToken := ""
-	if p.jwtSecret != "" && strings.TrimSpace(msg.ReplyTarget) != "" {
-		signed, _, err := auth.GenerateChatToken(auth.ChatToken{
-			BotID:             identity.BotID,
-			ChatID:            activeChatID,
-			RouteID:           resolved.RouteID,
-			UserID:            identity.UserID,
-			ChannelIdentityID: identity.ChannelIdentityID,
-		}, p.jwtSecret, p.tokenTTL)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "issue chat token failed", slog.Any("error", err))
-			}
-		} else {
-			chatToken = signed
-		}
-	}
-
-	token := p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken)
+	actorAccountID := p.runActorAccountID(ctx, identity, runtimeSession, sessionRuntimeOwner)
 
 	var desc channel.Descriptor
 	if p.registry != nil {
@@ -1105,12 +1073,11 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		BotID:                     identity.BotID,
 		ChatID:                    activeChatID,
 		ThreadID:                  sessionID,
-		Token:                     token,
+		ActorAccountID:            actorAccountID,
 		UserID:                    identity.UserID,
 		SourceChannelIdentityID:   identity.ChannelIdentityID,
 		DisplayName:               identity.DisplayName,
 		RouteID:                   resolved.RouteID,
-		ChatToken:                 chatToken,
 		IdempotencyKey:            turnIdempotencyKey(msg.Channel, resolved.RouteID, sourceMessageID),
 		ExternalMessageID:         sourceMessageID,
 		ReplyTarget:               target,
@@ -3611,7 +3578,6 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 		ReplyExternalMessageID: replyExternalID,
 		Decision:               parsed.Resource,
 		Reason:                 reason,
-		ChatToken:              p.issueChatToken(identity, routeID, msg),
 	})
 }
 
@@ -3653,7 +3619,6 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 		Answers:                answers,
 		TextAnswer:             answerText,
 		UILanguage:             loc.Locale(),
-		ChatToken:              p.issueChatToken(identity, routeID, msg),
 	})
 }
 
@@ -3941,90 +3906,27 @@ func hasUserInputAction(actions []channel.Action) bool {
 	return false
 }
 
-func (p *ChannelInboundProcessor) issueChatToken(identity InboundIdentity, routeID string, msg channel.InboundMessage) string {
-	if p.jwtSecret == "" || strings.TrimSpace(msg.ReplyTarget) == "" {
-		return ""
-	}
-	signed, _, err := auth.GenerateChatToken(auth.ChatToken{
-		BotID:             identity.BotID,
-		ChatID:            identity.BotID,
-		RouteID:           strings.TrimSpace(routeID),
-		UserID:            identity.UserID,
-		ChannelIdentityID: identity.ChannelIdentityID,
-	}, p.jwtSecret, p.tokenTTL)
-	if err != nil {
-		if p.logger != nil {
-			p.logger.Warn("issue approval chat token failed", slog.Any("error", err))
+// runActorAccountID is the account a turn acts for: the runtime owner of an
+// external-runtime session, else the bot owner; the sender's account when
+// neither resolves.
+func (p *ChannelInboundProcessor) runActorAccountID(ctx context.Context, identity InboundIdentity, sess SessionResult, runtimeOwnerAccountID string) string {
+	if sessionUsesExternalRuntime(sess) {
+		if owner := strings.TrimSpace(runtimeOwnerAccountID); owner != "" {
+			return owner
 		}
-		return ""
+		return strings.TrimSpace(identity.UserID)
 	}
-	return signed
-}
-
-func (p *ChannelInboundProcessor) issueChannelBearerToken(ctx context.Context, identity InboundIdentity, fallbackChatToken string) string {
-	if p.jwtSecret == "" {
-		if strings.TrimSpace(fallbackChatToken) != "" {
-			return "Bearer " + strings.TrimSpace(fallbackChatToken)
-		}
-		return ""
-	}
-	tokenUserID := strings.TrimSpace(identity.UserID)
 	if p.policy != nil {
-		if ownerID, err := p.policy.BotOwnerUserID(ctx, identity.BotID); err == nil && strings.TrimSpace(ownerID) != "" {
-			tokenUserID = strings.TrimSpace(ownerID)
-		} else if p.logger != nil {
-			p.logger.WarnContext(ctx, "resolve bot owner for token failed, falling back to caller identity",
+		ownerID, err := p.policy.BotOwnerUserID(ctx, identity.BotID)
+		if err == nil && strings.TrimSpace(ownerID) != "" {
+			return strings.TrimSpace(ownerID)
+		}
+		if err != nil && p.logger != nil {
+			p.logger.WarnContext(ctx, "resolve bot owner for the run actor failed, falling back to the caller",
 				slog.String("bot_id", identity.BotID), slog.Any("error", err))
 		}
 	}
-	if tokenUserID != "" {
-		signed, _, err := auth.GenerateToken(tokenUserID, p.jwtSecret, p.tokenTTL)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "issue channel token failed", slog.Any("error", err))
-			}
-		} else {
-			return "Bearer " + signed
-		}
-	}
-	if strings.TrimSpace(fallbackChatToken) != "" {
-		return "Bearer " + strings.TrimSpace(fallbackChatToken)
-	}
-	return ""
-}
-
-func (p *ChannelInboundProcessor) issueSessionBearerToken(ctx context.Context, identity InboundIdentity, sess SessionResult, runtimeOwnerAccountID, fallbackChatToken string) string {
-	if sessionUsesExternalRuntime(sess) {
-		return p.issueRuntimeBearerToken(ctx, identity, runtimeOwnerAccountID, fallbackChatToken)
-	}
-	return p.issueChannelBearerToken(ctx, identity, fallbackChatToken)
-}
-
-func (p *ChannelInboundProcessor) issueRuntimeBearerToken(ctx context.Context, identity InboundIdentity, runtimeOwnerAccountID, fallbackChatToken string) string {
-	if p.jwtSecret == "" {
-		if strings.TrimSpace(fallbackChatToken) != "" {
-			return "Bearer " + strings.TrimSpace(fallbackChatToken)
-		}
-		return ""
-	}
-	tokenUserID := strings.TrimSpace(runtimeOwnerAccountID)
-	if tokenUserID == "" {
-		tokenUserID = strings.TrimSpace(identity.UserID)
-	}
-	if tokenUserID != "" {
-		signed, _, err := auth.GenerateToken(tokenUserID, p.jwtSecret, p.tokenTTL)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "issue ACP runtime token failed", slog.Any("error", err))
-			}
-		} else {
-			return "Bearer " + signed
-		}
-	}
-	if strings.TrimSpace(fallbackChatToken) != "" {
-		return "Bearer " + strings.TrimSpace(fallbackChatToken)
-	}
-	return ""
+	return strings.TrimSpace(identity.UserID)
 }
 
 func acpMCPToolsURLFromEnv(botID string) string {

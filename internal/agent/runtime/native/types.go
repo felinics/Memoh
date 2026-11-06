@@ -30,7 +30,7 @@ type SessionContext struct {
 	ConversationType    string
 	Timezone            string
 	TimezoneLocation    *time.Location
-	SessionToken        string //nolint:gosec // carries session credential material at runtime
+	ActorAccountID      string
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string

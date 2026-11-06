@@ -108,7 +108,6 @@ func TurnInput(input external.PromptInput) PromptInput {
 		AttachmentReferences:     input.AttachmentReferences,
 		CanFallbackImagesToFiles: input.CanFallbackImagesToFiles,
 		ChannelIdentityID:        input.ChannelIdentityID,
-		SessionToken:             input.SessionToken,
 		CurrentPlatform:          input.CurrentPlatform,
 		ReplyTarget:              input.ReplyTarget,
 		ConversationType:         input.ConversationType,

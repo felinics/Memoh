@@ -137,14 +137,13 @@ func provideProviderOAuthHandler(providersService *providers.Service) *handlers.
 	return handlers.NewProviderOAuthHandler(providersService)
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *application.Service, sessionRuntime *sessionruntime.Manager, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler, workdirService *workdir.Service) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *application.Service, sessionRuntime *sessionruntime.Manager, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler, workdirService *workdir.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, hub, botService, accountService, sessionService)
 	h.SetAgentService(resolver)
 	h.SetSessionRuntime(sessionRuntime)
 	h.SetWorkdirService(workdirService)
 	h.SetCommandHandler(commandHandler)
 	h.SetRuntimeSkillResolver(containerdHandler)
-	h.SetAuthTokenConfig(rc.JwtSecret, rc.JwtExpiresIn)
 	h.SetMediaService(mediaService)
 	h.SetSpeechService(audioService, &webSpeechModelResolver{settings: settingsService})
 	return h

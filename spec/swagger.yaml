@@ -15881,56 +15881,6 @@ paths:
       summary: Send message via bot channel
       tags:
       - bots
-  /bots/{id}/channel/{platform}/send_chat:
-    post:
-      description: Send a message using a session-scoped token (reply only)
-      parameters:
-      - description: Bot ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Channel platform
-        in: path
-        name: platform
-        required: true
-        type: string
-      - description: Send payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/channel.SendRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Send message via bot channel session token
-      tags:
-      - bots
   /bots/{id}/channel/{platform}/status:
     patch:
       description: Update bot channel enabled/disabled status

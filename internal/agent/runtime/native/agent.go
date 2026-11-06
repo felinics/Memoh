@@ -478,7 +478,7 @@ func (a *Agent) assembleTools(
 		SessionType:              cfg.SessionType,
 		UserID:                   cfg.Identity.UserID,
 		ChannelIdentityID:        cfg.Identity.ChannelIdentityID,
-		SessionToken:             cfg.Identity.SessionToken,
+		ActorAccountID:           cfg.Identity.ActorAccountID,
 		WorkspaceTargetID:        cfg.Identity.WorkspaceTargetID,
 		WorkspaceTargetKind:      cfg.Identity.WorkspaceTargetKind,
 		WorkspaceTargetName:      cfg.Identity.WorkspaceTargetName,

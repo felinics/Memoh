@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -52,15 +51,13 @@ type mockTriggerer struct {
 	called  bool
 	botID   string
 	payload schedule.TriggerPayload
-	token   string
 	err     error
 }
 
-func (m *mockTriggerer) TriggerSchedule(_ context.Context, botID string, payload schedule.TriggerPayload, token string) (schedule.TriggerResult, error) {
+func (m *mockTriggerer) TriggerSchedule(_ context.Context, botID string, payload schedule.TriggerPayload) (schedule.TriggerResult, error) {
 	m.called = true
 	m.botID = botID
 	m.payload = payload
-	m.token = token
 	if m.err != nil {
 		return schedule.TriggerResult{}, m.err
 	}
@@ -159,9 +156,6 @@ func TestIntegrationTrigger_CallsTriggererWithCorrectPayload(t *testing.T) {
 	}
 	if mock.payload.OwnerUserID != ownerUserID {
 		t.Errorf("payload.OwnerUserID = %s, want %s", mock.payload.OwnerUserID, ownerUserID)
-	}
-	if !strings.HasPrefix(mock.token, "Bearer ") {
-		t.Errorf("token should have Bearer prefix, got: %s", mock.token)
 	}
 }
 

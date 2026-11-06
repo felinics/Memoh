@@ -159,7 +159,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		CurrentPlatform:   cmd.CurrentChannel,
 		ReplyTarget:       cmd.ReplyTarget,
 		ConversationType:  cmd.ConversationType,
-		ChatToken:         cmd.SessionToken,
+		ActorAccountID:    cmd.ActorAccountID,
 	})
 	if err != nil {
 		h.emitErr(err)
@@ -716,8 +716,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 		CurrentChannel:           cmd.CurrentChannel,
 		ReplyTarget:              cmd.ReplyTarget,
 		ConversationType:         cmd.ConversationType,
-		Token:                    cmd.SessionToken,
-		ChatToken:                cmd.ChatToken,
+		ActorAccountID:           cmd.ActorAccountID,
 		ToolHTTPURL:              cmd.ToolHTTPURL,
 		Query:                    prompt,
 		RawQuery:                 prompt,

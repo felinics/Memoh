@@ -471,7 +471,7 @@ func (s *effectLoop) startTurn(cmd turn.StartTurnCommand) string {
 // trigger fires a schedule whose command is text.
 func (s *effectLoop) trigger(text string) string {
 	f := s.f
-	_, err := f.service.TriggerSchedule(f.ctx, f.botID, schedule.TriggerPayload{FireID: uuid.NewString(), ID: uuid.NewString(), Name: "effects", Command: text, OwnerUserID: f.ownerUserID, SessionID: f.sessionID}, "")
+	_, err := f.service.TriggerSchedule(f.ctx, f.botID, schedule.TriggerPayload{FireID: uuid.NewString(), ID: uuid.NewString(), Name: "effects", Command: text, OwnerUserID: f.ownerUserID, SessionID: f.sessionID})
 	if err != nil {
 		return string(apperror.CodeOf(err))
 	}
@@ -946,7 +946,6 @@ func decisionKeepsPromptScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	}
 	// A server always records each run's admitted intent; it signs it with the
 	// JWT secret, which the fixture otherwise leaves unset.
-	f.service.SetResumeSecret("decision-keeps-prompt")
 	s.userID, s.decisionAfter = f.ownerUserID, 1
 	code, requests := s.run(entry, loopInput, 2)
 	if code != "" || !slices.Equal(s.effects, []int{1, 2}) || len(requests) < 4 {

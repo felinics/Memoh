@@ -107,7 +107,6 @@ type compactionRunner interface {
 // Service orchestrates chat with the internal agent.
 type Service struct {
 	activeTurns             activeTurnTracker
-	resumeSecret            string
 	resumeScopes            SessionResumeScopeProvider
 	resumeReady             func(context.Context, string, string) error
 	resumeStop              context.CancelFunc
@@ -469,7 +468,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		CurrentPlatform:    req.CurrentChannel,
 		ReplyTarget:        req.ReplyTarget,
 		ConversationType:   req.ConversationType,
-		SessionToken:       req.ChatToken,
+		ActorAccountID:     req.ActorAccountID,
 		SessionType:        req.SessionType,
 		SessionPrefModelID: sessionPrefModelID,
 		SessionPrefEffort:  sessionPrefEffort,
@@ -766,7 +765,7 @@ type baseRunConfigParams struct {
 	CurrentPlatform   string
 	ReplyTarget       string
 	ConversationType  string
-	SessionToken      string //nolint:gosec // session credential material, not a hardcoded secret
+	ActorAccountID    string
 	SessionType       string
 	// SessionPrefModelID/SessionPrefEffort carry the session's persisted
 	// (model, effort) pair (issue #879), loaded by the caller before the
@@ -886,7 +885,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 			ConversationType:  strings.TrimSpace(p.ConversationType),
 			Timezone:          userTimezoneName,
 			TimezoneLocation:  userClockLocation,
-			SessionToken:      p.SessionToken,
+			ActorAccountID:    p.ActorAccountID,
 		},
 		Bot:               botInfo,
 		Skills:            agentSkills,
@@ -1232,7 +1231,9 @@ type RunConfigRequest struct {
 	CurrentPlatform   string
 	ReplyTarget       string
 	ConversationType  string
-	ChatToken         string //nolint:gosec // session credential material, not a hardcoded secret
+	// ActorAccountID is the account the run acts for; a resume authorizes it
+	// again.
+	ActorAccountID string
 }
 
 // ResolveRunConfig builds the RunConfig (model, tools, identity, budget) of
@@ -1262,7 +1263,7 @@ func (s *Service) ResolveRunConfig(ctx context.Context, req RunConfigRequest) (R
 				CurrentPlatform:   req.CurrentPlatform,
 				ReplyTarget:       strings.TrimSpace(req.ReplyTarget),
 				ConversationType:  strings.TrimSpace(req.ConversationType),
-				SessionToken:      req.ChatToken,
+				ActorAccountID:    req.ActorAccountID,
 			},
 		}
 		return ResolveRunConfigResult{
@@ -1285,7 +1286,7 @@ func (s *Service) ResolveRunConfig(ctx context.Context, req RunConfigRequest) (R
 		CurrentPlatform:    req.CurrentPlatform,
 		ReplyTarget:        req.ReplyTarget,
 		ConversationType:   req.ConversationType,
-		SessionToken:       req.ChatToken,
+		ActorAccountID:     req.ActorAccountID,
 		SessionType:        sessionType,
 		SessionPrefModelID: sessionPrefModelID,
 		SessionPrefEffort:  sessionPrefEffort,

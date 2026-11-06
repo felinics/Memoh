@@ -13,12 +13,11 @@ func chatRequestFromCommand(cmd turn.StartTurnCommand) ChatRequest {
 		BotID:                     cmd.BotID,
 		ChatID:                    cmd.ChatID,
 		ThreadID:                  cmd.ThreadID,
-		Token:                     cmd.Token,
+		ActorAccountID:            cmd.ActorAccountID,
 		UserID:                    cmd.UserID,
 		SourceChannelIdentityID:   cmd.SourceChannelIdentityID,
 		DisplayName:               cmd.DisplayName,
 		RouteID:                   cmd.RouteID,
-		ChatToken:                 cmd.ChatToken,
 		ExternalMessageID:         cmd.ExternalMessageID,
 		ReplyTarget:               cmd.ReplyTarget,
 		ConversationType:          cmd.ConversationType,
@@ -84,7 +83,6 @@ func toolApprovalInputFromResponse(in turn.ToolApprovalResponse) ToolApprovalRes
 		Decision:                   in.Decision,
 		OptionID:                   in.OptionID,
 		Reason:                     in.Reason,
-		ChatToken:                  in.ChatToken,
 		SuppressActivePromptAttach: in.SuppressActivePromptAttach,
 	}
 }
@@ -104,7 +102,6 @@ func userInputInputFromResponse(in turn.UserInputResponse) UserInputResponseInpu
 		UILanguage:                 in.UILanguage,
 		Canceled:                   in.Canceled,
 		Reason:                     in.Reason,
-		ChatToken:                  in.ChatToken,
 		SuppressActivePromptAttach: in.SuppressActivePromptAttach,
 	}
 }

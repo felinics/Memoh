@@ -32,14 +32,9 @@ func TestToolApprovalHTTPUsesJWTUserIDForPermissionActor(t *testing.T) {
 		accountID         = "11111111-1111-1111-1111-111111111111"
 		channelIdentityID = "22222222-2222-2222-2222-222222222222"
 	)
-	token, _, err := auth.GenerateChatToken(auth.ChatToken{
-		BotID:             "33333333-3333-3333-3333-333333333333",
-		ChatID:            "chat-1",
-		UserID:            accountID,
-		ChannelIdentityID: channelIdentityID,
-	}, secret, time.Minute)
+	token, _, err := auth.GenerateToken(accountID, secret, time.Minute)
 	if err != nil {
-		t.Fatalf("GenerateChatToken() error = %v", err)
+		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
 	responder := &recordingToolApprovalResponder{}

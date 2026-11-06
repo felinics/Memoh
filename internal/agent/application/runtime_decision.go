@@ -266,7 +266,6 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		input.UserInputID = command.TargetID
 		input.ExplicitID = command.TargetID
 		input.ReplyExternalMessageID = ""
-		input.ChatToken = ""
 		input.SuppressActivePromptAttach = true
 		ctx = decision.WithResponseIdentity(ctx, decision.ResponseIdentity{
 			ControlID: input.ControlID, PayloadHash: command.PayloadHash,
@@ -316,7 +315,6 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		input.ApprovalID = command.TargetID
 		input.ExplicitID = command.TargetID
 		input.ReplyExternalMessageID = ""
-		input.ChatToken = ""
 		input.SuppressActivePromptAttach = true
 		ctx = decision.WithResponseIdentity(ctx, decision.ResponseIdentity{
 			ControlID: input.ControlID, PayloadHash: command.PayloadHash,

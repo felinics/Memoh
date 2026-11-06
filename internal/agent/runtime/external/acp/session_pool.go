@@ -125,21 +125,18 @@ type PromptInput struct {
 	AttachmentReferences     []string
 	CanFallbackImagesToFiles bool
 	ChannelIdentityID        string
-	// SessionToken is consumed only by Prompt, where it flows into the
-	// per-prompt tool context overlay. Ensure and SetModel ignore it.
-	SessionToken           string //nolint:gosec // runtime session credential, not a hardcoded secret.
-	CurrentPlatform        string
-	ReplyTarget            string
-	ConversationType       string
-	CanRequestUserInput    bool
-	SupportsImageInput     bool
-	ToolOutputLimit        client.ToolOutputLimit
-	ToolHTTPURL            string
-	ContextURI             string
-	ContextMarkdown        string
-	RuntimeOwnerAccountID  string
-	ForceFreshRuntime      bool
-	ContextBudgetMaxTokens int
+	CurrentPlatform          string
+	ReplyTarget              string
+	ConversationType         string
+	CanRequestUserInput      bool
+	SupportsImageInput       bool
+	ToolOutputLimit          client.ToolOutputLimit
+	ToolHTTPURL              string
+	ContextURI               string
+	ContextMarkdown          string
+	RuntimeOwnerAccountID    string
+	ForceFreshRuntime        bool
+	ContextBudgetMaxTokens   int
 	// RuntimeMetadata is the conversation's runtime metadata as the turn
 	// read it, for an extension that keeps its state there.
 	RuntimeMetadata map[string]any

@@ -789,8 +789,7 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	cmd.CurrentChannel = "telegram"
 	cmd.ReplyTarget = "chat-1"
 	cmd.ConversationType = "group"
-	cmd.SessionToken = "Bearer owner-token"
-	cmd.ChatToken = "chat-token"
+	cmd.ActorAccountID = "bot-owner"
 	cmd.ToolHTTPURL = "http://example.test/bots/bot-1/tools"
 	cmd.DiscussMessages = []turn.DiscussMessage{{Role: "user", Content: "please inspect the app"}}
 
@@ -810,8 +809,8 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	if req.RunID != h.RunID() {
 		t.Fatalf("ACP discuss RunID = %q, want admitted run ID %q", req.RunID, h.RunID())
 	}
-	if req.RouteID != "route-1" || req.ChatToken != "chat-token" || req.Token != "Bearer owner-token" {
-		t.Fatalf("runtime context = route %q chat token %q token %q", req.RouteID, req.ChatToken, req.Token)
+	if req.RouteID != "route-1" || req.ActorAccountID != "bot-owner" {
+		t.Fatalf("runtime context = route %q actor %q", req.RouteID, req.ActorAccountID)
 	}
 	if req.ToolHTTPURL != "http://example.test/bots/bot-1/tools" {
 		t.Fatalf("ToolHTTPURL = %q", req.ToolHTTPURL)

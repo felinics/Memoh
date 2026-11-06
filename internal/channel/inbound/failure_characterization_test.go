@@ -58,7 +58,8 @@ type imFailureResult struct {
 func newIMFailureProcessor(gateway turn.Service) (*ChannelInboundProcessor, *fakeReplySender, channel.ChannelConfig, channel.InboundMessage) {
 	routes := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "route-1"}}
 	processor := NewChannelInboundProcessor(slog.New(slog.DiscardHandler), nil, routes, routes, gateway,
-		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "identity-1"}}, &fakePolicyService{}, "", 0)
+		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "identity-1"}}, &fakePolicyService{},
+	)
 	msg := channel.InboundMessage{
 		BotID: "bot-1", Channel: channel.ChannelType("feishu"), Message: channel.Message{Text: "hello"}, ReplyTarget: "target-id",
 		Sender: channel.Identity{SubjectID: "ext-1"}, Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
@@ -173,7 +174,7 @@ func TestCharacterizeIMErrorEventText_CurrentBehavior(t *testing.T) {
 // (The accepted case is TestAcceptanceReceiptPrecedesFailedContinuation.)
 func TestCharacterizeIMContinuationNotAccepted(t *testing.T) {
 	t.Parallel()
-	processor := NewChannelInboundProcessor(slog.New(slog.DiscardHandler), nil, nil, nil, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.New(slog.DiscardHandler), nil, nil, nil, nil, nil, nil)
 	sink := &fakeReplySender{}
 	msg := channel.InboundMessage{Channel: channel.ChannelType("telegram"), ReplyTarget: "chat"}
 	cause := errors.New("SECRET transport failure")

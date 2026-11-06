@@ -279,7 +279,7 @@ func TestScheduledRuntimeFailureTextIsItsCode(t *testing.T) {
 	}}
 	_, err := service.triggerScheduleRuntime(context.Background(), lifecycleTestBotID, schedule.TriggerPayload{
 		SessionID: lifecycleTestSessionID, Command: "inspect", OwnerUserID: "user-1",
-	}, "", lifecycleTestRunID, driver)
+	}, lifecycleTestRunID, driver)
 	if err == nil || err.Error() != string(apperror.CodeRuntimePromptFailed) {
 		t.Fatalf("schedule error text = %q, want exactly %q", err, apperror.CodeRuntimePromptFailed)
 	}

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,7 +20,6 @@ import (
 	"github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/route"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -297,25 +295,6 @@ func TestLocateMessageAnswersMessageNotFound(t *testing.T) {
 	c.SetParamNames("bot_id")
 	c.SetParamValues(invocationTestBotID)
 	requireNotFoundCode(t, h.LocateMessage(c), apperror.CodeMessageNotFound, true)
-}
-
-type routeNoRows struct{ route.Service }
-
-func (routeNoRows) GetByID(context.Context, string) (route.Route, error) {
-	return route.Route{}, pgx.ErrNoRows
-}
-
-type unusedChannelRuntime struct{ channel.Runtime }
-
-func TestSendChatAnswersChannelRouteNotFound(t *testing.T) {
-	h := &UsersHandler{routeService: routeNoRows{}, channelRuntime: unusedChannelRuntime{}}
-	c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/", nil), httptest.NewRecorder())
-	c.Set("user", &jwt.Token{Valid: true, Claims: jwt.MapClaims{
-		"typ": "chat_route", "bot_id": invocationTestBotID, "route_id": "route-1", "user_id": "user-1",
-	}})
-	c.SetParamNames("id")
-	c.SetParamValues(invocationTestBotID)
-	requireNotFoundCode(t, h.SendBotMessageSession(c), apperror.CodeChannelRouteNotFound, true)
 }
 
 func (lookupQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {

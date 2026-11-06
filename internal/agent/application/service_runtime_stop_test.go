@@ -121,7 +121,7 @@ func TestScheduledRuntimeConfigurationFailureLeavesNoRound(t *testing.T) {
 			}}
 			_, err := service.triggerScheduleRuntime(context.Background(), lifecycleTestBotID, schedule.TriggerPayload{
 				SessionID: lifecycleTestSessionID, Command: "inspect", OwnerUserID: "user-1",
-			}, "", lifecycleTestRunID, driver)
+			}, lifecycleTestRunID, driver)
 			if got := apperror.CodeOf(err); got != tc.code {
 				t.Fatalf("schedule error code = %q, want %q: %v", got, tc.code, err)
 			}

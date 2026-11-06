@@ -230,7 +230,7 @@ func TestACPRuntimeHandlerEnsureStartsRuntimeAndReturnsModels(t *testing.T) {
 	if pool.ensureInput.BotID != botID || pool.ensureInput.SessionID != sessionID || pool.ensureInput.AgentID != acpprofile.AgentACPID || pool.ensureInput.ProjectPath != "/data/app" {
 		t.Fatalf("Ensure input = %#v", pool.ensureInput)
 	}
-	if pool.ensureInput.SessionToken != "" || pool.ensureInput.ToolHTTPURL != "http://example.com/bots/"+botID+"/tools" {
+	if pool.ensureInput.ToolHTTPURL != "http://example.com/bots/"+botID+"/tools" {
 		t.Fatalf("Ensure tool context = %#v", pool.ensureInput)
 	}
 	var got acpagent.RuntimeStatus
@@ -459,7 +459,7 @@ func TestACPRuntimeHandlerSetModel(t *testing.T) {
 	if pool.setModelInput.BotID != botID || pool.setModelInput.SessionID != sessionID || pool.setModelInput.AgentID != acpprofile.AgentACPID || pool.setModelInput.ProjectPath != "/data/app" {
 		t.Fatalf("SetModel input = %#v", pool.setModelInput)
 	}
-	if pool.setModelInput.SessionToken != "" || pool.setModelInput.ToolHTTPURL != "http://example.com/bots/"+botID+"/tools" {
+	if pool.setModelInput.ToolHTTPURL != "http://example.com/bots/"+botID+"/tools" {
 		t.Fatalf("SetModel tool context = %#v", pool.setModelInput)
 	}
 	if pool.setModelID != "gpt-5.1-codex-high" {
