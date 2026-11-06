@@ -18,6 +18,8 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/felinics/memoh/internal/acl"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -237,6 +239,10 @@ type ChannelInboundProcessor struct {
 	// currently running agent stream. Used by /stop to abort generation
 	// on external channels (Telegram, Discord, etc.).
 	activeStreams sync.Map
+
+	// replays joins concurrent first accesses of one session into a single
+	// replay, so a busy chat whose session is cold loads its history once.
+	replays singleflight.Group
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -863,22 +869,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	// Push event into the DCP pipeline (persist + in-memory projection).
-	// On first access for a session, replay persisted events to warm the pipeline.
 	var latestRC timeline.RenderedContext
 	var eventID string
 	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
-		if !p.pipeline.HasSession(sessionID) {
-			p.replayPipelineSession(ctx, identity.BotID, sessionID)
-		}
 		pipelineMsg := msg
 		pipelineMsg.Message = msg.Message
 		pipelineMsg.Message.Attachments = resolvedAttachments
 		event := AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
-		var store sessionEventPersister
-		if p.eventStore != nil {
-			store = p.eventStore
-		}
-		eventID, latestRC = persistAndProjectEvent(ctx, store, p.pipeline, p.logger, identity.BotID, sessionID, event)
+		eventID, latestRC = p.projectInboundEvent(ctx, identity.BotID, sessionID, event)
 	}
 
 	// Bot-centric history container:
@@ -3009,25 +3007,58 @@ func isLocalChannelType(ct channel.ChannelType) bool {
 	return s == "web" || s == "cli"
 }
 
+// projectInboundEvent persists an inbound event and projects it into the
+// pipeline, replaying the session's persisted events first when it is cold.
+// When that replay fails the event still renders for this message, but the
+// session stays cold: made resident without its history, it would keep
+// serving context with that history missing until evicted, and the next
+// message would never retry the replay.
+func (p *ChannelInboundProcessor) projectInboundEvent(ctx context.Context, botID, sessionID string, event timeline.CanonicalEvent) (string, timeline.RenderedContext) {
+	project := p.pipeline.PushEvent
+	if !p.pipeline.HasSession(sessionID) && !p.replayPipelineSession(ctx, botID, sessionID) {
+		project = p.pipeline.PushResidentEvent
+	}
+	var store sessionEventPersister
+	if p.eventStore != nil {
+		store = p.eventStore
+	}
+	return persistAndProjectEvent(ctx, store, project, p.logger, botID, sessionID, event)
+}
+
 // replayPipelineSession loads persisted events from the DB and replays them
-// into the pipeline. Called lazily on first access per session after cold start.
-func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, botID, sessionID string) {
-	if p.eventStore == nil || p.pipeline == nil {
-		return
+// into the pipeline, reporting whether the session is loaded. Called lazily on
+// first access per session after cold start or eviction. Concurrent callers
+// for one session share one replay; a caller that arrives after it finished
+// finds the session loaded and leaves it alone, since replaying again would
+// drop the events pushed since. The shared replay runs without the starting
+// caller's cancellation: the others waiting on it would otherwise go on
+// without the history it was loading.
+func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, botID, sessionID string) bool {
+	if p.eventStore == nil {
+		// Nothing is persisted, so the pipeline is all the history there is.
+		return true
 	}
-	events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
-	if err != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+	ctx = context.WithoutCancel(ctx)
+	loaded, _, _ := p.replays.Do(sessionID, func() (any, error) {
+		if p.pipeline.HasSession(sessionID) {
+			return true, nil
 		}
-		return
-	}
-	if len(events) > 0 {
+		events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.WarnContext(ctx, "pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+			}
+			return false, nil
+		}
+		// A successful empty replay is warm too; otherwise callers arriving
+		// after this flight would keep loading the same empty history.
 		p.pipeline.ReplaySession(sessionID, events)
 		if p.logger != nil {
 			p.logger.InfoContext(ctx, "pipeline session replayed", slog.String("session_id", sessionID), slog.Int("events", len(events)))
 		}
-	}
+		return true, nil
+	})
+	return loaded.(bool)
 }
 
 // broadcastInboundMessage notifies the observer about the user's inbound
