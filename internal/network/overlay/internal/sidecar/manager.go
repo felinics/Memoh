@@ -32,7 +32,7 @@ func (m Manager) SidecarID(req netctl.AttachmentRequest) string {
 
 func (m Manager) EnsureAttached(ctx context.Context, req netctl.AttachmentRequest) (netctl.OverlayStatus, error) {
 	if !req.Overlay.Enabled {
-		return netctl.OverlayStatus{Provider: m.Kind, State: "disabled"}, nil
+		return netctl.OverlayStatus{Provider: m.Kind, State: netctl.OverlayStateDisabled}, nil
 	}
 	if m.Runtime == nil {
 		return netctl.OverlayStatus{}, fmt.Errorf("%s overlay runtime is not configured", m.Kind)
@@ -77,7 +77,7 @@ func (m Manager) Detach(ctx context.Context, req netctl.AttachmentRequest) error
 
 func (m Manager) Status(ctx context.Context, req netctl.AttachmentRequest) (netctl.OverlayStatus, error) {
 	if !req.Overlay.Enabled {
-		return netctl.OverlayStatus{Provider: m.Kind, State: "disabled"}, nil
+		return netctl.OverlayStatus{Provider: m.Kind, State: netctl.OverlayStateDisabled}, nil
 	}
 	sidecarID := m.SidecarID(req)
 	task, err := m.Runtime.GetTaskInfo(ctx, sidecarID)
@@ -85,16 +85,16 @@ func (m Manager) Status(ctx context.Context, req netctl.AttachmentRequest) (netc
 		if ctr.IsNotFound(err) {
 			return netctl.OverlayStatus{
 				Provider: m.Kind,
-				State:    "missing",
+				State:    netctl.OverlayStateMissing,
 				Message:  "overlay sidecar is not created",
 			}, nil
 		}
 		return netctl.OverlayStatus{}, err
 	}
 	attached := task.Status == ctr.TaskStatusRunning
-	state := "stopped"
+	state := netctl.OverlayStateStopped
 	if attached {
-		state = "ready"
+		state = netctl.OverlayStateReady
 	}
 	status := netctl.OverlayStatus{
 		Provider: m.Kind,

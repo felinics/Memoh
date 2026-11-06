@@ -3398,7 +3398,13 @@
         "needsLogin": "需要登录",
         "connecting": "连接中…",
         "stopped": "已停止",
-        "unknown": "未知"
+        "unknown": "未知",
+        "notAttached": "尚未接入",
+        "workspaceMissing": "工作区尚未创建",
+        "needsConfig": "需要完善配置",
+        "unauthorized": "认证被拒绝",
+        "unsupported": "当前运行时不支持",
+        "disabled": "已关闭"
       },
       "networkDetailsTitle": "连接详情",
       "networkDetailsWorkspaceGroup": "工作区",
@@ -3419,6 +3425,7 @@
       },
       "networkActionFailed": "检测失败",
       "networkStatusState": "状态",
+      "networkStatusMessage": "说明",
       "networkStatusIP": "网络地址",
       "networkStatusProxy": "代理地址",
       "networkStatusPID": "进程 PID",

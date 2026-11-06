@@ -32,7 +32,7 @@ func (*nativeDriver) Kind() string { return "netbird" }
 
 func (d *nativeDriver) EnsureAttached(ctx context.Context, req netctl.AttachmentRequest) (netctl.OverlayStatus, error) {
 	if !d.config.Enabled {
-		return netctl.OverlayStatus{Provider: d.Kind(), State: "disabled"}, nil
+		return netctl.OverlayStatus{Provider: d.Kind(), State: netctl.OverlayStateDisabled}, nil
 	}
 	return d.manager.EnsureAttached(ctx, req)
 }
@@ -43,7 +43,7 @@ func (d *nativeDriver) Detach(ctx context.Context, req netctl.AttachmentRequest)
 
 func (d *nativeDriver) Status(ctx context.Context, req netctl.AttachmentRequest) (netctl.OverlayStatus, error) {
 	if !d.config.Enabled {
-		return netctl.OverlayStatus{Provider: d.Kind(), State: "disabled"}, nil
+		return netctl.OverlayStatus{Provider: d.Kind(), State: netctl.OverlayStateDisabled}, nil
 	}
 	return d.manager.Status(ctx, req)
 }

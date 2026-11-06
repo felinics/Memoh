@@ -3398,7 +3398,13 @@
         "needsLogin": "Sign-in required",
         "connecting": "Connecting…",
         "stopped": "Stopped",
-        "unknown": "Unknown"
+        "unknown": "Unknown",
+        "notAttached": "Not attached",
+        "workspaceMissing": "Workspace not created",
+        "needsConfig": "Configuration incomplete",
+        "unauthorized": "Credentials rejected",
+        "unsupported": "Not supported by this runtime",
+        "disabled": "Off"
       },
       "networkDetailsTitle": "Connection details",
       "networkDetailsWorkspaceGroup": "Workspace",
@@ -3419,6 +3425,7 @@
       },
       "networkActionFailed": "Network check failed",
       "networkStatusState": "State",
+      "networkStatusMessage": "Details",
       "networkStatusIP": "Address",
       "networkStatusProxy": "Proxy Address",
       "networkStatusPID": "Process PID",

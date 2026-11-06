@@ -20,7 +20,7 @@ type WorkspaceRuntimeStatus struct {
 type BotStatus struct {
 	Provider     string                  `json:"provider,omitempty"`
 	Attached     bool                    `json:"attached"`
-	State        string                  `json:"state,omitempty"`
+	State        OverlayState            `json:"state,omitempty"`
 	Title        string                  `json:"title,omitempty"`
 	Description  string                  `json:"description,omitempty"`
 	Message      string                  `json:"message,omitempty"`
@@ -92,7 +92,7 @@ type RuntimeNetworkStatus struct {
 type OverlayStatus struct {
 	Provider     string         `json:"provider,omitempty"`
 	Attached     bool           `json:"attached"`
-	State        string         `json:"state,omitempty"`
+	State        OverlayState   `json:"state,omitempty"`
 	Message      string         `json:"message,omitempty"`
 	NetworkIP    string         `json:"network_ip,omitempty"`
 	ProxyAddress string         `json:"proxy_address,omitempty"`

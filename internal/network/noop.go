@@ -9,11 +9,11 @@ type NoopOverlayDriver struct{}
 func (NoopOverlayDriver) Kind() string { return "noop" }
 
 func (NoopOverlayDriver) EnsureAttached(context.Context, AttachmentRequest) (OverlayStatus, error) {
-	return OverlayStatus{Provider: "noop", State: "disabled"}, nil
+	return OverlayStatus{Provider: "noop", State: OverlayStateDisabled}, nil
 }
 
 func (NoopOverlayDriver) Detach(context.Context, AttachmentRequest) error { return nil }
 
 func (NoopOverlayDriver) Status(context.Context, AttachmentRequest) (OverlayStatus, error) {
-	return OverlayStatus{Provider: "noop", State: "disabled"}, nil
+	return OverlayStatus{Provider: "noop", State: OverlayStateDisabled}, nil
 }

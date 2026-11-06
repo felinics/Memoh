@@ -210,13 +210,14 @@ func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 	return postgresstore.New(conn)
 }
 
-func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
+func provideOverlayProviderRegistry(log *slog.Logger, service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
 	registry := netctl.NewRegistry()
 	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
 	if err := netoverlay.RegisterBuiltinProviders(registry, netoverlay.ProviderDeps{
 		SidecarRuntime: service,
 		Runtime:        runtime.Descriptor(),
 		StateRoot:      cfg.Workspace.DataRoot,
+		Logger:         log.With(slog.String("service", "network")),
 	}); err != nil {
 		panic(err)
 	}
