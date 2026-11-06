@@ -161,13 +161,17 @@
             <DialogTitle>{{ $t('bots.channels.advancedTitle') }}</DialogTitle>
           </DialogHeader>
           <DialogBody>
-            <ChannelField
-              v-for="[key, field] in optionalFields"
-              :key="key"
-              v-model="form.credentials[key]"
-              :field="field"
-              :field-key="key"
-            />
+            <!-- The dialog body already pads its content, so the fields take
+                 only the list's row rhythm, not a card's inset. -->
+            <SettingsList>
+              <ChannelField
+                v-for="[key, field] in optionalFields"
+                :key="key"
+                v-model="form.credentials[key]"
+                :field="field"
+                :field-key="key"
+              />
+            </SettingsList>
           </DialogBody>
         </DialogPanel>
       </Dialog>
@@ -208,7 +212,7 @@
 </template>
 
 <script setup lang="ts">
-import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
+import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, SettingsList, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@felinic/ui'
