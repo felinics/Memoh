@@ -6,7 +6,6 @@ import (
 )
 
 func TestDecide(t *testing.T) {
-	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name string
 		w    Workspace
@@ -16,18 +15,16 @@ func TestDecide(t *testing.T) {
 		{"present/provisioning resumes", Workspace{Desired: DesiredPresent, Observed: ObservedProvisioning}, ActionProvision},
 		{"present/running settles", Workspace{Desired: DesiredPresent, Observed: ObservedRunning}, ActionNone},
 		{"present/stopped is user intent, no action", Workspace{Desired: DesiredPresent, Observed: ObservedStopped}, ActionNone},
-		{"present/failed waits during backoff", Workspace{Desired: DesiredPresent, Observed: ObservedFailed, NextAttemptAt: now.Add(time.Minute)}, ActionWait},
-		{"present/failed retries after backoff", Workspace{Desired: DesiredPresent, Observed: ObservedFailed, NextAttemptAt: now.Add(-time.Second)}, ActionProvision},
+		{"present/failed retries once claimed", Workspace{Desired: DesiredPresent, Observed: ObservedFailed}, ActionProvision},
 		{"absent/running tears down", Workspace{Desired: DesiredAbsent, Observed: ObservedRunning}, ActionTeardown},
-		{"absent/failed tears down once due", Workspace{Desired: DesiredAbsent, Observed: ObservedFailed, NextAttemptAt: now.Add(-time.Second)}, ActionTeardown},
-		{"absent/failed waits for its slow retry", Workspace{Desired: DesiredAbsent, Observed: ObservedFailed, NextAttemptAt: now.Add(10 * time.Minute)}, ActionWait},
+		{"absent/failed tears down once claimed", Workspace{Desired: DesiredAbsent, Observed: ObservedFailed}, ActionTeardown},
 		{"absent/removing resumes", Workspace{Desired: DesiredAbsent, Observed: ObservedRemoving}, ActionTeardown},
 		{"absent/absent settles once observed", Workspace{Desired: DesiredAbsent, DesiredGeneration: 2, Observed: ObservedAbsent, ObservedGeneration: 2}, ActionNone},
 		{"absent with unobserved default column tears down", Workspace{Desired: DesiredAbsent, DesiredGeneration: 1, Observed: ObservedAbsent, ObservedGeneration: 0}, ActionTeardown},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Decide(tc.w, now); got != tc.want {
+			if got := Decide(tc.w); got != tc.want {
 				t.Fatalf("Decide() = %s, want %s", got, tc.want)
 			}
 		})
