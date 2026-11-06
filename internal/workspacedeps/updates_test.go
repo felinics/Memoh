@@ -53,27 +53,27 @@ func TestUpdateWorkerRunOnceDedupesAndFansOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if checks != 2 || factoryCalls != 1 {
-		t.Errorf("checks = %d, factory calls = %d; want 2 and 1", checks, factoryCalls)
+	if checks != 3 || factoryCalls != 1 {
+		t.Errorf("checks = %d, factory calls = %d; want 3 and 1", checks, factoryCalls)
 	}
 	specs := f.runSpecs()
-	if len(specs) != 2 {
-		t.Fatalf("runs = %+v, want one per (dependency, platform) group", specs)
+	if len(specs) != 3 {
+		t.Fatalf("runs = %+v, want one per (dependency, version, platform) group", specs)
 	}
 	platforms := map[string]string{}
 	for _, spec := range specs {
 		if spec.DepID != "tool-y" || spec.Timeout != time.Duration(catalog.DefaultCheckUpdateTimeout)*time.Second {
 			t.Errorf("spec = %+v", spec)
 		}
-		platforms[spec.Platform.Arch+"/"+spec.Platform.Libc] = spec.CurrentVersion
+		platforms[spec.Platform.Arch+"/"+spec.Platform.Libc+"/"+spec.CurrentVersion] = spec.CurrentVersion
 	}
-	if platforms["amd64/glibc"] != "1.0.0" || platforms["arm64/musl"] != "1.0.0" {
+	if len(platforms) != 3 || platforms["amd64/glibc/1.0.0"] != "1.0.0" || platforms["amd64/glibc/1.0.1"] != "1.0.1" || platforms["arm64/musl/1.0.0"] != "1.0.0" {
 		t.Errorf("groups = %v", platforms)
 	}
 
 	for _, key := range []InstallationKey{keyA, keyB, keyD, keyE} {
 		rec, _ := f.store.get(key)
-		if rec.LatestVersion != "1.2.0" || rec.LastCheckedAt == nil || !rec.LastCheckedAt.Equal(f.now) || rec.LastError != "" || rec.Status != StatusInstalled {
+		if !rec.UpdateAvailable || rec.UpdateCheckedVersion != rec.InstalledVersion || rec.LatestVersion != "1.2.0" || rec.LastCheckedAt == nil || !rec.LastCheckedAt.Equal(f.now) || rec.LastError != "" || rec.Status != StatusInstalled {
 			t.Errorf("record %s/%s = %+v, want fanned-out result", key.BotID, key.DependencyID, rec)
 		}
 	}
@@ -99,7 +99,7 @@ func TestUpdateWorkerRunOnceDedupesAndFansOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if checks != 2 {
+	if checks != 3 {
 		t.Errorf("checks = %d", checks)
 	}
 	for _, key := range []InstallationKey{keyA, keyB, keyD, keyE} {
