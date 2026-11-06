@@ -12,6 +12,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
 	"github.com/felinics/memoh/internal/agent/step"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -65,7 +66,9 @@ func (a *Agent) wrapToolsWithHooks(ctx context.Context, cfg RunConfig, sdkTools 
 		originalExecute := tool.Execute
 		toolName := tool.Name
 		wrapped[i] = tool
-		if originalExecute == nil {
+		// The bridge only routes: hooks run on the on-demand tool it calls,
+		// under that tool's name, exactly once.
+		if originalExecute == nil || tools.IsBridgeTool(toolName) {
 			continue
 		}
 		wrapped[i].Execute = func(execCtx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {

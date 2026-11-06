@@ -374,6 +374,11 @@ type AgentConfig struct {
 	// the model has no configured window. Zero or negative selects the
 	// built-in default; the cap can be raised but never disabled.
 	ContextAbsoluteMaxTokens int `toml:"context_absolute_max_tokens"`
+	// OnDemandTools is "auto" (the default when empty) to keep rarely used
+	// tool groups out of the request until the model loads them with
+	// tool_describe, or "off" to send every tool definition with every
+	// request.
+	OnDemandTools string `toml:"on_demand_tools"`
 }
 
 // EffectiveContextAbsoluteMaxTokens resolves the server-wide context

@@ -90,26 +90,24 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	var sdkTools []toolexec.Tool
+	var toolBridge *tools.ToolBridge
 	cfg.ContextToolDefsResolved = true
 	if cfg.SupportsToolCall {
-		var toolUsage string
-		var toolUsageFrags []contextfrag.ContextFrag
-		var toolDefs []contextfrag.ToolDefAccounting
-		var err error
-		sdkTools, toolUsage, toolUsageFrags, toolDefs, err = a.assembleTools(streamCtx, cfg, streamEmitter, cfg.LiveToolStream)
+		assembled, err := a.assembleTools(streamCtx, cfg, streamEmitter, cfg.LiveToolStream)
 		if err != nil {
 			failure := localFailureEvent(fmt.Errorf("assemble tools: %w", err))
 			turnError = turnHookError(failure)
 			sendEvent(ctx, ch, failure)
 			return
 		}
-		cfg.ContextToolDefs = toolDefs
-		if toolUsage != "" {
+		sdkTools, toolBridge = assembled.tools, assembled.bridge
+		cfg.ContextToolDefs = assembled.defs
+		if assembled.usage != "" {
 			// Must run before dispatch assembly so prompt caching and
 			// background task summaries see the usage-augmented text.
-			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
-			cfg.ContextToolUsage = toolUsage
-			cfg.ContextToolUsageFrags = toolUsageFrags
+			cfg.System = appendToolUsageToSystem(cfg.System, assembled.usage)
+			cfg.ContextToolUsage = assembled.usage
+			cfg.ContextToolUsageFrags = assembled.usageFrags
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
@@ -152,7 +150,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 
 	// The execution chain over the assembled tools; a capability refresh
 	// rebuilds the same chain over the re-assembled set.
-	sdkTools, approvalTools := a.wrapExecutableTools(ctx, cfg, sdkTools, toolExecutionMetadata, toolLoopGuard, toolLoopAbortCallIDs)
+	sdkTools, approvalTools := a.wrapExecutableTools(ctx, cfg, sdkTools, toolBridge, toolExecutionMetadata, toolLoopGuard, toolLoopAbortCallIDs)
 
 	// The loop owns the dynamic input messages it appends at step boundaries:
 	// live InjectCh messages and read-media carriers.
