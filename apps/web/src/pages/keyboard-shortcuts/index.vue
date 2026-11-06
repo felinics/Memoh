@@ -1,15 +1,27 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, PageShell, SettingsSection } from '@felinic/ui'
+import { storeToRefs } from 'pinia'
+import { Button, PageShell, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SettingsRow, SettingsSection } from '@felinic/ui'
 import KeyCaptureDialog from './components/KeyCaptureDialog.vue'
 import ShortcutRow from './components/ShortcutRow.vue'
 import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
-import type { KeyboardBinding, KeyboardScope } from '@/lib/keyboard-bindings'
+import { COMPOSER_SEND_KEYS, type ComposerSendKey, isComposerSendKey, useSettingsStore } from '@/store/settings'
+import { detectPlatform, type KeyboardBinding, type KeyboardScope } from '@/lib/keyboard-bindings'
 import type { AppKeyboardCommand } from '@/lib/keyboard-commands'
 
 const { t } = useI18n()
 const store = useKeyboardShortcutsStore()
+const settingsStore = useSettingsStore()
+const { composerSendKey } = storeToRefs(settingsStore)
+
+// Key names stay untranslated; only the modifier follows the platform.
+const modKeyLabel = detectPlatform() === 'mac' ? '⌘' : 'Ctrl'
+const sendKeyLabels: Record<ComposerSendKey, string> = {
+  'enter': 'Enter',
+  'mod-enter': `${modKeyLabel}+Enter`,
+}
+const lineBreakKeyLabel = computed(() => composerSendKey.value === 'mod-enter' ? 'Enter' : 'Shift+Enter')
 
 const dialogOpen = ref(false)
 const editingCommand = ref<AppKeyboardCommand | null>(null)
@@ -52,6 +64,36 @@ const hasAnyOverride = computed(() => Object.keys(store.overrides).length > 0)
     </template>
 
     <div class="space-y-8">
+      <SettingsSection :title="t('settings.keyboard.chat')">
+        <SettingsRow
+          :label="t('settings.keyboard.sendKey')"
+          :description="t('settings.keyboard.sendKeyDescription', { key: lineBreakKeyLabel })"
+        >
+          <Select
+            :model-value="composerSendKey"
+            @update:model-value="(value) => isComposerSendKey(value) && settingsStore.setComposerSendKey(value)"
+          >
+            <SelectTrigger class="min-w-36">
+              <SelectValue>
+                {{ sendKeyLabels[composerSendKey] }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent
+              align="end"
+              :align-offset="0"
+            >
+              <SelectItem
+                v-for="value in COMPOSER_SEND_KEYS"
+                :key="value"
+                :value="value"
+              >
+                {{ sendKeyLabels[value] }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsSection>
+
       <SettingsSection
         v-for="group in grouped"
         :key="group.scope"

@@ -648,7 +648,7 @@
     "usage": "使用状況",
     "people": "メンバー",
     "appearance": "外観",
-    "keyboard": "キーボードショートカット",
+    "keyboard": "キーボード",
     "supermarket": "マーケットプレイス",
     "about": "Memoh について",
     "userMenu": "アカウントメニュー",
@@ -825,7 +825,10 @@
       "mermaidThemeAuto": "外観に合わせる"
     },
     "keyboard": {
-      "title": "キーボードショートカット",
+      "title": "キーボード",
+      "chat": "チャット",
+      "sendKey": "送信キー",
+      "sendKeyDescription": "{key} で改行",
       "resetAll": "すべてリセット",
       "scopes": {
         "workspace": "ワークスペース",

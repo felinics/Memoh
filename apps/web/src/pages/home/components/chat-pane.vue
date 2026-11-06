@@ -1307,6 +1307,7 @@ import {
 import { Button, CalloutBanner, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, ConfirmDeleteDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ExternalAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkdirsStore } from '@/store/workdirs'
+import { useSettingsStore } from '@/store/settings'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
@@ -1449,6 +1450,7 @@ const {
   loadingChats,
   hasExplicitSessionSelection,
 } = storeToRefs(chatStore)
+const { composerSendKey } = storeToRefs(useSettingsStore())
 
 const isActive = computed(() => props.active !== false)
 const { welcomeDismissed } = useChatExamplesUi()
@@ -4146,12 +4148,18 @@ function handleComposerKeydown(e: KeyboardEvent) {
     bridge.navigate(e)
     return
   }
-  if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
-  if (bridge?.hasHighlight) {
+  if (e.key !== 'Enter' || e.shiftKey || e.altKey) return
+  const withMod = e.ctrlKey || e.metaKey
+  // A highlighted slash-picker row takes a bare Enter in either send mode;
+  // the picker is a list, not text, so Enter means "choose this row".
+  if (!withMod && bridge?.hasHighlight) {
     e.preventDefault()
     bridge.select(e)
     return
   }
+  // In 'mod-enter' mode a bare Enter falls through to the textarea's native
+  // line break; Ctrl or ⌘ (either, matching the message edit box) sends.
+  if (withMod !== (composerSendKey.value === 'mod-enter')) return
   e.preventDefault()
   handleSend()
 }
