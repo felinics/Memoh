@@ -281,6 +281,7 @@ func TestThreadStorageDoesNotReachRouteDB(t *testing.T) {
 		"bot_channel_routes",
 		"GetActiveSessionForRoute",
 		"SetRouteActiveSession",
+		"CompareAndSetRouteActiveSession",
 	}
 	for _, file := range allGoFiles(t, root, "internal/chat/thread") {
 		data, err := os.ReadFile(filepath.Join(root, file)) //nolint:gosec // guard reads repository sources
