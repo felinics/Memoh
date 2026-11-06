@@ -44,31 +44,66 @@ type redisHistoryResetRecord struct {
 	ExpiresAtMS int64  `json:"expires_at_ms"`
 }
 
-// renewRedisLeaseScript also carries the lease index forward. The index score is
-// the deadline the reaper condemns a run by, so it must move in the same atomic
-// step as the deadline inside the snapshot; a renewal that updated one and not
-// the other would either lose the run or condemn a live owner.
+// renewRedisLeaseScript moves a run's lease. The lease is the run ref key's
+// expiry: Redis deletes the ref at the deadline, so every ownership check that
+// requires the ref also requires a live lease. The script checks the ref's
+// identity, not the session snapshot, so renewal neither reads nor rewrites the
+// snapshot and does not contend with the owner's own output writes. The lease
+// index score is the deadline the reaper condemns a run by, so it moves in the
+// same atomic step as the key's expiry; a renewal that updated one and not the
+// other would either lose the run or condemn a live owner.
+//
+// An active run lives until it terminalizes, however long it goes without
+// writing its state (an inline decision waits on a user). Renewal is then what
+// keeps the snapshot and its cursor from expiring under it; it extends them only
+// once half the state TTL has passed, so a run touches them at most once per
+// half TTL.
 var renewRedisLeaseScript = redis.NewScript(`
-local current_state = redis.call('GET', KEYS[1])
-local current_ref = redis.call('GET', KEYS[2])
-if not current_state or not current_ref then
-  return -1
+local current_ref = redis.call('GET', KEYS[1])
+if not current_ref then
+  return 0
 end
-if current_state ~= ARGV[1] or current_ref ~= ARGV[2] then
+local state_ttl = redis.call('PTTL', KEYS[3])
+if state_ttl == -2 then
+  return 0
+end
+local ok_ref, ref = pcall(cjson.decode, current_ref)
+if not ok_ref then
+  return 0
+end
+if ref.bot_id ~= ARGV[1] or ref.session_id ~= ARGV[2] or
+   ref.run_id ~= ARGV[3] or ref.owner_id ~= ARGV[4] or ref.generation ~= ARGV[5] then
   return 0
 end
 local now = redis.call('TIME')
 local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
-local expires_at_ms = tonumber(ARGV[5])
+local expires_at_ms = tonumber(ARGV[6])
 if not expires_at_ms or expires_at_ms <= now_ms then
-  return -1
+  return 0
 end
-redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[6])
-redis.call('SET', KEYS[2], ARGV[4], 'PXAT', ARGV[5])
-if ARGV[7] ~= '' then
-  redis.call('ZADD', KEYS[3], expires_at_ms, ARGV[7])
+redis.call('PEXPIREAT', KEYS[1], expires_at_ms)
+local keep_ms = tonumber(ARGV[7])
+if state_ttl >= 0 and state_ttl < keep_ms / 2 then
+  redis.call('PEXPIRE', KEYS[3], keep_ms)
+  redis.call('PEXPIRE', KEYS[4], keep_ms)
+end
+local token = tonumber(ref.fencing_token)
+if token and token > 0 then
+  redis.call('ZADD', KEYS[2], expires_at_ms, ARGV[1] .. '|' .. ARGV[2] .. '|' .. ARGV[3] .. '|' .. string.format('%d', math.floor(token)))
 end
 return 1
+`)
+
+// redisLeaseDeadlineScript reads a run's lease deadline from its ref key on the
+// Redis clock, the clock RenewLease writes it with. A negative result is the
+// key's PTTL status: -2 when the ref is gone, -1 when it has no expiry.
+var redisLeaseDeadlineScript = redis.NewScript(`
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then
+  return ttl
+end
+local now = redis.call('TIME')
+return tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000) + ttl
 `)
 
 // deleteRedisRunRefScript compares the identity fields rather than the whole
@@ -213,7 +248,25 @@ func (b *RedisBackend) Load(ctx context.Context, key Key) (Snapshot, bool, error
 	if err := unmarshalSnapshot(data, &snapshot); err != nil {
 		return Snapshot{}, false, err
 	}
+	if err := b.projectOwnerLease(ctx, b.client, key, &snapshot); err != nil {
+		return Snapshot{}, false, err
+	}
 	return snapshot, true, nil
+}
+
+func (b *RedisBackend) LoadCursor(ctx context.Context, key Key) (Cursor, bool, error) {
+	data, err := b.client.Get(ctx, b.cursorKey(key)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return Cursor{}, false, nil
+	}
+	if err != nil {
+		return Cursor{}, false, err
+	}
+	var cursor Cursor
+	if err := json.Unmarshal(data, &cursor); err != nil {
+		return Cursor{}, false, err
+	}
+	return cursor, true, nil
 }
 
 func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error) {
@@ -231,6 +284,9 @@ func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdat
 			if err != nil {
 				return err
 			}
+			if err := b.projectOwnerLease(ctx, tx, key, &current); err != nil {
+				return err
+			}
 			next, apply, err := update(current, ok)
 			if err != nil {
 				return err
@@ -245,7 +301,7 @@ func (b *RedisBackend) Update(ctx context.Context, key Key, update SnapshotUpdat
 				return err
 			}
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, stateKey, data, b.stateTTL)
+				b.setSnapshot(ctx, pipe, key, next, data)
 				return nil
 			}); err != nil {
 				return err
@@ -292,7 +348,9 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, runID, gene
 				return ErrRunOwnershipLost
 			}
 			run := current.CurrentRunView
-			if run.RunID != runID || run.Generation != generation || ref.RunID != runID || ref.Generation != generation || ref.OwnerID != run.OwnerID || ref.BotID != key.BotID || ref.SessionID != key.SessionID || !isActiveRunStatus(run.Status) || run.OwnerLeaseExpiresAt == nil || !now.Before(*run.OwnerLeaseExpiresAt) {
+			// The ref is the lease: Redis removes it at the deadline, so finding
+			// it is what proves the lease is still live.
+			if run.RunID != runID || run.Generation != generation || ref.RunID != runID || ref.Generation != generation || ref.OwnerID != run.OwnerID || ref.BotID != key.BotID || ref.SessionID != key.SessionID || !isActiveRunStatus(run.Status) || run.OwnerLeaseExpiresAt == nil {
 				return ErrRunOwnershipLost
 			}
 			next, apply, err := update(current, now)
@@ -309,7 +367,7 @@ func (b *RedisBackend) UpdateActiveRun(ctx context.Context, key Key, runID, gene
 				return err
 			}
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, stateKey, data, b.stateTTL)
+				b.setSnapshot(ctx, pipe, key, next, data)
 				return nil
 			}); err != nil {
 				return err
@@ -380,7 +438,9 @@ func (b *RedisBackend) releaseRun(ctx context.Context, key Key, ref RunRef, upda
 			}
 			identityMismatch := !storedRef.identityMatches(ref) || run.RunID != ref.RunID ||
 				run.Generation != ref.Generation || run.OwnerID != ref.OwnerID
-			leaseInvalid := !isActiveRunStatus(run.Status) || run.OwnerLeaseExpiresAt == nil || !now.Before(*run.OwnerLeaseExpiresAt)
+			// A live lease is the stored ref itself; ok already said whether it
+			// is there.
+			leaseInvalid := !isActiveRunStatus(run.Status) || run.OwnerLeaseExpiresAt == nil
 			fenceMismatch := !requireLiveLease && (storedRef.FencingToken != ref.FencingToken || (run.FencingToken > 0 && run.FencingToken != ref.FencingToken))
 			if identityMismatch || fenceMismatch || (requireLiveLease && leaseInvalid) {
 				return ErrRunOwnershipLost
@@ -399,7 +459,7 @@ func (b *RedisBackend) releaseRun(ctx context.Context, key Key, ref RunRef, upda
 				return err
 			}
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, stateKey, data, b.stateTTL)
+				b.setSnapshot(ctx, pipe, key, next, data)
 				pipe.Del(ctx, runKey)
 				// The stored ref, not the caller's, carries the token this
 				// reservation was indexed under.
@@ -463,6 +523,9 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref RunRef, update
 			if err != nil {
 				return err
 			}
+			if err := b.projectOwnerLease(ctx, tx, key, &current); err != nil {
+				return err
+			}
 			next, apply, err := update(current, ok)
 			if err != nil {
 				return err
@@ -478,7 +541,7 @@ func (b *RedisBackend) StartRun(ctx context.Context, key Key, ref RunRef, update
 			}
 			leaseExpiry := streamLeaseExpiry(next, runID, time.Now().Add(b.stateTTL))
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, stateKey, stateData, b.stateTTL)
+				b.setSnapshot(ctx, pipe, key, next, stateData)
 				pipe.Set(ctx, runKey, refData, 0)
 				pipe.PExpireAt(ctx, runKey, leaseExpiry)
 				// The index entry is what makes this reservation reapable. It is
@@ -693,68 +756,39 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, runID, ownerID, 
 	if renewedAt.IsZero() || !renewedAt.Before(expiresAt) {
 		return ErrRunOwnershipLost
 	}
-	stateKey := b.stateKey(key)
-	runKey := b.runKey(key, runID)
-	for {
-		stateData, err := b.client.Get(ctx, stateKey).Bytes()
-		if errors.Is(err, redis.Nil) {
-			return ErrRunOwnershipLost
-		}
-		if err != nil {
-			return err
-		}
-		refData, err := b.client.Get(ctx, runKey).Bytes()
-		if errors.Is(err, redis.Nil) {
-			return ErrRunOwnershipLost
-		}
-		if err != nil {
-			return err
-		}
-		var ref RunRef
-		if err := json.Unmarshal(refData, &ref); err != nil {
-			return err
-		}
-		if ref.OwnerID != ownerID || ref.BotID != key.BotID || ref.SessionID != key.SessionID || ref.RunID != runID || ref.Generation != generation {
-			return ErrRunOwnershipLost
-		}
-		var snapshot Snapshot
-		if err := unmarshalSnapshot(stateData, &snapshot); err != nil {
-			return err
-		}
-		if snapshot.CurrentRunView == nil {
-			return ErrRunOwnershipLost
-		}
-		run := snapshot.CurrentRunView
-		if run.RunID != runID || run.OwnerID != ownerID || run.Generation != generation || run.OwnerLeaseExpiresAt == nil {
-			return ErrRunOwnershipLost
-		}
-		if !isActiveRunStatus(run.Status) {
-			return nil
-		}
-		run.OwnerLeaseExpiresAt = &expiresAt
-		nextStateData, err := marshalSnapshot(snapshot)
-		if err != nil {
-			return err
-		}
-		leaseMember := ""
-		if ref.FencingToken > 0 {
-			leaseMember = encodeLeaseIndexMember(key, runID, ref.FencingToken)
-		}
-		result, err := renewRedisLeaseScript.Run(ctx, b.client, []string{stateKey, runKey, b.leaseIndexKey()},
-			stateData, refData, nextStateData, refData, expiresAt.UnixMilli(), b.stateTTL.Milliseconds(), leaseMember,
-		).Int64()
-		if err != nil {
-			return err
-		}
-		switch result {
-		case 1:
-			return nil
-		case 0:
-			continue
-		default:
-			return ErrRunOwnershipLost
-		}
+	renewed, err := renewRedisLeaseScript.Run(ctx, b.client,
+		[]string{b.runKey(key, runID), b.leaseIndexKey(), b.stateKey(key), b.cursorKey(key)},
+		strings.TrimSpace(key.BotID), strings.TrimSpace(key.SessionID), runID, ownerID, generation, expiresAt.UnixMilli(),
+		b.stateTTL.Milliseconds(),
+	).Int64()
+	if err != nil {
+		return err
 	}
+	if renewed != 1 {
+		return ErrRunOwnershipLost
+	}
+	return nil
+}
+
+// projectOwnerLease sets an active run's lease to the deadline its ref key
+// carries. RenewLease moves only that key, so the snapshot's own copy is the
+// deadline the run was last written with: never later than the live one, and
+// already past whenever the key has expired, which is why it stands when the
+// key is gone.
+func (b *RedisBackend) projectOwnerLease(ctx context.Context, c redis.Scripter, key Key, snapshot *Snapshot) error {
+	run := snapshot.CurrentRunView
+	if run == nil || run.OwnerLeaseExpiresAt == nil || !isActiveRunStatus(run.Status) || strings.TrimSpace(run.RunID) == "" {
+		return nil
+	}
+	deadline, err := redisLeaseDeadlineScript.Run(ctx, c, []string{b.runKey(key, run.RunID)}).Int64()
+	if err != nil {
+		return err
+	}
+	if deadline > 0 {
+		expiresAt := time.UnixMilli(deadline)
+		run.OwnerLeaseExpiresAt = &expiresAt
+	}
+	return nil
 }
 
 func (b *RedisBackend) ValidateRunOwnership(ctx context.Context, key Key, ref RunRef) error {
@@ -1141,6 +1175,21 @@ func effectiveRedisHistoryReset(state redisHistoryResetState, botID, sessionID s
 
 func (b *RedisBackend) stateKey(key Key) string {
 	return b.keyPrefix + "state:" + key.String()
+}
+
+// cursorKey holds the stored snapshot's cursor beside it, so a reader that
+// only asks whether the snapshot moved does not fetch and decode a run view.
+func (b *RedisBackend) cursorKey(key Key) string {
+	return b.keyPrefix + "cursor:" + key.String()
+}
+
+// setSnapshot queues the write of a snapshot and its cursor. Every snapshot
+// write goes through it, inside the write's transaction, so the cursor key
+// never names a position the state key does not hold.
+func (b *RedisBackend) setSnapshot(ctx context.Context, pipe redis.Pipeliner, key Key, snapshot Snapshot, data []byte) {
+	cursor, _ := json.Marshal(snapshot.cursor())
+	pipe.Set(ctx, b.stateKey(key), data, b.stateTTL)
+	pipe.Set(ctx, b.cursorKey(key), cursor, b.stateTTL)
 }
 
 func (b *RedisBackend) runKey(key Key, runID string) string {
