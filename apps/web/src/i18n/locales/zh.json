@@ -3948,7 +3948,7 @@
         "important": "仅在需要我关注时",
         "everyRun": "每次运行都提醒",
         "importantHelp": "由 Bot 判断这次运行是否值得告诉你。运行失败或需要你确认时总会提醒。",
-        "everyRunHelp": "每次运行结束都会提醒你。",
+        "everyRunHelp": "每次运行结束都会提醒你",
         "contact": "有更新时，通过已配置的平台主动联系我",
         "noPlatforms": "这个 Bot 还没有接入平台",
         "configurePlatforms": "配置平台"

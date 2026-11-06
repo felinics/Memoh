@@ -61,7 +61,7 @@ func TestCreateRejectsUnknownNotifyPolicy(t *testing.T) {
 
 type payloadRecorder struct{ payload *TriggerPayload }
 
-func (r payloadRecorder) TriggerSchedule(_ context.Context, _ string, payload TriggerPayload, _ string) (TriggerResult, error) {
+func (r payloadRecorder) TriggerSchedule(_ context.Context, _ string, payload TriggerPayload) (TriggerResult, error) {
 	*r.payload = payload
 	return TriggerResult{Status: "ok"}, nil
 }
@@ -89,7 +89,6 @@ func TestRunSchedulePassesNotifySettingsToTheRun(t *testing.T) {
 				triggerer:      payloadRecorder{payload: &got},
 				sessionCreator: fakeSessionCreator{},
 				events:         &recordingPublisher{},
-				jwtSecret:      "secret",
 				logger:         slog.Default(),
 			}
 			if err := svc.runSchedule(t.Context(), toSchedule(row)); err != nil {
