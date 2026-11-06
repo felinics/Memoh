@@ -28,7 +28,6 @@ type CachedDefinition struct {
 }
 
 type CachedCatalog struct {
-	TeamID     string
 	SourceURL  string
 	Data       []byte
 	Generation int64
@@ -36,7 +35,9 @@ type CachedCatalog struct {
 }
 
 // CatalogStore persists verified definitions separately from installation
-// intent. PostgreSQL applies the same connection-bound team RLS as Store.
+// intent. Definitions and catalogs are global: their content comes from the
+// server-level Supermarket source, so every team reads the same rows.
+// Definitions are append-only and reads never write.
 type CatalogStore interface {
 	FindIcon(context.Context, string, string) (CachedDefinition, error)
 	GetDefinition(context.Context, DefinitionKey) (CachedDefinition, error)
@@ -88,7 +89,7 @@ func (s *postgresCatalogStore) GetCatalog(ctx context.Context, sourceURL string)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CachedCatalog{}, ErrCatalogCacheMiss
 	}
-	return CachedCatalog{TeamID: uuidString(row.TeamID), SourceURL: sourceURL, Data: row.CatalogBytes, Generation: row.Generation, FetchedAt: db.TimeFromPg(row.FetchedAt)}, err
+	return CachedCatalog{SourceURL: sourceURL, Data: row.CatalogBytes, Generation: row.Generation, FetchedAt: db.TimeFromPg(row.FetchedAt)}, err
 }
 
 func (s *postgresCatalogStore) PutCatalog(ctx context.Context, entry CachedCatalog) (bool, error) {
@@ -96,9 +97,4 @@ func (s *postgresCatalogStore) PutCatalog(ctx context.Context, entry CachedCatal
 		SourceUrl: entry.SourceURL, CatalogBytes: entry.Data, ExpectedGeneration: entry.Generation,
 	})
 	return n == 1, err
-}
-
-func (s *postgresCatalogStore) PruneDefinitions(ctx context.Context, source string) error {
-	_, err := s.q.PruneWorkspaceDependencyDefinitions(ctx, source)
-	return err
 }

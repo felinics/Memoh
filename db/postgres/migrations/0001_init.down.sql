@@ -1,5 +1,3 @@
-DROP TABLE IF EXISTS public.workspace_dependency_catalogs;
-DROP TABLE IF EXISTS public.workspace_dependency_definitions;
 ALTER TABLE IF EXISTS bot_channel_routes DROP CONSTRAINT IF EXISTS fk_bot_channel_routes_active_session;
 
 DROP VIEW IF EXISTS public.team_accounts CASCADE;
@@ -82,6 +80,8 @@ DROP FUNCTION IF EXISTS public.memoh_history_checkpoint_kept(uuid, bigint, bigin
 DROP FUNCTION IF EXISTS public.memoh_current_team_id() CASCADE;
 DROP TYPE IF EXISTS user_role;
 
+DROP TABLE IF EXISTS template.workspace_dependency_catalogs CASCADE;
+DROP TABLE IF EXISTS template.workspace_dependency_definitions CASCADE;
 DROP TABLE IF EXISTS template.provider_template_models CASCADE;
 DROP TABLE IF EXISTS template.provider_templates CASCADE;
 DROP SCHEMA IF EXISTS template;
