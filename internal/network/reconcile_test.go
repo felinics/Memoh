@@ -3,6 +3,8 @@ package network
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -74,5 +76,40 @@ func TestReconcileBotKeepsSidecarWithinSameProvider(t *testing.T) {
 				t.Fatalf("detached %v, want %v", ctrl.detached, tc.wantDetached)
 			}
 		})
+	}
+}
+
+func TestLogoutWipesProviderStateAndMemohFiles(t *testing.T) {
+	const botID = "00000000-0000-0000-0000-000000000001"
+	root := t.TempDir()
+	botDir := filepath.Join(root, "network", botID)
+	keep := []string{"tailscale", "tailscale-resolv.conf"}
+	wipe := []string{"netbird", "netbird-sso.json", "netbird-login-error", "netbird-resolv.conf"}
+	for _, name := range append(append([]string{}, keep...), wipe...) {
+		if err := os.MkdirAll(botDir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(botDir, name+".probe"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(filepath.Join(botDir, name+".probe"), filepath.Join(botDir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := NewService(slog.New(slog.DiscardHandler), containerQueries{}, NewRegistry(), nil, "containerd", "", "", root)
+	svc.SetController(&recordingController{})
+
+	if _, err := svc.executeLogout(context.Background(), botID, BotOverlayConfig{Enabled: true, Provider: "netbird"}); err != nil {
+		t.Fatalf("executeLogout: %v", err)
+	}
+	for _, name := range wipe {
+		if _, err := os.Stat(filepath.Join(botDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s survived logout", name)
+		}
+	}
+	for _, name := range keep {
+		if _, err := os.Stat(filepath.Join(botDir, name)); err != nil {
+			t.Fatalf("another provider's %s was removed: %v", name, err)
+		}
 	}
 }
