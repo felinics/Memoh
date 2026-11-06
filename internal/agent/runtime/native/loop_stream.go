@@ -543,6 +543,7 @@ func (e *streamEngine) run() {
 
 	retryCfg := e.baseCfg.Retry
 	retryAttempts := 0
+	contextRecoveries := 0
 
 	// attemptSteps are the steps committed by the current dispatch, in
 	// call-local order: providerAttemptState.retryInput indexes them by the
@@ -559,7 +560,7 @@ func (e *streamEngine) run() {
 			readMedia:     e.readMedia,
 			drainInjected: e.drainInjectedMessages,
 		})
-		if next, ok := e.baseCfg.contextSwitch.redispatch(e.cfg, e.dispatch, stepParams); ok {
+		if next, ok := e.baseCfg.contextSwitch.redispatch(e.cfg, e.dispatch, stepParams, e.dispatch.handoff.admitted()); ok {
 			// A later mid-stream retry dispatches from the request as the
 			// event left it.
 			e.baseCfg.ContextCachePlan = next.ContextCachePlan
@@ -604,7 +605,29 @@ func (e *streamEngine) run() {
 			return
 		}
 		if failure == nil {
+			contextRecoveries = 0
 			attemptStep++
+			continue
+		}
+		if _, overflow := contextRecoveryFeedback(e.cfg, failure); overflow {
+			recovered, err := e.agent.recoverContextOverflow(e.streamCtx, e.cfg, &stepParams, failure, &contextRecoveries)
+			if !recovered {
+				e.endWithFailure(StreamEvent{Type: EventError, Cause: err})
+				return
+			}
+			refs := e.baseCfg.contextSwitch.remap(e.baseCfg.providerAttemptState.publishedRefs())
+			next, _ := e.baseCfg.contextSwitch.redispatch(e.cfg, e.dispatch, stepParams, refs)
+			e.baseCfg.ContextCachePlan = next.ContextCachePlan
+			e.baseCfg.initialProviderMessageCount = next.initialProviderMessageCount
+			e.cfg = next
+			e.interruptedStep.rebase(e.baseCfg.StepIndexOffset + len(e.steps))
+			dispatch, err := e.agent.buildGenerateDispatch(e.streamCtx, next, e.sdkTools, e.approvalTools, e.prepareStep)
+			if err != nil {
+				e.endWithFailure(localFailureEvent(err))
+				return
+			}
+			e.reset(dispatch)
+			attemptSteps, attemptStep = nil, 0
 			continue
 		}
 
@@ -685,11 +708,10 @@ func (e *streamEngine) callModel(
 	stepParams *sdk.Request,
 	attemptSteps *[]step.Record,
 ) (done bool, retry error) {
-	e.modelCtx = e.streamCtx
+	modelCtx, cancelModel := context.WithCancelCause(e.streamCtx)
+	defer cancelModel(nil)
+	e.modelCtx = modelCtx
 	if e.steer != nil {
-		modelCtx, cancelModel := context.WithCancelCause(e.streamCtx)
-		defer cancelModel(nil)
-		e.modelCtx = modelCtx
 		e.steer.arm(cancelModel)
 	}
 	provParts, err := e.baseCfg.Model.Provider.DoStream(e.modelCtx, *stepParams)
@@ -789,6 +811,8 @@ func (e *streamEngine) consumeStep(
 		stepFinishReason    sdk.FinishReason
 		stepRawFinishReason string
 		sawFinishStep       bool
+		sawFile             bool
+		sawSource           bool
 	)
 
 partLoop:
@@ -818,13 +842,6 @@ partLoop:
 			stepResponse = p.Response
 			stepFinishReason = p.FinishReason
 			stepRawFinishReason = p.RawFinishReason
-			// Emitted after every part of the step and before the commit
-			// barrier runs. The session runtime uses it to know the step's
-			// live projection is complete before it anchors a queue steer to
-			// it; the index is the durable step index the commit will use.
-			if !e.emit(StreamEvent{Type: EventStepEnd, StepNumber: e.baseCfg.StepIndexOffset + len(e.steps)}) {
-				e.aborted = true
-			}
 
 		case *sdk.TextStartPart:
 			if !e.emit(StreamEvent{Type: EventTextStart}) {
@@ -916,7 +933,11 @@ partLoop:
 				e.aborted = true
 			}
 
+		case *sdk.StreamSourcePart:
+			sawSource = true
+
 		case *sdk.StreamFilePart:
+			sawFile = true
 			mediaType := p.File.MediaType
 			if mediaType == "" {
 				mediaType = "image/png"
@@ -940,6 +961,13 @@ partLoop:
 			if e.streamCtx.Err() != nil {
 				// The provider is reporting the run's own cancellation.
 				e.aborted = true
+				break
+			}
+			if _, overflow := modelretry.ContextOverflow(p.Error); overflow &&
+				(stepText != "" || !stepReasoning.empty() || e.interruptedStep.toolActivity || sawFile || sawSource || sawFinishStep) {
+				// A rejection after visible/provider-owned work is not proof
+				// that replay is safe. Preserve the interrupted frontier.
+				e.endWithFailure(StreamEvent{Type: EventError, Cause: &modelCallFailure{err: errs.WrapDependency(p.Error, "model stream", slog.Int("step", attemptStep))}})
 				break
 			}
 			retry = e.providerFailure(errs.WrapDependency(p.Error, "model stream", slog.Int("step", attemptStep)))
@@ -966,8 +994,17 @@ partLoop:
 	if retry != nil {
 		// Drain the failed stream before folding: the retry input must not
 		// race the provider goroutine still flushing its buffer.
-		for part := range provParts {
+		lateOutput := false
+		drainStreamUntilClosed(provParts, streamCancelDrainGrace, func(part sdk.StreamPart) {
 			e.interruptedStep.observe(part)
+			_, file := part.(*sdk.StreamFilePart)
+			_, source := part.(*sdk.StreamSourcePart)
+			lateOutput = lateOutput || file || source || e.interruptedStep.finished || e.interruptedStep.text.Len() > 0 ||
+				!e.interruptedStep.reasoningBlocks.empty() || e.interruptedStep.toolActivity
+		})
+		if _, overflow := modelretry.ContextOverflow(retry); overflow && lateOutput {
+			e.endWithFailure(StreamEvent{Type: EventError, Cause: retry})
+			return true, nil
 		}
 		return false, retry
 	}
@@ -1006,6 +1043,19 @@ partLoop:
 		Response:             stepResponse,
 	}
 
+	if !sawFile && !sawSource && !e.interruptedStep.toolActivity {
+		if err := exhaustedContextResult(e.cfg, result); err != nil {
+			return false, err
+		}
+	}
+	// Only a settled attempt can release the session's step-consumed barrier.
+	// Recovery reuses this durable step index, so an empty exhausted attempt
+	// must not let a queued steer anchor before the retry's output is consumed.
+	// The marker still precedes tool execution and the commit barrier.
+	if !e.emit(StreamEvent{Type: EventStepEnd, StepNumber: e.baseCfg.StepIndexOffset + len(e.steps)}) {
+		e.aborted = true
+		return true, nil
+	}
 	// The tool batch's OnPart callback bridges approval, progress, result,
 	// and error parts onto the event channel.
 	sr, kind, err := settleStep(e.streamCtx, e.dispatch, result, stepTextMeta, e.bridgeToolPart)
@@ -1077,6 +1127,9 @@ func (e *streamEngine) providerFailure(err error) (retry error) {
 		return nil
 	}
 	if _, ok := modelretry.Retryable(err); ok {
+		return err
+	}
+	if _, ok := modelretry.ContextOverflow(err); ok {
 		return err
 	}
 	e.endWithFailure(StreamEvent{Type: EventError, Cause: err})
