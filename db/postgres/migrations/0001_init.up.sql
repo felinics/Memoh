@@ -145,6 +145,8 @@ CREATE TABLE IF NOT EXISTS providers (
     'openrouter-transcription',
     'elevenlabs-speech',
     'elevenlabs-transcription',
+    'fishaudio-speech',
+    'fishaudio-transcription',
     'deepgram-speech',
     'deepgram-transcription',
     'minimax-speech',

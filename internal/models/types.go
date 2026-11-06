@@ -65,6 +65,8 @@ const (
 	ClientTypeOpenRouterTranscription ClientType = "openrouter-transcription"
 	ClientTypeElevenLabsSpeech        ClientType = "elevenlabs-speech"
 	ClientTypeElevenLabsTranscription ClientType = "elevenlabs-transcription"
+	ClientTypeFishAudioSpeech         ClientType = "fishaudio-speech"
+	ClientTypeFishAudioTranscription  ClientType = "fishaudio-transcription"
 	ClientTypeDeepgramSpeech          ClientType = "deepgram-speech"
 	ClientTypeDeepgramTranscription   ClientType = "deepgram-transcription"
 	ClientTypeMiniMaxSpeech           ClientType = "minimax-speech"

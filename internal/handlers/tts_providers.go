@@ -495,7 +495,7 @@ func (h *AudioHandler) TestModel(c echo.Context) error {
 	}
 	audio, contentType, err := h.service.Synthesize(c.Request().Context(), id, text, req.Config)
 	if err != nil {
-		return errs.Wrap(err, "test model")
+		return errs.Wrap(probeError(err, false), "test model")
 	}
 	return c.Blob(http.StatusOK, contentType, audio)
 }
@@ -544,7 +544,7 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	}
 	result, err := h.service.Transcribe(c.Request().Context(), id, audio, file.Filename, file.Header.Get("Content-Type"), cfg)
 	if err != nil {
-		return errs.Wrap(err, "test transcription model")
+		return errs.Wrap(probeError(err, false), "test transcription model")
 	}
 	resp := audiopkg.TestTranscriptionResponse{
 		Text:            result.Text,
