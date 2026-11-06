@@ -54,7 +54,7 @@
               :model-value="form.timezone || emptyTimezoneValue"
               :placeholder="$t('bots.timezonePlaceholder')"
               allow-empty
-              :empty-label="$t('bots.timezoneInherited')"
+              :empty-label="inheritedTimezoneLabel"
               popover-class="min-w-[var(--reka-popover-trigger-width)] w-72"
               popover-align="end"
               @update:model-value="(val: string) => form.timezone = val === emptyTimezoneValue ? '' : val"
@@ -191,6 +191,16 @@ const { data: settings } = useQuery({
 })
 
 const { data: bot } = useBotQuery(botIdRef)
+
+// Names the timezone the bot follows when its own is cleared, as the server
+// resolves it, instead of a generic "inherited" placeholder.
+const inheritedTimezoneLabel = computed(() => {
+  const timezone = settings.value?.inherited_timezone?.trim()
+  if (!timezone) return t('bots.timezoneInherited')
+  return settings.value?.inherited_timezone_source === 'owner'
+    ? t('bots.timezoneFollowOwner', { timezone })
+    : t('bots.timezoneFollowSystem', { timezone })
+})
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -587,6 +597,10 @@ function onDrained(savedKeys: Set<keyof SettingsForm>) {
   }
   if (savedKeys.has('name') || savedKeys.has('timezone')) {
     queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
+  }
+  // Schedule views read the bot's effective timezone from its settings.
+  if (savedKeys.has('timezone')) {
+    void queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
   }
   // The sidebar lists bots by name; nothing else on this page is visible
   // there, so the expensive full-list refetch only fires for renames.

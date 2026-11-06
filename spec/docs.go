@@ -27304,11 +27304,26 @@ const docTemplate = `{
                 "display_enabled": {
                     "type": "boolean"
                 },
+                "effective_timezone": {
+                    "description": "EffectiveTimezone is the timezone the bot runs in: Timezone when set,\notherwise InheritedTimezone. Agent turns and the scheduler use the same\nvalue, so clients read it instead of deriving one from the browser.\nOnly the settings API fills EffectiveTimezone, InheritedTimezone and\nInheritedTimezoneSource; they are empty on settings the server reads for\nits own use.",
+                    "type": "string"
+                },
                 "fetch_provider_id": {
                     "type": "string"
                 },
                 "image_model_id": {
                     "type": "string"
+                },
+                "inherited_timezone": {
+                    "description": "InheritedTimezone is what the bot uses without a Timezone of its own.\nInheritedTimezoneSource says whose timezone that is.",
+                    "type": "string"
+                },
+                "inherited_timezone_source": {
+                    "type": "string",
+                    "enum": [
+                        "owner",
+                        "system"
+                    ]
                 },
                 "memory_enabled": {
                     "description": "MemoryEnabled reports whether the bot uses Built-in Memory. It is derived\nfrom MemoryProviderID, which stays internal to the server.",

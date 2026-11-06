@@ -10,7 +10,7 @@
 
     <!-- Loading (initial) -->
     <div
-      v-else-if="isLoading && schedules.length === 0"
+      v-else-if="(isLoading && schedules.length === 0) || (schedules.length > 0 && isTimezonePending)"
       class="flex items-center gap-2 px-[23px] pt-3 text-caption text-muted-foreground/60"
     >
       <Spinner class="size-3" />
@@ -126,6 +126,7 @@ import {
 import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdScheduleById } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
+import { useBotEffectiveTimezone } from '@/composables/api/useBotTimezone'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
@@ -154,9 +155,9 @@ const busyIds = reactive(new Set<string>())
 const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
 const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : locale.value.startsWith('ja') ? 'ja-JP' : 'en-US')
 
-const effectiveTimezone = computed(() => {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
-})
+// Schedules fire in the bot's effective timezone, which may differ from the
+// viewer's; next runs are computed there and shown in local time.
+const { timezone: effectiveTimezone, isPending: isTimezonePending } = useBotEffectiveTimezone(currentBotId)
 
 // --- Grouping by day; each item carries its own next-run time. ---
 
