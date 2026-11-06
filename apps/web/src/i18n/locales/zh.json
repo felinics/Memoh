@@ -93,7 +93,9 @@
     "unsaved": "未保存",
     "editJson": "编辑 JSON",
     "actionRequired": "需要操作",
-    "preview": "预览"
+    "preview": "预览",
+    "showSecretField": "显示{field}",
+    "hideSecretField": "隐藏{field}"
   },
   "computerAccess": {
     "emptyBots": "还没有 Bot",
@@ -3391,7 +3393,6 @@
       "overlayProviderFieldLabel": "服务商",
       "overlayProviderPlaceholder": "选择服务商",
       "overlayProviderRequired": "启用前请先选择服务商",
-      "overlayPrimaryConfigTitle": "主要配置",
       "networkState": {
         "connected": "已连接",
         "degraded": "已连接，但有异常",
@@ -3699,8 +3700,6 @@
       "lineWebhookSetFailed": "更新 LINE Webhook 地址失败",
       "lineWebhookSaveFirst": "请先保存当前平台配置，再设置 LINE Webhook 地址",
       "linePublicMediaLimit": "LINE 出站图片需要配置公网 HTTPS base 或启用 Cloudflare Quick Tunnel；图片必须是 PNG/JPEG，并符合 LINE 大小限制",
-      "showSecretField": "显示{field}",
-      "hideSecretField": "隐藏{field}",
       "feishuWebhookSecurityHint": "为了安全，使用 Webhook 模式时必须配置 Encrypt Key 或 Verification Token；不要将未受保护的回调地址直接暴露",
       "feishuWebhookSecretRequired": "为了安全，请至少配置 Encrypt Key 或 Verification Token 其中的一项",
       "noAvailableTypes": "所有平台类型均已配置",
