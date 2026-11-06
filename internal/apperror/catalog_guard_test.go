@@ -344,6 +344,7 @@ var declaredFaults = map[Code]Fault{
 	CodeExternalRuntimeOverloaded:          FaultDependency,
 	CodeExternalRuntimeUpstreamUnreachable: FaultDependency,
 	CodeWorkspaceImageRegistryUnavailable:  FaultDependency,
+	CodeChannelRegistrationUnavailable:     FaultDependency,
 }
 
 // providerCodePrefixes name the codes a model provider's answer produces. A

@@ -169,3 +169,27 @@ func TestNormalizeTarget(t *testing.T) {
 		t.Fatalf("unexpected normalized target: %s", got)
 	}
 }
+
+func TestNormalizeConfigSetupMode(t *testing.T) {
+	t.Parallel()
+
+	manual, err := normalizeConfig(map[string]any{"appId": "app", "appSecret": "secret"})
+	if err != nil {
+		t.Fatalf("normalize manual: %v", err)
+	}
+	if _, ok := manual["setupMode"]; ok {
+		t.Fatalf("manual config must keep its previous shape: %#v", manual)
+	}
+
+	registered, err := normalizeConfig(map[string]any{"appId": "app", "appSecret": "secret", "setupMode": "Registration"})
+	if err != nil {
+		t.Fatalf("normalize registration: %v", err)
+	}
+	if registered["setupMode"] != SetupModeRegistration {
+		t.Fatalf("setupMode = %v, want %q", registered["setupMode"], SetupModeRegistration)
+	}
+
+	if _, err := normalizeConfig(map[string]any{"appId": "app", "appSecret": "secret", "setupMode": "magic"}); err == nil {
+		t.Fatal("expected an unknown setup mode to be rejected")
+	}
+}
