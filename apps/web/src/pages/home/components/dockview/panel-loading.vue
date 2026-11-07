@@ -1,17 +1,17 @@
 <template>
   <!-- Stands in for a panel whose code is still downloading, or failed to
-       download (see panelComponents in chat-workspace.vue). A failure asks
-       for a reload instead of reloading on its own: other open panels may
-       hold unsaved edits. -->
+       download (see lazyPanel in chat-workspace.vue). Retry downloads the
+       code again in place; the page is not reloaded, since other open panels
+       may hold unsaved edits. -->
   <DockPanelFrame>
     <PanePlaceholder v-if="failed">
       {{ t('common.loadFailed') }}
       <template #action>
         <Button
           variant="outline"
-          @click="reload"
+          @click="retry?.()"
         >
-          {{ t('common.refresh') }}
+          {{ t('common.retry') }}
         </Button>
       </template>
     </PanePlaceholder>
@@ -24,7 +24,15 @@
   </DockPanelFrame>
 </template>
 
+<script lang="ts">
+import type { InjectionKey } from 'vue'
+
+/** Provided by each lazily loaded panel: mounts it again, which downloads its code again. */
+export const retryPanelLoadKey: InjectionKey<() => void> = Symbol('retry-panel-load')
+</script>
+
 <script setup lang="ts">
+import { inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, PanePlaceholder } from '@felinic/ui'
 import DockPanelFrame from './panel-frame.vue'
@@ -35,5 +43,5 @@ defineProps<{
 
 const { t } = useI18n()
 
-const reload = () => window.location.reload()
+const retry = inject(retryPanelLoadKey, undefined)
 </script>

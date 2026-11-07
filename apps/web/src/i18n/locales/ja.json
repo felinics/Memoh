@@ -783,6 +783,7 @@
     "loadUserFailed": "ユーザーデータの読み込みに失敗しました",
     "language": "表示言語",
     "languagePlaceholder": "言語を選択",
+    "languageLoadFailed": "言語を切り替えられませんでした。接続を確認してもう一度お試しください。",
     "theme": "テーマ",
     "themePlaceholder": "テーマの選択",
     "themeLight": "ライト",

@@ -783,6 +783,7 @@
     "loadUserFailed": "Failed to load user data",
     "language": "Language",
     "languagePlaceholder": "Select language",
+    "languageLoadFailed": "Couldn't switch the language. Check your connection and try again.",
     "theme": "Theme",
     "themePlaceholder": "Select Theme",
     "themeLight": "Light",

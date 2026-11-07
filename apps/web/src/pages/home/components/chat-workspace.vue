@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, h, inject, onBeforeUnmount, onMounted, provide, ref, type AsyncComponentLoader } from 'vue'
+import { defineAsyncComponent, defineComponent, h, inject, onBeforeUnmount, onMounted, provide, ref, type AsyncComponentLoader } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -43,7 +43,7 @@ import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFil
 import { normalizeFileManagerPath } from './file-manager-path'
 import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
 import PanelChat from './dockview/panel-chat.vue'
-import PanelLoading from './dockview/panel-loading.vue'
+import PanelLoading, { retryPanelLoadKey } from './dockview/panel-loading.vue'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTab from './dockview/workspace-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
@@ -141,13 +141,30 @@ function relayoutAfterAncestorTransform(event: TransitionEvent) {
 // arrives a panel shows PanelLoading (the editor's chunks are about 700KB
 // gzip, several seconds on a slow network), or its failed state if the chunk
 // can't be fetched. dockview passes later params updates as new props, which
-// the async wrapper forwards once the panel has loaded.
+// both wrappers forward once the panel has loaded.
+//
+// After a failed load, mounting the async component again runs its loader
+// again (Vue drops the failed request), and Chrome fetches a dynamic import
+// again after a failed fetch (other browsers not tested; where it stays
+// failed, reloading the page recovers). The failed state's Retry button
+// remounts by changing the key, so recovering one panel leaves the others,
+// and any unsaved edits in them, untouched.
 const PanelLoadFailed = () => h(PanelLoading, { failed: true })
-const lazyPanel = (loader: AsyncComponentLoader) => defineAsyncComponent({
-  loader,
-  loadingComponent: PanelLoading,
-  errorComponent: PanelLoadFailed,
-}) as unknown as VueComponent
+const lazyPanel = (loader: AsyncComponentLoader) => {
+  const Panel = defineAsyncComponent({
+    loader,
+    loadingComponent: PanelLoading,
+    errorComponent: PanelLoadFailed,
+  })
+  return defineComponent({
+    inheritAttrs: false,
+    setup(_, { attrs }) {
+      const attempt = ref(0)
+      provide(retryPanelLoadKey, () => { attempt.value += 1 })
+      return () => h(Panel, { ...attrs, key: attempt.value })
+    },
+  }) as unknown as VueComponent
+}
 
 const panelComponents: Record<string, VueComponent> = {
   chat: PanelChat as unknown as VueComponent,

@@ -1,4 +1,4 @@
-import { loadedLocaleMessages } from '@/i18n/messages'
+import { messagesFor } from '@/i18n/messages'
 
 interface ResolveApiErrorMessageOptions {
   prefixFallback?: boolean
@@ -81,10 +81,18 @@ function currentLocale(): Locale {
   return 'en'
 }
 
-// Only languages that have loaded can answer (see i18n/messages.ts); the stored
-// language is loaded before the app mounts and before a new pick is stored.
-function lookupMessage(locale: Locale, key: string): string {
-  let value: unknown = loadedLocaleMessages(locale)
+// Copy comes from the stored language once it has loaded. A language picked in
+// another tab is stored before this tab has downloaded it (see the language
+// watch in store/settings); until then messagesFor answers from a language this
+// tab has loaded, so an error still gets copy. Before any language has loaded
+// (the app mounts only after one has) there is no copy.
+function lookupMessage(key: string): string {
+  let value: unknown
+  try {
+    value = messagesFor(currentLocale())
+  } catch {
+    return ''
+  }
   for (const part of key.split('.')) {
     if (!value || typeof value !== 'object') return ''
     value = (value as Record<string, unknown>)[part]
@@ -105,11 +113,10 @@ function formatMessage(template: string, args?: ErrorRecord): string {
 
 /**
  * The copy for an i18n key in the stored locale, for code outside a component
- * that has no vue-i18n instance. Empty when no locale has the key.
+ * that has no vue-i18n instance. Empty when there is no copy for the key.
  */
 export function renderI18nMessage(key: string, args?: ErrorRecord): string {
-  const trimmed = key.trim()
-  const template = lookupMessage(currentLocale(), trimmed) || lookupMessage('en', trimmed)
+  const template = lookupMessage(key.trim())
   return template ? formatMessage(template, args).trim() : ''
 }
 

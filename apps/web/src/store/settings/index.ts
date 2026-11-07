@@ -4,6 +4,7 @@ import { computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useColorMode, useStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import { toast } from '@felinic/ui'
 import type { BundledTheme } from 'shiki'
 import { isColorSchemeId, type ColorSchemeId } from '@/constants/color-schemes'
 import { syncThemeColorWithBackground } from '@/utils/theme-color'
@@ -183,11 +184,21 @@ export const useSettingsStore = defineStore('settings', () => {
   }, { immediate: true })
 
   // Code outside components reads copy in the stored language (API error copy,
-  // chat notices), so store a pick only once its language has loaded.
+  // chat notices), so store a pick only once its language has loaded. Only the
+  // latest pick is stored: picking again while a download is in flight must not
+  // be overridden when the earlier download finishes later. A failed download
+  // leaves the current language in place and says so; picking again retries.
+  let pickedLanguage: Locale | undefined
   const setLanguage = (value: Locale) => {
+    pickedLanguage = value
     prepareLocale(value).then(
-      () => { language.value = value },
-      (error: unknown) => console.error('[settings] Failed to load language', value, error),
+      () => {
+        if (pickedLanguage === value) language.value = value
+      },
+      (error: unknown) => {
+        console.error('[settings] Failed to load language', value, error)
+        if (pickedLanguage === value) toast.error(i18n.t('settings.languageLoadFailed'))
+      },
     )
   }
 
