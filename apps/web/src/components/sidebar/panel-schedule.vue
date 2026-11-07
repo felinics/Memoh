@@ -203,6 +203,10 @@ function groupLabel(date: Date, now: Date): string {
 const groupedSchedules = computed<ScheduleGroup[]>(() => {
   const now = new Date()
   const tz = effectiveTimezone.value
+  // Keep tasks accessible when settings fail, without inventing local run times.
+  if (!tz) return schedules.value.length
+    ? [{ key: 'schedule', label: t('bots.schedule.title'), tasks: schedules.value }]
+    : []
 
   const pairs = schedules.value.flatMap(task => {
     if (!task.pattern) return []
@@ -241,11 +245,12 @@ function describeItem(pattern: string | undefined): string | undefined {
 }
 
 function nextRunForItem(item: ScheduleSchedule): Date | null {
-  if (!item.pattern) return null
+  if (!item.pattern || !effectiveTimezone.value) return null
   return nextRuns(item.pattern, effectiveTimezone.value, 1)[0] ?? null
 }
 
 function nextRunTimeLabel(item: ScheduleSchedule): string {
+  if (!effectiveTimezone.value) return ''
   const next = nextRunForItem(item)
   if (!next) return item.pattern ?? ''
   return next.toLocaleTimeString(uiLocale.value, { hour: '2-digit', minute: '2-digit', hour12: false })
