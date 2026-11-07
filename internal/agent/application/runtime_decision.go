@@ -21,6 +21,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
@@ -625,6 +626,16 @@ func runtimeDecisionTerminal(ctx context.Context, cause error) RunOutcome {
 	return RunOutcome{}
 }
 
+// parkedRunRequestResolver finds the request message a parked run's view
+// starts from. It is reached through a type assertion, so the production
+// message service is pinned to it at compile time: without it a recovered
+// waiting-decision run would show no decision card.
+type parkedRunRequestResolver interface {
+	GetVisibleHistoryTurnRequestMessageIDByTurn(context.Context, string, string) (string, error)
+}
+
+var _ parkedRunRequestResolver = (*messagepkg.DBService)(nil)
+
 // ParkedRunMessages rebuilds the assistant messages a parked run persisted, from
 // its request turn on, with each decision card as the history page shows it. A
 // recovered run is shown from them when the live backend kept no view of it.
@@ -634,9 +645,7 @@ func (s *Service) ParkedRunMessages(ctx context.Context, run ledger.Run) ([]chat
 	if s == nil || s.messageService == nil || s.sessionService == nil {
 		return nil, nil
 	}
-	resolver, ok := s.messageService.(interface {
-		GetVisibleHistoryTurnRequestMessageIDByTurn(context.Context, string, string) (string, error)
-	})
+	resolver, ok := s.messageService.(parkedRunRequestResolver)
 	if !ok {
 		return nil, nil
 	}
