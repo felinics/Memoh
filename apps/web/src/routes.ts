@@ -2,6 +2,7 @@ import { h } from 'vue'
 import { RouterView, type RouteLocationNormalized, type RouteRecordRaw } from 'vue-router'
 import { i18nRef } from './i18n'
 import { getBotBreadcrumbName } from './lib/bot-breadcrumb'
+import { prefetchInIdle } from './lib/idle-prefetch'
 
 /**
  * The persistent chat workspace (sidebar + dockview). App.vue mounts it outside
@@ -61,34 +62,11 @@ export const settingsPageLoaders = [
  * download, so on a slow connection a first-time click reads as a dead click
  * (measured ~0.6-0.7s on Slow 4G). Warming during idle makes first clicks hit
  * the module cache instead (ES module requests dedupe by URL, so the later
- * real navigation costs nothing). Skipped under Save-Data; failures are
- * swallowed — a cold click then just pays the normal lazy-load cost.
- *
- * Chunks are warmed ONE AT A TIME. Firing every loader at once makes a click
- * that lands mid-warmup queue behind the whole swarm — the module map dedupes
- * by URL, so the click cannot be prioritized and can end up slower than the
- * old single lazy import. Sequentially, an in-flight chunk costs a click at
- * most one small chunk, and chunks not yet started leave the connection free
- * for the click itself.
+ * real navigation costs nothing). The chunks download one at a time; see
+ * lib/idle-prefetch.ts.
  */
 export function prefetchAppPages(): void {
-  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
-  if (connection?.saveData) return
-
-  const w = window as Window & {
-    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
-  }
-  const schedule = (cb: () => void) => {
-    if (w.requestIdleCallback) w.requestIdleCallback(cb, { timeout: 3000 })
-    else setTimeout(cb, 2000)
-  }
-  const queue = [loadMainSection, ...settingsPageLoaders]
-  const warmNext = () => {
-    const load = queue.shift()
-    if (!load) return
-    void load().catch(() => {}).finally(() => schedule(warmNext))
-  }
-  schedule(warmNext)
+  prefetchInIdle([loadMainSection, ...settingsPageLoaders])
 }
 
 /** Shared page routes; each host owns its router, history, and navigation guards. */

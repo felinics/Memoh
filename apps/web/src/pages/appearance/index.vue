@@ -371,7 +371,7 @@ import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-v
 import { PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
-import { LOCALE_OPTIONS, type Locale } from '@/i18n'
+import { LOCALE_OPTIONS, preloadLocales, type Locale } from '@/i18n'
 import type { BundledTheme } from 'shiki'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
@@ -519,6 +519,9 @@ function renderCodeFontPreview() {
 
 onMounted(() => {
   renderCodeFontPreview()
+  // This page has the language picker; download the other languages now so a
+  // pick applies at once (see preloadLocales).
+  preloadLocales()
 })
 
 watch(uiFontFamily, (value) => { uiFontFamilyDraft.value = value })

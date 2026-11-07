@@ -62,6 +62,16 @@ export function prepareLocale(locale: Locale): Promise<void> {
 }
 
 /**
+ * Starts downloading every language, for screens with the language picker. The
+ * download usually finishes before the user picks, so the pick applies at once
+ * instead of waiting on it. A failure is ignored here; picking that language
+ * downloads it again.
+ */
+export function preloadLocales(): void {
+  for (const { value } of LOCALE_OPTIONS) loadLocaleMessages(value).catch(() => {})
+}
+
+/**
  * Settles once the starting language is loaded; the app mounts after it so the
  * first render has its copy. A chunk that fails to load reloads the page, the
  * same recovery the router applies to route chunks, and stays pending so the

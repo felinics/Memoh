@@ -42,6 +42,7 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
 import { normalizeFileManagerPath } from './file-manager-path'
 import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
+import { prefetchFirst } from '@/lib/idle-prefetch'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelLoading, { retryPanelLoadKey } from './dockview/panel-loading.vue'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
@@ -166,9 +167,18 @@ const lazyPanel = (loader: AsyncComponentLoader) => {
   }) as unknown as VueComponent
 }
 
+// Opening a file is a common next step in the workspace, and the file panel
+// carries the largest panel chunks (the Monaco editor, about 700KB gzip). Warm
+// it during idle time once the workspace is up, ahead of the settings pages
+// still queued. On the web those include the bot detail page, which embeds the
+// same editor, so the editor chunks were already downloaded in the background;
+// this only moves them earlier in the queue.
+const loadFilePanel = () => import('./dockview/panel-file.vue')
+onMounted(() => prefetchFirst(loadFilePanel))
+
 const panelComponents: Record<string, VueComponent> = {
   chat: PanelChat as unknown as VueComponent,
-  file: lazyPanel(() => import('./dockview/panel-file.vue')),
+  file: lazyPanel(loadFilePanel),
   preview: lazyPanel(() => import('./dockview/panel-preview.vue')),
   asset: lazyPanel(() => import('./dockview/panel-asset.vue')),
   terminal: lazyPanel(() => import('./dockview/panel-terminal.vue')),
