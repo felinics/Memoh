@@ -116,7 +116,7 @@ func (s *Service) StatusBot(ctx context.Context, botID string) (BotStatus, error
 	if err != nil {
 		return BotStatus{}, err
 	}
-	if providerStatus.State != StatusStateReady {
+	if providerStatus.State != OverlayStateReady {
 		return withWorkspace(botStatusFromProviderStatus(cfg.Provider, providerStatus), ws), nil
 	}
 	if s.overlayRuntimeUnsupported() {
@@ -174,7 +174,7 @@ func (s *Service) ExecuteActionBot(ctx context.Context, botID, actionID string, 
 	if err != nil {
 		return providerExec, err
 	}
-	if providerExec.Status.State != StatusStateReady {
+	if providerExec.Status.State != OverlayStateReady {
 		return providerExec, nil
 	}
 	if _, ensureErr := s.ensureOverlayBot(ctx, botID, cfg); ensureErr != nil && !errors.Is(ensureErr, ErrWorkspaceContainerMissing) {
@@ -185,7 +185,7 @@ func (s *Service) ExecuteActionBot(ctx context.Context, botID, actionID string, 
 		return providerExec, statusErr
 	}
 	providerExec.Status = ProviderStatus{
-		State:       StatusState(botStatus.State),
+		State:       botStatus.State,
 		Title:       botStatus.Title,
 		Description: firstNonEmptyString(botStatus.Description, botStatus.Message),
 		Details:     cloneMap(botStatus.Details),
@@ -218,7 +218,7 @@ func (s *Service) executeLogout(ctx context.Context, botID string, cfg BotOverla
 	return ProviderActionExecution{
 		ActionID: "logout",
 		Status: ProviderStatus{
-			State:       StatusStateNeedsConfig,
+			State:       OverlayStateNeedsConfig,
 			Title:       "Logged Out",
 			Description: "SD-WAN overlay has been stopped and state cleared.",
 		},
@@ -407,7 +407,7 @@ func unsupportedOverlayStatus(cfg BotOverlayConfig) OverlayStatus {
 func botStatusFromProviderStatus(provider string, status ProviderStatus) BotStatus {
 	return BotStatus{
 		Provider:    provider,
-		State:       OverlayState(status.State),
+		State:       status.State,
 		Title:       status.Title,
 		Description: status.Description,
 		Details:     cloneMap(status.Details),

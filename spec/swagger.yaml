@@ -6300,6 +6300,324 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
+  network.ActionType:
+    enum:
+    - test_connection
+    type: string
+    x-enum-varnames:
+    - ActionTypeTestConnection
+  network.BotActionRequest:
+    properties:
+      input:
+        additionalProperties: {}
+        type: object
+    type: object
+  network.BotStatus:
+    properties:
+      attached:
+        type: boolean
+      description:
+        type: string
+      details:
+        additionalProperties: {}
+        type: object
+      message:
+        type: string
+      network_ip:
+        type: string
+      provider:
+        type: string
+      proxy_address:
+        type: string
+      state:
+        $ref: '#/definitions/network.OverlayState'
+      title:
+        type: string
+      workspace:
+        $ref: '#/definitions/network.WorkspaceRuntimeStatus'
+    required:
+    - attached
+    - state
+    type: object
+  network.ConfigConstraint:
+    properties:
+      max:
+        type: number
+      min:
+        type: number
+      step:
+        type: number
+    type: object
+  network.ConfigField:
+    properties:
+      collapsed:
+        type: boolean
+      constraint:
+        $ref: '#/definitions/network.ConfigConstraint'
+      default: {}
+      description:
+        type: string
+      enum:
+        items:
+          type: string
+        type: array
+      example: {}
+      key:
+        type: string
+      multiline:
+        type: boolean
+      order:
+        type: integer
+      placeholder:
+        type: string
+      readonly:
+        type: boolean
+      required:
+        type: boolean
+      secret:
+        type: boolean
+      title:
+        type: string
+      type:
+        $ref: '#/definitions/network.FieldType'
+    required:
+    - key
+    - type
+    type: object
+  network.ConfigSchema:
+    properties:
+      fields:
+        items:
+          $ref: '#/definitions/network.ConfigField'
+        type: array
+      title:
+        type: string
+      version:
+        type: integer
+    required:
+    - fields
+    - version
+    type: object
+  network.FieldType:
+    enum:
+    - string
+    - secret
+    - number
+    - bool
+    - enum
+    - textarea
+    type: string
+    x-enum-varnames:
+    - FieldTypeString
+    - FieldTypeSecret
+    - FieldTypeNumber
+    - FieldTypeBool
+    - FieldTypeEnum
+    - FieldTypeTextarea
+  network.NodeListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/network.NodeOption'
+        type: array
+      message:
+        type: string
+      provider:
+        type: string
+    type: object
+  network.NodeOption:
+    properties:
+      addresses:
+        items:
+          type: string
+        type: array
+      can_exit_node:
+        type: boolean
+      description:
+        type: string
+      details:
+        additionalProperties: {}
+        type: object
+      display_name:
+        type: string
+      id:
+        type: string
+      online:
+        type: boolean
+      selected:
+        type: boolean
+      value:
+        type: string
+    required:
+    - can_exit_node
+    - display_name
+    - id
+    - online
+    - selected
+    - value
+    type: object
+  network.OverlayState:
+    enum:
+    - ready
+    - starting
+    - needs_login
+    - degraded
+    - stopped
+    - missing
+    - unsupported
+    - disabled
+    - workspace_missing
+    - needs_config
+    - unauthorized
+    - unknown
+    type: string
+    x-enum-varnames:
+    - OverlayStateReady
+    - OverlayStateStarting
+    - OverlayStateNeedsLogin
+    - OverlayStateDegraded
+    - OverlayStateStopped
+    - OverlayStateMissing
+    - OverlayStateUnsupported
+    - OverlayStateDisabled
+    - OverlayStateWorkspaceMissing
+    - OverlayStateNeedsConfig
+    - OverlayStateUnauthorized
+    - OverlayStateUnknown
+  network.ProviderAction:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      label:
+        type: string
+      primary:
+        type: boolean
+      status:
+        $ref: '#/definitions/network.ProviderActionStatus'
+      type:
+        $ref: '#/definitions/network.ActionType'
+    required:
+    - id
+    - label
+    - type
+    type: object
+  network.ProviderActionExecution:
+    properties:
+      action_id:
+        type: string
+      output:
+        additionalProperties: {}
+        type: object
+      status:
+        $ref: '#/definitions/network.ProviderStatus'
+    required:
+    - action_id
+    - status
+    type: object
+  network.ProviderActionStatus:
+    properties:
+      enabled:
+        type: boolean
+      reason:
+        type: string
+    required:
+    - enabled
+    type: object
+  network.ProviderCapabilities:
+    properties:
+      egress_proxy:
+        type: boolean
+      exit_node:
+        type: boolean
+      kernel_tun:
+        type: boolean
+      mesh:
+        type: boolean
+      native_client:
+        type: boolean
+      private_dns:
+        type: boolean
+      service_proxy:
+        type: boolean
+      sidecar_worker:
+        type: boolean
+      transparent_proxy:
+        type: boolean
+      userspace:
+        type: boolean
+    required:
+    - egress_proxy
+    - exit_node
+    - kernel_tun
+    - mesh
+    - native_client
+    - private_dns
+    - service_proxy
+    - sidecar_worker
+    - transparent_proxy
+    - userspace
+    type: object
+  network.ProviderDescriptor:
+    properties:
+      actions:
+        items:
+          $ref: '#/definitions/network.ProviderAction'
+        type: array
+      capabilities:
+        $ref: '#/definitions/network.ProviderCapabilities'
+      config_schema:
+        $ref: '#/definitions/network.ConfigSchema'
+      description:
+        type: string
+      display_name:
+        type: string
+      kind:
+        type: string
+    required:
+    - capabilities
+    - config_schema
+    - display_name
+    - kind
+    type: object
+  network.ProviderStatus:
+    properties:
+      description:
+        type: string
+      details:
+        additionalProperties: {}
+        type: object
+      state:
+        $ref: '#/definitions/network.OverlayState'
+      title:
+        type: string
+    required:
+    - state
+    type: object
+  network.WorkspaceRuntimeStatus:
+    properties:
+      container_id:
+        type: string
+      message:
+        type: string
+      network_attached:
+        type: boolean
+      network_target:
+        type: string
+      network_target_kind:
+        type: string
+      pid:
+        type: integer
+      state:
+        description: workspace_missing | runtime_unavailable | task_stopped | network_target_ready
+          | unknown
+        type: string
+      task_status:
+        type: string
+    required:
+    - state
+    type: object
   providers.CountResponse:
     properties:
       count:
@@ -12758,6 +13076,117 @@ paths:
       summary: Locate a bot history message
       tags:
       - messages
+  /bots/{bot_id}/network/actions/{action_id}:
+    post:
+      description: Run a provider action such as test_connection or logout
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Action ID
+        in: path
+        name: action_id
+        required: true
+        type: string
+      - description: Action input
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/network.BotActionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/network.ProviderActionExecution'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Run a bot network action
+      tags:
+      - network
+  /bots/{bot_id}/network/nodes:
+    get:
+      description: List the peers the bot can use as exit nodes
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/network.NodeListResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: List bot network nodes
+      tags:
+      - network
+  /bots/{bot_id}/network/status:
+    get:
+      description: Get the state of the bot's network overlay and of the workspace
+        it attaches to
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/network.BotStatus'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Get bot network status
+      tags:
+      - network
   /bots/{bot_id}/quick-actions/execute:
     post:
       consumes:
@@ -16817,6 +17246,28 @@ paths:
       summary: Update model by model ID
       tags:
       - models
+  /network/meta:
+    get:
+      description: List the network providers a bot can use, with their config schema,
+        capabilities and actions
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/network.ProviderDescriptor'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: List network providers
+      tags:
+      - network
   /oauth/mcp/callback:
     get:
       description: Exchanges the authorization code and renders a small completion

@@ -28,7 +28,7 @@ func TestProviderStatusRejectsExitNodeWithUserspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if status.State != netctl.StatusStateNeedsConfig {
+	if status.State != netctl.OverlayStateNeedsConfig {
 		t.Fatalf("expected needs config, got %s", status.State)
 	}
 	if !strings.Contains(status.Description, "userspace=false") {
@@ -50,7 +50,7 @@ func TestProviderStatusAllowsExitNodeWithKernelTUN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if status.State != netctl.StatusStateReady {
+	if status.State != netctl.OverlayStateReady {
 		t.Fatalf("expected ready, got %s: %s", status.State, status.Description)
 	}
 }

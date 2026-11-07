@@ -26,7 +26,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
-import type { NetworkNodeOption } from '@/pages/network/api'
+import type { NetworkNodeOption } from '@memohai/sdk'
 
 const props = defineProps<{
   nodes: NetworkNodeOption[]

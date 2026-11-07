@@ -3653,6 +3653,150 @@ export type ModelsUpdateRequest = {
     type?: ModelsModelType;
 };
 
+export type NetworkActionType = 'test_connection';
+
+export type NetworkBotActionRequest = {
+    input?: {
+        [key: string]: unknown;
+    };
+};
+
+export type NetworkBotStatus = {
+    attached: boolean;
+    description?: string;
+    details?: {
+        [key: string]: unknown;
+    };
+    message?: string;
+    network_ip?: string;
+    provider?: string;
+    proxy_address?: string;
+    state: NetworkOverlayState;
+    title?: string;
+    workspace?: NetworkWorkspaceRuntimeStatus;
+};
+
+export type NetworkConfigConstraint = {
+    max?: number;
+    min?: number;
+    step?: number;
+};
+
+export type NetworkConfigField = {
+    collapsed?: boolean;
+    constraint?: NetworkConfigConstraint;
+    default?: unknown;
+    description?: string;
+    enum?: Array<string>;
+    example?: unknown;
+    key: string;
+    multiline?: boolean;
+    order?: number;
+    placeholder?: string;
+    readonly?: boolean;
+    required?: boolean;
+    secret?: boolean;
+    title?: string;
+    type: NetworkFieldType;
+};
+
+export type NetworkConfigSchema = {
+    fields: Array<NetworkConfigField>;
+    title?: string;
+    version: number;
+};
+
+export type NetworkFieldType = 'string' | 'secret' | 'number' | 'bool' | 'enum' | 'textarea';
+
+export type NetworkNodeListResponse = {
+    items?: Array<NetworkNodeOption>;
+    message?: string;
+    provider?: string;
+};
+
+export type NetworkNodeOption = {
+    addresses?: Array<string>;
+    can_exit_node: boolean;
+    description?: string;
+    details?: {
+        [key: string]: unknown;
+    };
+    display_name: string;
+    id: string;
+    online: boolean;
+    selected: boolean;
+    value: string;
+};
+
+export type NetworkOverlayState = 'ready' | 'starting' | 'needs_login' | 'degraded' | 'stopped' | 'missing' | 'unsupported' | 'disabled' | 'workspace_missing' | 'needs_config' | 'unauthorized' | 'unknown';
+
+export type NetworkProviderAction = {
+    description?: string;
+    id: string;
+    label: string;
+    primary?: boolean;
+    status?: NetworkProviderActionStatus;
+    type: NetworkActionType;
+};
+
+export type NetworkProviderActionExecution = {
+    action_id: string;
+    output?: {
+        [key: string]: unknown;
+    };
+    status: NetworkProviderStatus;
+};
+
+export type NetworkProviderActionStatus = {
+    enabled: boolean;
+    reason?: string;
+};
+
+export type NetworkProviderCapabilities = {
+    egress_proxy: boolean;
+    exit_node: boolean;
+    kernel_tun: boolean;
+    mesh: boolean;
+    native_client: boolean;
+    private_dns: boolean;
+    service_proxy: boolean;
+    sidecar_worker: boolean;
+    transparent_proxy: boolean;
+    userspace: boolean;
+};
+
+export type NetworkProviderDescriptor = {
+    actions?: Array<NetworkProviderAction>;
+    capabilities: NetworkProviderCapabilities;
+    config_schema: NetworkConfigSchema;
+    description?: string;
+    display_name: string;
+    kind: string;
+};
+
+export type NetworkProviderStatus = {
+    description?: string;
+    details?: {
+        [key: string]: unknown;
+    };
+    state: NetworkOverlayState;
+    title?: string;
+};
+
+export type NetworkWorkspaceRuntimeStatus = {
+    container_id?: string;
+    message?: string;
+    network_attached?: boolean;
+    network_target?: string;
+    network_target_kind?: string;
+    pid?: number;
+    /**
+     * workspace_missing | runtime_unavailable | task_stopped | network_target_ready | unknown
+     */
+    state: string;
+    task_status?: string;
+};
+
 export type ProvidersCountResponse = {
     count?: number;
 };
@@ -10601,6 +10745,139 @@ export type GetBotsByBotIdMessagesLocateResponses = {
 
 export type GetBotsByBotIdMessagesLocateResponse = GetBotsByBotIdMessagesLocateResponses[keyof GetBotsByBotIdMessagesLocateResponses];
 
+export type PostBotsByBotIdNetworkActionsByActionIdData = {
+    /**
+     * Action input
+     */
+    body: NetworkBotActionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Action ID
+         */
+        action_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/network/actions/{action_id}';
+};
+
+export type PostBotsByBotIdNetworkActionsByActionIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type PostBotsByBotIdNetworkActionsByActionIdError = PostBotsByBotIdNetworkActionsByActionIdErrors[keyof PostBotsByBotIdNetworkActionsByActionIdErrors];
+
+export type PostBotsByBotIdNetworkActionsByActionIdResponses = {
+    /**
+     * OK
+     */
+    200: NetworkProviderActionExecution;
+};
+
+export type PostBotsByBotIdNetworkActionsByActionIdResponse = PostBotsByBotIdNetworkActionsByActionIdResponses[keyof PostBotsByBotIdNetworkActionsByActionIdResponses];
+
+export type GetBotsByBotIdNetworkNodesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/network/nodes';
+};
+
+export type GetBotsByBotIdNetworkNodesErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetBotsByBotIdNetworkNodesError = GetBotsByBotIdNetworkNodesErrors[keyof GetBotsByBotIdNetworkNodesErrors];
+
+export type GetBotsByBotIdNetworkNodesResponses = {
+    /**
+     * OK
+     */
+    200: NetworkNodeListResponse;
+};
+
+export type GetBotsByBotIdNetworkNodesResponse = GetBotsByBotIdNetworkNodesResponses[keyof GetBotsByBotIdNetworkNodesResponses];
+
+export type GetBotsByBotIdNetworkStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/network/status';
+};
+
+export type GetBotsByBotIdNetworkStatusErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetBotsByBotIdNetworkStatusError = GetBotsByBotIdNetworkStatusErrors[keyof GetBotsByBotIdNetworkStatusErrors];
+
+export type GetBotsByBotIdNetworkStatusResponses = {
+    /**
+     * OK
+     */
+    200: NetworkBotStatus;
+};
+
+export type GetBotsByBotIdNetworkStatusResponse = GetBotsByBotIdNetworkStatusResponses[keyof GetBotsByBotIdNetworkStatusResponses];
+
 export type PostBotsByBotIdQuickActionsExecuteData = {
     /**
      * Quick action payload
@@ -15232,6 +15509,35 @@ export type PostModelsByIdTestResponses = {
 };
 
 export type PostModelsByIdTestResponse = PostModelsByIdTestResponses[keyof PostModelsByIdTestResponses];
+
+export type GetNetworkMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/network/meta';
+};
+
+export type GetNetworkMetaErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetNetworkMetaError = GetNetworkMetaErrors[keyof GetNetworkMetaErrors];
+
+export type GetNetworkMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<NetworkProviderDescriptor>;
+};
+
+export type GetNetworkMetaResponse = GetNetworkMetaResponses[keyof GetNetworkMetaResponses];
 
 export type GetOauthMcpCallbackData = {
     body?: never;

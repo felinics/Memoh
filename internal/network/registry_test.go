@@ -19,7 +19,7 @@ func (testProvider) NormalizeConfig(raw map[string]any) (map[string]any, error) 
 }
 
 func (testProvider) Status(_ context.Context, _ BotOverlayConfig) (ProviderStatus, error) {
-	return ProviderStatus{State: StatusStateReady}, nil
+	return ProviderStatus{State: OverlayStateReady}, nil
 }
 
 func (testProvider) ExecuteAction(_ context.Context, _ BotOverlayConfig, _ string, _ map[string]any) (ProviderActionExecution, error) {
