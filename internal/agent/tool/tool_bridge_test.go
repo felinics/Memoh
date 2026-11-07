@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -316,15 +317,18 @@ func TestToolBridgeDefersLargeMCPGroupWithCompactCatalogAndQuerySearch(t *testin
 func TestToolBridgeGroupsConnectorToolsBySourceAndMatchesShortSelector(t *testing.T) {
 	t.Parallel()
 
+	// Each definition exceeds eagerMCPGroupMaxBytes, so both connector groups
+	// load on demand instead of staying in the request.
+	detail := strings.Repeat("detail ", eagerMCPGroupMaxBytes/len("detail "))
 	specs := []struct {
 		name  string
 		group string
 		desc  string
 	}{
-		{name: "list_email", group: "connector:email", desc: "List emails in the mailbox. " + strings.Repeat("detail ", 40)},
-		{name: "list_email_accounts", group: "connector:email", desc: "List configured email accounts. " + strings.Repeat("detail ", 40)},
-		{name: "send_email", group: "connector:email", desc: "Send an email message. " + strings.Repeat("detail ", 40)},
-		{name: "get_issue", group: "connector:github", desc: "Get a repository issue by number. " + strings.Repeat("detail ", 40)},
+		{name: "list_email", group: "connector:email", desc: "List emails in the mailbox. " + detail},
+		{name: "list_email_accounts", group: "connector:email", desc: "List configured email accounts. " + detail},
+		{name: "send_email", group: "connector:email", desc: "Send an email message. " + detail},
+		{name: "get_issue", group: "connector:github", desc: "Get a repository issue by number. " + detail},
 	}
 	tools := []toolexec.Tool{bridgeTestTool(ToolRead(), "path")}
 	for _, spec := range specs {
@@ -363,5 +367,125 @@ func TestToolBridgeGroupsConnectorToolsBySourceAndMatchesShortSelector(t *testin
 	described, _ := outputMap(t, out)["tools"].([]any)
 	if len(described) != 3 {
 		t.Fatalf("described email tools = %#v, want 3 tools", described)
+	}
+}
+
+// mcpTestGroup builds count external MCP tools in group id whose definitions
+// are about size bytes each.
+func mcpTestGroup(id string, count, size int) []toolexec.Tool {
+	var out []toolexec.Tool
+	for i := 1; i <= count; i++ {
+		tool := bridgeTestTool(ToolRead())
+		tool.Name = fmt.Sprintf("%s_tool_%d", strings.TrimPrefix(id, "mcp:"), i)
+		tool.Description = "[" + id + "] " + strings.Repeat("d", max(0, size-160))
+		tool.Group = id
+		out = append(out, tool)
+	}
+	return out
+}
+
+func schemaEnum(t *testing.T, tool toolexec.Tool, path ...string) []any {
+	t.Helper()
+	var node any = toolexec.SchemaValue(tool.Parameters)
+	for _, key := range path {
+		m, ok := node.(map[string]any)
+		if !ok {
+			return nil
+		}
+		node = m[key]
+	}
+	m, _ := node.(map[string]any)
+	values, _ := m["enum"].([]any)
+	return values
+}
+
+func TestToolBridgeEnumeratesNamesOnlyWhenTheDirectoryListsThemAll(t *testing.T) {
+	t.Parallel()
+
+	b := PlanToolBridge(bridgeTestSet())
+	callNames := schemaEnum(t, bridgeTool(t, b, ToolCall()), "properties", "name")
+	want := []any{ToolListSchedule().String(), ToolCreateSchedule().String(), ToolMCPManage().String()}
+	if !reflect.DeepEqual(callNames, want) {
+		t.Fatalf("tool_call name enum = %v, want %v", callNames, want)
+	}
+	selectors := schemaEnum(t, bridgeTool(t, b, ToolDescribe()), "properties", "names", "items")
+	if len(selectors) != 2+len(want) || selectors[0] != "schedule" || selectors[1] != "capability" {
+		t.Fatalf("tool_describe names enum = %v, want the group ids, then every tool", selectors)
+	}
+
+	withLargeGroup := append(bridgeTestSet(), mcpTestGroup("mcp:notion", 12, 1500)...)
+	b = PlanToolBridge(withLargeGroup)
+	if got := schemaEnum(t, bridgeTool(t, b, ToolCall()), "properties", "name"); got != nil {
+		t.Fatalf("tool_call name enum = %v with a compact group, want none: its tools are callable but unlisted", got)
+	}
+	if got := schemaEnum(t, bridgeTool(t, b, ToolDescribe()), "properties", "names", "items"); got != nil {
+		t.Fatalf("tool_describe names enum = %v with a compact group, want none", got)
+	}
+}
+
+func TestToolBridgeSuggestsTheClosestNameForAWrongOne(t *testing.T) {
+	t.Parallel()
+
+	b := PlanToolBridge(bridgeTestSet())
+	call := bridgeTool(t, b, ToolCall())
+	for _, wrong := range []string{"schedule_create", "create_schedul", "Create_Schedule"} {
+		_, err := call.Execute(&toolexec.ToolExecContext{ToolName: call.Name}, toolexec.ArgumentsFromValue(map[string]any{
+			"name": wrong, "arguments": map[string]any{},
+		}))
+		if err == nil || !strings.Contains(err.Error(), "did you mean "+ToolCreateSchedule().String()) {
+			t.Fatalf("tool_call %q: err = %v, want a create_schedule suggestion", wrong, err)
+		}
+	}
+	describe := bridgeTool(t, b, ToolDescribe())
+	output, err := describe.Execute(&toolexec.ToolExecContext{ToolName: describe.Name}, toolexec.ArgumentsFromValue(map[string]any{
+		"names": []any{"mcp_manager"},
+	}))
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	suggestions, _ := outputMap(t, output)["did_you_mean"].(map[string]any)
+	if got, _ := suggestions["mcp_manager"].([]any); len(got) == 0 || got[0] != ToolMCPManage().String() {
+		t.Fatalf("did_you_mean = %#v, want mcp_manage for mcp_manager", suggestions)
+	}
+	if got := b.closestNames("totally_unrelated"); len(got) != 0 {
+		t.Fatalf("closestNames(unrelated) = %v, want none", got)
+	}
+}
+
+func TestPlanToolBridgeKeepsSmallMCPGroupsInTheRequest(t *testing.T) {
+	t.Parallel()
+
+	tools := append(bridgeTestSet(), mcpTestGroup("mcp:tiny", 3, 600)...)
+	tools = append(tools, mcpTestGroup("mcp:notion", 12, 1500)...)
+	b := PlanToolBridge(tools)
+	if b.Defers("tiny_tool_1") {
+		t.Fatal("a small MCP group must stay directly callable")
+	}
+	if !b.Defers("notion_tool_1") {
+		t.Fatal("a large MCP group must load on demand")
+	}
+	visible := toolNames(b.Bind(tools))
+	if !slices.Contains(visible, "tiny_tool_1") || slices.Contains(visible, "notion_tool_1") {
+		t.Fatalf("visible tools = %v, want tiny tools in and notion tools out", visible)
+	}
+	describe := bridgeTool(t, b, ToolDescribe())
+	if strings.Contains(describe.Description, "mcp:tiny") || !strings.Contains(describe.Description, "mcp:notion") {
+		t.Fatalf("directory must list only deferred groups:\n%s", describe.Description)
+	}
+}
+
+func TestEagerMCPGroupsFillTheBudgetSmallestFirst(t *testing.T) {
+	t.Parallel()
+
+	got := eagerMCPGroups(map[string]int{
+		"mcp:b":     6000,
+		"mcp:a":     6000,
+		"mcp:c":     6000,
+		"mcp:large": eagerMCPGroupMaxBytes + 1,
+		"mcp:tiny":  500,
+	})
+	want := map[string]bool{"mcp:tiny": true, "mcp:a": true, "mcp:b": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("eager groups = %v, want %v (smallest first, ties by id, within %d bytes)", got, want, eagerMCPBudgetBytes)
 	}
 }

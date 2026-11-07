@@ -75,6 +75,17 @@ type ToolBridge struct {
 // group-level describe call floods the context.
 const maxInlineGroupTools = 8
 
+// External MCP groups load progressively by size. A group whose definitions
+// are small stays in the request, smallest first, until the eager groups
+// together reach eagerMCPBudgetBytes: deferring it would save little context
+// and cost the model a describe step in every session. The rest load on
+// demand, listed by name when a group has at most maxInlineGroupTools tools
+// and as a one-line count, browsed by group or query, when it has more.
+const (
+	eagerMCPGroupMaxBytes = 8 * 1024
+	eagerMCPBudgetBytes   = 16 * 1024
+)
+
 type bridgeGroup struct {
 	id      string
 	summary string
@@ -111,25 +122,44 @@ func PlanToolBridge(assembled []toolexec.Tool) *ToolBridge {
 			b.groups = append(b.groups, group)
 		}
 	}
-	dynamicIndex := map[string]int{}
+	type dynamicGroup struct {
+		id    string
+		tools []toolexec.Tool
+		bytes int
+	}
+	var dynamic []*dynamicGroup
+	dynamicIndex := map[string]*dynamicGroup{}
 	for _, tool := range assembled {
 		groupID := strings.TrimSpace(tool.Group)
 		if groupID == "" || b.Defers(tool.Name) || tool.Execute == nil || tool.RequireApproval {
 			continue
 		}
-		idx, ok := dynamicIndex[groupID]
+		group, ok := dynamicIndex[groupID]
 		if !ok {
-			idx = len(b.groups)
-			dynamicIndex[groupID] = idx
-			b.groups = append(b.groups, bridgeGroup{
-				id:      groupID,
-				summary: dynamicGroupSummary(groupID, tool.Description),
-			})
+			group = &dynamicGroup{id: groupID}
+			dynamicIndex[groupID] = group
+			dynamic = append(dynamic, group)
 		}
-		b.groups[idx].tools = append(b.groups[idx].tools, tool.Name)
-		b.group[tool.Name] = groupID
-		b.defs[tool.Name] = tool
-		deferredBytes += definitionBytes(tool)
+		group.tools = append(group.tools, tool)
+		group.bytes += definitionBytes(tool)
+	}
+	sizes := make(map[string]int, len(dynamic))
+	for _, group := range dynamic {
+		sizes[group.id] = group.bytes
+	}
+	eager := eagerMCPGroups(sizes)
+	for _, group := range dynamic {
+		if eager[group.id] {
+			continue
+		}
+		deferred := bridgeGroup{id: group.id, summary: dynamicGroupSummary(group.id, group.tools[0].Description)}
+		for _, tool := range group.tools {
+			deferred.tools = append(deferred.tools, tool.Name)
+			b.group[tool.Name] = group.id
+			b.defs[tool.Name] = tool
+		}
+		b.groups = append(b.groups, deferred)
+		deferredBytes += group.bytes
 	}
 	if len(b.groups) == 0 {
 		return nil
@@ -142,6 +172,34 @@ func PlanToolBridge(assembled []toolexec.Tool) *ToolBridge {
 		return nil
 	}
 	return b
+}
+
+// eagerMCPGroups picks the external MCP groups that stay in the request:
+// groups of at most eagerMCPGroupMaxBytes, smallest first (ties by group id),
+// while their total fits eagerMCPBudgetBytes. The choice depends only on the
+// definitions, so the same tool set always yields the same request prefix.
+func eagerMCPGroups(sizes map[string]int) map[string]bool {
+	ids := make([]string, 0, len(sizes))
+	for id := range sizes {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if sizes[ids[i]] != sizes[ids[j]] {
+			return sizes[ids[i]] < sizes[ids[j]]
+		}
+		return ids[i] < ids[j]
+	})
+	eager := map[string]bool{}
+	used := 0
+	for _, id := range ids {
+		size := sizes[id]
+		if size > eagerMCPGroupMaxBytes || used+size > eagerMCPBudgetBytes {
+			continue
+		}
+		eager[id] = true
+		used += size
+	}
+	return eager
 }
 
 func dynamicGroupSummary(groupID, description string) string {
@@ -272,10 +330,26 @@ func (b *ToolBridge) Tools() []toolexec.Tool {
 	if b == nil {
 		return nil
 	}
+	var describeShape []func(*jsonschema.Schema)
+	nameProperty := map[string]any{
+		"type":        "string",
+		"description": "On-demand tool to run.",
+	}
+	if b.listsEveryName() {
+		names := b.toolNames()
+		selectors := make([]string, 0, len(b.groups)+len(names))
+		for _, group := range b.groups {
+			selectors = append(selectors, group.id)
+		}
+		selectors = append(selectors, names...)
+		describeShape = append(describeShape, toolexec.Items("names", func(s *jsonschema.Schema) { s.Enum = stringsAsAny(selectors) }))
+		nameProperty["enum"] = stringsAsAny(names)
+	}
 	describe := toolexec.Define(ToolDescribe().String(), b.describeDescription(),
 		func(_ *toolexec.ToolExecContext, args describeArgs) (sdk.ToolOutput, error) {
 			return toolexec.OutputPair(b.describe(args.Names, args.Query))
 		},
+		describeShape...,
 	)
 	call := toolexec.Tool{
 		Name: ToolCall().String(),
@@ -284,10 +358,7 @@ func (b *ToolBridge) Tools() []toolexec.Tool {
 		Parameters: toolexec.SchemaFromValue(map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"name": map[string]any{
-					"type":        "string",
-					"description": "On-demand tool to run.",
-				},
+				"name": nameProperty,
 				"arguments": map[string]any{
 					"type":        "object",
 					"description": "Arguments matching the tool's parameters.",
@@ -298,6 +369,37 @@ func (b *ToolBridge) Tools() []toolexec.Tool {
 		Execute: b.call,
 	}
 	return []toolexec.Tool{describe, call}
+}
+
+// listsEveryName reports whether the tool_describe directory names every
+// on-demand tool, which is when the bridge schemas enumerate the names. The
+// enum then says exactly what the directory says; with a compact group it
+// would have to omit tools the model may legitimately call, and a provider
+// that enforced it would refuse those calls.
+func (b *ToolBridge) listsEveryName() bool {
+	for _, group := range b.groups {
+		if len(group.tools) > maxInlineGroupTools {
+			return false
+		}
+	}
+	return true
+}
+
+// toolNames returns every on-demand tool in directory order.
+func (b *ToolBridge) toolNames() []string {
+	names := make([]string, 0, len(b.defs))
+	for _, group := range b.groups {
+		names = append(names, group.tools...)
+	}
+	return names
+}
+
+func stringsAsAny(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
 }
 
 func (b *ToolBridge) describeDescription() string {
@@ -418,6 +520,15 @@ func (b *ToolBridge) describe(selectors []string, rawQuery string) (any, error) 
 	if len(unknown) > 0 {
 		result["unknown"] = unknown
 		result["available"] = b.availableSelectors()
+		suggestions := map[string][]string{}
+		for _, selector := range unknown {
+			if suggested := b.closestNames(selector); len(suggested) > 0 {
+				suggestions[selector] = suggested
+			}
+		}
+		if len(suggestions) > 0 {
+			result["did_you_mean"] = suggestions
+		}
 	}
 	return result, nil
 }
@@ -451,6 +562,93 @@ func (b *ToolBridge) filterByQuery(candidates map[string]bool, query string) map
 	return matched
 }
 
+// closestNames suggests on-demand tools for a name the model got wrong: the
+// same words in another order (schedule_create for create_schedule), one name
+// containing the other, or a small edit distance. Closest first, at most 3.
+func (b *ToolBridge) closestNames(raw string) []string {
+	name := strings.ToLower(strings.TrimSpace(raw))
+	if name == "" {
+		return nil
+	}
+	type scored struct {
+		name  string
+		score int
+	}
+	var matches []scored
+	for _, candidate := range b.toolNames() {
+		lower := strings.ToLower(candidate)
+		score := -1
+		switch {
+		case sameWords(name, lower):
+			score = 0
+		case strings.Contains(lower, name) || strings.Contains(name, lower):
+			score = 1 + abs(len(lower)-len(name))
+		default:
+			if d := editDistance(name, lower); d <= max(2, len(name)/4) {
+				score = 1 + d
+			}
+		}
+		if score >= 0 {
+			matches = append(matches, scored{candidate, score})
+		}
+	}
+	sort.SliceStable(matches, func(i, j int) bool { return matches[i].score < matches[j].score })
+	out := make([]string, 0, 3)
+	for _, match := range matches {
+		if len(out) == 3 {
+			break
+		}
+		out = append(out, match.name)
+	}
+	return out
+}
+
+func sameWords(a, b string) bool {
+	split := func(s string) []string {
+		words := strings.FieldsFunc(s, func(r rune) bool { return r == '_' || r == '-' || r == '.' || r == ' ' })
+		sort.Strings(words)
+		return words
+	}
+	wa, wb := split(a), split(b)
+	if len(wa) != len(wb) || len(wa) == 0 {
+		return false
+	}
+	for i := range wa {
+		if wa[i] != wb[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func editDistance(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	cur := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(rb)]
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
 func briefToolDescription(description string) string {
 	for _, line := range strings.Split(description, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
@@ -479,6 +677,9 @@ func (b *ToolBridge) call(ctx *toolexec.ToolExecContext, input sdk.ToolArguments
 	if !ok {
 		if IsBridgeTool(name) {
 			return sdk.ToolOutput{}, fmt.Errorf("%s runs on-demand tools; call %s directly", ToolCall().String(), name)
+		}
+		if suggested := b.closestNames(name); len(suggested) > 0 {
+			return sdk.ToolOutput{}, fmt.Errorf("%q is not an on-demand tool; did you mean %s? Call a tool directly if it is in your tool list", name, strings.Join(suggested, " or "))
 		}
 		return sdk.ToolOutput{}, fmt.Errorf("%q is not an on-demand tool; call it directly if it is in your tool list. On-demand tools: %s", name, strings.Join(b.availableSelectors(), ", "))
 	}
