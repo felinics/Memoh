@@ -201,12 +201,18 @@ func (s *Service) executeLogout(ctx context.Context, botID string, cfg BotOverla
 		return ProviderActionExecution{}, err
 	}
 	if s.networkStateRoot != "" && strings.TrimSpace(cfg.Provider) != "" {
-		stateDir := filepath.Join(s.networkStateRoot, "network", botID, cfg.Provider)
-		if err := os.RemoveAll(stateDir); err != nil {
-			s.logger.WarnContext(ctx, "failed to wipe network state directory on logout",
-				slog.String("bot_id", botID),
-				slog.String("provider", cfg.Provider),
-				slog.Any("error", err))
+		botDir := filepath.Join(s.networkStateRoot, "network", botID)
+		// The client's state directory, plus the files Memoh keeps for the
+		// provider next to it (named "<provider>-*"), such as a pending login.
+		paths, _ := filepath.Glob(filepath.Join(botDir, cfg.Provider+"-*"))
+		for _, path := range append(paths, filepath.Join(botDir, cfg.Provider)) {
+			if err := os.RemoveAll(path); err != nil {
+				s.logger.WarnContext(ctx, "failed to wipe network state on logout",
+					slog.String("bot_id", botID),
+					slog.String("provider", cfg.Provider),
+					slog.String("path", path),
+					slog.Any("error", err))
+			}
 		}
 	}
 	return ProviderActionExecution{

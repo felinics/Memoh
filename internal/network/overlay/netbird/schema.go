@@ -13,8 +13,6 @@ func schema() netctl.ConfigSchema {
 			{Key: "admin_url", Type: netctl.FieldTypeString, Title: "Admin URL", Collapsed: true, Order: 12},
 			{Key: "disable_dns", Type: netctl.FieldTypeBool, Title: "Disable DNS", Collapsed: true, Default: false, Order: 12},
 			{Key: "userspace", Type: netctl.FieldTypeBool, Title: "Userspace Networking", Collapsed: true, Default: false, Order: 13},
-			{Key: "state_dir", Type: netctl.FieldTypeString, Title: "State Directory", Collapsed: true, Default: "/var/lib/netbird", Order: 14},
-			{Key: "extra_args", Type: netctl.FieldTypeTextarea, Title: "Extra Args", Collapsed: true, Order: 15},
 		},
 	}
 }

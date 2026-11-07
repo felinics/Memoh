@@ -77,7 +77,8 @@ PATH="$(go env GOPATH)/bin:$PATH" protoc \
   --go-grpc_out=paths=source_relative:. \
   internal/agent/turn/turnpb/turn.proto \
   internal/rpc/runtimepb/runtime.proto \
-  internal/rpc/storagepb/storage.proto
+  internal/rpc/storagepb/storage.proto \
+  internal/network/overlay/netbird/daemonpb/daemon.proto
 """
 
 [tasks.icons-generate]

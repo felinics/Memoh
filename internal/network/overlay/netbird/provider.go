@@ -3,6 +3,7 @@ package netbird
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	netctl "github.com/felinics/memoh/internal/network"
@@ -13,6 +14,7 @@ type Deps struct {
 	SidecarRuntime sidecar.Runtime
 	Runtime        netctl.RuntimeDescriptor
 	StateRoot      string
+	Logger         *slog.Logger
 }
 
 type Provider struct {
@@ -34,6 +36,7 @@ func (p *Provider) Descriptor() netctl.ProviderDescriptor {
 		Capabilities: netctl.ProviderCapabilities{
 			Mesh:          true,
 			PrivateDNS:    true,
+			EgressProxy:   true,
 			Userspace:     true,
 			KernelTUN:     true,
 			NativeClient:  true,
@@ -111,7 +114,7 @@ func (p *Provider) BuildDriver(cfg netctl.BotOverlayConfig) (netctl.OverlayDrive
 	}
 	cfg.Config = config
 	if p.deps.Runtime.Capabilities.SidecarWorker {
-		return newNativeDriver(cfg, p.deps.SidecarRuntime, filepath.Join(p.deps.StateRoot, "network")), nil
+		return newNativeDriver(cfg, p.deps.SidecarRuntime, filepath.Join(p.deps.StateRoot, "network"), p.deps.Logger), nil
 	}
 	return unsupportedDriver{kind: p.Kind(), message: "NetBird overlay is not supported by the current runtime backend."}, nil
 }

@@ -11,7 +11,7 @@ import (
 func TestNativeDriverBuildSpecKeepsResolvConfOutsideMounts(t *testing.T) {
 	root := t.TempDir()
 	cfg := netctl.BotOverlayConfig{Enabled: true, Provider: "netbird", Config: map[string]any{}}
-	driver := newNativeDriver(cfg, nil, root)
+	driver := newNativeDriver(cfg, nil, root, nil)
 	spec, err := driver.buildSpec(netctl.AttachmentRequest{BotID: "bot-1", Overlay: cfg})
 	if err != nil {
 		t.Fatalf("buildSpec returned error: %v", err)
