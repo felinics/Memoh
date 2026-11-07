@@ -26,6 +26,7 @@ func newNativeDriver(cfg netctl.BotOverlayConfig, runtime sidecar.Runtime, state
 		Runtime:      runtime,
 		BuildSpec:    d.buildSpec,
 		EnrichStatus: d.enrichStatus,
+		DataDir:      stateRoot,
 	}
 	return d
 }
@@ -139,11 +140,12 @@ func (d *nativeDriver) buildSpec(req netctl.AttachmentRequest) (sidecar.Spec, er
 		addedCaps = append(addedCaps, "CAP_NET_ADMIN")
 	}
 	return sidecar.Spec{
-		Image:        "tailscale/tailscale:stable",
-		Env:          env,
-		Mounts:       mounts,
-		AddedCaps:    addedCaps,
-		ProxyAddress: proxyAddress,
+		Image:          "tailscale/tailscale:stable",
+		Env:            env,
+		Mounts:         mounts,
+		AddedCaps:      addedCaps,
+		ResolvConfPath: filepath.Join(d.root, req.BotID, "tailscale-resolv.conf"),
+		ProxyAddress:   proxyAddress,
 		Details: map[string]any{
 			"userspace":                 userspace,
 			"state_dir":                 stateDir,
