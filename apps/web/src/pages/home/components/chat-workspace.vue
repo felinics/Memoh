@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import { inject, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { defineAsyncComponent, h, inject, onBeforeUnmount, onMounted, provide, ref, type AsyncComponentLoader } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -43,13 +43,7 @@ import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFil
 import { normalizeFileManagerPath } from './file-manager-path'
 import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
 import PanelChat from './dockview/panel-chat.vue'
-import PanelFile from './dockview/panel-file.vue'
-import PanelPreview from './dockview/panel-preview.vue'
-import PanelAsset from './dockview/panel-asset.vue'
-import PanelTerminal from './dockview/panel-terminal.vue'
-import PanelBrowser from './dockview/panel-browser.vue'
-import PanelDisplay from './dockview/panel-display.vue'
-import PanelSchedule from './dockview/panel-schedule.vue'
+import PanelLoading from './dockview/panel-loading.vue'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTab from './dockview/workspace-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
@@ -139,15 +133,31 @@ function relayoutAfterAncestorTransform(event: TransitionEvent) {
 // from a serialized layout. dockview-vue types frameworks components as
 // DefineComponent<T> (single generic), which script-setup SFC types do not
 // structurally match, hence the casts.
+//
+// Only the chat panel ships with the workspace. The other panel types load the
+// first time a panel of that type is created (opened, or restored from a saved
+// layout): the file and asset panels carry the Monaco editor and the terminal
+// carries xterm, which a chat-only session never needs. Until its chunk
+// arrives a panel shows PanelLoading (the editor's chunks are about 700KB
+// gzip, several seconds on a slow network), or its failed state if the chunk
+// can't be fetched. dockview passes later params updates as new props, which
+// the async wrapper forwards once the panel has loaded.
+const PanelLoadFailed = () => h(PanelLoading, { failed: true })
+const lazyPanel = (loader: AsyncComponentLoader) => defineAsyncComponent({
+  loader,
+  loadingComponent: PanelLoading,
+  errorComponent: PanelLoadFailed,
+}) as unknown as VueComponent
+
 const panelComponents: Record<string, VueComponent> = {
   chat: PanelChat as unknown as VueComponent,
-  file: PanelFile as unknown as VueComponent,
-  preview: PanelPreview as unknown as VueComponent,
-  asset: PanelAsset as unknown as VueComponent,
-  terminal: PanelTerminal as unknown as VueComponent,
-  browser: PanelBrowser as unknown as VueComponent,
-  display: PanelDisplay as unknown as VueComponent,
-  schedule: PanelSchedule as unknown as VueComponent,
+  file: lazyPanel(() => import('./dockview/panel-file.vue')),
+  preview: lazyPanel(() => import('./dockview/panel-preview.vue')),
+  asset: lazyPanel(() => import('./dockview/panel-asset.vue')),
+  terminal: lazyPanel(() => import('./dockview/panel-terminal.vue')),
+  browser: lazyPanel(() => import('./dockview/panel-browser.vue')),
+  display: lazyPanel(() => import('./dockview/panel-display.vue')),
+  schedule: lazyPanel(() => import('./dockview/panel-schedule.vue')),
 }
 
 const watermarkComponent = WorkspaceWatermark as unknown as VueComponent

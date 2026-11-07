@@ -30,6 +30,9 @@ export default defineConfig({
           server: { deps: { inline: ['reka-ui', /@vueuse\//] } },
           globals: true,
           include: ['src/**/*.test.ts'],
+          // The app loads only its active language before mounting; tests read
+          // copy in every language, so this loads all three first.
+          setupFiles: ['./src/vitest-setup.ts'],
           env: process.env,
           testTimeout: Infinity,
         },

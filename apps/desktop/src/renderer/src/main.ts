@@ -9,7 +9,7 @@ import { createQueryCachePersistencePlugin, whenQueryCacheRestored } from '@memo
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 import { watchEffect } from 'vue'
-import i18n from '@memohai/web/i18n'
+import i18n, { i18nReady } from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
 import { configureProviderIconLoader } from '@memohai/web/components/provider-icon/preload'
 import { installFileDropGuard } from '@memohai/web/lib/file-drop-guard'
@@ -170,8 +170,9 @@ async function bootstrap() {
   })
 
   // Mount only after the snapshot is hydrated so the first render already
-  // has the last-known values (storage is sync, so this resolves fast).
-  await whenQueryCacheRestored()
+  // has the last-known values (storage is sync, so this resolves fast), and
+  // after the active language has loaded so the first render has its copy.
+  await Promise.all([whenQueryCacheRestored(), i18nReady])
   app.mount('#app')
 
   // The first frame stays optimistic: render the normal auth/app route while
