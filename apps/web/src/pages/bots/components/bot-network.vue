@@ -95,149 +95,47 @@
           </SettingsRow>
 
           <div v-if="showOverlayConfig">
-            <template v-if="primarySchema?.fields?.length">
-              <SettingsRow :label="$t('bots.settings.overlayPrimaryConfigTitle')">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  @click="isEditorDialogOpen = true"
-                >
-                  <SquarePen class="size-4" />
-                  {{ $t('common.editJson') }}
-                </Button>
-              </SettingsRow>
+            <SchemaField
+              v-for="field in primaryFields"
+              :key="field.key"
+              :field="field"
+              :field-key="field.key"
+              id-prefix="bot-network-config"
+              :model-value="getFieldValue(field)"
+              @update:model-value="(value) => updateValue(field.key, value)"
+            />
 
-              <SettingsRow
-                v-for="field in primarySchema.fields"
-                :key="field.key"
-                :stack="isMultilineField(field) ? 'always' : 'never'"
-              >
-                <!-- A schema field keeps its Label bound to the control via `for`,
-                     so #content carries the label + description rather than the
-                     plain-text label prop. A multi-line field stacks the control
-                     full-width beneath; a scalar one keeps it beside. -->
-                <template #content>
-                  <Label
-                    :for="`bot-network-config-primary-${field.key}`"
-                    class="text-sm font-medium text-foreground"
+            <ExpandableSettingsRow
+              v-if="advancedFields.length"
+              v-model:open="showAdvancedConfig"
+              :label="$t('common.advanced')"
+              :description="$t('common.allOptional')"
+            >
+              <template #expanded>
+                <SchemaField
+                  v-for="field in advancedFields"
+                  :key="field.key"
+                  :field="field"
+                  :field-key="field.key"
+                  id-prefix="bot-network-config"
+                  :model-value="getFieldValue(field)"
+                  @update:model-value="(value) => updateValue(field.key, value)"
+                />
+                <div class="flex justify-end pt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    @click="isEditorDialogOpen = true"
                   >
-                    {{ field.title || field.key }}
-                  </Label>
-                  <p
-                    v-if="field.description"
-                    class="mt-0.5 text-xs text-muted-foreground"
-                  >
-                    {{ field.description }}
-                  </p>
-                </template>
-
-                <div :class="isMultilineField(field) ? 'w-full' : 'w-full sm:w-80'">
-                  <Textarea
-                    v-if="isMultilineField(field)"
-                    :id="`bot-network-config-primary-${field.key}`"
-                    :model-value="stringValue(field)"
-                    :placeholder="placeholderOf(field)"
-                    :readonly="field.readonly"
-                    rows="4"
-                    class="min-h-24 resize-none"
-                    @update:model-value="(val) => updateValue(field.key, val)"
-                  />
-
-                  <Switch
-                    v-else-if="field.type === 'bool'"
-                    :model-value="!!getFieldValue(field)"
-                    :disabled="field.readonly"
-                    @update:model-value="(val: boolean) => updateValue(field.key, !!val)"
-                  />
-
-                  <Select
-                    v-else-if="field.type === 'enum' && field.enum"
-                    :model-value="stringValue(field)"
-                    :disabled="field.readonly"
-                    @update:model-value="(val) => updateValue(field.key, val)"
-                  >
-                    <SelectTrigger
-                      class="w-full"
-                    >
-                      <SelectValue :placeholder="placeholderOf(field)" />
-                    </SelectTrigger>
-                    <SelectContent class="w-[--reka-select-trigger-width]">
-                      <SelectItem
-                        v-for="option in field.enum"
-                        :key="option"
-                        :value="option"
-                      >
-                        {{ option }}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <InputGroup v-else-if="field.type === 'secret'">
-                    <InputGroupInput
-                      :id="`bot-network-config-primary-${field.key}`"
-                      :model-value="stringValue(field)"
-                      :type="visibleSecrets[field.key] ? 'text' : 'password'"
-                      :placeholder="placeholderOf(field)"
-                      :readonly="field.readonly"
-                      @update:model-value="(val: string) => updateValue(field.key, val)"
-                    />
-                    <InputGroupAddon align="inline-end">
-                      <InputGroupButton
-                        size="icon-xs"
-                        variant="quiet"
-                        :aria-label="$t('common.preview')"
-                        @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
-                      >
-                        <component :is="visibleSecrets[field.key] ? EyeOff : Eye" />
-                      </InputGroupButton>
-                    </InputGroupAddon>
-                  </InputGroup>
-
-                  <NumberField
-                    v-else-if="field.type === 'number'"
-                    :id="`bot-network-config-primary-${field.key}`"
-                    :model-value="numberValue(field)"
-                    :placeholder="placeholderOf(field)"
-                    :readonly="field.readonly"
-                    :min="field.constraint?.min"
-                    :max="field.constraint?.max"
-                    :step="field.constraint?.step ?? 1"
-                    class="w-full"
-                    disable-wheel-change
-                    @update:model-value="(value) => updateNumber(field.key, value)"
-                  />
-
-                  <Input
-                    v-else
-                    :id="`bot-network-config-primary-${field.key}`"
-                    :model-value="stringValue(field)"
-                    type="text"
-                    :placeholder="placeholderOf(field)"
-                    :readonly="field.readonly"
-                    class="h-8 w-full"
-                    @update:model-value="(val) => updateValue(field.key, val)"
-                  />
+                    <SquarePen class="size-4" />
+                    {{ $t('common.editJson') }}
+                  </Button>
                 </div>
-              </SettingsRow>
-            </template>
+              </template>
+            </ExpandableSettingsRow>
           </div>
         </template>
       </SettingsSection>
-
-      <!-- Advanced overlay fields behind a named ActionCard entry opening a
-           focused dialog — the house replacement for the old in-card
-           "Advanced" expand row. Slim single-line entry (no description, per
-           the ActionCard contract); the dialog's DialogDescription carries
-           the "all optional" note. -->
-      <ActionCard
-        v-if="showOverlayConfig && advancedSchema?.fields?.length"
-        :title="$t('common.advanced')"
-        @click="showAdvancedConfig = true"
-      >
-        <template #icon>
-          <SlidersHorizontal />
-        </template>
-      </ActionCard>
 
       <SettingsSection
         v-if="showExitNodeSelector"
@@ -288,141 +186,6 @@
         </Button>
       </div>
     </div>
-
-    <!-- Advanced overlay fields dialog (workbench form). The schema-driven
-         rows move here UNCHANGED from the old in-card expand — same
-         SettingsRow renderer, only the container changed: each group is a
-         SettingsList, which gives the rows their height and hairlines while
-         the dialog body supplies the inset. Draft semantics
-         unchanged: edits land in the same config draft; the page's
-         Save/Cancel bar remains the commit point. -->
-    <Dialog v-model:open="showAdvancedConfig">
-      <DialogPanel>
-        <DialogHeader>
-          <DialogTitle>{{ $t('common.advanced') }}</DialogTitle>
-          <DialogDescription>{{ $t('common.allOptional') }}</DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          <SettingsList
-            v-for="group in advancedSchemaGroups"
-            :key="group.title"
-          >
-            <div class="pb-1 pt-3 text-xs font-medium text-muted-foreground">
-              {{ group.title }}
-            </div>
-
-            <SettingsRow
-              v-for="field in group.fields"
-              :key="field.key"
-              :stack="isMultilineField(field) ? 'always' : 'never'"
-            >
-              <template #content>
-                <Label
-                  :for="`bot-network-config-advanced-${field.key}`"
-                  class="text-sm font-medium text-foreground"
-                >
-                  {{ field.title || field.key }}
-                </Label>
-                <p
-                  v-if="field.description"
-                  class="mt-0.5 text-xs text-muted-foreground"
-                >
-                  {{ field.description }}
-                </p>
-              </template>
-
-              <div :class="isMultilineField(field) ? 'w-full' : 'w-full sm:w-80'">
-                <Textarea
-                  v-if="isMultilineField(field)"
-                  :id="`bot-network-config-advanced-${field.key}`"
-                  :model-value="stringValue(field)"
-                  :placeholder="placeholderOf(field)"
-                  :readonly="field.readonly"
-                  rows="4"
-                  class="min-h-24 resize-none"
-                  @update:model-value="(val) => updateValue(field.key, val)"
-                />
-
-                <Switch
-                  v-else-if="field.type === 'bool'"
-                  :model-value="!!getFieldValue(field)"
-                  :disabled="field.readonly"
-                  @update:model-value="(val: boolean) => updateValue(field.key, !!val)"
-                />
-
-                <Select
-                  v-else-if="field.type === 'enum' && field.enum"
-                  :model-value="stringValue(field)"
-                  :disabled="field.readonly"
-                  @update:model-value="(val) => updateValue(field.key, val)"
-                >
-                  <SelectTrigger
-                    class="w-full"
-                  >
-                    <SelectValue :placeholder="placeholderOf(field)" />
-                  </SelectTrigger>
-                  <SelectContent class="w-[--reka-select-trigger-width]">
-                    <SelectItem
-                      v-for="option in field.enum"
-                      :key="option"
-                      :value="option"
-                    >
-                      {{ option }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <InputGroup v-else-if="field.type === 'secret'">
-                  <InputGroupInput
-                    :id="`bot-network-config-advanced-${field.key}`"
-                    :model-value="stringValue(field)"
-                    :type="visibleSecrets[field.key] ? 'text' : 'password'"
-                    :placeholder="placeholderOf(field)"
-                    :readonly="field.readonly"
-                    @update:model-value="(val: string) => updateValue(field.key, val)"
-                  />
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      size="icon-xs"
-                      variant="quiet"
-                      :aria-label="$t('common.preview')"
-                      @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
-                    >
-                      <component :is="visibleSecrets[field.key] ? EyeOff : Eye" />
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
-
-                <NumberField
-                  v-else-if="field.type === 'number'"
-                  :id="`bot-network-config-advanced-${field.key}`"
-                  :model-value="numberValue(field)"
-                  :placeholder="placeholderOf(field)"
-                  :readonly="field.readonly"
-                  :min="field.constraint?.min"
-                  :max="field.constraint?.max"
-                  :step="field.constraint?.step ?? 1"
-                  class="w-full"
-                  disable-wheel-change
-                  @update:model-value="(value) => updateNumber(field.key, value)"
-                />
-
-                <Input
-                  v-else
-                  :id="`bot-network-config-advanced-${field.key}`"
-                  :model-value="stringValue(field)"
-                  type="text"
-                  :placeholder="placeholderOf(field)"
-                  :readonly="field.readonly"
-                  class="h-8 w-full"
-                  @update:model-value="(val) => updateValue(field.key, val)"
-                />
-              </div>
-            </SettingsRow>
-          </SettingsList>
-        </DialogBody>
-      </DialogPanel>
-    </Dialog>
 
     <Dialog v-model:open="isEditorDialogOpen">
       <DialogContent class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden p-0 sm:h-[70vh] sm:max-w-3xl">
@@ -550,23 +313,14 @@
 
 <script setup lang="ts">
 import {
-  ActionCard,
-  Button,
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-  Label,
-  NumberField,
+  ExpandableSettingsRow,
   Switch,
-  Input,
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-  Textarea,
-  Dialog, DialogBody, DialogContent, DialogHeader, DialogPanel, DialogTitle, DialogDescription, DialogFooter, DialogClose,
+  Button,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
 } from '@felinic/ui'
-import { SquarePen, Eye, EyeOff, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
+import { SquarePen, RefreshCw } from 'lucide-vue-next'
 import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
-import { ConfirmPopover, InlineLoadingRow, SettingsList, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { ConfirmPopover, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -577,9 +331,9 @@ import {
   postBotsByBotIdNetworkActionsByActionId,
   putBotsByBotIdSettings,
 } from '@memohai/sdk'
-import type { NetworkProviderDescriptor, SettingsUpsertRequest } from '@memohai/sdk'
-import { cloneConfig, getPathValue, setPathValue } from '@/components/config-schema-form/utils'
-import type { ConfigSchema, ConfigSchemaField } from '@/components/config-schema-form/types'
+import type { NetworkConfigField, NetworkProviderDescriptor, SettingsUpsertRequest } from '@memohai/sdk'
+import { cloneConfig } from '@/components/config-schema-form/utils'
+import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
@@ -627,128 +381,30 @@ const selectedNetworkCapabilities = computed(() =>
   selectedOverlayProviderMeta.value?.capabilities ?? null,
 )
 
-// Primary and Advanced schemas computed locally to avoid modifying the generic ConfigSchemaForm
-const selectedOverlayProviderSchema = computed<ConfigSchema | undefined>(() => {
-  const schema = selectedOverlayProviderMeta.value?.config_schema as ConfigSchema | undefined
-  if (!schema) return undefined
-  return {
-    ...schema,
-    fields: (schema.fields ?? []).filter(field => field.key !== 'exit_node'),
-  }
-})
-
-const primarySchema = computed<ConfigSchema | undefined>(() => {
-  if (!selectedOverlayProviderSchema.value) return undefined
-  return {
-    ...selectedOverlayProviderSchema.value,
-    fields: selectedOverlayProviderSchema.value.fields.filter(f => !f.collapsed)
-  }
-})
-
-const advancedSchema = computed<ConfigSchema | undefined>(() => {
-  if (!selectedOverlayProviderSchema.value) return undefined
-  // Map collapsed to false so the ConfigSchemaForm renders them flat. We handle the wrapper.
-  return {
-    ...selectedOverlayProviderSchema.value,
-    fields: selectedOverlayProviderSchema.value.fields
-      .filter(f => f.collapsed)
-      .map(f => ({ ...f, collapsed: false }))
-  }
-})
-
-const advancedSchemaGroups = computed(() => {
-  if (!advancedSchema.value) return []
-  const fields = advancedSchema.value.fields
-
-  const auth = fields.filter(f => (f.order ?? 0) >= 10 && (f.order ?? 0) < 12)
-  const network = fields.filter(f => (f.order ?? 0) >= 12 && (f.order ?? 0) < 20)
-  const environment = fields.filter(f => (f.order ?? 0) >= 20 && (f.order ?? 0) < 30)
-  const others = fields.filter(f => (f.order ?? 0) >= 30)
-
-  const groups = []
-  if (auth.length) groups.push({ title: t('mcp.oauth.title'), fields: auth })
-  if (network.length) groups.push({ title: t('sidebar.network'), fields: network })
-  if (environment.length) groups.push({ title: t('mcp.env'), fields: environment })
-  if (others.length) groups.push({ title: t('common.advanced'), fields: others })
-
-  return groups.map(g => ({
-    ...g,
-    fields: g.fields
-  }))
-})
+// The provider schema decides which fields show on the card; the rest go to
+// the Advanced row. exit_node has its own selector below.
+const overlayConfigFields = computed<NetworkConfigField[]>(() =>
+  [...(selectedOverlayProviderMeta.value?.config_schema?.fields ?? [])]
+    .filter(field => field.key !== 'exit_node')
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+)
+const primaryFields = computed(() => overlayConfigFields.value.filter(field => !field.collapsed))
+const advancedFields = computed(() => overlayConfigFields.value.filter(field => field.collapsed))
 
 const showOverlayConfig = computed(() =>
   !!form.overlay_enabled
   && !!form.overlay_provider
-  && !!selectedOverlayProviderSchema.value?.fields?.length,
+  && overlayConfigFields.value.length > 0,
 )
 
 const showAdvancedConfig = ref(false)
 
-// ---------------------------------------------------------------------------
-// Manual Field Rendering Helpers
-// ---------------------------------------------------------------------------
-const visibleSecrets = reactive<Record<string, boolean>>({})
-
-function getFieldValue(field: ConfigSchemaField) {
-  const current = getPathValue(form.overlay_config, field.key)
-  if (current !== undefined) return current
-  return field.default
+function getFieldValue(field: NetworkConfigField) {
+  return form.overlay_config[field.key] ?? field.default
 }
 
-function stringValue(field: ConfigSchemaField) {
-  const value = getFieldValue(field)
-  return typeof value === 'string' ? value : value == null ? '' : String(value)
-}
-
-function numberValue(field: ConfigSchemaField) {
-  const value = getFieldValue(field)
-  return typeof value === 'number' ? value : undefined
-}
-
-function placeholderOf(field: ConfigSchemaField) {
-  let base = field.placeholder || (field.example != null ? String(field.example) : '')
-
-  if (!base) {
-    const key = field.key.toLowerCase()
-    if (key.includes('key') || key.includes('token') || key.includes('secret')) {
-      base = 'tskey-auth-kru6P22CNTRL-...'
-    } else if (key.includes('url')) {
-      base = 'https://example.com'
-    } else if (key.includes('port')) {
-      base = '1080'
-    } else if (key.includes('host') || key.includes('addr')) {
-      base = '192.168.1.1'
-    } else if (key.includes('tag')) {
-      base = 'tag:bot,tag:server'
-    } else if (key.includes('arg') || key.includes('cmd')) {
-      base = '--verbose'
-    } else if (key.includes('user')) {
-      base = 'admin'
-    } else if (field.type === 'number') {
-      base = '60'
-    } else if (field.type === 'textarea') {
-      base = t('common.enterContent')
-    } else {
-      base = '...'
-    }
-  }
-
-  return t('common.placeholderPrefix', { example: base })
-}
-
-function updateValue(path: string, value: unknown) {
-  const next = cloneConfig(form.overlay_config)
-  setPathValue(next, path, value)
-  form.overlay_config = next
-}
-
-function updateNumber(path: string, value: number | undefined) {
-  updateValue(path, value)
-}
-
-function isMultilineField(field: ConfigSchemaField) {
-  return field.type === 'textarea' || field.multiline
+function updateValue(key: string, value: unknown) {
+  form.overlay_config = { ...form.overlay_config, [key]: value }
 }
 
 // Exit node selection only makes sense after the sidecar is authenticated and connected.

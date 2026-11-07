@@ -90,7 +90,9 @@
     "preview": "プレビュー",
     "hide": "非表示",
     "show": "表示",
-    "saveChanges": "変更を保存"
+    "saveChanges": "変更を保存",
+    "showSecretField": "{field}を表示",
+    "hideSecretField": "{field}を隠す"
   },
   "computerAccess": {
     "emptyBots": "Bot がまだありません。",
@@ -3399,7 +3401,6 @@
       "overlayProviderFieldLabel": "接続タイプ",
       "overlayProviderPlaceholder": "解決策を選択します (スキップするにはオフにします)SD-WAN)",
       "overlayProviderRequired": "有効にする前に接続タイプを選択してください。",
-      "overlayPrimaryConfigTitle": "一次構成",
       "networkStatusPendingSaveTitle": "保存保留中",
       "networkStatusPendingSave": "ネットワーク設定が変更されました。現在のステータスを確認する前に保存してください。",
       "networkWorkspaceStateLabel": "州",
@@ -3712,8 +3713,6 @@
       "lineWebhookSetFailed": "LINE Webhook URL の更新に失敗しました",
       "lineWebhookSaveFirst": "LINE Webhook URL を設定する前に、このプラットフォーム構成を保存してください。",
       "linePublicMediaLimit": "LINE の画像送信には、公開 HTTPS base の設定または Cloudflare Quick Tunnel が必要です。画像は PNG/JPEG で、LINE のサイズ制限内に収めてください。",
-      "showSecretField": "{field}を表示",
-      "hideSecretField": "{field}を隠す",
       "feishuWebhookSecurityHint": "セキュリティのため、Webhook モードには暗号化キーまたは検証Tokenのいずれかが必要です。保護されていないパブリック コールバックURL暴露してはならない。",
       "feishuWebhookSecretRequired": "セキュリティのため、暗号化キーまたは検証Tokenの少なくとも 1 つを構成します。",
       "noAvailableTypes": "すべてのプラットフォーム タイプが設定されました",

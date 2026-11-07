@@ -93,7 +93,9 @@
     "unsaved": "Unsaved",
     "editJson": "Edit JSON",
     "actionRequired": "Action Required",
-    "preview": "Preview"
+    "preview": "Preview",
+    "showSecretField": "Show {field}",
+    "hideSecretField": "Hide {field}"
   },
   "computerAccess": {
     "emptyBots": "No bots yet.",
@@ -3391,7 +3393,6 @@
       "overlayProviderFieldLabel": "Provider",
       "overlayProviderPlaceholder": "Select a provider",
       "overlayProviderRequired": "Choose a provider before enabling.",
-      "overlayPrimaryConfigTitle": "Primary Configuration",
       "networkState": {
         "connected": "Connected",
         "degraded": "Connected, with issues",
@@ -3699,8 +3700,6 @@
       "lineWebhookSetFailed": "Failed to update LINE webhook endpoint",
       "lineWebhookSaveFirst": "Save this platform configuration before setting the LINE webhook endpoint.",
       "linePublicMediaLimit": "LINE outbound images need a configured public HTTPS base or Cloudflare Quick Tunnel; images must be PNG/JPEG and stay within LINE size limits.",
-      "showSecretField": "Show {field}",
-      "hideSecretField": "Hide {field}",
       "feishuWebhookSecurityHint": "For security, webhook mode requires either an Encrypt Key or a Verification Token; an unprotected public callback URL should not be exposed.",
       "feishuWebhookSecretRequired": "For security, configure at least one of Encrypt Key or Verification Token.",
       "noAvailableTypes": "All platform types have been configured",

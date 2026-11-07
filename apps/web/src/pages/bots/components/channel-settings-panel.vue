@@ -132,12 +132,14 @@
           {{ $t('bots.channels.feishuWebhookSecurityHint') }}
         </p>
 
-        <ChannelField
+        <SchemaField
           v-for="[key, field] in requiredFields"
           :key="key"
-          v-model="form.credentials[key]"
+          :model-value="form.credentials[key]"
           :field="field"
           :field-key="key"
+          id-prefix="channel-field"
+          @update:model-value="(v) => setCredential(key, v)"
         />
       </SettingsSection>
 
@@ -164,12 +166,14 @@
             <!-- The dialog body already pads its content, so the fields take
                  only the list's row rhythm, not a card's inset. -->
             <SettingsList>
-              <ChannelField
+              <SchemaField
                 v-for="[key, field] in optionalFields"
                 :key="key"
-                v-model="form.credentials[key]"
+                :model-value="form.credentials[key]"
                 :field="field"
                 :field-key="key"
+                id-prefix="channel-field"
+                @update:model-value="(v) => setCredential(key, v)"
               />
             </SettingsList>
           </DialogBody>
@@ -222,7 +226,7 @@ import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBot
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import ChannelIcon from '@/components/channel-icon/index.vue'
-import ChannelField from './channel-field.vue'
+import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -258,6 +262,12 @@ const isEditMode = computed(() => props.channelItem.configured)
 const lastSavedConfigId = ref('')
 
 const form = reactive<{ credentials: Record<string, unknown>; disabled: boolean }>({ credentials: {}, disabled: false })
+
+// A cleared number field reports undefined; store it as '' like a cleared
+// text field so dirty tracking and the save filter treat both the same.
+function setCredential(key: string, value: unknown) {
+  form.credentials[key] = value ?? ''
+}
 const isAdvancedExpanded = ref(false)
 
 const { mutateAsync: upsertChannel } = useMutation({

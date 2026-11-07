@@ -1,14 +1,15 @@
 <template>
-  <!-- Horizontal label|control settings row; stacks on a narrow pane. The label
-       keeps a #content slot (not the default :label prop) so the <Label :for>
-       association to each field's input survives the migration. -->
-  <SettingsRow stack="sm">
+  <!-- Horizontal label|control settings row; stacks on a narrow pane, and
+       always for a multi-line field. The label keeps a #content slot (not the
+       default :label prop) so the <Label :for> association to each field's
+       input survives. -->
+  <SettingsRow :stack="multiline ? 'always' : 'sm'">
     <template #content>
       <Label
         :for="fieldId"
         class="text-sm font-medium text-foreground"
       >
-        {{ field.title || fieldKey }}
+        {{ label }}
       </Label>
       <p
         v-if="field.description"
@@ -19,13 +20,25 @@
     </template>
 
     <!-- Fixed control width so every field type lines up down the card. -->
-    <div class="w-full sm:w-80">
-      <InputGroup v-if="field.type === 'secret'">
+    <div :class="multiline ? 'w-full' : 'w-full sm:w-80'">
+      <Textarea
+        v-if="multiline"
+        :id="fieldId"
+        :model-value="stringValue"
+        :placeholder="placeholder"
+        :readonly="field.readonly"
+        rows="4"
+        class="min-h-24 resize-none"
+        @update:model-value="(v) => emit('update:modelValue', v)"
+      />
+
+      <InputGroup v-else-if="field.type === 'secret'">
         <InputGroupInput
           :id="fieldId"
           :model-value="stringValue"
           :type="revealed ? 'text' : 'password'"
           :placeholder="placeholder"
+          :readonly="field.readonly"
           @update:model-value="(v: string) => emit('update:modelValue', v)"
         />
         <InputGroupAddon align="inline-end">
@@ -33,8 +46,8 @@
             size="icon-xs"
             variant="quiet"
             :aria-label="revealed
-              ? t('bots.channels.hideSecretField', { field: field.title || fieldKey })
-              : t('bots.channels.showSecretField', { field: field.title || fieldKey })"
+              ? t('common.hideSecretField', { field: label })
+              : t('common.showSecretField', { field: label })"
             @click="revealed = !revealed"
           >
             <component :is="revealed ? EyeOff : Eye" />
@@ -48,6 +61,7 @@
       >
         <Switch
           :model-value="!!modelValue"
+          :disabled="field.readonly"
           @update:model-value="(v: boolean) => emit('update:modelValue', !!v)"
         />
       </div>
@@ -55,12 +69,13 @@
       <Select
         v-else-if="field.type === 'enum' && field.enum"
         :model-value="String(modelValue ?? '')"
+        :disabled="field.readonly"
         @update:model-value="(v) => emit('update:modelValue', v)"
       >
         <SelectTrigger
           class="w-full"
         >
-          <SelectValue :placeholder="field.title || fieldKey" />
+          <SelectValue :placeholder="label" />
         </SelectTrigger>
         <SelectContent class="w-[--reka-select-trigger-width]">
           <SelectItem
@@ -78,9 +93,14 @@
         :id="fieldId"
         :model-value="numberValue"
         :placeholder="placeholder"
+        :readonly="field.readonly"
+        :min="field.constraint?.min"
+        :max="field.constraint?.max"
+        :step="field.constraint?.step ?? 1"
+        :format-options="{ useGrouping: false }"
         class="w-full"
         disable-wheel-change
-        @update:model-value="onNumber"
+        @update:model-value="(v: number | undefined) => emit('update:modelValue', v)"
       />
 
       <Input
@@ -89,6 +109,7 @@
         :model-value="stringValue"
         type="text"
         :placeholder="placeholder"
+        :readonly="field.readonly"
         class="w-full"
         @update:model-value="(v) => emit('update:modelValue', v)"
       />
@@ -100,20 +121,35 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Input, Label, NumberField, Switch,
+  Input, Label, NumberField, Switch, Textarea,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   InputGroup, InputGroupInput, InputGroupAddon, InputGroupButton,
+  SettingsRow,
 } from '@felinic/ui'
 import { Eye, EyeOff } from 'lucide-vue-next'
-import type { ChannelFieldSchema } from '@memohai/sdk'
-import { SettingsRow } from '@felinic/ui'
+
+// The parts of a server-declared config field the control needs. Channel and
+// network schemas both satisfy it structurally.
+export interface SchemaFieldSpec {
+  type?: string
+  title?: string
+  description?: string
+  placeholder?: string
+  example?: unknown
+  enum?: string[]
+  multiline?: boolean
+  readonly?: boolean
+  constraint?: { min?: number; max?: number; step?: number } | null
+}
 
 const props = defineProps<{
-  field: ChannelFieldSchema
+  field: SchemaFieldSpec
   fieldKey: string
+  idPrefix: string
   modelValue: unknown
 }>()
 
+// A cleared number field emits undefined; every other control emits its value.
 const emit = defineEmits<{
   'update:modelValue': [value: unknown]
 }>()
@@ -121,17 +157,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const revealed = ref(false)
 
-const fieldId = computed(() => `channel-field-${props.fieldKey}`)
-const placeholder = computed(() => (props.field.example != null ? String(props.field.example) : ''))
+const fieldId = computed(() => `${props.idPrefix}-${props.fieldKey}`)
+const label = computed(() => props.field.title || props.fieldKey)
+const multiline = computed(() => props.field.type === 'textarea' || !!props.field.multiline)
+const placeholder = computed(() =>
+  props.field.placeholder || (props.field.example != null ? String(props.field.example) : ''),
+)
 const stringValue = computed(() => {
   const v = props.modelValue
   return typeof v === 'string' || typeof v === 'number' ? String(v) : ''
 })
 const numberValue = computed(() => (typeof props.modelValue === 'number' ? props.modelValue : undefined))
-
-// Mirror the panel's old number handling: empty clears to ''; NumberField only
-// commits a parsed number or undefined (emptied), so non-numeric can't arrive.
-function onNumber(v: number | undefined) {
-  emit('update:modelValue', v ?? '')
-}
 </script>
