@@ -2,10 +2,11 @@ package tailscale
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
+	"time"
 
 	ctr "github.com/felinics/memoh/internal/container"
 	netctl "github.com/felinics/memoh/internal/network"
@@ -13,14 +14,22 @@ import (
 	"github.com/felinics/memoh/internal/network/overlay/internal/sidecar"
 )
 
+// localAPIWait bounds how long attach waits for a freshly started tailscaled
+// to open its LocalAPI socket.
+const localAPIWait = 15 * time.Second
+
 type nativeDriver struct {
 	config  netctl.BotOverlayConfig
 	root    string
+	logger  *slog.Logger
 	manager sidecar.Manager
 }
 
-func newNativeDriver(cfg netctl.BotOverlayConfig, runtime sidecar.Runtime, stateRoot string) *nativeDriver {
-	d := &nativeDriver{config: cfg, root: stateRoot}
+func newNativeDriver(cfg netctl.BotOverlayConfig, runtime sidecar.Runtime, stateRoot string, logger *slog.Logger) *nativeDriver {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	d := &nativeDriver{config: cfg, root: stateRoot, logger: logger}
 	d.manager = sidecar.Manager{
 		Kind:         "tailscale",
 		Runtime:      runtime,
@@ -35,9 +44,19 @@ func (*nativeDriver) Kind() string { return "tailscale" }
 
 func (d *nativeDriver) EnsureAttached(ctx context.Context, req netctl.AttachmentRequest) (netctl.OverlayStatus, error) {
 	if !d.config.Enabled {
-		return netctl.OverlayStatus{Provider: d.Kind(), State: "disabled"}, nil
+		return netctl.OverlayStatus{Provider: d.Kind(), State: netctl.OverlayStateDisabled}, nil
 	}
-	return d.manager.EnsureAttached(ctx, req)
+	status, err := d.manager.EnsureAttached(ctx, req)
+	if err != nil || !status.Attached {
+		return status, err
+	}
+	// A control server that is briefly unreachable must not fail the
+	// workspace start; tailscaled keeps retrying and the status shows why.
+	if err := d.configure(ctx, req); err != nil {
+		d.logger.WarnContext(ctx, "configure tailscale sidecar failed",
+			slog.String("bot_id", req.BotID), slog.Any("error", err))
+	}
+	return d.manager.Status(ctx, req)
 }
 
 func (d *nativeDriver) Detach(ctx context.Context, req netctl.AttachmentRequest) error {
@@ -46,14 +65,16 @@ func (d *nativeDriver) Detach(ctx context.Context, req netctl.AttachmentRequest)
 
 func (d *nativeDriver) Status(ctx context.Context, req netctl.AttachmentRequest) (netctl.OverlayStatus, error) {
 	if !d.config.Enabled {
-		return netctl.OverlayStatus{Provider: d.Kind(), State: "disabled"}, nil
+		return netctl.OverlayStatus{Provider: d.Kind(), State: netctl.OverlayStateDisabled}, nil
 	}
 	return d.manager.Status(ctx, req)
 }
 
+// buildSpec describes the sidecar process. Login and preferences go through
+// the LocalAPI in configure, so only settings that tailscaled reads at
+// startup appear here; changing them recreates the sidecar.
 func (d *nativeDriver) buildSpec(req netctl.AttachmentRequest) (sidecar.Spec, error) {
 	cfg := d.config.Config
-	authKey := configutil.String(cfg, "auth_key")
 	userspace := configutil.Bool(cfg, "userspace")
 	stateDir := d.stateDir(req)
 	socketDir := d.socketDir(req)
@@ -63,60 +84,26 @@ func (d *nativeDriver) buildSpec(req netctl.AttachmentRequest) (sidecar.Spec, er
 	if err := os.MkdirAll(socketDir, 0o750); err != nil {
 		return sidecar.Spec{}, err
 	}
-	proxyAddress := ""
-	env := []string{
-		"TS_STATE_DIR=/var/lib/tailscale",
-		"TS_SOCKET=/var/run/tailscale/tailscaled.sock",
-		"TS_USERSPACE=" + strconv.FormatBool(userspace),
-		"TS_ENABLE_HEALTH_CHECK=true",
-		"TS_LOCAL_ADDR_PORT=127.0.0.1:9002",
-		"TS_AUTH_ONCE=true",
+	cmd := []string{
+		"tailscaled",
+		"--statedir=/var/lib/tailscale",
+		"--socket=/var/run/tailscale/tailscaled.sock",
 	}
-	if authKey != "" {
-		env = append(env, "TS_AUTHKEY="+authKey)
-	}
-	if hostname := configutil.FirstNonEmpty(configutil.String(cfg, "hostname"), req.BotID); hostname != "" {
-		env = append(env, "TS_HOSTNAME="+hostname)
-	}
-	if routes := configutil.String(cfg, "advertise_routes"); routes != "" {
-		env = append(env, "TS_ROUTES="+routes)
-	}
-	if configutil.Bool(cfg, "accept_dns", true) {
-		env = append(env, "TS_ACCEPT_DNS=true")
-	}
-	extraArgs := make([]string, 0, 4)
-	if controlURL := configutil.String(cfg, "control_url"); controlURL != "" {
-		extraArgs = append(extraArgs, "--login-server="+controlURL)
-	}
-	extraArgs = append(extraArgs, "--accept-routes="+strconv.FormatBool(configutil.Bool(cfg, "accept_routes")))
-	exitNode := configutil.String(req.Overlay.Config, "exit_node")
-	if exitNode != "" {
-		extraArgs = append(extraArgs, "--exit-node="+exitNode)
-	}
-	if more := strings.TrimSpace(configutil.String(cfg, "extra_args")); more != "" {
-		extraArgs = append(extraArgs, more)
-	}
-	if len(extraArgs) > 0 {
-		env = append(env, "TS_EXTRA_ARGS="+strings.Join(extraArgs, " "))
-	}
-	tailscaledExtraArgs := make([]string, 0, 4)
 	if userspace {
-		tailscaledExtraArgs = append(tailscaledExtraArgs, "--tun=userspace-networking")
+		cmd = append(cmd, "--tun=userspace-networking")
 	}
+	proxyAddress := ""
 	if configutil.Bool(cfg, "socks5_enabled") {
-		port := configutil.Int(cfg, "socks5_port", 1055)
-		env = append(env, "TS_SOCKS5_SERVER=:"+strconv.Itoa(port))
-		proxyAddress = "socks5://127.0.0.1:" + strconv.Itoa(port)
+		port := strconv.Itoa(configutil.Int(cfg, "socks5_port", 1055))
+		cmd = append(cmd, "--socks5-server=:"+port)
+		proxyAddress = "socks5://127.0.0.1:" + port
 	}
 	if configutil.Bool(cfg, "http_proxy_enabled") {
-		port := configutil.Int(cfg, "http_proxy_port", 1056)
-		env = append(env, "TS_OUTBOUND_HTTP_PROXY_LISTEN=:"+strconv.Itoa(port))
+		port := strconv.Itoa(configutil.Int(cfg, "http_proxy_port", 1056))
+		cmd = append(cmd, "--outbound-http-proxy-listen=:"+port)
 		if proxyAddress == "" {
-			proxyAddress = "http://127.0.0.1:" + strconv.Itoa(port)
+			proxyAddress = "http://127.0.0.1:" + port
 		}
-	}
-	if len(tailscaledExtraArgs) > 0 {
-		env = append(env, "TS_TAILSCALED_EXTRA_ARGS="+strings.Join(tailscaledExtraArgs, " "))
 	}
 	mounts := []ctr.MountSpec{{
 		Destination: "/var/lib/tailscale",
@@ -141,7 +128,7 @@ func (d *nativeDriver) buildSpec(req netctl.AttachmentRequest) (sidecar.Spec, er
 	}
 	return sidecar.Spec{
 		Image:          "tailscale/tailscale:stable",
-		Env:            env,
+		Cmd:            cmd,
 		Mounts:         mounts,
 		AddedCaps:      addedCaps,
 		ResolvConfPath: filepath.Join(d.root, req.BotID, "tailscale-resolv.conf"),
@@ -150,10 +137,13 @@ func (d *nativeDriver) buildSpec(req netctl.AttachmentRequest) (sidecar.Spec, er
 			"userspace":                 userspace,
 			"state_dir":                 stateDir,
 			"localapi_socket_host_path": d.socketPath(req),
-			"healthcheck_url":           "http://127.0.0.1:9002/healthz",
-			"configured_exit_node":      exitNode,
+			"configured_exit_node":      configutil.String(cfg, "exit_node"),
 		},
 	}, nil
+}
+
+func (d *nativeDriver) client(req netctl.AttachmentRequest) localClient {
+	return localClient{socketPath: d.socketPath(req)}
 }
 
 func (d *nativeDriver) stateDir(req netctl.AttachmentRequest) string {

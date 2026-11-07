@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	netctl "github.com/felinics/memoh/internal/network"
@@ -15,6 +16,7 @@ type Deps struct {
 	SidecarRuntime sidecar.Runtime
 	Runtime        netctl.RuntimeDescriptor
 	StateRoot      string
+	Logger         *slog.Logger
 }
 
 type Provider struct {
@@ -116,7 +118,7 @@ func (p *Provider) ListNodes(ctx context.Context, botID string, cfg netctl.BotOv
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	driver := newNativeDriver(cfg, p.deps.SidecarRuntime, p.stateRoot())
+	driver := newNativeDriver(cfg, p.deps.SidecarRuntime, p.stateRoot(), p.deps.Logger)
 	return driver.listNodes(ctx, botID)
 }
 
@@ -130,7 +132,7 @@ func (p *Provider) BuildDriver(cfg netctl.BotOverlayConfig) (netctl.OverlayDrive
 		return nil, err
 	}
 	if p.deps.Runtime.Capabilities.SidecarWorker {
-		return newNativeDriver(cfg, p.deps.SidecarRuntime, p.stateRoot()), nil
+		return newNativeDriver(cfg, p.deps.SidecarRuntime, p.stateRoot(), p.deps.Logger), nil
 	}
 	return unsupportedDriver{kind: p.Kind(), message: "Tailscale overlay is not supported by the current runtime backend."}, nil
 }
@@ -142,6 +144,9 @@ func (p *Provider) stateRoot() string {
 func validateConfig(cfg netctl.BotOverlayConfig) error {
 	if configutil.Bool(cfg.Config, "userspace") && configutil.String(cfg.Config, "exit_node") != "" {
 		return errors.New("tailscale transparent egress via exit node requires userspace=false")
+	}
+	if _, err := parseRoutes(configutil.String(cfg.Config, "advertise_routes")); err != nil {
+		return err
 	}
 	return nil
 }
@@ -164,5 +169,5 @@ func (d unsupportedDriver) Status(context.Context, netctl.AttachmentRequest) (ne
 }
 
 func (d unsupportedDriver) status() netctl.OverlayStatus {
-	return netctl.OverlayStatus{Provider: d.kind, State: "unsupported", Message: d.message}
+	return netctl.OverlayStatus{Provider: d.kind, State: netctl.OverlayStateUnsupported, Message: d.message}
 }

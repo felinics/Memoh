@@ -3417,6 +3417,7 @@
       },
       "networkActionFailed": "ネットワークチェックに失敗しました",
       "networkStatusState": "州",
+      "networkStatusMessage": "詳細",
       "networkStatusIP": "テールネットIP",
       "networkStatusProxy": "プロキシアドレス",
       "networkStatusPID": "プロセスPID",
@@ -3464,7 +3465,21 @@
       "agentCredentialConnected": "API キー接続済み",
       "agentCredentialConnectedHint": "この Agent は専用のキーを使用します。新しいキーを保存すると置き換えられます。",
       "agentCredentialDisconnect": "切断",
-      "agentCredentialDisconnectConfirm": "この Agent の認証情報を切断しますか?"
+      "agentCredentialDisconnectConfirm": "この Agent の認証情報を切断しますか?",
+      "networkState": {
+        "connected": "接続済み",
+        "degraded": "接続済み（問題あり）",
+        "needsLogin": "サインインが必要です",
+        "connecting": "接続中…",
+        "stopped": "停止中",
+        "notAttached": "未接続",
+        "workspaceMissing": "Workspace が未作成です",
+        "needsConfig": "設定が不足しています",
+        "unauthorized": "認証が拒否されました",
+        "unsupported": "このランタイムでは使用できません",
+        "disabled": "オフ",
+        "unknown": "不明"
+      }
     },
     "access": {
       "title": "アクセス制御",

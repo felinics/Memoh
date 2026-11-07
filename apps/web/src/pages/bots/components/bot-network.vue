@@ -779,7 +779,7 @@ const shouldLoadNodeOptions = computed(() =>
 )
 
 // Transient states that should trigger automatic polling until resolved.
-const TRANSIENT_STATES = ['starting', 'needs_login', 'needslogin', 'stopped']
+const TRANSIENT_STATES = ['starting', 'needs_login', 'stopped']
 
 const isTransientState = computed(() =>
   TRANSIENT_STATES.includes(overlayState.value),
@@ -883,14 +883,14 @@ const overlayAuthURL = computed(() => {
 
 // "Connected" means sidecar is fully running and authenticated.
 const isConnected = computed(() =>
-  ['ready', 'running', 'degraded'].includes(overlayState.value),
+  ['ready', 'degraded'].includes(overlayState.value),
 )
 
 // Show logout when the sidecar is alive (connected or waiting for login).
 const showLogoutButton = computed(() =>
   shouldLoadNetworkStatus.value
   && !needsSaveForStatus.value
-  && ['ready', 'running', 'degraded', 'needs_login', 'starting', 'stopped'].includes(overlayState.value),
+  && ['ready', 'degraded', 'needs_login', 'starting', 'stopped'].includes(overlayState.value),
 )
 
 // ---------------------------------------------------------------------------
@@ -936,19 +936,29 @@ const networkStatusLine = computed<{ tone: NetworkStatusTone; label: string; det
   const address = status?.network_ip || (details.dns_name as string | undefined) || ''
   switch (overlayState.value) {
     case 'ready':
-    case 'running':
       return { tone: 'success', label: t('bots.settings.networkState.connected'), detail: address || undefined }
     case 'degraded':
       return { tone: 'warning', label: t('bots.settings.networkState.degraded'), detail: address || undefined }
     case 'needs_login':
-    case 'needslogin':
       return { tone: 'warning', label: t('bots.settings.networkState.needsLogin') }
     case 'starting':
       return { tone: 'muted', label: t('bots.settings.networkState.connecting') }
     case 'stopped':
       return { tone: 'muted', label: t('bots.settings.networkState.stopped') }
+    case 'missing':
+      return { tone: 'muted', label: t('bots.settings.networkState.notAttached') }
+    case 'workspace_missing':
+      return { tone: 'muted', label: t('bots.settings.networkState.workspaceMissing') }
+    case 'needs_config':
+      return { tone: 'warning', label: t('bots.settings.networkState.needsConfig') }
+    case 'unauthorized':
+      return { tone: 'destructive', label: t('bots.settings.networkState.unauthorized') }
+    case 'unsupported':
+      return { tone: 'muted', label: t('bots.settings.networkState.unsupported') }
+    case 'disabled':
+      return { tone: 'muted', label: t('bots.settings.networkState.disabled') }
     default:
-      return { tone: 'muted', label: overlayState.value || t('bots.settings.networkState.unknown') }
+      return { tone: 'muted', label: t('bots.settings.networkState.unknown') }
   }
 })
 
@@ -990,6 +1000,7 @@ const overlayNetworkStatusFields = computed(() => {
   const details = status.details ?? {}
   const items: { label: string; value: string | undefined; mono: boolean }[] = [
     { label: t('bots.settings.networkStatusState'), value: status.state, mono: false },
+    { label: t('bots.settings.networkStatusMessage'), value: status.message, mono: false },
     { label: t('bots.settings.networkStatusIP'), value: status.network_ip, mono: true },
     { label: t('bots.settings.networkStatusProxy'), value: status.proxy_address, mono: true },
     { label: t('bots.settings.networkStatusPID'), value: details.pid == null ? undefined : String(details.pid), mono: true },

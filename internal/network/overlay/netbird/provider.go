@@ -134,5 +134,5 @@ func (d unsupportedDriver) Status(context.Context, netctl.AttachmentRequest) (ne
 }
 
 func (d unsupportedDriver) status() netctl.OverlayStatus {
-	return netctl.OverlayStatus{Provider: d.kind, State: "unsupported", Message: d.message}
+	return netctl.OverlayStatus{Provider: d.kind, State: netctl.OverlayStateUnsupported, Message: d.message}
 }
