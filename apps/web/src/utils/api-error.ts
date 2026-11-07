@@ -1,6 +1,4 @@
-import enMessages from '@/i18n/locales/en.json'
-import zhMessages from '@/i18n/locales/zh.json'
-import jaMessages from '@/i18n/locales/ja.json'
+import { loadedLocaleMessages } from '@/i18n/messages'
 
 interface ResolveApiErrorMessageOptions {
   prefixFallback?: boolean
@@ -51,12 +49,6 @@ const clientStatusCodes: Record<number, string> = {
   429: 'http.too_many_requests',
 }
 
-const messagesByLocale = {
-  en: enMessages,
-  zh: zhMessages,
-  ja: jaMessages,
-} as const
-
 function asRecord(value: unknown): ErrorRecord | null {
   if (!value || typeof value !== 'object') {
     return null
@@ -89,8 +81,10 @@ function currentLocale(): Locale {
   return 'en'
 }
 
+// Only languages that have loaded can answer (see i18n/messages.ts); the stored
+// language is loaded before the app mounts and before a new pick is stored.
 function lookupMessage(locale: Locale, key: string): string {
-  let value: unknown = messagesByLocale[locale]
+  let value: unknown = loadedLocaleMessages(locale)
   for (const part of key.split('.')) {
     if (!value || typeof value !== 'object') return ''
     value = (value as Record<string, unknown>)[part]

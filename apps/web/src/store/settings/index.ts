@@ -1,4 +1,5 @@
 import type { Locale } from '@/i18n'
+import { loadLocaleMessages } from '@/i18n/messages'
 import { computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useColorMode, useStorage } from '@vueuse/core'
@@ -124,7 +125,7 @@ export const useSettingsStore = defineStore('settings', () => {
     colorMode.value = value === 'system' ? 'auto' : value
   }, { immediate: true })
 
-  watch(language, (value) => {
+  const applyLanguage = (value: Locale) => {
     i18n.locale.value = value
     // Reflect the active locale onto <html lang> so locale-scoped CSS can target
     // it — chiefly the CJK font-weight de-emphasis (see :lang(zh) in style.css):
@@ -133,6 +134,31 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof document !== 'undefined') {
       document.documentElement.lang = value
     }
+  }
+
+  // Loads a language and registers it with vue-i18n (the same step i18n.ts
+  // runs for the starting language).
+  const prepareLocale = (value: Locale) => loadLocaleMessages(value).then((messages) => {
+    if (!i18n.availableLocales.includes(value)) i18n.setLocaleMessage(value, messages)
+  })
+
+  // Only the active language is downloaded (see i18n/messages.ts). setLanguage
+  // stores a pick once its language has loaded, so this normally applies at
+  // once; the starting language is loaded before the app mounts. A change from
+  // another tab (useStorage follows storage events) may name a language this
+  // tab hasn't loaded yet, so load it first.
+  watch(language, (value) => {
+    if (i18n.availableLocales.includes(value)) {
+      applyLanguage(value)
+      return
+    }
+    prepareLocale(value).then(
+      () => {
+        // A later pick may have landed while this one was downloading.
+        if (language.value === value) applyLanguage(value)
+      },
+      (error: unknown) => console.error('[settings] Failed to load language', value, error),
+    )
   }, { immediate: true })
 
   watch(colorScheme, (value) => {
@@ -156,8 +182,13 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTypography()
   }, { immediate: true })
 
+  // Code outside components reads copy in the stored language (API error copy,
+  // chat notices), so store a pick only once its language has loaded.
   const setLanguage = (value: Locale) => {
-    language.value = value
+    prepareLocale(value).then(
+      () => { language.value = value },
+      (error: unknown) => console.error('[settings] Failed to load language', value, error),
+    )
   }
 
   const withViewTransition = (fn: () => void) => {

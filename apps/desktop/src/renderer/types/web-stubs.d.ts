@@ -30,6 +30,7 @@ declare module '@memohai/web/i18n' {
   import type { ComputedRef } from 'vue'
   const i18n: I18n
   export default i18n
+  export const i18nReady: Promise<void>
   export function i18nRef(key: string): ComputedRef<string>
 }
 

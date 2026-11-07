@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
@@ -126,6 +127,9 @@ export default defineConfig(({ command }) => {
         '/': browserHostProxy,
       },
       allowedHosts: true,
+    },
+    test: {
+      setupFiles: ['./src/vitest-setup.ts'],
     },
     resolve: {
       // @felinic/ui is a linked workspace package and pnpm can resolve its

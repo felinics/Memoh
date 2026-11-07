@@ -19,7 +19,7 @@ import { registerWorkspaceTabCommands } from './pages/home/commands/workspace-ta
 import { useWorkspaceTabsStore } from './store/workspace-tabs'
 import { useKeyboardShortcutsStore } from './store/keyboard-shortcuts'
 import { createPinia } from 'pinia'
-import i18n from './i18n'
+import i18n, { i18nReady } from './i18n'
 import { PiniaColada } from '@pinia/colada'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import { createQueryCachePersistencePlugin, whenQueryCacheRestored } from './lib/query-cache-persistence'
@@ -82,5 +82,6 @@ if (forceDesktopShell) {
 }
 
 // Mount only after the snapshot is hydrated so the first render already has
-// the last-known values (storage is sync, so this resolves in a microtask).
-void whenQueryCacheRestored().then(() => app.mount('#app'))
+// the last-known values (storage is sync, so this resolves in a microtask), and
+// after the active language has loaded so the first render has its copy.
+void Promise.all([whenQueryCacheRestored(), i18nReady]).then(() => app.mount('#app'))

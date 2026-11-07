@@ -3,8 +3,16 @@ import { RouterView, type RouteLocationNormalized, type RouteRecordRaw } from 'v
 import { i18nRef } from './i18n'
 import { getBotBreadcrumbName } from './lib/bot-breadcrumb'
 
+/**
+ * The persistent chat workspace (sidebar + dockview). App.vue mounts it outside
+ * RouterView on chat and settings routes and loads it on demand: it carries
+ * the chat UI, Markdown rendering and code highlighting, which the login and
+ * onboarding pages must not wait on. prefetchAppPages warms it first.
+ */
+export const loadMainSection = () => import('@/pages/main-section/index.vue')
+
 // ── Settings page loaders ────────────────────────────────────────────────────
-// Named consts instead of inline arrows so prefetchSettingsPages warms EXACTLY
+// Named consts instead of inline arrows so prefetchAppPages warms EXACTLY
 // the functions the routes reference — one copy of each import path, no drift.
 const pageSettings = () => import('@/pages/settings-section/index.vue')
 const pageBots = () => import('@/pages/bots/index.vue')
@@ -24,7 +32,7 @@ const pageSupermarketAppDetail = () => import('@/pages/supermarket/app-detail.vu
 const pageAbout = () => import('@/pages/about/index.vue')
 
 /**
- * Settings page loaders warmed by prefetchSettingsPages, ordered sidebar
+ * Settings page loaders warmed by prefetchAppPages, ordered sidebar
  * destinations FIRST and drill-in sub-pages (only reachable through a list
  * page) LAST — warming drill-ins early just competes with the pages a first
  * click can actually hit. Exported so routes.test.ts can pin it to the route
@@ -40,7 +48,13 @@ export const settingsPageLoaders = [
 ]
 
 /**
- * Warm the settings page chunks during browser idle time.
+ * Warm the chat workspace and the settings page chunks during browser idle time.
+ *
+ * The chat workspace goes first: on the login and onboarding pages it is the
+ * next screen, and it is the largest chunk, so warming it while the user types
+ * lets the chat open right after sign-in. On chat and settings routes App.vue
+ * has already started loading it, and the warm-up resolves from the module
+ * cache.
  *
  * Every settings page is a lazy route chunk, and vue-router only starts
  * loading one AFTER the nav click — the URL and the page both wait on the
@@ -57,7 +71,7 @@ export const settingsPageLoaders = [
  * most one small chunk, and chunks not yet started leave the connection free
  * for the click itself.
  */
-export function prefetchSettingsPages(): void {
+export function prefetchAppPages(): void {
   const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
   if (connection?.saveData) return
 
@@ -68,7 +82,7 @@ export function prefetchSettingsPages(): void {
     if (w.requestIdleCallback) w.requestIdleCallback(cb, { timeout: 3000 })
     else setTimeout(cb, 2000)
   }
-  const queue = [...settingsPageLoaders]
+  const queue = [loadMainSection, ...settingsPageLoaders]
   const warmNext = () => {
     const load = queue.shift()
     if (!load) return
