@@ -10,7 +10,7 @@
 
     <!-- Loading (initial) -->
     <div
-      v-else-if="isLoading && schedules.length === 0"
+      v-else-if="(isLoading && schedules.length === 0) || (schedules.length > 0 && isTimezonePending)"
       class="flex items-center gap-2 px-[23px] pt-3 text-caption text-muted-foreground/60"
     >
       <Spinner class="size-3" />
@@ -131,6 +131,7 @@ import {
 import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdScheduleById } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
+import { useBotEffectiveTimezone } from '@/composables/api/useBotTimezone'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useUnreadStore, type AttentionKind } from '@/store/unread'
 import { useAttentionFocusStore } from '@/store/attention-focus'
@@ -163,9 +164,9 @@ const busyIds = reactive(new Set<string>())
 const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
 const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : locale.value.startsWith('ja') ? 'ja-JP' : 'en-US')
 
-const effectiveTimezone = computed(() => {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
-})
+// Schedules fire in the bot's effective timezone, which may differ from the
+// viewer's; next runs are computed there and shown in local time.
+const { timezone: effectiveTimezone, isPending: isTimezonePending } = useBotEffectiveTimezone(currentBotId)
 
 // --- Grouping by day; each item carries its own next-run time. ---
 
@@ -202,6 +203,10 @@ function groupLabel(date: Date, now: Date): string {
 const groupedSchedules = computed<ScheduleGroup[]>(() => {
   const now = new Date()
   const tz = effectiveTimezone.value
+  // Keep tasks accessible when settings fail, without inventing local run times.
+  if (!tz) return schedules.value.length
+    ? [{ key: 'schedule', label: t('bots.schedule.title'), tasks: schedules.value }]
+    : []
 
   const pairs = schedules.value.flatMap(task => {
     if (!task.pattern) return []
@@ -240,11 +245,12 @@ function describeItem(pattern: string | undefined): string | undefined {
 }
 
 function nextRunForItem(item: ScheduleSchedule): Date | null {
-  if (!item.pattern) return null
+  if (!item.pattern || !effectiveTimezone.value) return null
   return nextRuns(item.pattern, effectiveTimezone.value, 1)[0] ?? null
 }
 
 function nextRunTimeLabel(item: ScheduleSchedule): string {
+  if (!effectiveTimezone.value) return ''
   const next = nextRunForItem(item)
   if (!next) return item.pattern ?? ''
   return next.toLocaleTimeString(uiLocale.value, { hour: '2-digit', minute: '2-digit', hour12: false })

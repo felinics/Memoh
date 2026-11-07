@@ -39,8 +39,10 @@ vi.mock('@felinic/ui', () => {
   }
 })
 
+import { createPinia } from 'pinia'
+import { PiniaColada } from '@pinia/colada'
 import ScheduleEditor from './schedule-editor.vue'
-import { postBotsByBotIdSchedule, putBotsByBotIdScheduleById } from '@memohai/sdk'
+import { getBotsByBotIdSettings, postBotsByBotIdSchedule, putBotsByBotIdScheduleById } from '@memohai/sdk'
 let app: App
 let root: HTMLDivElement
 afterEach(() => { app?.unmount(); root?.remove(); vi.clearAllMocks() })
@@ -48,6 +50,7 @@ async function mount(schedule?: Record<string, unknown>) {
   root = document.createElement('div')
   document.body.append(root)
   app = createApp(ScheduleEditor, { botId: 'bot', mode: schedule ? 'edit' : 'create', schedule })
+  app.use(createPinia()).use(PiniaColada)
   app.mount(root)
   await nextTick()
 }
@@ -115,4 +118,11 @@ it('keeps a schedule\'s notification settings through an edit', async () => {
   await vi.waitFor(() => expect(putBotsByBotIdScheduleById).toHaveBeenCalledWith(expect.objectContaining({
     body: expect.objectContaining({ notify_policy: 'every_run', contact_via_channels: false }),
   })))
+})
+
+it('labels the preview with the timezone the server resolved for the bot', async () => {
+  vi.mocked(getBotsByBotIdSettings).mockResolvedValueOnce({ data: { timezone: '', effective_timezone: 'Asia/Shanghai' } } as never)
+  await mount({ id: 'schedule', name: 'Report', command: 'Summarize', pattern: '0 9 * * 1' })
+  await vi.waitFor(() => expect(root.textContent).toContain('· Asia/Shanghai'))
+  expect(getBotsByBotIdSettings).toHaveBeenCalledWith(expect.objectContaining({ path: { bot_id: 'bot' } }))
 })

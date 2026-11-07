@@ -36,6 +36,17 @@ type Settings struct {
 	CommandUILanguage    string `json:"command_ui_language"`
 	AclDefaultEffect     string `json:"acl_default_effect"`
 	Timezone             string `json:"timezone"`
+	// EffectiveTimezone is the timezone the bot runs in: Timezone when set,
+	// otherwise InheritedTimezone. Agent turns and the scheduler use the same
+	// value, so clients read it instead of deriving one from the browser.
+	// Only the settings API fills EffectiveTimezone, InheritedTimezone and
+	// InheritedTimezoneSource; they are empty on settings the server reads for
+	// its own use.
+	EffectiveTimezone string `json:"effective_timezone,omitempty"`
+	// InheritedTimezone is what the bot uses without a Timezone of its own.
+	// InheritedTimezoneSource says whose timezone that is.
+	InheritedTimezone       string `json:"inherited_timezone,omitempty"`
+	InheritedTimezoneSource string `json:"inherited_timezone_source,omitempty" enums:"owner,system"`
 	// ReasoningEffort is the single on/off source for reasoning:
 	// models.ReasoningEffortDisable means no reasoning, any other value is a tier.
 	ReasoningEffort string `json:"reasoning_effort"`

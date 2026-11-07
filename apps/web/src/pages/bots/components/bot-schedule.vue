@@ -156,7 +156,6 @@ import {
 import {
   deleteBotsByBotIdScheduleById,
   getBotsByBotIdSchedule,
-  getBotsByBotIdSettings,
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
@@ -165,6 +164,7 @@ import { formatCalendarTime } from '@/utils/date-time'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import { scheduleDeleteConfirmKey } from '@/utils/schedule-delete'
 import { useChatStore } from '@/store/chat-list'
+import { useBotEffectiveTimezone } from '@/composables/api/useBotTimezone'
 import ScheduleEditor from './schedule-editor.vue'
 
 const props = defineProps<{
@@ -178,7 +178,6 @@ const { scheduleActivityRevisions } = storeToRefs(chatStore)
 
 const isLoading = ref(false)
 const schedules = ref<ScheduleSchedule[]>([])
-const botTimezone = ref<string | undefined>(undefined)
 const busyIds = reactive(new Set<string>())
 
 // --- Sort ---
@@ -198,11 +197,8 @@ const currentSortLabel = computed(
 const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
 const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : locale.value.startsWith('ja') ? 'ja-JP' : 'en-US')
 
-const effectiveTimezone = computed(() => {
-  const tz = botTimezone.value?.trim()
-  if (tz) return tz
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
-})
+// Next runs are computed in the bot's effective timezone, where schedules fire.
+const { timezone: effectiveTimezone } = useBotEffectiveTimezone(() => props.botId)
 
 const sortedSchedules = computed(() => {
   const list = [...schedules.value]
@@ -288,17 +284,6 @@ async function fetchSchedules() {
   }
 }
 
-async function fetchBotSettings() {
-  if (!props.botId) return
-  try {
-    const { data } = await getBotsByBotIdSettings({ path: { bot_id: props.botId }, throwOnError: true })
-    const tz = (data as { timezone?: string } | undefined)?.timezone
-    botTimezone.value = tz?.trim() || undefined
-  } catch {
-    botTimezone.value = undefined
-  }
-}
-
 function handleNew() {
   formMode.value = 'create'
   editingSchedule.value = null
@@ -348,7 +333,6 @@ async function handleToggleEnabled(item: ScheduleSchedule, enabled: boolean) {
 
 onMounted(() => {
   fetchSchedules()
-  fetchBotSettings()
 })
 
 watch(
