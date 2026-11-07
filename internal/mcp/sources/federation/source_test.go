@@ -90,6 +90,9 @@ func TestSourceListToolsIncludesSSETools(t *testing.T) {
 	if tools[0].Name != "remote_sse_search" {
 		t.Fatalf("unexpected tool alias: %s", tools[0].Name)
 	}
+	if tools[0].Group != "mcp:remote_sse" {
+		t.Fatalf("unexpected tool group: %s, want mcp:remote_sse", tools[0].Group)
+	}
 }
 
 func TestSourceCallToolRoutesToSSEConnection(t *testing.T) {

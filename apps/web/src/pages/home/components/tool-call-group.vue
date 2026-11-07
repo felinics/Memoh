@@ -139,6 +139,7 @@ import {
   getToolDisplay,
   getToolTitle,
   isGuiTool,
+  isToolLoadingStep,
   toolBucket,
   toolFragmentKind,
   type SummaryFragment,
@@ -220,12 +221,19 @@ function navigateHost(tool: ToolCallBlockType): string {
   }
 }
 
+// The tools the header summarizes: loading on-demand tool definitions is a
+// step toward the tool that ran, so it only counts when nothing else ran.
+const summarizedTools = computed(() => {
+  const ran = toolItems.value.filter(tool => !isToolLoadingStep(tool.toolName))
+  return ran.length > 0 ? ran : toolItems.value
+})
+
 // Phase of the segment, by its dominant bucket. Ties break by
 // SUMMARY_BUCKET_ORDER; 'other' never wins a tie because a generic "Working"
 // adds nothing over the details alone. A GUI run is always "Browsing"
 // regardless of mix (its observe+action steps are one browsing activity).
 const phaseKey = computed<ToolBucket | 'gui' | null>(() => {
-  const tools = toolItems.value
+  const tools = summarizedTools.value
   if (tools.length === 0) return null
   if (tools.every(tool => isGuiTool(tool.toolName))) return 'gui'
   const counts = new Map<ToolBucket, number>()
@@ -272,7 +280,7 @@ const detailsLabel = computed(() => {
     return t('chat.process.steps', { count: tools.length })
   }
   const counts = new Map<SummaryFragment, number>()
-  for (const tool of tools) {
+  for (const tool of summarizedTools.value) {
     const kind = toolFragmentKind(tool.toolName)
     counts.set(kind, (counts.get(kind) ?? 0) + 1)
   }

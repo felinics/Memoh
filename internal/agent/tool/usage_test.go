@@ -213,6 +213,8 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolGenerateVideo():   "self-describing media generation tool",
 		ToolTranscribeAudio(): "self-describing media transcription tool",
 		ToolNotifyUser():      "self-describing parameterless tool, registered only in a schedule run that tells its owner on request",
+		ToolDescribe():        "on-demand bridge; its description lists the tools it loads and returns their usage",
+		ToolCall():            "on-demand bridge; its description says how to run a loaded tool",
 	}
 
 	for _, name := range BuiltInToolNames() {

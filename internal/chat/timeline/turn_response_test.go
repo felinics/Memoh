@@ -532,6 +532,45 @@ func TestDecodeTurnResponseEntryDoesNotDuplicateHybridToolCall(t *testing.T) {
 	}
 }
 
+func TestDecodeTurnResponseEntryUnwrapsBridgedToolCallInDebugContent(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{
+		{
+			"type":       "tool-call",
+			"toolName":   "tool_call",
+			"toolCallId": "call-bridge-1",
+			"input": map[string]any{
+				"name":      "create_schedule",
+				"arguments": map[string]any{"name": "daily"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{
+		Role:    "assistant",
+		Content: content,
+	})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{
+		Role:      "assistant",
+		Content:   modelMessage,
+		CreatedAt: time.Unix(1710000000, 0).UTC(),
+	})
+	if !ok {
+		t.Fatal("expected turn response entry")
+	}
+	if entry.Content != "[tool call: create_schedule]" {
+		t.Fatalf("entry.Content = %q, want %q", entry.Content, "[tool call: create_schedule]")
+	}
+	assertRawPart(t, entry.RawContent, "tool-call", "tool_call", "call-bridge-1")
+}
+
 func assertRawPart(t *testing.T, raw json.RawMessage, partType, nameOrText, callID string) map[string]any {
 	t.Helper()
 	var parts []map[string]any

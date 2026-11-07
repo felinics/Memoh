@@ -70,6 +70,10 @@ type Tool struct {
 	Parameters      *jsonschema.Schema `json:"parameters"`
 	Execute         ToolExecuteFunc    `json:"-"`
 	RequireApproval bool               `json:"-"`
+	// Group assigns the tool to an on-demand bridge group (for example
+	// "mcp:notion") when dynamic providers register tools outside the static
+	// built-in catalog.
+	Group string `json:"-"`
 	// CacheControl enables prompt caching for this tool's definition.
 	// Only supported by Anthropic; other providers ignore this field.
 	CacheControl *sdk.CacheControl `json:"-"`

@@ -6,6 +6,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolbridge"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/messageconv"
@@ -350,7 +351,8 @@ func debugContent(raw json.RawMessage) string {
 				texts = append(texts, text)
 			}
 		case "tool-call":
-			texts = append(texts, "[tool call: "+strings.TrimSpace(p.ToolName)+"]")
+			name, _, _ := toolbridge.Unwrap(p.ToolName, p.Input)
+			texts = append(texts, "[tool call: "+strings.TrimSpace(name)+"]")
 		case "tool-result":
 			texts = append(texts, "[tool result: "+strings.TrimSpace(p.ToolName)+"]")
 		}

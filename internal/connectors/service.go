@@ -317,6 +317,38 @@ func (s *Service) SessionConnections(ctx context.Context, botID string) (map[str
 	return connections, nil
 }
 
+// ConnectorGroups resolves the tool group for each active connector alias in
+// connections: if the connection is linked to an installed App, the App ID is
+// used; otherwise the connector alias is used.
+func (s *Service) ConnectorGroups(ctx context.Context, botID string, connections map[string]string) map[string]string {
+	if len(connections) == 0 {
+		return nil
+	}
+	appByConnection := map[string]string{}
+	if s != nil && s.queries != nil {
+		if botUUID, err := db.ParseUUID(botID); err == nil {
+			if refs, err := s.queries.ListAppConnectorRefsForBot(ctx, botUUID); err == nil {
+				for _, ref := range refs {
+					connID := strings.TrimSpace(ref.ConnectionID)
+					appID := strings.TrimSpace(ref.AppID)
+					if connID != "" && appID != "" && appByConnection[connID] == "" {
+						appByConnection[connID] = appID
+					}
+				}
+			}
+		}
+	}
+	groups := make(map[string]string, len(connections))
+	for alias, connID := range connections {
+		label := alias
+		if appID := appByConnection[strings.TrimSpace(connID)]; appID != "" {
+			label = appID
+		}
+		groups[alias] = "connector:" + normalizeAlias(label)
+	}
+	return groups
+}
+
 const aliasAllocationAttempts = 3
 
 // createBinding allocates the binding's durable alias and inserts the row.

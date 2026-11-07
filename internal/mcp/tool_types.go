@@ -20,6 +20,7 @@ type ToolDescriptor struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	InputSchema map[string]any `json:"inputSchema"`
+	Group       string         `json:"-"`
 }
 
 // ToolSource represents a tool source surfaced through the MCP gateway.
