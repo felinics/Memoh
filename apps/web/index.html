@@ -63,14 +63,10 @@
         width: 3.5rem;
         height: 3.5rem;
         opacity: 0;
-        animation: boot-splash-in 300ms ease-out 400ms forwards, boot-splash-pulse 2s ease-in-out 700ms infinite;
+        animation: boot-splash-in 300ms ease-out 400ms forwards;
       }
       @keyframes boot-splash-in {
         to { opacity: 1; }
-      }
-      @keyframes boot-splash-pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.4; }
       }
       @media (prefers-reduced-motion: reduce) {
         .boot-splash img {
