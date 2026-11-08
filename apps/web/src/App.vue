@@ -5,7 +5,8 @@ import { RouterView, useRoute, useRouter } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
 import { isChunkLoadError } from '@/lib/chunk-load-error'
-import { loadMainSection } from './routes'
+import { holdPrefetchUntil, whenNetworkQuiet } from '@/lib/idle-prefetch'
+import { loadMainSection, prefetchAppPages } from './routes'
 
 useSettingsStore()
 
@@ -65,10 +66,22 @@ const isAppArea = computed(() => isChatRoute.value || isSettingsRoute.value)
 // still loading. Remove the splash once both have settled, on the next frame
 // so the screen behind it has rendered. On failure it is removed too, so an
 // error state is not hidden behind it.
-void router.isReady()
+const firstScreenSettled = router.isReady()
   .then(() => (isAppArea.value ? mainSectionSettled : undefined))
   .catch(() => {})
-  .finally(() => requestAnimationFrame(() => document.getElementById('boot-splash')?.remove()))
+void firstScreenSettled.finally(() => requestAnimationFrame(() => document.getElementById('boot-splash')?.remove()))
+
+// Warm the chat workspace and the settings pages in the background so the
+// first open after sign-in and first-time sidebar clicks don't wait on a chunk
+// (see prefetchAppPages). The downloads wait for the first screen. In the chat
+// workspace they also wait out the burst of requests its first screen starts
+// (fonts, a dozen API calls), so they don't delay the user's first clicks. On
+// the login and onboarding pages they start once the page has rendered: the
+// chat workspace is first in the queue, and signing in needs it. Queued here
+// rather than when the router is ready, which can happen before this
+// component mounts and so before the hold is in place.
+holdPrefetchUntil(firstScreenSettled.then(() => (isAppArea.value ? whenNetworkQuiet() : undefined)))
+prefetchAppPages()
 
 // Localized headings for auto-shaped long-blob toasts (raw backend errors etc.).
 // @felinic/ui is i18n-agnostic, so the app supplies these; they react to locale.

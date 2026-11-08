@@ -1,5 +1,5 @@
 import type { Locale } from '@/i18n'
-import { loadLocaleMessages } from '@/i18n/messages'
+import { loadLocaleMessages, setShownLocale } from '@/i18n/messages'
 import { computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useColorMode, useStorage } from '@vueuse/core'
@@ -128,6 +128,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const applyLanguage = (value: Locale) => {
     i18n.locale.value = value
+    setShownLocale(value)
     // Reflect the active locale onto <html lang> so locale-scoped CSS can target
     // it — chiefly the CJK font-weight de-emphasis (see :lang(zh) in style.css):
     // CJK glyphs render visually heavier than Latin at the same numeric weight, so
@@ -143,7 +144,8 @@ export const useSettingsStore = defineStore('settings', () => {
     if (!i18n.availableLocales.includes(value)) i18n.setLocaleMessage(value, messages)
   })
 
-  // Only the active language is downloaded (see i18n/messages.ts). setLanguage
+  // Languages download on demand, the active one before the first screen and
+  // the others in the background after it (see i18n/messages.ts). setLanguage
   // stores a pick once its language has loaded, so this normally applies at
   // once; the starting language is loaded before the app mounts. A change from
   // another tab (useStorage follows storage events) may name a language this

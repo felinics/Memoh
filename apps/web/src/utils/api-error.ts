@@ -83,8 +83,8 @@ function currentLocale(): Locale {
 
 // Copy comes from the stored language once it has loaded. A language picked in
 // another tab is stored before this tab has downloaded it (see the language
-// watch in store/settings); until then messagesFor answers from a language this
-// tab has loaded, so an error still gets copy. Before any language has loaded
+// watch in store/settings); until then messagesFor answers in the language this
+// tab still shows, so an error still gets copy. Before any language has loaded
 // (the app mounts only after one has) there is no copy.
 function lookupMessage(key: string): string {
   let value: unknown

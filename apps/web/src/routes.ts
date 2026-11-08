@@ -1,6 +1,7 @@
 import { h } from 'vue'
 import { RouterView, type RouteLocationNormalized, type RouteRecordRaw } from 'vue-router'
-import { i18nRef } from './i18n'
+import { i18nRef, LOCALE_OPTIONS } from './i18n'
+import { loadLocaleMessages } from './i18n/messages'
 import { getBotBreadcrumbName } from './lib/bot-breadcrumb'
 import { prefetchInIdle } from './lib/idle-prefetch'
 
@@ -64,9 +65,17 @@ export const settingsPageLoaders = [
  * the module cache instead (ES module requests dedupe by URL, so the later
  * real navigation costs nothing). The chunks download one at a time; see
  * lib/idle-prefetch.ts.
+ *
+ * The other UI languages follow (a few dozen KB each), so a language picked
+ * later applies at once. The appearance pages also start them on open, in case
+ * the queue hasn't reached them yet.
  */
 export function prefetchAppPages(): void {
-  prefetchInIdle([loadMainSection, ...settingsPageLoaders])
+  prefetchInIdle([
+    loadMainSection,
+    ...settingsPageLoaders,
+    ...LOCALE_OPTIONS.map(({ value }) => () => loadLocaleMessages(value)),
+  ])
 }
 
 /** Shared page routes; each host owns its router, history, and navigation guards. */

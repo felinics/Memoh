@@ -6,20 +6,13 @@ import { useUserStore } from '@/store/user'
 import { ensureOnboarding, hasOnboardingInProgress } from '@/router-guards/onboarding'
 import { installBackHistory } from '@/composables/useBackOr'
 import { isChunkLoadError } from '@/lib/chunk-load-error'
-import { createAppRoutes, prefetchAppPages } from './routes'
+import { createAppRoutes } from './routes'
 
 
 const router = createRouter({
   history: createWebHistory(),
   routes: createAppRoutes('web'),
 })
-
-// After the initial navigation settles (entry chunks had bandwidth priority),
-// warm the chat workspace and the settings pages so the first open after
-// sign-in and first-time sidebar clicks don't wait on a chunk.
-// isReady rejects when the initial navigation errors (e.g. backend down) —
-// prefetch silently skipping then is fine, an unhandled rejection is not.
-void router.isReady().then(() => prefetchAppPages(), () => {})
 
 // Track the previous route so history-following back affordances work the same
 // on web and on the desktop shell's memory-history router. See useBackOr.

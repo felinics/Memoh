@@ -4,10 +4,11 @@ export type Locale = 'en' | 'zh' | 'ja'
 
 export type LocaleMessages = typeof en
 
-// Each language is its own chunk and only the active one is downloaded, so a
-// first visit doesn't carry the other two (about 55KB gzip each). No fallback
-// language is loaded alongside it: every locale has exactly the keys of en
-// (enforced by i18n.test.ts).
+// Each language is its own chunk. Only the active one is downloaded before the
+// first screen, so a first visit doesn't wait on the other two (about 55KB gzip
+// each); they download in the background afterwards (prefetchAppPages in
+// routes.ts). No fallback language is loaded alongside the active one: every
+// locale has exactly the keys of en (enforced by i18n.test.ts).
 //
 // The chunk is requested when the entry script runs, not preloaded from
 // index.html. Measured on Slow 4G, a preload competed with the entry download
@@ -26,6 +27,7 @@ const localeLoaders: Record<Locale, () => Promise<{ default: LocaleMessages }>> 
 
 const loadedMessages = new Map<Locale, LocaleMessages>()
 const pendingMessages = new Map<Locale, Promise<LocaleMessages>>()
+let shownLocale: Locale | undefined
 
 /** Downloads a language's messages once; a failed download is retried by the next call. */
 export function loadLocaleMessages(locale: Locale): Promise<LocaleMessages> {
@@ -46,14 +48,23 @@ export function loadedLocaleMessages(locale: Locale): LocaleMessages | undefined
   return loadedMessages.get(locale)
 }
 
+/** Records the language the page currently shows; messagesFor falls back to it. */
+export function setShownLocale(locale: Locale): void {
+  shownLocale = locale
+}
+
 /**
  * Messages for copy read outside vue-i18n's t(): the requested language once
- * it has loaded, otherwise English or any loaded language. The app mounts only
- * after its starting language has loaded, so something is always loaded by the
- * time a component or event handler asks.
+ * it has loaded, otherwise the language the page currently shows, so the copy
+ * matches the rest of the page. A language picked in another tab is requested
+ * before this tab has downloaded it; meanwhile the page still shows the
+ * previous one, and other languages may already be loaded in the background.
+ * The app mounts only after its starting language has loaded, so something is
+ * always loaded by the time a component or event handler asks.
  */
 export function messagesFor(locale: Locale): LocaleMessages {
   const messages = loadedMessages.get(locale)
+    ?? (shownLocale && loadedMessages.get(shownLocale))
     ?? loadedMessages.get('en')
     ?? loadedMessages.values().next().value
   if (!messages) throw new Error('[i18n] Locale messages read before any language loaded')

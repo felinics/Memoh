@@ -42,7 +42,7 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
 import { normalizeFileManagerPath } from './file-manager-path'
 import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
-import { prefetchFirst } from '@/lib/idle-prefetch'
+import { prefetchLater, whenNetworkQuiet } from '@/lib/idle-prefetch'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelLoading, { retryPanelLoadKey } from './dockview/panel-loading.vue'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
@@ -135,10 +135,11 @@ function relayoutAfterAncestorTransform(event: TransitionEvent) {
 // DefineComponent<T> (single generic), which script-setup SFC types do not
 // structurally match, hence the casts.
 //
-// Only the chat panel ships with the workspace. The other panel types load the
-// first time a panel of that type is created (opened, or restored from a saved
-// layout): the file and asset panels carry the Monaco editor and the terminal
-// carries xterm, which a chat-only session never needs. Until its chunk
+// Only the chat panel ships with the workspace, so the chat can render without
+// waiting on the others: the file and asset panels carry the Monaco editor and
+// the terminal carries xterm. The other panel types download in the background
+// once the workspace is up (below), or when a panel of that type is created
+// (opened, or restored from a saved layout) before that. Until its chunk
 // arrives a panel shows PanelLoading (the editor's chunks are about 700KB
 // gzip, several seconds on a slow network), or its failed state if the chunk
 // can't be fetched. dockview passes later params updates as new props, which
@@ -167,24 +168,29 @@ const lazyPanel = (loader: AsyncComponentLoader) => {
   }) as unknown as VueComponent
 }
 
-// Opening a file is a common next step in the workspace, and the file panel
-// carries the largest panel chunks (the Monaco editor, about 700KB gzip). Warm
-// it during idle time once the workspace is up, ahead of the settings pages
-// still queued. On the web those include the bot detail page, which embeds the
-// same editor, so the editor chunks were already downloaded in the background;
-// this only moves them earlier in the queue.
-const loadFilePanel = () => import('./dockview/panel-file.vue')
-onMounted(() => prefetchFirst(loadFilePanel))
+// Every panel type is also downloaded in the background, after the small
+// chunks a click is more likely to need (on the web, the settings pages) and
+// only once the workspace's own first requests have finished; see
+// lib/idle-prefetch.ts. Waiting here covers the workspace opening after
+// sign-in, when the rest of the queue may have finished long before. The file
+// panel goes first: opening a file is the most common of these, and it
+// carries the editor.
+const panelLoaders = {
+  file: () => import('./dockview/panel-file.vue'),
+  preview: () => import('./dockview/panel-preview.vue'),
+  asset: () => import('./dockview/panel-asset.vue'),
+  terminal: () => import('./dockview/panel-terminal.vue'),
+  browser: () => import('./dockview/panel-browser.vue'),
+  display: () => import('./dockview/panel-display.vue'),
+  schedule: () => import('./dockview/panel-schedule.vue'),
+}
+onMounted(() => {
+  void whenNetworkQuiet().then(() => prefetchLater(Object.values(panelLoaders)))
+})
 
 const panelComponents: Record<string, VueComponent> = {
   chat: PanelChat as unknown as VueComponent,
-  file: lazyPanel(loadFilePanel),
-  preview: lazyPanel(() => import('./dockview/panel-preview.vue')),
-  asset: lazyPanel(() => import('./dockview/panel-asset.vue')),
-  terminal: lazyPanel(() => import('./dockview/panel-terminal.vue')),
-  browser: lazyPanel(() => import('./dockview/panel-browser.vue')),
-  display: lazyPanel(() => import('./dockview/panel-display.vue')),
-  schedule: lazyPanel(() => import('./dockview/panel-schedule.vue')),
+  ...Object.fromEntries(Object.entries(panelLoaders).map(([type, load]) => [type, lazyPanel(load)])),
 }
 
 const watermarkComponent = WorkspaceWatermark as unknown as VueComponent
