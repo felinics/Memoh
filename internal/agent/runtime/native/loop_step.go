@@ -7,6 +7,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/step"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // stepThread is the request state one dispatch advances call by call: the
@@ -83,7 +84,9 @@ func (t *stepThread) advance(cfg RunConfig, dynamic *loopDynamicInputs, boundary
 	}
 	request := t.params
 	request.Messages = t.messages
-	return request
+	// The breakpoint rides only this call's request: the thread keeps its
+	// messages unmarked, so the next call places its own at its own end.
+	return models.WithRollingCacheBreakpoint(request, t.dispatch.rollingCache)
 }
 
 // extend appends a committed step's messages to the conversation.
