@@ -1013,6 +1013,10 @@ func TestChannelInboundProcessorQueueCommandsUseResolvedSession(t *testing.T) {
 					input.TeamID != cfg.TeamID || input.ChannelIdentityID != "channelIdentity-1" {
 					t.Fatalf("steer input = %#v", input)
 				}
+				if input.CurrentChannel != tc.channelType || input.ReplyTarget != msg.ReplyTarget ||
+					input.ConversationType != channel.ConversationTypePrivate || input.RouteID != "route-1" {
+					t.Fatalf("%s input lost the route it arrived on: %#v", tc.channelType, input)
+				}
 			} else {
 				if len(queueHandler.followUpInputs) == 0 {
 					t.Fatal("follow-up was not admitted")
@@ -1021,6 +1025,10 @@ func TestChannelInboundProcessorQueueCommandsUseResolvedSession(t *testing.T) {
 				if input.SessionID != "session-1" || input.Text != tc.wantPayload || input.InvocationID == "" ||
 					input.TeamID != cfg.TeamID || input.ChannelIdentityID != "channelIdentity-1" {
 					t.Fatalf("follow-up input = %#v", input)
+				}
+				if input.CurrentChannel != tc.channelType || input.ReplyTarget != msg.ReplyTarget ||
+					input.ConversationType != channel.ConversationTypePrivate || input.RouteID != "route-1" {
+					t.Fatalf("%s input lost the route it arrived on: %#v", tc.channelType, input)
 				}
 			}
 		})

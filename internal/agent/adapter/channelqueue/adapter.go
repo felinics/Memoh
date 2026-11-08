@@ -44,6 +44,10 @@ func (a *Adapter) enqueue(input inbound.QueueCommandInput, admit func(applicatio
 		UserID:                  input.UserID,
 		SourceChannelIdentityID: input.ChannelIdentityID,
 		Text:                    input.Text,
+		RouteID:                 input.RouteID,
+		CurrentChannel:          input.CurrentChannel,
+		ReplyTarget:             input.ReplyTarget,
+		ConversationType:        input.ConversationType,
 	}))
 }
 

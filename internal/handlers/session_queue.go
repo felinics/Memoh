@@ -17,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel/adapters/local"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/errs"
@@ -101,8 +102,10 @@ type queueScope struct {
 	IdentityID string
 }
 
+// input is the queued text as the Web chat would have sent it: these
+// endpoints are the Web client's queue, so the item replays a Web turn.
 func (s queueScope) input(invocationID, text string) application.QueueInput {
-	return application.QueueInput{
+	return localQueueRoute(application.QueueInput{
 		TeamID:                  s.TeamID,
 		BotID:                   s.BotID,
 		SessionID:               s.SessionID,
@@ -110,7 +113,7 @@ func (s queueScope) input(invocationID, text string) application.QueueInput {
 		UserID:                  s.IdentityID,
 		SourceChannelIdentityID: s.IdentityID,
 		Text:                    text,
-	}
+	}, local.WebType)
 }
 
 func (h *SessionQueueHandler) authorize(c echo.Context) (queueScope, error) {

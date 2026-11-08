@@ -35,6 +35,14 @@ type QueueInput struct {
 	UserID                  string
 	SourceChannelIdentityID string
 	Text                    string
+	// RouteID, CurrentChannel, ReplyTarget and ConversationType name where
+	// the input arrived, as the ingress's ordinary turn names them. The run
+	// that replays the input renders its prompt and messaging tools for that
+	// conversation; without them it runs as if it had none.
+	RouteID          string
+	CurrentChannel   string
+	ReplyTarget      string
+	ConversationType string
 }
 
 // ErrQueueInputIncomplete reports an ingress that admitted queue input without
@@ -61,18 +69,26 @@ func queueTurnCommand(input QueueInput) (turn.StartTurnCommand, error) {
 	if text == "" || strings.TrimSpace(input.InvocationID) == "" {
 		return turn.StartTurnCommand{}, sessionruntime.ErrQueueInvalidReference
 	}
-	return turn.StartTurnCommand{
+	cmd := turn.StartTurnCommand{
 		SchemaVersion:           1,
 		TeamID:                  teamID,
 		Mode:                    turn.ModeChat,
 		BotID:                   botID,
 		ChatID:                  botID,
 		ThreadID:                sessionID,
+		RouteID:                 strings.TrimSpace(input.RouteID),
 		UserID:                  strings.TrimSpace(input.UserID),
 		SourceChannelIdentityID: strings.TrimSpace(input.SourceChannelIdentityID),
 		Query:                   text,
 		UserVisibleText:         text,
-	}, nil
+		ReplyTarget:             strings.TrimSpace(input.ReplyTarget),
+		ConversationType:        strings.TrimSpace(input.ConversationType),
+		CurrentChannel:          strings.TrimSpace(input.CurrentChannel),
+	}
+	if cmd.CurrentChannel != "" {
+		cmd.Channels = []string{cmd.CurrentChannel}
+	}
+	return cmd, nil
 }
 
 func (s *Service) EnqueueSteer(ctx context.Context, input QueueInput) (sessionruntime.SteerItem, error) {

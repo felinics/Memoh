@@ -31,6 +31,8 @@ const (
 // supply queue provenance. Team and sender identity are recorded with the
 // item because a queued follow-up starts after this request is gone, and the
 // admission that starts it needs the same identity an ordinary turn carries.
+// So is the route the command arrived on, which the run renders its prompt
+// and messaging tools for.
 type QueueCommandInput struct {
 	TeamID            string `json:"team_id"`
 	BotID             string `json:"bot_id"`
@@ -39,6 +41,10 @@ type QueueCommandInput struct {
 	UserID            string `json:"user_id,omitempty"`
 	ChannelIdentityID string `json:"channel_identity_id,omitempty"`
 	Text              string `json:"text"`
+	RouteID           string `json:"route_id,omitempty"`
+	CurrentChannel    string `json:"current_channel,omitempty"`
+	ReplyTarget       string `json:"reply_target,omitempty"`
+	ConversationType  string `json:"conversation_type,omitempty"`
 }
 
 // QueueCommandHandler is the narrow live-queue port used by channel slash

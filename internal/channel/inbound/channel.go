@@ -1464,6 +1464,10 @@ func (p *ChannelInboundProcessor) handleQueueCommand(
 		UserID:            strings.TrimSpace(identity.UserID),
 		ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 		Text:              strings.TrimSpace(invocation.Rest),
+		RouteID:           strings.TrimSpace(routeID),
+		CurrentChannel:    msg.Channel.String(),
+		ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
+		ConversationType:  msg.Conversation.Type,
 	}
 	var err error
 	switch resource {

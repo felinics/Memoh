@@ -35,3 +35,27 @@ func TestMapAdmissionErrorKeepsChannelCodes(t *testing.T) {
 		t.Fatal("nil error was rewritten")
 	}
 }
+
+// The adapter hands the application everything the channel boundary
+// recorded, the route included, so a queued follow-up replays the turn the
+// channel would have started.
+func TestEnqueueCarriesTheChannelRoute(t *testing.T) {
+	adapter := New(&application.Service{})
+	in := inbound.QueueCommandInput{
+		TeamID: "team-1", BotID: "bot-1", SessionID: "session-1", InvocationID: "invoke-1",
+		UserID: "user-1", ChannelIdentityID: "identity-1", Text: "hello",
+		RouteID: "route-1", CurrentChannel: "cli", ReplyTarget: "target-1", ConversationType: "private",
+	}
+	var got application.QueueInput
+	if err := adapter.enqueue(in, func(queued application.QueueInput) error { got = queued; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	want := application.QueueInput{
+		TeamID: "team-1", BotID: "bot-1", SessionID: "session-1", InvocationID: "invoke-1",
+		UserID: "user-1", SourceChannelIdentityID: "identity-1", Text: "hello",
+		RouteID: "route-1", CurrentChannel: "cli", ReplyTarget: "target-1", ConversationType: "private",
+	}
+	if got != want {
+		t.Fatalf("queued input = %+v, want %+v", got, want)
+	}
+}

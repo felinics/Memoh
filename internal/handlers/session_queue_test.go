@@ -17,6 +17,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/application"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/local"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/server"
@@ -44,6 +46,19 @@ func TestSessionQueueHandlerRegistersSeparateQueueRoutes(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing queue routes: %v", want)
+	}
+}
+
+// The queue endpoints are the Web client's, so a queued text replays a Web
+// turn: the Web channel, replying into the bot's own private conversation.
+func TestSessionQueueInputReplaysAWebTurn(t *testing.T) {
+	scope := queueScope{BotID: "bot-1", SessionID: "session-1", TeamID: "team-1", IdentityID: "user-1"}
+	input := scope.input("invoke-1", "hello")
+	if input.CurrentChannel != local.WebType.String() || input.ReplyTarget != "bot-1" || input.ConversationType != channel.ConversationTypePrivate {
+		t.Fatalf("queued input route = channel %q, target %q, conversation %q", input.CurrentChannel, input.ReplyTarget, input.ConversationType)
+	}
+	if input.TeamID != "team-1" || input.UserID != "user-1" || input.SourceChannelIdentityID != "user-1" || input.Text != "hello" {
+		t.Fatalf("queued input identity = %+v", input)
 	}
 }
 

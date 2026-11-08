@@ -582,6 +582,16 @@ func sendWSCommandResult(writer *wsWriter, msg wsClientMessage, actionID string,
 	writer.SendJSON(event)
 }
 
+// localQueueRoute names the conversation a local chat turn runs in, as
+// startWSStream does: the local channel, replying into the bot's own private
+// conversation. A text queued from a local client replays that turn.
+func localQueueRoute(input application.QueueInput, channelType channel.ChannelType) application.QueueInput {
+	input.CurrentChannel = channelType.String()
+	input.ReplyTarget = input.BotID
+	input.ConversationType = channel.ConversationTypePrivate
+	return input
+}
+
 // Queue commands share REST admission and invocation identity. They never start
 // a parallel chat turn or pass the command selector to the model.
 func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer *wsWriter, msg wsClientMessage, channelIdentityID, botID, actionID, text string) {
@@ -601,7 +611,7 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 			err = apperror.New(apperror.CodeSessionNotFound, nil)
 			break
 		}
-		input := application.QueueInput{
+		input := localQueueRoute(application.QueueInput{
 			TeamID:                  sess.TeamID,
 			BotID:                   botID,
 			SessionID:               msg.SessionID,
@@ -609,7 +619,7 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 			UserID:                  channelIdentityID,
 			SourceChannelIdentityID: channelIdentityID,
 			Text:                    text,
-		}
+		}, h.channelType)
 		if actionID == "steer" {
 			_, err = h.agentService.EnqueueSteer(ctx, input)
 		} else {

@@ -236,6 +236,29 @@ func TestQueuedTextFollowUpReplaysRecordedIdentityWithoutServedTeam(t *testing.T
 	}
 }
 
+// A queued text replays the turn its ingress would have started, route
+// included: the run renders its prompt and messaging tools for the
+// conversation the text came from, as an ordinary turn there does.
+func TestQueuedTextFollowUpReplaysRecordedRoute(t *testing.T) {
+	runner := &fakeRunner{chunks: []string{`{"type":"done"}`}}
+	service, _, backend, key := newFollowUpTestService(t, runner)
+	ctx := context.Background()
+	input := testQueueInput(key.BotID, key.SessionID, "invoke-1", "hello")
+	input.RouteID, input.CurrentChannel, input.ReplyTarget, input.ConversationType = "route-1", "web", key.BotID, "private"
+	if _, err := service.EnqueueFollowUp(ctx, input); err != nil {
+		t.Fatalf("enqueue follow-up: %v", err)
+	}
+	markFollowUpTestRunTerminal(t, backend, key)
+	service.startFollowUp(ctx, sessionruntime.TerminalRun{RunID: "original-run", BotID: key.BotID, SessionID: key.SessionID})
+
+	got := runner.gotReq
+	if got.CurrentChannel != "web" || !reflect.DeepEqual(got.Channels, []string{"web"}) || got.ReplyTarget != key.BotID ||
+		got.ConversationType != "private" || got.RouteID != "route-1" {
+		t.Fatalf("continuation lost the recorded route: channel=%q channels=%v target=%q conversation=%q route=%q",
+			got.CurrentChannel, got.Channels, got.ReplyTarget, got.ConversationType, got.RouteID)
+	}
+}
+
 func TestQueueInputRequiresRecordedTeam(t *testing.T) {
 	service, _, _, key := newFollowUpTestService(t, &fakeRunner{})
 	input := testQueueInput(key.BotID, key.SessionID, "invoke-1", "hello")
