@@ -26,7 +26,6 @@ const (
 	MethodCommandMemberRole    = "server.command.member_role"
 	MethodCommandResolveLocale = "server.command.resolve_locale"
 	MethodQueueEnqueueSteer    = "server.queue.enqueue_steer"
-	MethodQueueEnqueueFollowUp = "server.queue.enqueue_follow_up"
 	MethodResolveSkills        = "server.skills.resolve"
 	MethodSynthesize           = "server.audio.synthesize"
 	MethodTranscribe           = "server.audio.transcribe"
@@ -82,10 +81,6 @@ func (c *Client) ResolveLocale(ctx context.Context, botID string) string {
 
 func (c *Client) EnqueueSteer(ctx context.Context, input inbound.QueueCommandInput) error {
 	return c.call(ctx, MethodQueueEnqueueSteer, input, nil)
-}
-
-func (c *Client) EnqueueFollowUp(ctx context.Context, input inbound.QueueCommandInput) error {
-	return c.call(ctx, MethodQueueEnqueueFollowUp, input, nil)
 }
 
 func (c *Client) ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skills.ResolvedSkill, error) {
@@ -202,8 +197,7 @@ func Handlers(commandHandler *command.Handler, queueHandler inbound.QueueCommand
 			}
 			return commandHandler.ResolveLocale(ctx, botID), nil
 		},
-		MethodQueueEnqueueSteer:    queueHandlerFunc(decode, queueHandler.EnqueueSteer),
-		MethodQueueEnqueueFollowUp: queueHandlerFunc(decode, queueHandler.EnqueueFollowUp),
+		MethodQueueEnqueueSteer: queueHandlerFunc(decode, queueHandler.EnqueueSteer),
 		MethodResolveSkills: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in struct {
 				BotID string

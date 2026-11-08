@@ -72,7 +72,7 @@ func TestDiscussAdmissionResumeContextIsRetired(t *testing.T) {
 	s.SetAllowedTeam("00000000-0000-0000-0000-000000000001")
 	s.queries = q
 	ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: "bot", SessionID: "session", Token: 7})
-	req := chatRequestFromCommand(turn.StartTurnCommand{Mode: turn.ModeDiscuss, BotID: "bot", ChatID: "chat", ThreadID: "session", DiscussMessages: []turn.DiscussMessage{{Role: "user", Content: "hi"}}})
+	req := ChatRequestFromCommand(turn.StartTurnCommand{Mode: turn.ModeDiscuss, BotID: "bot", ChatID: "chat", ThreadID: "session", DiscussMessages: []turn.DiscussMessage{{Role: "user", Content: "hi"}}})
 	req.RunID, req.SessionType = uuid.NewString(), "discuss"
 	if err := s.recordRunResumeContext(ctx, req); err != nil || q.calls != 1 {
 		t.Fatalf("save err=%v calls=%d", err, q.calls)

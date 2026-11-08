@@ -522,7 +522,7 @@ func TestBoundaryValuesPassThrough(t *testing.T) {
 		Name: "skill", Description: "desc", Content: "body", SourceKind: "registry",
 		OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
 	}}
-	request := chatRequestFromCommand(turn.StartTurnCommand{
+	request := ChatRequestFromCommand(turn.StartTurnCommand{
 		ReplyAttachments: []turn.Attachment{attachment},
 		Attachments:      []turn.Attachment{attachment},
 		SkillActivation:  activation,

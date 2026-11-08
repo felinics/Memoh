@@ -352,20 +352,13 @@ type fakeSessionEnsurer struct {
 }
 
 type fakeQueueCommandHandler struct {
-	steerInputs    []QueueCommandInput
-	followUpInputs []QueueCommandInput
-	steerErr       error
-	followUpErr    error
+	steerInputs []QueueCommandInput
+	steerErr    error
 }
 
 func (f *fakeQueueCommandHandler) EnqueueSteer(_ context.Context, input QueueCommandInput) error {
 	f.steerInputs = append(f.steerInputs, input)
 	return f.steerErr
-}
-
-func (f *fakeQueueCommandHandler) EnqueueFollowUp(_ context.Context, input QueueCommandInput) error {
-	f.followUpInputs = append(f.followUpInputs, input)
-	return f.followUpErr
 }
 
 func (f *fakeSessionEnsurer) EnsureActiveSession(_ context.Context, _, routeID, _ string) (SessionResult, error) {
@@ -966,7 +959,7 @@ func TestChannelInboundProcessorRemovedModeCommandIsRejected(t *testing.T) {
 	}
 }
 
-func TestChannelInboundProcessorQueueCommandsUseResolvedSession(t *testing.T) {
+func TestChannelInboundProcessorSteerUsesResolvedSession(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-1", RouteID: "route-1"}}
 	gateway := &fakeChatGateway{}
@@ -975,70 +968,10 @@ func TestChannelInboundProcessorQueueCommandsUseResolvedSession(t *testing.T) {
 	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
 	queueHandler := &fakeQueueCommandHandler{}
 	processor.SetQueueCommandHandler(queueHandler)
-	for _, tc := range []struct {
-		channelType string
-		text        string
-		wantSteer   bool
-		wantPayload string
-	}{
-		// Follow-ups start a server-owned run whose output only a local
-		// channel can observe; steers join the run this channel streams.
-		{channelType: "web", text: "/queue build the test", wantPayload: "build the test"},
-		{channelType: "telegram", text: "/steer use bun", wantSteer: true, wantPayload: "use bun"},
-	} {
-		t.Run(tc.channelType+" "+tc.text, func(t *testing.T) {
-			cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType(tc.channelType)}
-			msg := channel.InboundMessage{
-				BotID: "bot-1", Channel: cfg.ChannelType, ReplyTarget: "target-id",
-				Message:      channel.Message{ID: strings.ReplaceAll(tc.wantPayload, " ", "-"), Text: tc.text},
-				Sender:       channel.Identity{SubjectID: "ext-1"},
-				Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
-			}
-			sender := &fakeReplySender{}
-			if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-				t.Fatalf("HandleInbound() error = %v", err)
-			}
-			if len(sender.sent) != 1 || sender.sent[0].Message.Reply == nil || sender.sent[0].Message.Reply.MessageID != msg.Message.ID {
-				t.Fatalf("reply = %#v, want acknowledgment replying to command", sender.sent)
-			}
-			if gateway.gotReq.Query != "" || len(chatSvc.persistedIn) != 0 {
-				t.Fatalf("queue command entered normal chat: query=%q persisted=%d", gateway.gotReq.Query, len(chatSvc.persistedIn))
-			}
-			if tc.wantSteer {
-				if len(queueHandler.steerInputs) == 0 {
-					t.Fatal("steer was not admitted")
-				}
-				input := queueHandler.steerInputs[len(queueHandler.steerInputs)-1]
-				if input.SessionID != "session-1" || input.Text != tc.wantPayload || input.InvocationID == "" ||
-					input.TeamID != cfg.TeamID || input.ChannelIdentityID != "channelIdentity-1" {
-					t.Fatalf("steer input = %#v", input)
-				}
-			} else {
-				if len(queueHandler.followUpInputs) == 0 {
-					t.Fatal("follow-up was not admitted")
-				}
-				input := queueHandler.followUpInputs[len(queueHandler.followUpInputs)-1]
-				if input.SessionID != "session-1" || input.Text != tc.wantPayload || input.InvocationID == "" ||
-					input.TeamID != cfg.TeamID || input.ChannelIdentityID != "channelIdentity-1" {
-					t.Fatalf("follow-up input = %#v", input)
-				}
-			}
-		})
-	}
-}
-
-func TestChannelInboundProcessorRejectsFollowUpQueueOnPlatformChannel(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-1", RouteID: "route-1"}}
-	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, &fakeChatGateway{}, channelIdentitySvc, &fakePolicyService{})
-	processor.SetACLService(&fakeChatACL{allowed: true})
-	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
-	queueHandler := &fakeQueueCommandHandler{}
-	processor.SetQueueCommandHandler(queueHandler)
 	cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}
 	msg := channel.InboundMessage{
 		BotID: "bot-1", Channel: cfg.ChannelType, ReplyTarget: "target-id",
-		Message:      channel.Message{ID: "queue-on-telegram", Text: "/queue build the test"},
+		Message:      channel.Message{ID: "use-bun", Text: "/steer use bun"},
 		Sender:       channel.Identity{SubjectID: "ext-1"},
 		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
 	}
@@ -1046,11 +979,53 @@ func TestChannelInboundProcessorRejectsFollowUpQueueOnPlatformChannel(t *testing
 	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
 		t.Fatalf("HandleInbound() error = %v", err)
 	}
-	if len(queueHandler.followUpInputs) != 0 || len(queueHandler.steerInputs) != 0 {
-		t.Fatalf("platform channel follow-up was admitted: %#v", queueHandler)
+	if len(sender.sent) != 1 || sender.sent[0].Message.Reply == nil || sender.sent[0].Message.Reply.MessageID != msg.Message.ID {
+		t.Fatalf("reply = %#v, want acknowledgment replying to command", sender.sent)
 	}
-	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() == "" {
-		t.Fatalf("reply = %#v, want an explanatory slash error", sender.sent)
+	if gateway.gotReq.Query != "" || len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("steer entered normal chat: query=%q persisted=%d", gateway.gotReq.Query, len(chatSvc.persistedIn))
+	}
+	if len(queueHandler.steerInputs) != 1 {
+		t.Fatalf("steer inputs = %#v, want one", queueHandler.steerInputs)
+	}
+	input := queueHandler.steerInputs[0]
+	if input.SessionID != "session-1" || input.Text != "use bun" || input.InvocationID == "" ||
+		input.TeamID != cfg.TeamID || input.ChannelIdentityID != "channelIdentity-1" {
+		t.Fatalf("steer input = %#v", input)
+	}
+}
+
+// A follow-up is a run the server starts with no handle for a channel to
+// stream its reply from; the Web client queues follow-ups through its own
+// API, so /queue is refused on every channel.
+func TestChannelInboundProcessorRejectsFollowUpQueue(t *testing.T) {
+	for _, channelType := range []string{"telegram", "web"} {
+		t.Run(channelType, func(t *testing.T) {
+			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
+			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-1", RouteID: "route-1"}}
+			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, &fakeChatGateway{}, channelIdentitySvc, &fakePolicyService{})
+			processor.SetACLService(&fakeChatACL{allowed: true})
+			processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+			queueHandler := &fakeQueueCommandHandler{}
+			processor.SetQueueCommandHandler(queueHandler)
+			cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType(channelType)}
+			msg := channel.InboundMessage{
+				BotID: "bot-1", Channel: cfg.ChannelType, ReplyTarget: "target-id",
+				Message:      channel.Message{ID: "queue-on-" + channelType, Text: "/queue build the test"},
+				Sender:       channel.Identity{SubjectID: "ext-1"},
+				Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+			}
+			sender := &fakeReplySender{}
+			if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
+				t.Fatalf("HandleInbound() error = %v", err)
+			}
+			if len(queueHandler.steerInputs) != 0 {
+				t.Fatalf("follow-up was admitted: %#v", queueHandler)
+			}
+			if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() == "" {
+				t.Fatalf("reply = %#v, want an explanatory slash error", sender.sent)
+			}
+		})
 	}
 }
 
@@ -1073,8 +1048,8 @@ func TestChannelInboundProcessorQueueCommandNoSessionDoesNotCreateOne(t *testing
 	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}, msg, sender); err != nil {
 		t.Fatalf("HandleInbound() error = %v", err)
 	}
-	if len(queueHandler.steerInputs) != 0 || len(queueHandler.followUpInputs) != 0 || gateway.gotReq.Query != "" || len(chatSvc.persistedIn) != 0 {
-		t.Fatalf("queue command without session admitted or started chat: queue=%#v/%#v query=%q persisted=%d", queueHandler.steerInputs, queueHandler.followUpInputs, gateway.gotReq.Query, len(chatSvc.persistedIn))
+	if len(queueHandler.steerInputs) != 0 || gateway.gotReq.Query != "" || len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("queue command without session admitted or started chat: queue=%#v query=%q persisted=%d", queueHandler.steerInputs, gateway.gotReq.Query, len(chatSvc.persistedIn))
 	}
 	if ensurer.createCalls != 0 {
 		t.Fatalf("queue command created a session %d times with spec %#v", ensurer.createCalls, ensurer.lastSpec)
@@ -1121,8 +1096,8 @@ func TestChannelInboundProcessorQueueCommandsRejectDiscussSession(t *testing.T) 
 			}
 		})
 	}
-	if len(queueHandler.steerInputs) != 0 || len(queueHandler.followUpInputs) != 0 || gateway.gotReq.Query != "" || len(chatSvc.persistedIn) != 0 {
-		t.Fatalf("discuss queue command admitted or entered chat: steer=%#v queue=%#v query=%q persisted=%d", queueHandler.steerInputs, queueHandler.followUpInputs, gateway.gotReq.Query, len(chatSvc.persistedIn))
+	if len(queueHandler.steerInputs) != 0 || gateway.gotReq.Query != "" || len(chatSvc.persistedIn) != 0 {
+		t.Fatalf("discuss queue command admitted or entered chat: steer=%#v query=%q persisted=%d", queueHandler.steerInputs, gateway.gotReq.Query, len(chatSvc.persistedIn))
 	}
 }
 

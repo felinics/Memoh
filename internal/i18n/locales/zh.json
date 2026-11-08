@@ -456,8 +456,7 @@
     }
   },
   "queue": {
-    "steerAccepted": "已加入 steer 队列。",
-    "accepted": "已加入队列。"
+    "steerAccepted": "已加入 steer 队列。"
   },
   "menu": {
     "start": "显示欢迎信息",

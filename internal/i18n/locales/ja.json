@@ -456,8 +456,7 @@
     }
   },
   "queue": {
-    "steerAccepted": "Steer をキューに追加しました。",
-    "accepted": "キューに追加しました。"
+    "steerAccepted": "Steer をキューに追加しました。"
   },
   "menu": {
     "start": "ウェルカムメッセージを表示する",

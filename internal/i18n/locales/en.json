@@ -456,8 +456,7 @@
     }
   },
   "queue": {
-    "steerAccepted": "Steer queued.",
-    "accepted": "Queued."
+    "steerAccepted": "Steer queued."
   },
   "menu": {
     "start": "Show the welcome message",

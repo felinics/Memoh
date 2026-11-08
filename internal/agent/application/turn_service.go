@@ -75,7 +75,7 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 		assets  []turn.OutboundAssetRef
 	)
 
-	req := chatRequestFromCommand(cmd)
+	req := ChatRequestFromCommand(cmd)
 	req.RunID = admission.RunID
 	req.RunHandle = admission.Handle
 	req.TurnID = admission.TurnID

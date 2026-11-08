@@ -133,7 +133,7 @@ func TestEnqueueDeferredTurnWithoutActiveRunReportsNoActiveRun(t *testing.T) {
 func TestUpdateFollowUpOnlyBySender(t *testing.T) {
 	service, _, _, key := newFollowUpTestService(t, &fakeRunner{})
 	ctx := context.Background()
-	item, err := service.EnqueueFollowUp(ctx, testQueueInput(key.BotID, key.SessionID, "invoke-1", "original"))
+	item, err := service.EnqueueFollowUp(ctx, "invoke-1", testQueuedText(key.BotID, key.SessionID, "original"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,26 +191,29 @@ func TestRewriteQueuePayloadTextRequiresRecordedSender(t *testing.T) {
 	}
 }
 
-// testQueueInput is what an ingress hands the application for one queued text:
-// the team and sender it authenticated, next to the session and the text.
-func testQueueInput(botID, sessionID, invocationID, text string) QueueInput {
-	return QueueInput{
-		TeamID: "team1", BotID: botID, SessionID: sessionID, InvocationID: invocationID,
-		UserID: "user-1", SourceChannelIdentityID: "user-1", Text: text,
+// testQueuedText is the turn an ingress queues for a text: the turn it would
+// have started, sent by user-1 of team1.
+func testQueuedText(botID, sessionID, text string) turn.StartTurnCommand {
+	return turn.StartTurnCommand{
+		TeamID: "team1", Mode: turn.ModeChat, BotID: botID, ChatID: botID, ThreadID: sessionID,
+		UserID: "user-1", SourceChannelIdentityID: "user-1", Query: text, UserVisibleText: text,
 	}
 }
 
-// A hosted runtime serves every team from one process and pins none, so the
-// continuation must take the team from the item itself: the ingress recorded
-// it at enqueue time together with the sender.
-func TestQueuedTextFollowUpReplaysRecordedIdentityWithoutServedTeam(t *testing.T) {
+// A queued follow-up replays the turn its ingress recorded: the team, the
+// sender, the account it acts for, and the conversation it answers in. A
+// hosted runtime serves every team from one process and pins none, so the
+// team, too, comes from the item.
+func TestQueuedFollowUpReplaysItsCommand(t *testing.T) {
 	runner := &fakeRunner{chunks: []string{`{"type":"done"}`}}
 	service, admitter, backend, key := newFollowUpTestService(t, runner)
 	service.allowedTeam = ""
 	ctx := context.Background()
-	input := testQueueInput(key.BotID, key.SessionID, "invoke-1", "hello")
-	input.TeamID, input.UserID, input.SourceChannelIdentityID = "team-cloud", "user-9", "identity-9"
-	item, err := service.EnqueueFollowUp(ctx, input)
+	cmd := testQueuedText(key.BotID, key.SessionID, "hello")
+	cmd.TeamID, cmd.UserID, cmd.SourceChannelIdentityID, cmd.ActorAccountID = "team-cloud", "user-9", "identity-9", "owner-9"
+	cmd.CurrentChannel, cmd.Channels, cmd.ReplyTarget, cmd.ConversationType = "web", []string{"web"}, key.BotID, "private"
+	cmd.ToolHTTPURL = "http://gateway/bots/" + key.BotID + "/mcp"
+	item, err := service.EnqueueFollowUp(ctx, "invoke-1", cmd)
 	if err != nil {
 		t.Fatalf("enqueue follow-up: %v", err)
 	}
@@ -220,9 +223,12 @@ func TestQueuedTextFollowUpReplaysRecordedIdentityWithoutServedTeam(t *testing.T
 	markFollowUpTestRunTerminal(t, backend, key)
 	service.startFollowUp(ctx, sessionruntime.TerminalRun{RunID: "original-run", BotID: key.BotID, SessionID: key.SessionID})
 
-	if runner.gotReq.Query != "hello" || runner.gotReq.UserID != "user-9" || runner.gotReq.SourceChannelIdentityID != "identity-9" ||
-		runner.gotReq.BotID != key.BotID || runner.gotReq.ChatID != key.BotID || runner.gotReq.ThreadID != key.SessionID {
-		t.Fatalf("continuation lost the recorded identity: %+v", runner.gotReq)
+	got := runner.gotReq
+	if got.Query != "hello" || got.UserID != "user-9" || got.SourceChannelIdentityID != "identity-9" || got.ActorAccountID != "owner-9" ||
+		got.BotID != key.BotID || got.ChatID != key.BotID || got.ThreadID != key.SessionID ||
+		got.CurrentChannel != "web" || !reflect.DeepEqual(got.Channels, []string{"web"}) || got.ReplyTarget != key.BotID ||
+		got.ConversationType != "private" || got.ToolHTTPURL != cmd.ToolHTTPURL {
+		t.Fatalf("continuation did not replay the queued command: %+v", got)
 	}
 	admitter.mu.Lock()
 	inputs := append([]sessionruntime.AdmitInput(nil), admitter.inputs...)
@@ -236,18 +242,18 @@ func TestQueuedTextFollowUpReplaysRecordedIdentityWithoutServedTeam(t *testing.T
 	}
 }
 
-func TestQueueInputRequiresRecordedTeam(t *testing.T) {
+func TestQueuedCommandRequiresTeamAndText(t *testing.T) {
 	service, _, _, key := newFollowUpTestService(t, &fakeRunner{})
-	input := testQueueInput(key.BotID, key.SessionID, "invoke-1", "hello")
-	input.TeamID = ""
-	if _, err := service.EnqueueFollowUp(context.Background(), input); !errors.Is(err, ErrQueueInputIncomplete) {
+	cmd := testQueuedText(key.BotID, key.SessionID, "hello")
+	cmd.TeamID = ""
+	if _, err := service.EnqueueFollowUp(context.Background(), "invoke-1", cmd); !errors.Is(err, ErrQueueInputIncomplete) {
 		t.Fatalf("follow-up without team = %v, want %v", err, ErrQueueInputIncomplete)
 	}
-	if _, err := service.EnqueueSteer(context.Background(), input); !errors.Is(err, ErrQueueInputIncomplete) {
+	if _, err := service.EnqueueSteer(context.Background(), "invoke-1", cmd); !errors.Is(err, ErrQueueInputIncomplete) {
 		t.Fatalf("steer without team = %v, want %v", err, ErrQueueInputIncomplete)
 	}
-	input.TeamID, input.Text = "team1", "  "
-	if _, err := service.EnqueueFollowUp(context.Background(), input); !errors.Is(err, sessionruntime.ErrQueueInvalidReference) {
+	cmd.TeamID, cmd.Query = "team1", "  "
+	if _, err := service.EnqueueFollowUp(context.Background(), "invoke-1", cmd); !errors.Is(err, sessionruntime.ErrQueueInvalidReference) {
 		t.Fatalf("follow-up without text = %v, want %v", err, sessionruntime.ErrQueueInvalidReference)
 	}
 }
@@ -296,7 +302,7 @@ func TestUnreplayableFollowUpIsRejectedAndDoesNotBlockTheQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.EnqueueFollowUp(ctx, testQueueInput(key.BotID, key.SessionID, "invoke-2", "runs after it")); err != nil {
+	if _, err := service.EnqueueFollowUp(ctx, "invoke-2", testQueuedText(key.BotID, key.SessionID, "runs after it")); err != nil {
 		t.Fatal(err)
 	}
 	markFollowUpTestRunTerminal(t, backend, key)
@@ -327,12 +333,12 @@ func TestFollowUpForUnservedTeamIsRejectedNotRetried(t *testing.T) {
 	runner := &fakeRunner{chunks: []string{`{"type":"done"}`}}
 	service, admitter, backend, key := newFollowUpTestService(t, runner)
 	ctx := context.Background()
-	foreign := testQueueInput(key.BotID, key.SessionID, "invoke-foreign", "for another team")
+	foreign := testQueuedText(key.BotID, key.SessionID, "for another team")
 	foreign.TeamID = "team-elsewhere"
-	if _, err := service.EnqueueFollowUp(ctx, foreign); err != nil {
+	if _, err := service.EnqueueFollowUp(ctx, "invoke-foreign", foreign); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.EnqueueFollowUp(ctx, testQueueInput(key.BotID, key.SessionID, "invoke-served", "for this team")); err != nil {
+	if _, err := service.EnqueueFollowUp(ctx, "invoke-served", testQueuedText(key.BotID, key.SessionID, "for this team")); err != nil {
 		t.Fatal(err)
 	}
 	markFollowUpTestRunTerminal(t, backend, key)
@@ -376,7 +382,7 @@ func TestFollowUpStarterStopsWhenRejectionCannotBeRecorded(t *testing.T) {
 	if _, err := service.sessionManager.EnqueueFollowUp(ctx, key, "legacy-item", "legacy-invocation", []byte(`{"text":"no command"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.EnqueueFollowUp(ctx, testQueueInput(key.BotID, key.SessionID, "invoke-2", "behind it")); err != nil {
+	if _, err := service.EnqueueFollowUp(ctx, "invoke-2", testQueuedText(key.BotID, key.SessionID, "behind it")); err != nil {
 		t.Fatal(err)
 	}
 	markFollowUpTestRunTerminal(t, memory, key)
@@ -405,7 +411,7 @@ func TestFollowUpStartIsSingleFlightPerSession(t *testing.T) {
 	runner := &fakeRunner{chunks: []string{`{"type":"done"}`}}
 	service, _, backend, key := newFollowUpTestService(t, runner)
 	ctx := context.Background()
-	if _, err := service.EnqueueFollowUp(ctx, testQueueInput(key.BotID, key.SessionID, "invoke-1", "queued")); err != nil {
+	if _, err := service.EnqueueFollowUp(ctx, "invoke-1", testQueuedText(key.BotID, key.SessionID, "queued")); err != nil {
 		t.Fatal(err)
 	}
 	markFollowUpTestRunTerminal(t, backend, key)
@@ -434,7 +440,7 @@ func TestFollowUpSchedulingRaces(t *testing.T) {
 				service, admitter, backend, key := newFollowUpTestService(t, &fakeRunner{chunks: []string{`{"type":"done"}`}})
 				ctx := context.Background()
 				for _, id := range []string{"first", "second"}[:tc.pending] {
-					if _, err := service.EnqueueFollowUp(ctx, testQueueInput(key.BotID, key.SessionID, id, "queued")); err != nil {
+					if _, err := service.EnqueueFollowUp(ctx, id, testQueuedText(key.BotID, key.SessionID, "queued")); err != nil {
 						t.Fatal(err)
 					}
 				}

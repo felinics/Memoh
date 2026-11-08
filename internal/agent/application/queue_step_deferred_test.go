@@ -57,7 +57,7 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 	service, handle := newDeferredSteerTestService(t)
 	ctx := context.Background()
 	key := sessionruntime.Key{BotID: handle.BotID, SessionID: handle.SessionID}
-	item, err := service.EnqueueSteer(ctx, testQueueInput(handle.BotID, handle.SessionID, "invoke-1", "steer me"))
+	item, err := service.EnqueueSteer(ctx, "invoke-1", testQueuedText(handle.BotID, handle.SessionID, "steer me"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 	if _, err := service.sessionManager.UpdateSteer(ctx, key, item.ID, []byte("x")); err == nil {
 		t.Fatal("applied steer still mutable")
 	}
-	if _, err := service.EnqueueSteer(ctx, testQueueInput(handle.BotID, handle.SessionID, "invoke-2", "late")); !errors.Is(err, sessionruntime.ErrQueueNoActiveRun) {
+	if _, err := service.EnqueueSteer(ctx, "invoke-2", testQueuedText(handle.BotID, handle.SessionID, "late")); !errors.Is(err, sessionruntime.ErrQueueNoActiveRun) {
 		t.Fatalf("late steer after sealed final = %v", err)
 	}
 }
@@ -131,7 +131,7 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 func TestFinalStepClaimsSteerForLoopContinuation(t *testing.T) {
 	service, handle := newDeferredSteerTestService(t)
 	ctx := context.Background()
-	item, err := service.EnqueueSteer(ctx, testQueueInput(handle.BotID, handle.SessionID, "invoke-1", "change direction"))
+	item, err := service.EnqueueSteer(ctx, "invoke-1", testQueuedText(handle.BotID, handle.SessionID, "change direction"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestFinalStepClaimsSteerForLoopContinuation(t *testing.T) {
 	if got := QueuePayloadText(outcome.claimedSteer.Payload); got != "change direction" {
 		t.Fatalf("claimed payload = %q", got)
 	}
-	if _, err := service.EnqueueSteer(ctx, testQueueInput(handle.BotID, handle.SessionID, "invoke-2", "late")); err != nil {
+	if _, err := service.EnqueueSteer(ctx, "invoke-2", testQueuedText(handle.BotID, handle.SessionID, "late")); err != nil {
 		t.Fatalf("run should stay open after a claimed final steer: %v", err)
 	}
 }
