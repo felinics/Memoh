@@ -146,20 +146,54 @@ func TestTerminalWSDisconnectsASilentClient(t *testing.T) {
 // background tab answers every ping and still has to reach the idle timeout.
 func TestTerminalWSPongsDoNotCountAsActivity(t *testing.T) {
 	t.Parallel()
-	idle := 4 * testWSHeartbeat.readTimeout
-	client, _ := openTestTerminal(t, terminalTestHandler(idle), newFakeTerminalStream(false))
+	const idle = 600 * time.Millisecond
+	const deadline = 10 * idle
+	handler := terminalTestHandler(idle)
+	// This tests session inactivity, not peer liveness. A busy race-enabled
+	// runner must not let the heartbeat win the race with the idle timer.
+	// If pongs incorrectly reset that timer, the client deadline still fails
+	// the test before the heartbeat can close the connection for another reason.
+	handler.wsHeartbeat.readTimeout = 2 * deadline
+	handler.wsHeartbeat.writeTimeout = 2 * deadline
+	stream := newFakeTerminalStream(false)
+	client, served := openTestTerminal(t, handler, stream)
+	pongs := 0
+	defaultPing := client.PingHandler()
+	client.SetPingHandler(func(data string) error {
+		if err := defaultPing(data); err != nil {
+			return err
+		}
+		pongs++
+		return nil
+	})
 
 	start := time.Now()
-	_ = client.SetReadDeadline(start.Add(10 * idle))
+	if err := client.SetReadDeadline(start.Add(deadline)); err != nil {
+		t.Fatal(err)
+	}
 	_, _, err := client.ReadMessage() // the default ping handler answers pings
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatal("pongs kept an idle terminal open")
 	}
-	if !websocket.IsCloseError(err, websocket.CloseGoingAway) {
+	var closed *websocket.CloseError
+	if !errors.As(err, &closed) || closed.Code != websocket.CloseGoingAway || closed.Text != "idle timeout" {
 		t.Fatalf("read ended with %v, want the idle timeout's going-away close", err)
+	}
+	if pongs == 0 {
+		t.Fatal("the terminal closed without exercising pong handling")
 	}
 	if elapsed := time.Since(start); elapsed < idle/2 {
 		t.Errorf("closed after %v, before the %v idle timeout", elapsed, idle)
+	}
+	select {
+	case <-served:
+	case <-time.After(deadline):
+		t.Fatal("the idle terminal handler did not exit")
+	}
+	select {
+	case <-stream.closed:
+	default:
+		t.Fatal("the idle terminal left its PTY stream open")
 	}
 }
 

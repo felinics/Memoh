@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -361,7 +363,26 @@ func (s *sessionPoolExecStream) Recv() (*pb.ExecInput, error) {
 func writeSessionPoolFakeAgentScript(t *testing.T, dir, name string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	script := fmt.Sprintf("#!/bin/sh\nif [ -n \"${MEMOH_ACP_START_LOG:-}\" ]; then printf 'start\\n' >> \"$MEMOH_ACP_START_LOG\"; fi\nMEMOH_ACP_SESSION_POOL_FAKE_AGENT=1 exec %s -test.run '^TestSessionPoolFakeAgentHelper$' --\n", sessionPoolShellArg(os.Args[0]))
+	// The helper is a separate process. Its race detector cannot fail the
+	// parent test, and runtime shutdown may kill it before its exit status is
+	// observed. Keep reports outside stderr and check them after pool cleanup.
+	raceLog := filepath.Join(t.TempDir(), "race")
+	raceOptions := strings.TrimSpace(os.Getenv("GORACE") + " halt_on_error=1 log_path=" + raceLog)
+	t.Cleanup(func() {
+		reports, err := filepath.Glob(raceLog + ".*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, report := range reports {
+			data, err := os.ReadFile(report) //nolint:gosec // test-owned race report.
+			if err != nil {
+				t.Error(err)
+				continue
+			}
+			t.Errorf("ACP helper race report:\n%s", data)
+		}
+	})
+	script := fmt.Sprintf("#!/bin/sh\nif [ -n \"${MEMOH_ACP_START_LOG:-}\" ]; then printf 'start\\n' >> \"$MEMOH_ACP_START_LOG\"; fi\nGORACE=%s MEMOH_ACP_SESSION_POOL_FAKE_AGENT=1 exec %s -test.run '^TestSessionPoolFakeAgentHelper$' --\n", sessionPoolShellArg(raceOptions), sessionPoolShellArg(os.Args[0]))
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil { //nolint:gosec // test helper must be executable.
 		t.Fatal(err)
 	}
@@ -372,14 +393,42 @@ func TestSessionPoolFakeAgentHelper(_ *testing.T) {
 	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT") != "1" {
 		return
 	}
-	agent := &sessionPoolFakeAgent{}
+	agent := &sessionPoolFakeAgent{ready: make(chan struct{})}
 	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
 	agent.conn = conn
+	close(agent.ready)
 	<-conn.Done()
 	os.Exit(0)
 }
 
+func TestSessionPoolFakeAgentWaitsForConnection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		agent := &sessionPoolFakeAgent{ready: make(chan struct{})}
+		done := make(chan error, 1)
+		go func() {
+			_, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionId: "test-session"})
+			done <- err
+		}()
+		// Prompt has entered before the constructor can publish its result.
+		// Wait for it to block without relying on a sleep or scheduler luck.
+		synctest.Wait()
+		select {
+		case err := <-done:
+			t.Fatalf("Prompt returned before connection initialization: %v", err)
+		default:
+		}
+		reader, writer := io.Pipe()
+		defer func() { _ = reader.Close(); _ = writer.Close() }()
+		agent.conn = acp.NewAgentSideConnection(agent, io.Discard, reader)
+		close(agent.ready)
+		if err := <-done; err != nil {
+			t.Fatalf("Prompt after connection initialization: %v", err)
+		}
+	})
+}
+
 type sessionPoolFakeAgent struct {
+	ready           chan struct{}
 	conn            *acp.AgentSideConnection
 	modelID         string
 	reasoningEffort string
@@ -453,6 +502,9 @@ func (a *sessionPoolFakeAgent) NewSession(context.Context, acp.NewSessionRequest
 }
 
 func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
+	// NewAgentSideConnection starts receiving before it returns. Publish the
+	// fully initialized connection before a handler uses it for notifications.
+	<-a.ready
 	a.appendConfigLog(fmt.Sprintf("prompt:model=%s,reasoning=%s", a.modelID, a.reasoningEffort))
 	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{
 		SessionId: p.SessionId,
