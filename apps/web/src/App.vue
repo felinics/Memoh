@@ -6,7 +6,7 @@ import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
 import { isChunkLoadError } from '@/lib/chunk-load-error'
 import { holdPrefetchUntil, whenNetworkQuiet } from '@/lib/idle-prefetch'
-import { loadMainSection, prefetchAppPages } from './routes'
+import { loadMainSection, prefetchAppPages, showsChatWorkspace } from './routes'
 
 useSettingsStore()
 
@@ -56,9 +56,8 @@ const MainSection = defineAsyncComponent({
 //   - settings routes: MainSection stays mounted, settings content renders above it.
 //   - auth-boundary routes (login/onboarding/oauth/dev): MainSection is not
 //     mounted at all; those render alone via RouterView.
-const isChatRoute = computed(() => route.name === 'home' || route.name === 'bot')
 const isSettingsRoute = computed(() => route.path.startsWith('/settings'))
-const isAppArea = computed(() => isChatRoute.value || isSettingsRoute.value)
+const isAppArea = computed(() => showsChatWorkspace(route))
 
 // index.html shows a loading splash (#boot-splash) while the entry downloads.
 // Vue mounting is not the end of the wait: the initial navigation still loads

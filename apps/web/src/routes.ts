@@ -13,6 +13,11 @@ import { prefetchInIdle } from './lib/idle-prefetch'
  */
 export const loadMainSection = () => import('@/pages/main-section/index.vue')
 
+/** Whether App.vue mounts the chat workspace on this route: chat routes, and settings routes (rendered above it). */
+export function showsChatWorkspace(route: Pick<RouteLocationNormalized, 'name' | 'path'>): boolean {
+  return route.name === 'home' || route.name === 'bot' || route.path.startsWith('/settings')
+}
+
 // ── Settings page loaders ────────────────────────────────────────────────────
 // Named consts instead of inline arrows so prefetchAppPages warms EXACTLY
 // the functions the routes reference — one copy of each import path, no drift.
@@ -54,9 +59,9 @@ export const settingsPageLoaders = [
  *
  * The chat workspace goes first: on the login and onboarding pages it is the
  * next screen, and it is the largest chunk, so warming it while the user types
- * lets the chat open right after sign-in. On chat and settings routes App.vue
- * has already started loading it, and the warm-up resolves from the module
- * cache.
+ * lets the chat open right after sign-in. On chat and settings routes it is
+ * already loading (router.ts starts it with the first route), and the warm-up
+ * resolves from the module cache.
  *
  * Every settings page is a lazy route chunk, and vue-router only starts
  * loading one AFTER the nav click — the URL and the page both wait on the
