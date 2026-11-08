@@ -29,6 +29,7 @@ import { attachDevelopmentWindowShortcuts } from './window-shortcuts'
 import { macWindowChromeOptions } from './window-chrome'
 import { maybeSelfInstallMacOS } from './self-install'
 import { maybePromptAppleSiliconBuild } from './arch-check'
+import { installMainProcessErrorHandlers } from './main-process-errors'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
 import { isTrustedRendererUrl } from './renderer-trust'
 import { normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
@@ -49,6 +50,9 @@ const guardedExternalLinkWebContents = new WeakSet<Electron.WebContents>()
 
 // Must run before anything resolves `app.getPath('userData')`.
 app.setName(DESKTOP_PRODUCT_NAME)
+// Right after setName so the error log lands under the Memoh logs directory,
+// and before anything that can throw asynchronously.
+installMainProcessErrorHandlers()
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 type WindowKind = 'chat'
