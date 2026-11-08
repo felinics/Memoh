@@ -105,7 +105,7 @@ func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext
 	}
 	callCtx, cancel := context.WithTimeout(ctx, connectorCallTimeout)
 	defer cancel()
-	clientSession, ok, err := s.connect(callCtx, botID)
+	clientSession, connections, ok, err := s.connect(callCtx, botID)
 	if err != nil {
 		s.noteListFailure(botID, err)
 		return nil, err
@@ -122,6 +122,7 @@ func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext
 		return nil, err
 	}
 	s.service.RecordToolDiscoverySuccess(botID)
+	groups := s.service.ConnectorGroups(callCtx, botID, connections)
 	tools := make([]mcpgw.ToolDescriptor, 0, len(result.Tools))
 	for _, tool := range result.Tools {
 		if tool == nil || strings.TrimSpace(tool.Name) == "" {
@@ -136,14 +137,49 @@ func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext
 			)
 			continue
 		}
+		name := strings.TrimSpace(tool.Name)
 		tools = append(tools, mcpgw.ToolDescriptor{
-			Name:        strings.TrimSpace(tool.Name),
+			Name:        name,
 			Description: strings.TrimSpace(tool.Description),
 			InputSchema: inputSchema,
+			Group:       connectorToolGroup(name, groups),
 		})
 	}
 	s.storeToolList(botID, tools)
 	return cloneToolList(tools), nil
+}
+
+func connectorToolGroup(toolName string, groups map[string]string) string {
+	if alias, _, ok := strings.Cut(strings.TrimSpace(toolName), "__"); ok {
+		if group := strings.TrimSpace(groups[alias]); group != "" {
+			return group
+		}
+		if slug := normalizeAlias(alias); slug != "" {
+			return "connector:" + slug
+		}
+	}
+	if group := singleConnectorGroup(groups); group != "" {
+		return group
+	}
+	return "connector"
+}
+
+func singleConnectorGroup(groups map[string]string) string {
+	unique := ""
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if unique == "" {
+			unique = group
+			continue
+		}
+		if unique != group {
+			return ""
+		}
+	}
+	return unique
 }
 
 func (s *Source) cachedToolList(botID string) ([]mcpgw.ToolDescriptor, bool) {
@@ -203,7 +239,7 @@ func (s *Source) CallTool(
 	if err := toolcontext.ValidateRuntimeGuard(callCtx, session); err != nil {
 		return nil, err
 	}
-	clientSession, ok, err := s.connect(callCtx, strings.TrimSpace(session.BotID))
+	clientSession, _, ok, err := s.connect(callCtx, strings.TrimSpace(session.BotID))
 	if err != nil {
 		return nil, err
 	}
@@ -225,16 +261,16 @@ func (s *Source) CallTool(
 	return callResultObject(result)
 }
 
-func (s *Source) connect(ctx context.Context, botID string) (*sdkmcp.ClientSession, bool, error) {
+func (s *Source) connect(ctx context.Context, botID string) (*sdkmcp.ClientSession, map[string]string, bool, error) {
 	if botID == "" || !s.service.Configured() {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 	connections, err := s.service.SessionConnections(ctx, botID)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if len(connections) == 0 {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 	handler := s.authHandler(botID, connections)
 	mcpClient := sdkmcp.NewClient(&sdkmcp.Implementation{
@@ -247,9 +283,9 @@ func (s *Source) connect(ctx context.Context, botID string) (*sdkmcp.ClientSessi
 		DisableStandaloneSSE: true,
 	}, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	return clientSession, true, nil
+	return clientSession, connections, true, nil
 }
 
 func (s *Source) authHandler(

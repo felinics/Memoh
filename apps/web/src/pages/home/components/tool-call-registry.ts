@@ -153,6 +153,12 @@ export function isReadOnlyTool(toolName: string): boolean {
   return READONLY_TOOLS.has(toolName)
 }
 
+// tool_describe only loads on-demand tool definitions before they run; the
+// group header counts the tools that ran, not the loading step.
+export function isToolLoadingStep(toolName: string): boolean {
+  return toolName === 'tool_describe'
+}
+
 // Buckets used to summarize a finished multi-tool run in the collapsed group
 // header. They live here, next to the tool catalog itself, so the header and
 // the per-row registry cannot drift apart as tools are added.
@@ -1133,6 +1139,22 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         target: '',
         expandable: true,
       }
+    // tool_describe loads on-demand tool definitions; the bridged tool_call
+    // arrives already unwrapped to the tool it ran.
+    case 'tool_describe': {
+      const names = Array.isArray(input.names)
+        ? input.names.filter((name): name is string => typeof name === 'string')
+        : []
+      const query = pickString(input, 'query')
+      const target = [names.join(', '), query ? `"${query}"` : ''].filter(Boolean).join(' · ')
+      return {
+        icon: Boxes,
+        actionKey: 'tool_describe',
+        target: truncate(target, 80),
+        fullTarget: target,
+        expandable: true,
+      }
+    }
     case 'browser_action': {
       const resolved = resolveGuiAction(BROWSER_ACTION_ICONS, 'browserAction', MousePointerClick, 'browser_action', pickString(input, 'action'), input)
       const target = guiKeyTarget(resolved.action, input) || pickString(input, 'url', 'ref', 'selector')

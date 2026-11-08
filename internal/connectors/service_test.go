@@ -159,3 +159,50 @@ func TestConnectorFromCarriesStoredAlias(t *testing.T) {
 		t.Fatalf("unexpected projection: %+v", got)
 	}
 }
+
+type appRefQueries struct {
+	dbstore.Queries
+	refs []dbsqlc.ListAppConnectorRefsForBotRow
+}
+
+func (q appRefQueries) ListAppConnectorRefsForBot(context.Context, pgtype.UUID) ([]dbsqlc.ListAppConnectorRefsForBotRow, error) {
+	return q.refs, nil
+}
+
+func TestConnectorGroupsAndToolGroupUseAppOrAliasNeverVerb(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		queries: appRefQueries{
+			refs: []dbsqlc.ListAppConnectorRefsForBotRow{
+				{ConnectionID: "conn-mail", ConnectorType: "gmail", AppID: "Email Suite"},
+			},
+		},
+	}
+	groups := svc.ConnectorGroups(context.Background(), "00000000-0000-0000-0000-000000000001", map[string]string{
+		"gmail":  "conn-mail",
+		"github": "conn-gh",
+	})
+	if groups["gmail"] != "connector:email-suite" || groups["github"] != "connector:github" {
+		t.Fatalf("ConnectorGroups() = %#v, want App group for gmail and alias group for github", groups)
+	}
+
+	if got := connectorToolGroup("gmail__list_email", groups); got != "connector:email-suite" {
+		t.Fatalf("connectorToolGroup(gmail__list_email) = %q, want connector:email-suite", got)
+	}
+	if got := connectorToolGroup("github__get_issue", groups); got != "connector:github" {
+		t.Fatalf("connectorToolGroup(github__get_issue) = %q, want connector:github", got)
+	}
+
+	singleAppGroups := map[string]string{"gmail": "connector:email-suite"}
+	for _, toolName := range []string{"list_email", "list_email_accounts", "send_email"} {
+		if got := connectorToolGroup(toolName, singleAppGroups); got != "connector:email-suite" {
+			t.Fatalf("connectorToolGroup(%q) with single App = %q, want connector:email-suite", toolName, got)
+		}
+	}
+	for _, toolName := range []string{"list_email", "list_email_accounts", "send_email", "get_issue"} {
+		if got := connectorToolGroup(toolName, groups); got != "connector" {
+			t.Fatalf("connectorToolGroup(%q) with multiple unprefixed groups = %q, want connector", toolName, got)
+		}
+	}
+}

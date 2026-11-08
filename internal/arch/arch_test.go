@@ -91,6 +91,7 @@ func TestChannelAgentDependenciesStayOnPorts(t *testing.T) {
 		modulePrefix + "internal/agent/turn",
 		modulePrefix + "internal/agent/event",
 		modulePrefix + "internal/agent/decision",
+		modulePrefix + "internal/agent/toolbridge",
 	}
 	root := repoRoot(t)
 	for _, file := range goFiles(t, root, "internal/channel") {
@@ -106,7 +107,7 @@ func TestChannelAgentDependenciesStayOnPorts(t *testing.T) {
 				}
 			}
 			if !allowed {
-				t.Errorf("%s imports %s: Channel may only depend on agent/turn, agent/event, or agent/decision", file, imp)
+				t.Errorf("%s imports %s: Channel may only depend on agent/turn, agent/event, agent/decision, or agent/toolbridge", file, imp)
 			}
 		}
 	}
@@ -123,8 +124,9 @@ func TestTimelineOnlyDependsOnTurnPort(t *testing.T) {
 			case isPackageOrChild(imp, modulePrefix+"internal/channel"):
 				t.Errorf("%s imports %s: chat/timeline must not depend on Channel", file, imp)
 			case isPackageOrChild(imp, modulePrefix+"internal/agent") &&
-				!isPackageOrChild(imp, modulePrefix+"internal/agent/turn"):
-				t.Errorf("%s imports %s: chat/timeline may only depend on the Agent turn contract", file, imp)
+				!isPackageOrChild(imp, modulePrefix+"internal/agent/turn") &&
+				!isPackageOrChild(imp, modulePrefix+"internal/agent/toolbridge"):
+				t.Errorf("%s imports %s: chat/timeline may only depend on the Agent turn contract or toolbridge", file, imp)
 			}
 		}
 	}
