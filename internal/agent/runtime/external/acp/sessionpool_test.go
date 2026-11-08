@@ -373,10 +373,9 @@ func TestSessionPoolFakeAgentHelper(_ *testing.T) {
 		return
 	}
 	agent := &sessionPoolFakeAgent{ready: make(chan struct{})}
-	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
-	agent.conn = conn
+	agent.conn = acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
 	close(agent.ready)
-	<-conn.Done()
+	<-agent.conn.Done()
 	os.Exit(0)
 }
 

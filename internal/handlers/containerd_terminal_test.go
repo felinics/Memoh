@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -87,35 +86,6 @@ func terminalTestHandler(idle time.Duration) *ContainerdHandler {
 	}
 }
 
-// An open terminal with nobody typing carries nothing, and a proxy with an
-// idle timeout cuts it; the ping is what it carries instead.
-func TestTerminalWSPingsAnIdleClient(t *testing.T) {
-	t.Parallel()
-	client, _ := openTestTerminal(t, terminalTestHandler(time.Hour), newFakeTerminalStream(false))
-	pinged := make(chan struct{}, 1)
-	defaultPing := client.PingHandler()
-	client.SetPingHandler(func(data string) error {
-		select {
-		case pinged <- struct{}{}:
-		default:
-		}
-		return defaultPing(data)
-	})
-	go func() {
-		for {
-			if _, _, err := client.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}()
-
-	select {
-	case <-pinged:
-	case <-time.After(10 * testWSHeartbeat.pingInterval):
-		t.Fatal("no ping within ten intervals")
-	}
-}
-
 // A peer that vanished without closing answers no pings. Without a read
 // deadline the session, and the shell behind it, would wait for the idle
 // timeout.
@@ -142,9 +112,9 @@ func TestTerminalWSDisconnectsASilentClient(t *testing.T) {
 	}
 }
 
-// Pongs keep the connection, not the session: a terminal left open in a
-// background tab answers every ping and still has to reach the idle timeout.
-func TestTerminalWSPongsDoNotCountAsActivity(t *testing.T) {
+// An idle terminal sends heartbeats, but answering them is not activity:
+// the session must still close at its idle timeout.
+func TestTerminalWSHeartbeatDoesNotExtendIdleSession(t *testing.T) {
 	t.Parallel()
 	const idle = 600 * time.Millisecond
 	const deadline = 10 * idle
@@ -154,29 +124,23 @@ func TestTerminalWSPongsDoNotCountAsActivity(t *testing.T) {
 	handler.wsHeartbeat.readTimeout = 2 * deadline
 	handler.wsHeartbeat.writeTimeout = 2 * deadline
 	client, _ := openTestTerminal(t, handler, newFakeTerminalStream(false))
-	pongs := 0
+	pinged := false
 	defaultPing := client.PingHandler()
 	client.SetPingHandler(func(data string) error {
-		if err := defaultPing(data); err != nil {
-			return err
-		}
-		pongs++
-		return nil
+		pinged = true
+		return defaultPing(data)
 	})
 
 	if err := client.SetReadDeadline(time.Now().Add(deadline)); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := client.ReadMessage()
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		t.Fatal("pongs kept an idle terminal open")
-	}
 	var closed *websocket.CloseError
 	if !errors.As(err, &closed) || closed.Code != websocket.CloseGoingAway || closed.Text != "idle timeout" {
 		t.Fatalf("read ended with %v, want the idle timeout's going-away close", err)
 	}
-	if pongs == 0 {
-		t.Fatal("the terminal closed without exercising pong handling")
+	if !pinged {
+		t.Fatal("the terminal closed without sending a heartbeat")
 	}
 }
 
