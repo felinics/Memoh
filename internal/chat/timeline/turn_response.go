@@ -24,8 +24,11 @@ func DecodeTurnResponseEntries(msgs []messagepkg.Message) []TurnResponseEntry {
 			msgs[i].Metadata[messagepkg.AgentStepInterruptedMetadataKey] == true
 	})
 	entries := make([]TurnResponseEntry, 0, len(msgs))
+	// A tool_call's result carries only its call ID; remembering the tool each
+	// bridged call ran lets the result's debug text name that tool too.
+	bridged := map[string]string{}
 	for i, msg := range msgs {
-		if entry, ok := decodeTurnResponseEntry(msg, i == checkpoint); ok {
+		if entry, ok := decodeTurnResponseEntry(msg, i == checkpoint, bridged); ok {
 			entries = append(entries, entry)
 		}
 	}
@@ -37,13 +40,13 @@ func DecodeTurnResponseEntries(msgs []messagepkg.Message) []TurnResponseEntry {
 // needs the surrounding history to know whether it is still live, so callers
 // composing context use DecodeTurnResponseEntries instead.
 func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
-	return decodeTurnResponseEntry(msg, false)
+	return decodeTurnResponseEntry(msg, false, nil)
 }
 
 // Tool calls and tool results are preserved as native structured content
 // parts. They must not be rendered as assistant-visible pseudo-protocol text:
 // models may imitate that text instead of emitting real provider tool calls.
-func decodeTurnResponseEntry(msg messagepkg.Message, liveCheckpoint bool) (TurnResponseEntry, bool) {
+func decodeTurnResponseEntry(msg messagepkg.Message, liveCheckpoint bool, bridged map[string]string) (TurnResponseEntry, bool) {
 	role := strings.ToLower(strings.TrimSpace(msg.Role))
 	if role != "assistant" && role != "tool" {
 		return TurnResponseEntry{}, false
@@ -72,7 +75,7 @@ func decodeTurnResponseEntry(msg messagepkg.Message, liveCheckpoint bool) (TurnR
 	return TurnResponseEntry{
 		RequestedAtMs:   msg.CreatedAt.UnixMilli(),
 		Role:            role,
-		Content:         debugContent(rawContent),
+		Content:         debugContent(rawContent, bridged),
 		RawContent:      rawContent,
 		SourceMessageID: msg.ID,
 		DiscussStep:     msg.Metadata[messagepkg.DiscussStepMetadataKey] == true,
@@ -334,7 +337,10 @@ func marshalParts(parts []map[string]any) json.RawMessage {
 	return raw
 }
 
-func debugContent(raw json.RawMessage) string {
+// debugContent renders a message as readable text. bridged maps a tool_call's
+// call ID to the tool it ran; it is filled from calls and read for results, and
+// may be nil when a single message is decoded without its run.
+func debugContent(raw json.RawMessage, bridged map[string]string) string {
 	var plain string
 	if err := json.Unmarshal(raw, &plain); err == nil {
 		return plain
@@ -351,10 +357,17 @@ func debugContent(raw json.RawMessage) string {
 				texts = append(texts, text)
 			}
 		case "tool-call":
-			name, _, _ := toolbridge.Unwrap(p.ToolName, p.Input)
+			name, _, ok := toolbridge.Unwrap(p.ToolName, p.Input)
+			if ok && bridged != nil && p.ToolCallID != "" {
+				bridged[p.ToolCallID] = name
+			}
 			texts = append(texts, "[tool call: "+strings.TrimSpace(name)+"]")
 		case "tool-result":
-			texts = append(texts, "[tool result: "+strings.TrimSpace(p.ToolName)+"]")
+			name := strings.TrimSpace(p.ToolName)
+			if ran, ok := bridged[p.ToolCallID]; ok {
+				name = ran
+			}
+			texts = append(texts, "[tool result: "+strings.TrimSpace(name)+"]")
 		}
 	}
 	return strings.Join(texts, "\n")

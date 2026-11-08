@@ -595,3 +595,48 @@ func assertRawPart(t *testing.T, raw json.RawMessage, partType, nameOrText, call
 	t.Fatalf("missing %s part name/text=%q callID=%q in %#v", partType, nameOrText, callID, parts)
 	return nil
 }
+
+// A tool_call's result names only its call ID; decoding the run remembers the
+// tool the call ran, so the result's debug text names that tool too.
+func TestDecodeTurnResponseEntriesNamesTheToolABridgedResultCameFrom(t *testing.T) {
+	t.Parallel()
+
+	message := func(role string, parts []map[string]any, at int64) messagepkg.Message {
+		t.Helper()
+		content, err := json.Marshal(parts)
+		if err != nil {
+			t.Fatalf("marshal content: %v", err)
+		}
+		modelMessage, err := json.Marshal(turn.ModelMessage{Role: role, Content: content})
+		if err != nil {
+			t.Fatalf("marshal model message: %v", err)
+		}
+		return messagepkg.Message{Role: role, Content: modelMessage, CreatedAt: time.Unix(at, 0).UTC()}
+	}
+	call := message("assistant", []map[string]any{{
+		"type":       "tool-call",
+		"toolName":   "tool_call",
+		"toolCallId": "call-bridge-1",
+		"input":      map[string]any{"name": "create_schedule", "arguments": map[string]any{"name": "daily"}},
+	}}, 1710000000)
+	result := message("tool", []map[string]any{{
+		"type":       "tool-result",
+		"toolName":   "tool_call",
+		"toolCallId": "call-bridge-1",
+		"output":     map[string]any{"ok": true},
+	}}, 1710000001)
+
+	entries := DecodeTurnResponseEntries([]messagepkg.Message{call, result})
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	if entries[0].Content != "[tool call: create_schedule]" || entries[1].Content != "[tool result: create_schedule]" {
+		t.Fatalf("debug content = %q / %q, want create_schedule on both", entries[0].Content, entries[1].Content)
+	}
+	assertRawPart(t, entries[1].RawContent, "tool-result", "tool_call", "call-bridge-1")
+
+	alone, ok := DecodeTurnResponseEntry(result)
+	if !ok || alone.Content != "[tool result: tool_call]" {
+		t.Fatalf("single-message decode = %q, want the stored name without its call", alone.Content)
+	}
+}
