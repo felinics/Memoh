@@ -1,4 +1,4 @@
-// Package channelqueue adapts channel queue controls to the application
+// Package channelqueue adapts the channel /steer control to the application
 // service without exposing queue storage types to channels or RPC.
 package channelqueue
 
@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/channel/inbound"
 )
 
@@ -14,41 +15,27 @@ type Adapter struct{ service *application.Service }
 
 func New(service *application.Service) *Adapter { return &Adapter{service: service} }
 
+// EnqueueSteer admits a channel /steer. The steer joins the run the channel
+// is already streaming, so its command needs only the team, the sender, and
+// the text.
 func (a *Adapter) EnqueueSteer(ctx context.Context, input inbound.QueueCommandInput) error {
-	return a.enqueue(input, func(queued application.QueueInput) error {
-		_, err := a.service.EnqueueSteer(ctx, queued)
-		return err
-	})
-}
-
-func (a *Adapter) EnqueueFollowUp(ctx context.Context, input inbound.QueueCommandInput) error {
-	return a.enqueue(input, func(queued application.QueueInput) error {
-		_, err := a.service.EnqueueFollowUp(ctx, queued)
-		return err
-	})
-}
-
-func (a *Adapter) enqueue(input inbound.QueueCommandInput, admit func(application.QueueInput) error) error {
 	if a == nil || a.service == nil {
 		return inbound.NewQueueCommandError(inbound.QueueCommandCodeUnavailable)
 	}
-	if strings.TrimSpace(input.BotID) == "" || strings.TrimSpace(input.SessionID) == "" ||
-		strings.TrimSpace(input.InvocationID) == "" || strings.TrimSpace(input.Text) == "" {
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeInvalid)
-	}
-	return mapAdmissionError(admit(application.QueueInput{
+	text := strings.TrimSpace(input.Text)
+	_, err := a.service.EnqueueSteer(ctx, input.InvocationID, turn.StartTurnCommand{
+		SchemaVersion:           1,
 		TeamID:                  input.TeamID,
+		Mode:                    turn.ModeChat,
 		BotID:                   input.BotID,
-		SessionID:               input.SessionID,
-		InvocationID:            input.InvocationID,
+		ChatID:                  input.BotID,
+		ThreadID:                input.SessionID,
 		UserID:                  input.UserID,
 		SourceChannelIdentityID: input.ChannelIdentityID,
-		Text:                    input.Text,
-		RouteID:                 input.RouteID,
-		CurrentChannel:          input.CurrentChannel,
-		ReplyTarget:             input.ReplyTarget,
-		ConversationType:        input.ConversationType,
-	}))
+		Query:                   text,
+		UserVisibleText:         text,
+	})
+	return mapAdmissionError(err)
 }
 
 // admissionCodes renders queue admission refusals in the channel command

@@ -158,7 +158,7 @@ func (s *Service) admitTurnRun(
 		return sessionruntime.Admission{}, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, invocationID)
 	}
 	if cmd.Mode == turn.ModeDiscuss {
-		req := chatRequestFromCommand(cmd)
+		req := ChatRequestFromCommand(cmd)
 		req.RunID = admission.RunID
 		req.SessionType = "discuss"
 		if err := s.recordRunResumeContext(s.withAdmissionRuntimeFence(ctx, admission), req); err != nil {

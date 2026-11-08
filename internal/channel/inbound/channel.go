@@ -1449,35 +1449,26 @@ func (p *ChannelInboundProcessor) handleQueueCommand(
 	if strings.TrimSpace(sessionType) == sessionpkg.TypeDiscuss {
 		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueUnsupportedSession, nil))
 	}
-	// A follow-up starts a run that the server owns; only local channels see
-	// that run's output through the session runtime subscription. A steer
-	// joins the run this channel is already streaming, so it stays available.
-	if resource == "queue" && !isLocalChannelType(msg.Channel) {
-		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueFollowUpUnsupportedChannel, nil))
-	}
-	invocationID := queueCommandIdempotencyKey(msg.Channel, routeID, msg.Message.ID, resource)
-	input := QueueCommandInput{
-		TeamID:            strings.TrimSpace(cfg.TeamID),
-		BotID:             strings.TrimSpace(identity.BotID),
-		SessionID:         strings.TrimSpace(sessionID),
-		InvocationID:      invocationID,
-		UserID:            strings.TrimSpace(identity.UserID),
-		ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
-		Text:              strings.TrimSpace(invocation.Rest),
-		RouteID:           strings.TrimSpace(routeID),
-		CurrentChannel:    msg.Channel.String(),
-		ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
-		ConversationType:  msg.Conversation.Type,
-	}
-	var err error
+	// A follow-up starts a run that the server owns, with no handle for this
+	// channel to stream its reply from; the Web client, which watches the
+	// session, queues follow-ups through its own API. A steer joins the run
+	// this channel is already streaming, so it stays available.
 	switch resource {
-	case "steer":
-		err = p.queueCommandHandler.EnqueueSteer(ctx, input)
 	case "queue":
-		err = p.queueCommandHandler.EnqueueFollowUp(ctx, input)
+		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueFollowUpUnsupportedChannel, nil))
+	case "steer":
 	default:
 		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueRequestInvalid, nil))
 	}
+	err := p.queueCommandHandler.EnqueueSteer(ctx, QueueCommandInput{
+		TeamID:            strings.TrimSpace(cfg.TeamID),
+		BotID:             strings.TrimSpace(identity.BotID),
+		SessionID:         strings.TrimSpace(sessionID),
+		InvocationID:      queueCommandIdempotencyKey(msg.Channel, routeID, msg.Message.ID, resource),
+		UserID:            strings.TrimSpace(identity.UserID),
+		ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
+		Text:              strings.TrimSpace(invocation.Rest),
+	})
 	if err != nil {
 		if apperror.CodeOf(err) == "" {
 			// A queue command that failed for any other reason was not admitted.
@@ -1492,10 +1483,7 @@ func (p *ChannelInboundProcessor) handleQueueCommand(
 		}
 		return p.sendSlashError(ctx, sender, msg, err)
 	}
-	if resource == "steer" {
-		return p.sendSlashNotice(ctx, sender, msg, "queue.steerAccepted")
-	}
-	return p.sendSlashNotice(ctx, sender, msg, "queue.accepted")
+	return p.sendSlashNotice(ctx, sender, msg, "queue.steerAccepted")
 }
 
 func (p *ChannelInboundProcessor) accessDeniedRole(ctx context.Context, identity InboundIdentity) string {

@@ -9,9 +9,8 @@ import (
 )
 
 type queueHandlerStub struct {
-	steer    []inbound.QueueCommandInput
-	followUp []inbound.QueueCommandInput
-	err      error
+	steer []inbound.QueueCommandInput
+	err   error
 }
 
 func (s *queueHandlerStub) EnqueueSteer(_ context.Context, input inbound.QueueCommandInput) error {
@@ -19,14 +18,8 @@ func (s *queueHandlerStub) EnqueueSteer(_ context.Context, input inbound.QueueCo
 	return s.err
 }
 
-func (s *queueHandlerStub) EnqueueFollowUp(_ context.Context, input inbound.QueueCommandInput) error {
-	s.followUp = append(s.followUp, input)
-	return s.err
-}
-
-func TestQueueRPCHandlersKeepQueueOperationsSeparate(t *testing.T) {
+func TestQueueRPCHandlerPassesSteerThrough(t *testing.T) {
 	stub := &queueHandlerStub{}
-	handlers := Handlers(nil, stub, nil, nil)
 	want := inbound.QueueCommandInput{
 		BotID: "bot-1", SessionID: "session-1", InvocationID: "channel:42:queue:steer", Text: "use bun",
 	}
@@ -34,17 +27,10 @@ func TestQueueRPCHandlersKeepQueueOperationsSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if _, err := handlers[MethodQueueEnqueueSteer](context.Background(), payload); err != nil {
+	if _, err := Handlers(nil, stub, nil, nil)[MethodQueueEnqueueSteer](context.Background(), payload); err != nil {
 		t.Fatalf("steer handler error = %v", err)
 	}
-	if _, err := handlers[MethodQueueEnqueueFollowUp](context.Background(), payload); err != nil {
-		t.Fatalf("follow-up handler error = %v", err)
-	}
-	if len(stub.steer) != 1 || len(stub.followUp) != 1 {
-		t.Fatalf("calls = steer %#v, follow-up %#v", stub.steer, stub.followUp)
-	}
-	if stub.steer[0] != want || stub.followUp[0] != want {
-		t.Fatalf("RPC changed queue input: steer %#v, follow-up %#v, want %#v", stub.steer[0], stub.followUp[0], want)
+	if len(stub.steer) != 1 || stub.steer[0] != want {
+		t.Fatalf("RPC changed steer input: %#v, want %#v", stub.steer, want)
 	}
 }

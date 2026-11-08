@@ -1874,7 +1874,7 @@ func TestWebQueueCommandErrorsUsePublicCatalog(t *testing.T) {
 	} {
 		for _, action := range []string{"steer", "queue"} {
 			event := decodeWSTestEvent(t, func(w *wsWriter) {
-				h.executeWSQueueCommand(context.Background(), w, wsClientMessage{SessionID: tc.session, InvocationID: "invocation"}, "user", "bot", action, tc.text)
+				h.executeWSQueueCommand(context.Background(), nil, w, wsClientMessage{SessionID: tc.session, InvocationID: "invocation"}, "user", "bot", action, tc.text)
 			})
 			definition, _ := apperror.Lookup(tc.code)
 			_, nested := event["error"]

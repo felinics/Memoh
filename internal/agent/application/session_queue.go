@@ -19,36 +19,11 @@ type SessionQueues struct {
 	FollowUp       []sessionruntime.FollowUpItem
 }
 
-// QueueInput is one text input an ingress admits into a session queue. It
-// carries the identity the ingress authenticated, because the continuation
-// that eventually runs the input happens after the request is gone and, in a
-// hosted deployment, possibly on another instance: nothing at that point can
-// recover which team or user the text belonged to.
-type QueueInput struct {
-	TeamID       string
-	BotID        string
-	SessionID    string
-	InvocationID string
-	// UserID and SourceChannelIdentityID name the sender the way the
-	// ingress's ordinary turns do. Empty values are allowed for a channel
-	// that has no platform account for the sender.
-	UserID                  string
-	SourceChannelIdentityID string
-	Text                    string
-	// RouteID, CurrentChannel, ReplyTarget and ConversationType name where
-	// the input arrived, as the ingress's ordinary turn names them. The run
-	// that replays the input renders its prompt and messaging tools for that
-	// conversation; without them it runs as if it had none.
-	RouteID          string
-	CurrentChannel   string
-	ReplyTarget      string
-	ConversationType string
-}
-
-// ErrQueueInputIncomplete reports an ingress that admitted queue input without
-// the identity the continuation needs. It is a wiring error at the ingress,
-// not a rejected user request, so handlers surface it as unavailable.
-var ErrQueueInputIncomplete = errors.New("queue: input is missing team, bot, or session identity")
+// ErrQueueInputIncomplete reports an ingress that queued a command without
+// the team, bot, or session the continuation needs. It is a wiring error at
+// the ingress, not a rejected user request, so handlers surface it as
+// unavailable.
+var ErrQueueInputIncomplete = errors.New("queue: command is missing team, bot, or session")
 
 func (s *Service) liveQueueRuntime() (*sessionruntime.Manager, error) {
 	if s == nil || s.sessionManager == nil {
@@ -57,46 +32,32 @@ func (s *Service) liveQueueRuntime() (*sessionruntime.Manager, error) {
 	return s.sessionManager, nil
 }
 
-// queueTurnCommand rebuilds the ordinary chat turn a queued text would have
-// started had the session been idle. Every queue item stores this shape, so
-// the continuation replays a command instead of inferring one.
-func queueTurnCommand(input QueueInput) (turn.StartTurnCommand, error) {
-	teamID, botID, sessionID := strings.TrimSpace(input.TeamID), strings.TrimSpace(input.BotID), strings.TrimSpace(input.SessionID)
-	if teamID == "" || botID == "" || sessionID == "" {
-		return turn.StartTurnCommand{}, ErrQueueInputIncomplete
+// checkQueuedCommand admits the command an ingress queues: the turn its text
+// would have started had the session been idle, built by the code that starts
+// that turn. The queue stores it whole, because the run that replays it
+// starts after the request is gone and, in a hosted deployment, possibly on
+// another instance: nothing then can recover who sent the text, the account
+// it runs for, or the conversation it answers in.
+func checkQueuedCommand(invocationID string, cmd turn.StartTurnCommand) (string, error) {
+	if strings.TrimSpace(cmd.TeamID) == "" || strings.TrimSpace(cmd.BotID) == "" || strings.TrimSpace(cmd.ThreadID) == "" {
+		return "", ErrQueueInputIncomplete
 	}
-	text := strings.TrimSpace(input.Text)
-	if text == "" || strings.TrimSpace(input.InvocationID) == "" {
-		return turn.StartTurnCommand{}, sessionruntime.ErrQueueInvalidReference
+	invocationID = strings.TrimSpace(invocationID)
+	if invocationID == "" || strings.TrimSpace(cmd.Query) == "" {
+		return "", sessionruntime.ErrQueueInvalidReference
 	}
-	cmd := turn.StartTurnCommand{
-		SchemaVersion:           1,
-		TeamID:                  teamID,
-		Mode:                    turn.ModeChat,
-		BotID:                   botID,
-		ChatID:                  botID,
-		ThreadID:                sessionID,
-		RouteID:                 strings.TrimSpace(input.RouteID),
-		UserID:                  strings.TrimSpace(input.UserID),
-		SourceChannelIdentityID: strings.TrimSpace(input.SourceChannelIdentityID),
-		Query:                   text,
-		UserVisibleText:         text,
-		ReplyTarget:             strings.TrimSpace(input.ReplyTarget),
-		ConversationType:        strings.TrimSpace(input.ConversationType),
-		CurrentChannel:          strings.TrimSpace(input.CurrentChannel),
-	}
-	if cmd.CurrentChannel != "" {
-		cmd.Channels = []string{cmd.CurrentChannel}
-	}
-	return cmd, nil
+	return invocationID, nil
 }
 
-func (s *Service) EnqueueSteer(ctx context.Context, input QueueInput) (sessionruntime.SteerItem, error) {
+// EnqueueSteer queues text for the session's running turn. The steer joins
+// that run, so only its text and sender are used; the command keeps the
+// sender, who alone may edit it.
+func (s *Service) EnqueueSteer(ctx context.Context, invocationID string, cmd turn.StartTurnCommand) (sessionruntime.SteerItem, error) {
 	runtime, err := s.liveQueueRuntime()
 	if err != nil {
 		return sessionruntime.SteerItem{}, err
 	}
-	cmd, err := queueTurnCommand(input)
+	invocationID, err = checkQueuedCommand(invocationID, cmd)
 	if err != nil {
 		return sessionruntime.SteerItem{}, err
 	}
@@ -104,21 +65,22 @@ func (s *Service) EnqueueSteer(ctx context.Context, input QueueInput) (sessionru
 	if err != nil {
 		return sessionruntime.SteerItem{}, err
 	}
-	return runtime.EnqueueSteer(ctx, sessionruntime.Key{BotID: cmd.BotID, SessionID: cmd.ThreadID}, uuid.NewString(), strings.TrimSpace(input.InvocationID), payload)
+	return runtime.EnqueueSteer(ctx, sessionruntime.Key{BotID: cmd.BotID, SessionID: cmd.ThreadID}, uuid.NewString(), invocationID, payload)
 }
 
-func (s *Service) EnqueueFollowUp(ctx context.Context, input QueueInput) (sessionruntime.FollowUpItem, error) {
-	cmd, err := queueTurnCommand(input)
+// EnqueueFollowUp queues a turn to start after the session's running one.
+func (s *Service) EnqueueFollowUp(ctx context.Context, invocationID string, cmd turn.StartTurnCommand) (sessionruntime.FollowUpItem, error) {
+	invocationID, err := checkQueuedCommand(invocationID, cmd)
 	if err != nil {
 		return sessionruntime.FollowUpItem{}, err
 	}
-	return s.enqueueFollowUpCommand(ctx, strings.TrimSpace(input.InvocationID), cmd)
+	return s.enqueueFollowUpCommand(ctx, invocationID, cmd)
 }
 
 // enqueueFollowUpCommand is the single write path into the follow-up queue.
-// Text inputs from the queue panel and complete turns deferred by a busy
-// channel both arrive here as a StartTurnCommand, so the queue holds one
-// payload shape and the continuation has one way to read it.
+// Text queued from the Web and complete turns deferred by a busy channel both
+// arrive here as a StartTurnCommand, so the queue holds one payload shape and
+// the continuation has one way to read it.
 func (s *Service) enqueueFollowUpCommand(ctx context.Context, invocationID string, cmd turn.StartTurnCommand) (sessionruntime.FollowUpItem, error) {
 	runtime, err := s.liveQueueRuntime()
 	if err != nil {
