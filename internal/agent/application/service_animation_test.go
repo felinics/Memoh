@@ -12,11 +12,12 @@ import (
 	"github.com/felinics/memoh/internal/models"
 )
 
-// movingStickerTGS is a red square crossing a 512x512 canvas, so the sampled
-// frames are genuinely different from one another.
+// movingStickerTGS exercises frame routing with a small moving square.
+// Full-size rasterisation is covered by internal/media/lottie; these tests
+// need five distinct frames, not a 512x512 rendering workload.
 func movingStickerTGS(t *testing.T) []byte {
 	t.Helper()
-	const document = `{"v":"5.5.2","w":512,"h":512,"ip":0,"op":60,"fr":30,"layers":[{"ty":1,"ind":1,"ip":0,"op":60,"st":0,"sw":128,"sh":128,"sc":"#ff0000","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"t":0,"s":[0,128,0],"e":[384,128,0]},{"t":59,"s":[384,128,0]}]},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[100,100,100]}}}]}`
+	const document = `{"v":"5.5.2","w":32,"h":32,"ip":0,"op":60,"fr":30,"layers":[{"ty":1,"ind":1,"ip":0,"op":60,"st":0,"sw":8,"sh":8,"sc":"#ff0000","ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":1,"k":[{"t":0,"s":[0,8,0],"e":[24,8,0]},{"t":59,"s":[24,8,0]}]},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[100,100,100]}}}]}`
 	var buf bytes.Buffer
 	writer := gzip.NewWriter(&buf)
 	if _, err := writer.Write([]byte(document)); err != nil {
