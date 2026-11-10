@@ -372,14 +372,15 @@ func TestSessionPoolFakeAgentHelper(_ *testing.T) {
 	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT") != "1" {
 		return
 	}
-	agent := &sessionPoolFakeAgent{}
-	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
-	agent.conn = conn
-	<-conn.Done()
+	agent := &sessionPoolFakeAgent{ready: make(chan struct{})}
+	agent.conn = acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
+	close(agent.ready)
+	<-agent.conn.Done()
 	os.Exit(0)
 }
 
 type sessionPoolFakeAgent struct {
+	ready           chan struct{}
 	conn            *acp.AgentSideConnection
 	modelID         string
 	reasoningEffort string
@@ -453,6 +454,8 @@ func (a *sessionPoolFakeAgent) NewSession(context.Context, acp.NewSessionRequest
 }
 
 func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
+	// The SDK starts receiving before its constructor returns.
+	<-a.ready
 	a.appendConfigLog(fmt.Sprintf("prompt:model=%s,reasoning=%s", a.modelID, a.reasoningEffort))
 	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{
 		SessionId: p.SessionId,
