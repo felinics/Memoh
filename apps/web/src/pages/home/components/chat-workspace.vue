@@ -147,10 +147,11 @@ function relayoutAfterAncestorTransform(event: TransitionEvent) {
 //
 // After a failed load, mounting the async component again runs its loader
 // again (Vue drops the failed request), and Chrome fetches a dynamic import
-// again after a failed fetch (other browsers not tested; where it stays
-// failed, reloading the page recovers). The failed state's Retry button
-// remounts by changing the key, so recovering one panel leaves the others,
-// and any unsaved edits in them, untouched.
+// again after a failed fetch (other browsers not tested). The failed state's
+// Retry button remounts by changing the key, so recovering one panel leaves
+// the others, and any unsaved edits in them, untouched. A chunk removed by a
+// deployment since the page loaded fails on every retry; the failed state
+// also offers a page reload for that (see panel-loading.vue).
 const PanelLoadFailed = () => h(PanelLoading, { failed: true })
 const lazyPanel = (loader: AsyncComponentLoader) => {
   const Panel = defineAsyncComponent({

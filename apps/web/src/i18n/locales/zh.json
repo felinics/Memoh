@@ -1255,6 +1255,10 @@
     "panel": {
       "regionLabel": "待处理事项"
     },
+    "panelLoad": {
+      "reloadPage": "刷新页面",
+      "saveBeforeReload": "有未保存的文件，保存后才能刷新页面。"
+    },
     "answers": {
       "skipped": "已跳过",
       "cancelled": "已取消",

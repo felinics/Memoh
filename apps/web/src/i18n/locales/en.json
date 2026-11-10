@@ -1243,6 +1243,10 @@
     "panel": {
       "regionLabel": "Pending items"
     },
+    "panelLoad": {
+      "reloadPage": "Reload page",
+      "saveBeforeReload": "You have unsaved files. Save them before reloading the page."
+    },
     "answers": {
       "skipped": "Skipped",
       "cancelled": "Cancelled",

@@ -1243,6 +1243,10 @@
     "panel": {
       "regionLabel": "保留中の項目"
     },
+    "panelLoad": {
+      "reloadPage": "ページを再読み込み",
+      "saveBeforeReload": "未保存のファイルがあります。保存してから再読み込みしてください。"
+    },
     "answers": {
       "skipped": "スキップ",
       "cancelled": "キャンセル",

@@ -1,11 +1,14 @@
 import {
   createRouter,
   createWebHistory,
+  START_LOCATION,
 } from 'vue-router'
+import { toast } from '@felinic/ui'
 import { useUserStore } from '@/store/user'
 import { ensureOnboarding, hasOnboardingInProgress } from '@/router-guards/onboarding'
 import { installBackHistory } from '@/composables/useBackOr'
-import { isChunkLoadError } from '@/lib/chunk-load-error'
+import { isChunkLoadError, reloadForChunkLoadError, showLoadFailedScreen } from '@/lib/chunk-load-error'
+import i18n from './i18n'
 import { createAppRoutes, loadMainSection, showsChatWorkspace } from './routes'
 
 
@@ -29,11 +32,21 @@ void router.isReady().then(() => {
 // on web and on the desktop shell's memory-history router. See useBackOr.
 installBackHistory(router)
 
-// Handle chunk load errors (e.g. user aborted refresh, network failure, new deployment)
-router.onError((error) => {
+// Handle chunk load errors (e.g. user aborted refresh, network failure, new
+// deployment) by reloading the page, at most once a minute (see
+// reloadForChunkLoadError). Failing again within that, the navigation is
+// dropped: the first navigation has no page to fall back on, so it shows a
+// load failure with a reload button; a later one keeps the current page and
+// says so, and clicking the link again retries the download.
+router.onError((error, _to, from) => {
   if (isChunkLoadError(error)) {
-    console.warn('[Router] Chunk load failed, reloading...', error.message)
-    window.location.reload()
+    if (reloadForChunkLoadError()) {
+      console.warn('[Router] Chunk load failed, reloading...', error.message)
+      return
+    }
+    console.error('[Router] Chunk failed to load again after a reload', error)
+    if (from === START_LOCATION) showLoadFailedScreen()
+    else toast.error(i18n.global.t('common.loadFailed'))
     return
   }
   throw error

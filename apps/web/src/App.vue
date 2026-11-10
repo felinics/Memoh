@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
-import { isChunkLoadError } from '@/lib/chunk-load-error'
+import { isChunkLoadError, reloadForChunkLoadError, showLoadFailedScreen } from '@/lib/chunk-load-error'
 import { holdPrefetchUntil, whenNetworkQuiet } from '@/lib/idle-prefetch'
 import { loadMainSection, prefetchAppPages, showsChatWorkspace } from './routes'
 
@@ -17,7 +17,9 @@ const router = useRouter()
 // Loaded on demand so the login and onboarding pages don't download the chat
 // workspace before they can render (see loadMainSection). A chunk that fails
 // to load reloads the page, the same recovery the router applies to route
-// chunks; nothing in the workspace has user state yet at this point.
+// chunks; nothing in the workspace has user state yet at this point. Failing
+// again within a minute of that reload, the page shows a load failure with a
+// reload button instead (see reloadForChunkLoadError).
 let markMainSectionSettled!: () => void
 const mainSectionSettled = new Promise<void>((resolve) => {
   markMainSectionSettled = resolve
@@ -37,9 +39,12 @@ const MainSection = defineAsyncComponent({
   delay: 0,
   onError(error, _retry, fail) {
     if (isChunkLoadError(error)) {
-      console.warn('[App] Chat workspace chunk failed to load, reloading...', error.message)
-      window.location.reload()
-      return
+      if (reloadForChunkLoadError()) {
+        console.warn('[App] Chat workspace chunk failed to load, reloading...', error.message)
+        return
+      }
+      console.error('[App] Chat workspace chunk failed to load again after a reload', error)
+      showLoadFailedScreen()
     }
     fail()
   },
