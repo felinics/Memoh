@@ -6,6 +6,8 @@ import type { Component, Ref, Slots } from 'vue'
 const mocks = vi.hoisted(() => ({
   providerData: undefined as unknown as Ref<Array<Record<string, unknown>> | undefined>,
   providersLoading: undefined as unknown as Ref<boolean>,
+  providersError: undefined as unknown as Ref<unknown>,
+  refetchProviders: vi.fn(),
   modelData: undefined as unknown as Ref<Array<Record<string, unknown>>>,
   templateData: undefined as unknown as Ref<Array<Record<string, unknown>> | undefined>,
   templatesLoading: undefined as unknown as Ref<boolean>,
@@ -22,12 +24,13 @@ vi.mock('@pinia/colada', async () => {
   const { ref } = await import('vue')
   mocks.providerData = ref()
   mocks.providersLoading = ref(false)
+  mocks.providersError = ref(null)
   mocks.modelData = ref([])
   mocks.templateData = ref()
   mocks.templatesLoading = ref(false)
   return {
     useQuery: ({ key }: { key: () => string[] }) => {
-      if (key()[0] === 'providers') return { data: mocks.providerData, isLoading: mocks.providersLoading }
+      if (key()[0] === 'providers') return { data: mocks.providerData, error: mocks.providersError, isLoading: mocks.providersLoading, refetch: mocks.refetchProviders }
       if (key()[0] === 'provider-templates') return { data: mocks.templateData, isLoading: mocks.templatesLoading }
       return { data: mocks.modelData, isLoading: ref(false) }
     },
@@ -93,6 +96,12 @@ vi.mock('@felinic/ui', () => {
     SwapTransition,
     PageShell,
     Button: Passthrough,
+    CalloutBanner: {
+      props: ['title', 'description', 'tone'],
+      setup(props: { title?: string, description?: string }, { slots }: { slots: Slots }) {
+        return () => h('div', { 'data-slot': 'callout-banner' }, [props.title, props.description, slots.default?.()])
+      },
+    },
     Empty: Passthrough,
     EmptyContent: Passthrough,
     EmptyDescription: Passthrough,
@@ -201,6 +210,8 @@ describe('models panel route state', () => {
       { id: 'provider-two', name: 'Two', enable: true },
     ]
     mocks.providersLoading.value = false
+    mocks.providersError.value = null
+    mocks.refetchProviders.mockReset()
     mocks.modelData.value = []
     mocks.templateData.value = []
     mocks.templatesLoading.value = false
@@ -257,6 +268,31 @@ describe('models panel route state', () => {
     await nextTick()
     expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
     expect(cardNames(root)).toContain('302.AI')
+    app.unmount()
+  })
+
+  it('says the configured providers failed to load instead of silently leaving them out', async () => {
+    mocks.providerData.value = undefined
+    mocks.providersError.value = { status: 500 }
+    const { app, root } = await mountPage()
+
+    const banner = root.querySelector('[data-slot="callout-banner"]')
+    expect(banner?.textContent).toContain('provider.loadFailed')
+    // The addable sources are static, so the gallery itself still renders.
+    expect(cardNames(root)).toContain('302.AI')
+
+    const retry = [...banner!.querySelectorAll('div')].find(el => el.textContent?.trim() === 'common.retry')
+    retry!.click()
+    expect(mocks.refetchProviders).toHaveBeenCalledOnce()
+    app.unmount()
+  })
+
+  it('keeps cached providers without a failure notice when a refresh fails', async () => {
+    mocks.providersError.value = { status: 500 }
+    const { app, root } = await mountPage()
+
+    expect(cardNames(root).slice(0, 2)).toEqual(['One', 'Two'])
+    expect(root.querySelector('[data-slot="callout-banner"]')).toBeNull()
     app.unmount()
   })
 

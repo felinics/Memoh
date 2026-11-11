@@ -1994,6 +1994,7 @@
   "provider": {
     "add": "プロバイダーを追加",
     "addBtn": "追加",
+    "loadFailed": "設定済みのプロバイダーを読み込めませんでした",
     "gallery": {
       "configured": "設定済み",
       "subscriptions": "サブスクリプション",

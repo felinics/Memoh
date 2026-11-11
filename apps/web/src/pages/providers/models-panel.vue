@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
   Button,
+  CalloutBanner,
   Empty,
   Pagination,
   PaginationContent,
@@ -28,6 +29,7 @@ import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/ind
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   groupModelSources,
   isMonochromeLogo,
@@ -44,7 +46,7 @@ import { pageSections, type GallerySection } from './gallery-sections'
 
 const { t } = useI18n()
 
-const { data: providerData, isLoading: providersLoading } = useQuery({
+const { data: providerData, error: providersError, isLoading: providersLoading, refetch: refetchProviders } = useQuery({
   key: () => ['providers'],
   query: async () => {
     const { data } = await getProviders({ throwOnError: true })
@@ -167,6 +169,12 @@ const modelCountByProvider = computed(() => {
 // query still fetching needs a skeleton; a failed one must leave loading.
 const listLoading = computed(() => providerData.value === undefined && providersLoading.value)
 
+// The gallery still renders after a failed request because the addable
+// sources are static. Without this notice the user's own providers would just
+// be missing from it, which reads as "you have none".
+const providersLoadFailed = computed(() => !!providersError.value && providerData.value === undefined)
+const providersLoadFailedDetail = computed(() => resolveApiErrorMessage(providersError.value, ''))
+
 const filteredProviders = computed(() => {
   const keyword = props.searchQuery.trim().toLowerCase()
   if (!keyword) return catalogProviders.value
@@ -279,6 +287,22 @@ function openAddProvider() {
         v-else-if="catalogProviders.length + availableSources.length > 0"
         class="flex flex-col gap-4"
       >
+        <CalloutBanner
+          v-if="providersLoadFailed"
+          tone="destructive"
+          :title="t('provider.loadFailed')"
+          :description="providersLoadFailedDetail || undefined"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            :loading="providersLoading"
+            @click="void refetchProviders()"
+          >
+            {{ t('common.retry') }}
+          </Button>
+        </CalloutBanner>
+
         <Empty
           v-if="cardCount === 0"
           class="flex flex-col items-center justify-center px-4 py-16"

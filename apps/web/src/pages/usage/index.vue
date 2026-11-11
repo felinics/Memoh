@@ -96,6 +96,22 @@
         </div>
       </template>
 
+      <template v-else-if="usageLoadFailed">
+        <CalloutBanner
+          tone="destructive"
+          :title="usageLoadFailedMessage"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            :loading="isFetching"
+            @click="retryUsage"
+          >
+            {{ $t('common.retry') }}
+          </Button>
+        </CalloutBanner>
+      </template>
+
       <template v-else>
         <section class="space-y-2.5">
           <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
@@ -229,13 +245,28 @@
                   </div>
                 </TableCell>
               </TableRow>
-              <TableRow v-else-if="recordsList.length === 0">
+              <TableRow v-else-if="recordsLoadFailed || recordsList.length === 0">
                 <TableCell
                   :colspan="6"
                   class="p-0"
                 >
                   <div class="flex items-center justify-center h-[480px] text-muted-foreground">
-                    {{ $t('usage.noRecords') }}
+                    <div
+                      v-if="recordsLoadFailed"
+                      class="flex flex-col items-center gap-3"
+                    >
+                      {{ recordsLoadFailedMessage }}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        @click="void refetchRecords()"
+                      >
+                        {{ $t('common.retry') }}
+                      </Button>
+                    </div>
+                    <template v-else>
+                      {{ $t('usage.noRecords') }}
+                    </template>
                   </div>
                 </TableCell>
               </TableRow>
@@ -324,6 +355,8 @@ import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
 import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date'
 import {
+  Button,
+  CalloutBanner,
   type DateRange,
   DateRangePicker,
   type DateRangePreset,
@@ -360,6 +393,7 @@ import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsa
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { formatDateTimeShort } from '@/utils/date-time'
 import { externalAgentDisplayName } from '@/utils/external-agent'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
@@ -467,7 +501,7 @@ const sessionTypeFilter = computed(() =>
   selectedSessionType.value === 'all' ? null : selectedSessionType.value as SessionTypeFilter,
 )
 
-const { data: usageData, asyncStatus, refetch } = useQuery({
+const { data: usageData, error: usageError, asyncStatus, refetch } = useQuery({
   key: () => ['token-usage', selectedBotId.value, dateFrom.value, dateTo.value, modelIdFilter.value ?? '', sessionTypeFilter.value ?? ''],
   query: async () => {
     const { data } = await getBotsByBotIdTokenUsage({
@@ -487,6 +521,12 @@ const { data: usageData, asyncStatus, refetch } = useQuery({
 
 const isFetching = computed(() => asyncStatus.value === 'loading')
 const isLoading = computed(() => isFetching.value && !usageData.value)
+// A failed request with nothing cached must not fall through to the overview:
+// it would render every total as 0, which reads as "this bot used nothing".
+const usageLoadFailed = computed(() => !!usageError.value && !usageData.value)
+const usageLoadFailedMessage = computed(() =>
+  resolveApiErrorMessage(usageError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
+)
 
 onMounted(() => {
   if (selectedBotId.value) {
@@ -505,7 +545,7 @@ const recordsPageNumber = computed(() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
 })
 
-const { data: recordsData, asyncStatus: recordsAsyncStatus, refetch: refetchRecords } = useQuery({
+const { data: recordsData, error: recordsError, asyncStatus: recordsAsyncStatus, refetch: refetchRecords } = useQuery({
   key: () => [
     'token-usage-records',
     selectedBotId.value,
@@ -536,6 +576,17 @@ const { data: recordsData, asyncStatus: recordsAsyncStatus, refetch: refetchReco
 const recordsList = computed<HandlersTokenUsageRecord[]>(() => recordsData.value?.items ?? [])
 const isRecordsFetching = computed(() => recordsAsyncStatus.value === 'loading')
 const isRecordsInitialLoading = computed(() => isRecordsFetching.value && !recordsData.value)
+const recordsLoadFailed = computed(() => !!recordsError.value && !recordsData.value)
+const recordsLoadFailedMessage = computed(() =>
+  resolveApiErrorMessage(recordsError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
+)
+
+// The records table lives inside the overview branch, so one retry has to
+// bring both requests back.
+function retryUsage() {
+  void refetch()
+  void refetchRecords()
+}
 const recordsTotal = computed(() => recordsData.value?.total ?? 0)
 const recordsTotalPages = computed(() =>
   Math.max(1, Math.ceil(recordsTotal.value / RECORDS_PAGE_SIZE)),
