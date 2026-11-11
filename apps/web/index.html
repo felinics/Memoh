@@ -41,69 +41,278 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#faf8f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#060606" media="(prefers-color-scheme: dark)" />
-    <!-- Loading splash (#boot-splash below). The styles live here because the
-         splash must draw before the app script runs and this file is outside
-         Tailwind's @source paths. Colors are the app's theme tokens: in a build,
-         the entry stylesheet is a render-blocking <link> in <head>, so the tokens
-         and the dark class set above are in place by the first paint. The logo
-         waits 400ms before fading in, so a cached load that finishes sooner
-         shows only the background. App.vue renders the same .boot-splash
-         markup while the chat workspace is still loading after the first
-         screen; these rules stay in the page after the splash is removed. -->
+    <!-- Loading splash (#boot-splash below). Everything here is inline because
+         it must draw and animate before the app script runs; this file is also
+         outside Tailwind's @source paths. The whole timeline is CSS animation
+         delays, so it keeps going even if the script is slow or never arrives:
+           0-200ms  background only, so a fast load never flashes a splash
+           200ms    mark fades in
+           800ms    indeterminate line (constant speed, no easing)
+           3s       "Loading Memoh..."
+           10s      "Taking longer than usual" (no action: the browser is still
+                    loading, a retry button here would only restart the wait)
+         Only a failed entry script/stylesheet switches to the error state, which
+         is the one place with a Retry. App.vue dismisses the splash once the
+         first screen has rendered (lib/boot-splash.ts), with the motions of
+         login -> home run together rather than one after the other: the splash
+         fades out with its content scaling to 0.88 (175ms) while the app scales
+         in from 1.15 (300ms, faster than login's 450ms). They run as a view
+         transition; see the exit rules below.
+         Colors use the app's theme tokens with fallbacks: in a build the entry
+         stylesheet is render-blocking, but under the dev server Vite injects CSS
+         from JS, so the tokens do not exist yet on the first frames. The
+         fallbacks are the theme-color values above. -->
     <style>
       .boot-splash {
+        --boot-bg: var(--background, #faf8f7);
+        --boot-fg: var(--foreground, #2b2a28);
+        --boot-muted: var(--muted-foreground, #6f6c69);
+        --boot-control: var(--secondary, #f5f5f5);
+        --boot-control-hover: var(--accent, #ebebeb);
         position: fixed;
         inset: 0;
-        z-index: var(--z-top);
+        z-index: var(--z-top, 100);
         display: grid;
         place-items: center;
-        background: var(--background);
+        background: var(--boot-bg);
+        color: var(--boot-fg);
+        font: 360 14px/20px "Inter Variable", Inter, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei UI", sans-serif;
+        letter-spacing: -0.14px;
+        -webkit-font-smoothing: antialiased;
+        transition: opacity 175ms ease-out;
       }
-      .boot-splash img {
-        width: 3.5rem;
-        height: 3.5rem;
+      html.dark .boot-splash {
+        --boot-bg: var(--background, #060606);
+        --boot-fg: var(--foreground, #e2e2e2);
+        --boot-muted: var(--muted-foreground, #a3a3a3);
+        --boot-control: var(--secondary, #2b2b2b);
+        --boot-control-hover: var(--accent, #343434);
+      }
+      /* Only the mark is in flow. The line, the timed text and the error hang
+         below it absolutely, so nothing that appears or fades out can move it.
+         Because everything hangs below, the stage is lifted 45px so the group
+         does not sit low on the screen. */
+      .boot-splash-stage {
+        position: relative;
+        translate: 0 -45px;
+        transition: scale 175ms ease-out;
+      }
+      /* Exit without view transitions (see the exit rules below): the whole
+         splash fades, background included, over the app already rendered behind
+         it. */
+      .boot-splash.is-leaving { opacity: 0; pointer-events: none; }
+      .boot-splash.is-leaving .boot-splash-stage { scale: 0.88; }
+      .boot-splash-mark {
+        display: block;
+        width: 56px;
+        height: auto;
         opacity: 0;
-        animation: boot-splash-in 300ms ease-out 400ms forwards;
+        animation: boot-splash-in 180ms cubic-bezier(0.16, 1, 0.3, 1) 200ms forwards;
       }
-      @keyframes boot-splash-in {
-        to { opacity: 1; }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .boot-splash img {
-          animation: boot-splash-in 0s linear 400ms forwards;
-        }
-      }
-      /* Load failure shown in the splash's place when a chunk keeps failing
-         (showLoadFailedScreen in src/lib/chunk-load-error.ts). */
-      .load-failed {
-        align-content: center;
-        gap: 0.75rem;
-        padding: 0 1.5rem;
+      .boot-splash-loading,
+      .boot-splash-failed {
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        width: min(420px, 100vw - 32px);
+        translate: -50% 0;
         text-align: center;
-        font: 0.875rem/1.5 system-ui, sans-serif;
-        color: var(--muted-foreground);
       }
-      .load-failed p {
-        margin: 0;
-        max-width: 28rem;
+      .boot-splash-loading { display: grid; justify-items: center; }
+      .boot-splash-track {
+        width: 64px;
+        height: 2px;
+        margin-top: 24px;
+        border-radius: 1px;
+        overflow: hidden;
+        background: var(--boot-control);
+        opacity: 0;
+        animation: boot-splash-in 240ms ease-out 800ms forwards;
       }
-      .load-failed button {
-        padding: 0.375rem 0.875rem;
-        border: 1px solid var(--border);
-        border-radius: 0.5rem;
-        background: var(--background);
-        color: var(--foreground);
+      /* Seamless wrap: a 128px strip holds two identical 22px segments exactly
+         one track width (64px) apart. Sliding it by 64px and repeating means the
+         part leaving on the right is already re-entering on the left, so the
+         visible length stays 22px and the speed never changes. */
+      .boot-splash-seg {
+        width: 128px;
+        height: 2px;
+        will-change: transform;
+        background:
+          linear-gradient(var(--boot-muted), var(--boot-muted)) 0 0 / 22px 2px no-repeat,
+          linear-gradient(var(--boot-muted), var(--boot-muted)) 64px 0 / 22px 2px no-repeat;
+        animation: boot-splash-sweep 1.2s linear infinite;
+      }
+      .boot-splash-status { position: relative; width: 100%; margin-top: 20px; }
+      .boot-splash-status > p { position: absolute; inset: 0 0 auto; }
+      .boot-splash-stage p { margin: 0; color: var(--boot-muted); }
+      .boot-splash-stage strong { display: block; margin-bottom: 2px; font-weight: 450; color: var(--boot-fg); }
+      .boot-splash-connecting {
+        opacity: 0;
+        animation: boot-splash-in 120ms ease-out 3s forwards, boot-splash-out 100ms ease-out 10s forwards;
+      }
+      .boot-splash-slow {
+        opacity: 0;
+        visibility: hidden;
+        animation: boot-splash-reveal 120ms ease-out 10s forwards;
+      }
+      /* Loading -> error is Material's fade through: the line and the timed text
+         fade out (90ms), then the error fades in while scaling up from 92%
+         (210ms). The two blocks overlap on screen, so they are never visible
+         together. The mark is left alone: it keeps its own fade-in and never
+         moves. The failure handler below sets --boot-failed-delay so an early
+         failure waits for the mark instead of showing the error before it. */
+      .boot-splash-loading { transition: opacity 90ms cubic-bezier(0.4, 0, 1, 1); }
+      .boot-splash-failed {
+        margin-top: 20px;
+        opacity: 0;
+        scale: 0.92;
+        visibility: hidden;
+        transform-origin: 50% 0;
+      }
+      .boot-splash.is-failed .boot-splash-loading { opacity: 0; }
+      .boot-splash.is-failed .boot-splash-failed {
+        opacity: 1;
+        scale: 1;
+        visibility: visible;
+        transition: opacity 210ms cubic-bezier(0, 0, 0.2, 1), scale 210ms cubic-bezier(0, 0, 0.2, 1);
+        transition-delay: var(--boot-failed-delay, 90ms);
+      }
+      .boot-splash-actions { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
+      .boot-splash-actions button {
+        height: 36px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 999px;
         font: inherit;
+        font-weight: 450;
+        color: var(--boot-fg);
+        background: var(--boot-control);
         cursor: pointer;
+        transition: background-color 120ms ease-out;
+      }
+      .boot-splash-actions button:hover { background: var(--boot-control-hover); }
+      .boot-splash-actions button:focus-visible { outline: 2px solid #2383e2; outline-offset: 2px; }
+      .boot-splash-actions .boot-splash-ghost { background: transparent; color: var(--boot-muted); }
+      .boot-splash-actions .boot-splash-ghost:hover { background: var(--boot-control); color: var(--boot-fg); }
+      .boot-splash-failed .boot-splash-detail {
+        margin-top: 12px;
+        font: 12px/16px ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: 0;
+        word-break: break-all;
+      }
+      /* Exit. The splash leaving and the app entering are a view transition
+         (lib/boot-splash.ts sets boot-entering for its duration), so the motions
+         play on snapshots and the app itself is never scaled. Scaling #app
+         directly broke the chat workspace: dockview sizes its panels from their
+         on-screen boxes, measured them mid-scale, and left them 15% too large.
+         The stage is captured on its own so that it scales while the splash
+         background only fades. Blending is set back to normal because the two
+         root snapshots are not a cross-fade (their durations differ). Browsers
+         without view transitions use the is-leaving rules above and skip the
+         app's entry. */
+      html.boot-entering #boot-splash .boot-splash-stage { view-transition-name: boot-splash-stage; }
+      html.boot-entering::view-transition-old(root) { animation: boot-splash-out 175ms ease-out both; mix-blend-mode: normal; }
+      html.boot-entering::view-transition-new(root) { animation: boot-app-enter 300ms ease-out both; mix-blend-mode: normal; }
+      html.boot-entering::view-transition-old(boot-splash-stage) { animation: boot-splash-stage-out 175ms ease-out both; }
+      @keyframes boot-splash-in { to { opacity: 1; } }
+      @keyframes boot-splash-out { to { opacity: 0; } }
+      @keyframes boot-splash-stage-out { to { opacity: 0; scale: 0.88; } }
+      @keyframes boot-splash-reveal { from { visibility: visible; } to { opacity: 1; visibility: visible; } }
+      @keyframes boot-splash-sweep { from { transform: translate3d(-64px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
+      @keyframes boot-app-enter { from { opacity: 0; scale: 1.15; } to { opacity: 1; scale: 1; } }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-splash-seg { animation: none; transform: translate3d(-43px, 0, 0); }
+        .boot-splash-stage { transition: none; }
+        .boot-splash-failed { scale: none; }
       }
     </style>
   </head>
   <body>
     <div id="app"></div>
-    <!-- Removed by App.vue once the first screen has rendered. -->
-    <div id="boot-splash" class="boot-splash" aria-hidden="true">
-      <img src="/logo.svg" alt="" />
+    <!-- Dismissed by App.vue (lib/boot-splash.ts) once the first screen has
+         rendered. App.vue's MainSectionLoading reuses the stage markup while the
+         chat workspace is still loading. -->
+    <div id="boot-splash" class="boot-splash" role="status" aria-live="polite">
+      <div class="boot-splash-stage">
+        <svg class="boot-splash-mark" viewBox="0 0 454.08 399.96" role="img" aria-label="Memoh">
+          <path fill="#bd69ff" d="M249.55,307.07c-63.11,20.61-155.69,25.5-182.38,6.68-34.57-24.37-19.05-137.12,7.42-173.36,32.66-44.71,114.75-54.31,152.82-55.97,44.88-1.96,50.44-30.49,50.44-30.49-15.46,14.29-17.33,16.35-64.32,18.23-33.97,1.36-87.49,3.88-130.26,27.67l-2.72-56.39c-.4-8.24-7.4-14.59-15.63-14.2-8.24.4-14.59,7.4-14.2,15.63l3.68,76.38c-4.98,4.93-9.62,10.35-13.82,16.35C3.89,189.99-1.8,249.58.42,297.41c.81,17.44,2.49,31.96,6.82,44.21,0,0,0,.01.01.03.6,1.19,22.35,43.42,104.6,34.64,83.45-8.9,172.88-57.76,208.36-119.64-13.8,23.41-35.2,38.86-70.67,50.43Z" />
+          <path fill="#7948ff" d="M429.45,110.2c-23.96-30.8-56.39-44.77-79.74-51.1l13.35-39.38c2.65-7.81-1.54-16.29-9.35-18.93h0c-7.81-2.65-16.29,1.54-18.93,9.35l-14.85,43.78c-8.49,25.06-53.64,36.67-53.64,36.67,0,0,11.72-1.65,40.22,7.62,28.5,9.29,34.21,37.45,31.07,93.85-1.36,24.71-6.6,46.33-17.36,64.57-35.48,61.88-124.9,110.75-208.36,119.64-82.26,8.78-104-33.45-104.6-34.64,2.24,6.32,5.18,12.03,9.07,17.2,13.1,17.4,32.05,24.78,47.08,28.94,81.61,22.55,233.81,7.12,244.66,5.97,24.35-2.57,51.97-5.92,79.03-25.32,5.4-3.87,22.47-18.21,39.94-46.21,25.47-40.82,44.25-158.22,2.42-212.01Z" />
+          <path fill="#7948ff" d="M163.41,238.79c.37.09,2.75.63,6.52,1.04,11.65,1.27,36.5,1.31,55.49-17.2,3.11-3.04,3.18-8.02.14-11.13-3.04-3.11-8.02-3.18-11.13-.14-18.85,18.38-47.15,12.17-47.44,12.11-4.23-.99-8.45,1.64-9.44,5.86-1,4.23,1.63,8.47,5.86,9.47Z" />
+          <path fill="#7948ff" d="M118.67,218.27c12.32-.73,22.48-9.91,24.45-22.09l2-12.31c1.56-9.59-6.18-18.15-15.87-17.57h0c-12.32.73-22.48,9.91-24.45,22.09l-2,12.31c-1.56,9.59,6.18,18.15,15.87,17.57Z" />
+          <path fill="#7948ff" d="M249.71,207.88h0c12.32-.73,22.48-9.91,24.45-22.09l2-12.31c1.56-9.59-6.18-18.15-15.87-17.57h0c-12.32.73-22.48,9.91-24.45,22.09l-2,12.31c-1.56,9.59,6.18,18.15,15.87,17.57Z" />
+        </svg>
+        <div class="boot-splash-loading">
+          <div class="boot-splash-track" aria-hidden="true"><div class="boot-splash-seg"></div></div>
+          <div class="boot-splash-status">
+            <p class="boot-splash-connecting" data-boot-text="connecting">Loading Memoh…</p>
+            <p class="boot-splash-slow"><strong data-boot-text="slowTitle">Taking longer than usual</strong><span data-boot-text="slowBody">Your connection may be slow. Still loading…</span></p>
+          </div>
+        </div>
+        <div class="boot-splash-failed">
+          <p><strong data-boot-text="failedTitle">Couldn't load Memoh</strong><span data-boot-text="failedBody">Check your connection, then try again.</span></p>
+          <div class="boot-splash-actions">
+            <button type="button" data-boot-text="retry" onclick="location.reload()">Retry</button>
+            <button type="button" class="boot-splash-ghost" data-boot-text="details" onclick="var d=document.getElementById('boot-splash-detail');d.hidden=!d.hidden">Details</button>
+          </div>
+          <p id="boot-splash-detail" class="boot-splash-detail" hidden></p>
+        </div>
+      </div>
     </div>
+    <!-- The splash runs before i18n exists, so its few strings are localized
+         here, in the language the app is about to start in: the saved
+         `language`, or on a first visit the browser's (the same choice as
+         getInitialLocale in src/i18n.ts). Keep these in step with the locale
+         files' wording when the copy changes. Only the entry's own script, stylesheet
+         and module preloads count as a failure here: they are the ones in the
+         page before the app runs (in a build Vite puts them in <head>; the dev
+         server's entry script follows this one in <body>). Links the app adds
+         later to preload lazy chunks are its own to handle: it reloads once and,
+         if that fails too, switches this splash to the same failure state
+         (lib/boot-splash.ts). -->
+    <script>
+      (function () {
+        var splash = document.getElementById('boot-splash')
+        var entryResources = Array.prototype.slice.call(
+          document.querySelectorAll('script[src], link[rel="stylesheet"], link[rel="modulepreload"]')
+        )
+        function isEntryResource(el) {
+          if (entryResources.indexOf(el) !== -1) return true
+          return el.tagName === 'SCRIPT' && el.parentNode === document.body
+        }
+        var copy = {
+          zh: { connecting: '正在加载 Memoh…', slowTitle: '加载时间比平时长', slowBody: '网络可能较慢，仍在加载…', failedTitle: 'Memoh 加载失败', failedBody: '请检查网络连接后重试。', retry: '重试', details: '详情' },
+          ja: { connecting: 'Memoh を読み込んでいます…', slowTitle: 'いつもより時間がかかっています', slowBody: 'ネットワークが遅い可能性があります。読み込みを続けています…', failedTitle: 'Memoh を読み込めませんでした', failedBody: '接続を確認してから、もう一度お試しください。', retry: '再試行', details: '詳細' }
+        }
+        var language
+        try {
+          language = localStorage.getItem('language')
+        } catch (e) {}
+        if (language !== 'en' && language !== 'zh' && language !== 'ja') {
+          var browserLanguage = (navigator.language || '').toLowerCase()
+          language = browserLanguage.indexOf('zh') === 0 ? 'zh' : browserLanguage.indexOf('ja') === 0 ? 'ja' : 'en'
+        }
+        var strings = copy[language]
+        if (strings) {
+          document.documentElement.lang = language
+          splash.querySelectorAll('[data-boot-text]').forEach(function (el) {
+            var key = el.getAttribute('data-boot-text')
+            if (strings[key]) el.textContent = strings[key]
+          })
+        }
+        window.addEventListener('error', function (event) {
+          var el = event.target
+          if (!el || (el.tagName !== 'SCRIPT' && el.tagName !== 'LINK') || !isEntryResource(el)) return
+          if (!document.getElementById('boot-splash')) return
+          if (splash.classList.contains('is-failed')) return
+          // The mark fades in at 200ms over 180ms; an earlier failure holds the
+          // error until then. performance.now() counts from navigation start,
+          // which is close enough to when the CSS delays started.
+          splash.style.setProperty('--boot-failed-delay', Math.max(90, 380 - performance.now()) + 'ms')
+          splash.classList.add('is-failed')
+          document.getElementById('boot-splash-detail').textContent = 'Failed to load ' + (el.src || el.href)
+        }, true)
+      })()
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

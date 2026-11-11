@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
-import { isChunkLoadError, reloadForChunkLoadError, showLoadFailedScreen } from '@/lib/chunk-load-error'
+import { isChunkLoadError, reloadForChunkLoadError } from '@/lib/chunk-load-error'
+import { dismissBootSplash, showBootFailure } from '@/lib/boot-splash'
 import { holdPrefetchUntil, whenNetworkQuiet } from '@/lib/idle-prefetch'
 import { loadMainSection, prefetchAppPages, showsChatWorkspace } from './routes'
 
@@ -18,23 +19,29 @@ const router = useRouter()
 // workspace before they can render (see loadMainSection). A chunk that fails
 // to load reloads the page, the same recovery the router applies to route
 // chunks; nothing in the workspace has user state yet at this point. Failing
-// again within a minute of that reload, the page shows a load failure with a
-// reload button instead (see reloadForChunkLoadError).
+// again within a minute of that reload, the loading splash switches to its
+// failure state instead (see reloadForChunkLoadError, showBootFailure).
 let markMainSectionSettled!: () => void
 const mainSectionSettled = new Promise<void>((resolve) => {
   markMainSectionSettled = resolve
 })
-// Until the workspace arrives, the loading splash's markup stands in for it
-// (its .boot-splash styles are in index.html). Signing in right after the login
-// page opens can outrun the warm-up on a slow network: measured on Slow 4G, the
-// page was otherwise empty for about 5s after the login page left.
+// Until the workspace arrives, the loading splash's mark and line stand in for
+// it (the .boot-splash styles are in index.html; the timed status text is left
+// out because it is localized there, before i18n exists). Signing in right
+// after the login page opens can outrun the warm-up on a slow network: measured
+// on Slow 4G, the page was otherwise empty for about 5s after the login page left.
 const MainSectionLoading = () => h('div', { class: 'boot-splash', 'aria-hidden': 'true' }, [
-  h('img', { src: '/logo.svg', alt: '' }),
+  h('div', { class: 'boot-splash-stage' }, [
+    h('img', { class: 'boot-splash-mark', src: '/logo.svg', alt: '' }),
+    h('div', { class: 'boot-splash-loading' }, [
+      h('div', { class: 'boot-splash-track' }, [h('div', { class: 'boot-splash-seg' })]),
+    ]),
+  ]),
 ])
 const MainSection = defineAsyncComponent({
   loader: () => loadMainSection().finally(markMainSectionSettled),
   loadingComponent: MainSectionLoading,
-  // The splash keeps its logo hidden for its first 400ms, so a quick load shows
+  // The splash keeps its mark hidden for its first 200ms, so a quick load shows
   // only the page background either way.
   delay: 0,
   onError(error, _retry, fail) {
@@ -44,7 +51,7 @@ const MainSection = defineAsyncComponent({
         return
       }
       console.error('[App] Chat workspace chunk failed to load again after a reload', error)
-      showLoadFailedScreen()
+      showBootFailure(error.message)
     }
     fail()
   },
@@ -68,12 +75,12 @@ const isAppArea = computed(() => showsChatWorkspace(route))
 // Vue mounting is not the end of the wait: the initial navigation still loads
 // its lazy route page, and on chat and settings routes the chat workspace is
 // still loading. Remove the splash once both have settled, on the next frame
-// so the screen behind it has rendered. On failure it is removed too, so an
+// so the screen behind it has rendered. On failure it is dismissed too, so an
 // error state is not hidden behind it.
 const firstScreenSettled = router.isReady()
   .then(() => (isAppArea.value ? mainSectionSettled : undefined))
   .catch(() => {})
-void firstScreenSettled.finally(() => requestAnimationFrame(() => document.getElementById('boot-splash')?.remove()))
+void firstScreenSettled.finally(() => requestAnimationFrame(dismissBootSplash))
 
 // Warm the chat workspace and the settings pages in the background so the
 // first open after sign-in and first-time sidebar clicks don't wait on a chunk

@@ -1,7 +1,8 @@
 import { createI18n } from 'vue-i18n'
 import { computed } from 'vue'
 import { detectLocale } from '@/utils/detect-locale'
-import { isChunkLoadError, reloadForChunkLoadError, showLoadFailedScreen } from '@/lib/chunk-load-error'
+import { isChunkLoadError, reloadForChunkLoadError } from '@/lib/chunk-load-error'
+import { showBootFailure } from '@/lib/boot-splash'
 import { loadLocaleMessages, loadedLocaleMessages, type Locale, type LocaleMessages } from '@/i18n/messages'
 
 export type { Locale, LocaleMessages }
@@ -75,8 +76,8 @@ export function preloadLocales(): void {
  * Settles once the starting language is loaded; the app mounts after it so the
  * first render has its copy. A chunk that fails to load reloads the page, the
  * same recovery the router applies to route chunks, at most once a minute
- * (see reloadForChunkLoadError); failing again within that, the page shows a
- * load failure with a reload button. Either way it stays pending so the app
+ * (see reloadForChunkLoadError); failing again within that, the loading splash
+ * switches to its failure state (showBootFailure). Either way it stays pending so the app
  * doesn't mount without copy. Any other failure is logged and the app mounts
  * anyway.
  */
@@ -86,7 +87,7 @@ export const i18nReady: Promise<void> = prepareLocale(initialLocale).catch((erro
       console.warn('[i18n] Locale chunk failed to load, reloading...', error)
     } else {
       console.error('[i18n] Locale chunk failed to load again after a reload', error)
-      showLoadFailedScreen()
+      showBootFailure(error instanceof Error ? error.message : String(error))
     }
     return new Promise<void>(() => {})
   }

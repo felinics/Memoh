@@ -7,7 +7,8 @@ import { toast } from '@felinic/ui'
 import { useUserStore } from '@/store/user'
 import { ensureOnboarding, hasOnboardingInProgress } from '@/router-guards/onboarding'
 import { installBackHistory } from '@/composables/useBackOr'
-import { isChunkLoadError, reloadForChunkLoadError, showLoadFailedScreen } from '@/lib/chunk-load-error'
+import { isChunkLoadError, reloadForChunkLoadError } from '@/lib/chunk-load-error'
+import { showBootFailure } from '@/lib/boot-splash'
 import i18n from './i18n'
 import { createAppRoutes, loadMainSection, showsChatWorkspace } from './routes'
 
@@ -35,8 +36,8 @@ installBackHistory(router)
 // Handle chunk load errors (e.g. user aborted refresh, network failure, new
 // deployment) by reloading the page, at most once a minute (see
 // reloadForChunkLoadError). Failing again within that, the navigation is
-// dropped: the first navigation has no page to fall back on, so it shows a
-// load failure with a reload button; a later one keeps the current page and
+// dropped: the first navigation has no page to fall back on, so the loading
+// splash switches to its failure state; a later one keeps the current page and
 // says so, and clicking the link again retries the download.
 router.onError((error, _to, from) => {
   if (isChunkLoadError(error)) {
@@ -45,7 +46,7 @@ router.onError((error, _to, from) => {
       return
     }
     console.error('[Router] Chunk failed to load again after a reload', error)
-    if (from === START_LOCATION) showLoadFailedScreen()
+    if (from === START_LOCATION) showBootFailure(error.message)
     else toast.error(i18n.global.t('common.loadFailed'))
     return
   }
