@@ -4,6 +4,7 @@ import { i18nRef, LOCALE_OPTIONS } from './i18n'
 import { loadLocaleMessages } from './i18n/messages'
 import { getBotBreadcrumbName } from './lib/bot-breadcrumb'
 import { prefetchInIdle } from './lib/idle-prefetch'
+import { withStylesheetRecovery } from './lib/chunk-load-error'
 
 /**
  * The persistent chat workspace (sidebar + dockview). App.vue mounts it outside
@@ -11,7 +12,7 @@ import { prefetchInIdle } from './lib/idle-prefetch'
  * the chat UI, Markdown rendering and code highlighting, which the login and
  * onboarding pages must not wait on. prefetchAppPages warms it first.
  */
-export const loadMainSection = () => import('@/pages/main-section/index.vue')
+export const loadMainSection = withStylesheetRecovery(() => import('@/pages/main-section/index.vue'))
 
 /** Whether App.vue mounts the chat workspace on this route: chat routes, and settings routes (rendered above it). */
 export function showsChatWorkspace(route: Pick<RouteLocationNormalized, 'name' | 'path'>): boolean {
@@ -21,22 +22,24 @@ export function showsChatWorkspace(route: Pick<RouteLocationNormalized, 'name' |
 // ── Settings page loaders ────────────────────────────────────────────────────
 // Named consts instead of inline arrows so prefetchAppPages warms EXACTLY
 // the functions the routes reference — one copy of each import path, no drift.
-const pageSettings = () => import('@/pages/settings-section/index.vue')
-const pageBots = () => import('@/pages/bots/index.vue')
-const pageBotNew = () => import('@/pages/bots/new.vue')
-const pageBotCreateProgress = () => import('@/pages/bots/new-progress.vue')
-const pageBotDetail = () => import('@/pages/bots/detail.vue')
-const pageProviders = () => import('@/pages/providers/index.vue')
-const pageRuntimes = () => import('@/pages/runtimes/index.vue')
-const pageUsage = () => import('@/pages/usage/index.vue')
-const pagePeople = () => import('@/pages/people/index.vue')
-const pageAppearance = () => import('@/pages/appearance/index.vue')
-const pageKeyboard = () => import('@/pages/keyboard-shortcuts/index.vue')
-const pageProfile = () => import('@/pages/profile/index.vue')
-const pageSupermarket = () => import('@/pages/supermarket/index.vue')
-const pageSupermarketCategory = () => import('@/pages/supermarket/category.vue')
-const pageSupermarketAppDetail = () => import('@/pages/supermarket/app-detail.vue')
-const pageAbout = () => import('@/pages/about/index.vue')
+// Each is wrapped with withStylesheetRecovery: a stylesheet that failed during
+// the background warm-up must not leave the page unstyled when it opens.
+const pageSettings = withStylesheetRecovery(() => import('@/pages/settings-section/index.vue'))
+const pageBots = withStylesheetRecovery(() => import('@/pages/bots/index.vue'))
+const pageBotNew = withStylesheetRecovery(() => import('@/pages/bots/new.vue'))
+const pageBotCreateProgress = withStylesheetRecovery(() => import('@/pages/bots/new-progress.vue'))
+const pageBotDetail = withStylesheetRecovery(() => import('@/pages/bots/detail.vue'))
+const pageProviders = withStylesheetRecovery(() => import('@/pages/providers/index.vue'))
+const pageRuntimes = withStylesheetRecovery(() => import('@/pages/runtimes/index.vue'))
+const pageUsage = withStylesheetRecovery(() => import('@/pages/usage/index.vue'))
+const pagePeople = withStylesheetRecovery(() => import('@/pages/people/index.vue'))
+const pageAppearance = withStylesheetRecovery(() => import('@/pages/appearance/index.vue'))
+const pageKeyboard = withStylesheetRecovery(() => import('@/pages/keyboard-shortcuts/index.vue'))
+const pageProfile = withStylesheetRecovery(() => import('@/pages/profile/index.vue'))
+const pageSupermarket = withStylesheetRecovery(() => import('@/pages/supermarket/index.vue'))
+const pageSupermarketCategory = withStylesheetRecovery(() => import('@/pages/supermarket/category.vue'))
+const pageSupermarketAppDetail = withStylesheetRecovery(() => import('@/pages/supermarket/app-detail.vue'))
+const pageAbout = withStylesheetRecovery(() => import('@/pages/about/index.vue'))
 
 /**
  * Settings page loaders warmed by prefetchAppPages, ordered sidebar

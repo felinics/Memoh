@@ -43,6 +43,7 @@ import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFil
 import { normalizeFileManagerPath } from './file-manager-path'
 import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
 import { prefetchLater, whenNetworkQuiet } from '@/lib/idle-prefetch'
+import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelLoading, { retryPanelLoadKey } from './dockview/panel-loading.vue'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
@@ -176,14 +177,16 @@ const lazyPanel = (loader: AsyncComponentLoader) => {
 // sign-in, when the rest of the queue may have finished long before. The file
 // panel goes first: opening a file is the most common of these, and it
 // carries the editor.
+// Wrapped with withStylesheetRecovery so a stylesheet that failed during the
+// background download is loaded again when the panel opens or retries.
 const panelLoaders = {
-  file: () => import('./dockview/panel-file.vue'),
-  preview: () => import('./dockview/panel-preview.vue'),
-  asset: () => import('./dockview/panel-asset.vue'),
-  terminal: () => import('./dockview/panel-terminal.vue'),
-  browser: () => import('./dockview/panel-browser.vue'),
-  display: () => import('./dockview/panel-display.vue'),
-  schedule: () => import('./dockview/panel-schedule.vue'),
+  file: withStylesheetRecovery(() => import('./dockview/panel-file.vue')),
+  preview: withStylesheetRecovery(() => import('./dockview/panel-preview.vue')),
+  asset: withStylesheetRecovery(() => import('./dockview/panel-asset.vue')),
+  terminal: withStylesheetRecovery(() => import('./dockview/panel-terminal.vue')),
+  browser: withStylesheetRecovery(() => import('./dockview/panel-browser.vue')),
+  display: withStylesheetRecovery(() => import('./dockview/panel-display.vue')),
+  schedule: withStylesheetRecovery(() => import('./dockview/panel-schedule.vue')),
 }
 onMounted(() => {
   void whenNetworkQuiet().then(() => prefetchLater(Object.values(panelLoaders)))
