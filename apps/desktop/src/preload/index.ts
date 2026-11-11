@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 import {
   DESKTOP_KEYBOARD_COMMAND_CHANNEL,
   isAppKeyboardCommand,
@@ -97,12 +96,10 @@ export type MemohApi = typeof api
 
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
     console.error(error)
   }
 } else {
-  window.electron = electronAPI
   window.api = api
 }

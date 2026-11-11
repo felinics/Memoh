@@ -49,7 +49,7 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
 
 export default defineConfig(async ({ command }) => {
   const { port, host, baseUrl } = resolveProxyTarget(command)
-  const bundledElectronToolkit = ['@electron-toolkit/preload', '@electron-toolkit/utils']
+  const bundledElectronToolkit = ['@electron-toolkit/utils']
   const desktopBaseUrl = process.env.MEMOH_DESKTOP_BASE_URL?.trim() ?? ''
   const desktopAppId = process.env.MEMOH_DESKTOP_APP_ID?.trim() ?? ''
   const updateBaseUrl = process.env.MEMOH_DESKTOP_UPDATE_BASE_URL?.trim() ?? ''

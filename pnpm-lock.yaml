@@ -98,9 +98,6 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@electron-toolkit/preload':
-        specifier: ^3.0.1
-        version: 3.0.2(electron@42.11.18)
       '@electron-toolkit/utils':
         specifier: ^4.0.0
         version: 4.0.0(electron@42.11.18)
@@ -818,11 +815,6 @@ packages:
   '@electron-internal/extract-zip@1.0.5':
     resolution: {integrity: sha512-+bqFCP98pLI0Tt0XQo1TmlXtwjWchISndDOxCkEcIuUgXWpBnLyRI+2DU+mesvnMMX6L1XDqYNA0lXNDHd/yiA==}
     engines: {node: '>=22.12.0'}
-
-  '@electron-toolkit/preload@3.0.2':
-    resolution: {integrity: sha512-TWWPToXd8qPRfSXwzf5KVhpXMfONaUuRAZJHsKthKgZR/+LqX1dZVSSClQ8OTAEduvLGdecljCsoT2jSshfoUg==}
-    peerDependencies:
-      electron: '>=13.0.0'
 
   '@electron-toolkit/tsconfig@1.0.1':
     resolution: {integrity: sha512-M0Mol3odspvtCuheyujLNAW7bXq7KFNYVMRtpjFa4ZfES4MuklXBC7Nli/omvc+PRKlrklgAGx3l4VakjNo8jg==}
@@ -5987,10 +5979,6 @@ snapshots:
   '@drizzle-team/brocli@0.10.2': {}
 
   '@electron-internal/extract-zip@1.0.5': {}
-
-  '@electron-toolkit/preload@3.0.2(electron@42.11.18)':
-    dependencies:
-      electron: 42.11.18
 
   '@electron-toolkit/tsconfig@1.0.1(@types/node@25.9.5)':
     dependencies:
