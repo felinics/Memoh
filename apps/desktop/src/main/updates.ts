@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { OutgoingHttpHeaders } from 'node:http'
 import { CancellationToken } from 'builder-util-runtime'
 import { GenericProvider } from 'electron-updater/out/providers/GenericProvider.js'
+import { ElectronHttpExecutor } from 'electron-updater/out/electronHttpExecutor.js'
 import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import electronUpdater from 'electron-updater'
 import type { ProgressInfo, UpdateInfo } from 'electron-updater'
@@ -132,6 +133,39 @@ class FeedProvider extends GenericProvider {
       clearTimeout(timer)
     }
   }
+}
+
+// electron-updater 6.8.9 / builder-util-runtime 9.7.0 leave some responses
+// without an 'error' listener: a check answered with 404, a download answered
+// with status >= 400 (both settle on the status and stop reading), and the
+// multi-range differential download, which only pipes the response. When the
+// connection resets on such a response, Electron's net stack destroys it with
+// the error and the main process gets an uncaughtException
+// (net::ERR_CONNECTION_RESET) long after the updater has moved on.
+// Electron emits that same error on the request too, and the updater already
+// listens there, so the listener added here only stops Node from treating the
+// response's copy as unhandled; the failure is still reported once, through the
+// request.
+class ResponseErrorTolerantExecutor extends ElectronHttpExecutor {
+  override createRequest(options: unknown, callback: (response: Electron.IncomingMessage) => void): Electron.ClientRequest {
+    return super.createRequest(options, (response: Electron.IncomingMessage) => {
+      response.on('error', () => {})
+      callback(response)
+    })
+  }
+}
+
+// AppUpdater keeps its executor in an undocumented internal field and hands it
+// to the provider when setFeedURL runs, so this must happen before useFeed.
+// The field is not part of the typed API: if an electron-updater upgrade renames
+// it, assigning would silently do nothing, so check it first and say so.
+function useResponseErrorTolerantExecutor(): void {
+  const updater = autoUpdater as unknown as { httpExecutor?: unknown }
+  if (!(updater.httpExecutor instanceof ElectronHttpExecutor)) {
+    console.warn('[updates] autoUpdater.httpExecutor is missing; update responses are not guarded against unhandled errors')
+    return
+  }
+  updater.httpExecutor = new ResponseErrorTolerantExecutor((authInfo, callback) => autoUpdater.emit('login', authInfo, callback))
 }
 
 function useFeed(): void {
@@ -428,6 +462,7 @@ function configureAutoUpdater(): void {
     autoUpdater.autoInstallOnAppQuit = false
     autoUpdater.forceDevUpdateConfig = !app.isPackaged
     try {
+      useResponseErrorTolerantExecutor()
       useFeed()
       updaterConfigured = true
     } catch (error) {
