@@ -26,6 +26,8 @@ export function wsFrameErrorCode(event: { code?: string }): string {
   return event.code?.trim() ?? ''
 }
 
+const logSessionRefreshFailure = (error: unknown) => console.error('Failed to refresh session messages:', error)
+
 type AssistantStreams = ReturnType<typeof createAssistantStreamRegistry>
 type Decisions = ReturnType<typeof createChatDecisions>
 type Realtime = ReturnType<typeof createChatRealtimeController>
@@ -457,7 +459,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
 
     if (needsHistoryResync && currentRun && isRuntimeRunActive(currentRun.status)) {
       refreshedMessages = true
-      void resyncTranscript()
+      void resyncTranscript().catch(logSessionRefreshFailure)
     }
 
     deps.decisions.observeRun(sessionId, currentRun)
@@ -472,7 +474,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         }
         if (view) {
           refreshedMessages = true
-          void deps.refreshCurrentSession(botId, sessionId)
+          void deps.refreshCurrentSession(botId, sessionId).catch(logSessionRefreshFailure)
             .finally(() => deps.releaseHiddenSessionView(botId, sessionId))
         } else {
           deps.touchSessionInList(sessionId, previousRun.updated_at)
@@ -534,7 +536,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       const refresh = needsHistoryResync
         ? resyncTranscript()
         : deps.refreshCurrentSession(botId, sessionId)
-      void refresh
+      void refresh.catch(logSessionRefreshFailure)
         .finally(() => deps.releaseHiddenSessionView(botId, sessionId))
     } else if (!view) {
       deps.touchSessionInList(sessionId, currentRun.updated_at)

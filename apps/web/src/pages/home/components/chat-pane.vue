@@ -57,6 +57,21 @@
                 </Button>
               </CalloutBanner>
 
+              <CalloutBanner
+                v-if="initialLoadFailed && !loadingMessages && !activeSessionSummaryFailed"
+                tone="warning"
+                :title="$t('common.loadFailed')"
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :loading="retryingInitialLoad"
+                  @click="retryInitialLoad"
+                >
+                  {{ $t('common.retry') }}
+                </Button>
+              </CalloutBanner>
+
               <!-- A session with a live run but no messages yet (a subagent
                    that has not produced output) reads as starting, not empty.
                    A first send waiting on welcome already shows its spinner
@@ -1469,6 +1484,7 @@ provideConnectorLogos(paneTarget)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
+const initialLoadFailed = computed(() => paneView.value.initialLoadFailed.value)
 /** Kept-alive panes behind settings, loading transcripts and inactive splits are not readers. */
 const canReadSession = computed(() => isActive.value && isVisible.value
   && !loadingMessages.value && !loadingChats.value && CHAT_ROUTE_NAMES.has(String(route.name)))
@@ -1517,6 +1533,21 @@ async function retryActiveSessionSummary() {
     await chatStore.ensureVisibleSessionSummary(botId, sessionId)
   } finally {
     retryingSessionSummary.value = false
+  }
+}
+const retryingInitialLoad = ref(false)
+
+async function retryInitialLoad() {
+  const { botId, sessionId } = paneTarget.value
+  if (!botId || !sessionId || retryingInitialLoad.value) return
+  retryingInitialLoad.value = true
+  try {
+    await paneView.value.transcript.refreshCurrentSession(botId, sessionId)
+  } catch (error) {
+    // The notice stays up: it only clears once history is applied.
+    console.error('Failed to load session messages:', error)
+  } finally {
+    retryingInitialLoad.value = false
   }
 }
 const activeChatCanFork = computed(() => chatStore.chatCanForkFor(paneTarget.value))

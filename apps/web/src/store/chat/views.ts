@@ -205,7 +205,17 @@ export function createChatViews(deps: ChatViewsDeps) {
       || view.staleWhileHidden
       || !chatViews.isActivityStreamCovered(botId)
     )
-    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, { mask })
+    view.initialLoadFailed.value = false
+    try {
+      await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, { mask })
+    } catch (error) {
+      // Turns already on screen (a cached or client-born view) stay as they
+      // are. Only a view with nothing to show would pass for an empty session.
+      if (!view.initialized && view.transcript.messages.length === 0) {
+        view.initialLoadFailed.value = true
+      }
+      throw error
+    }
     view.initialized = true
   }
   const fetchSessionWindow = (botId: string, sessionId: string) =>

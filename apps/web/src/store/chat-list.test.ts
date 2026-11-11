@@ -4128,6 +4128,76 @@ describe('chat-list store', () => {
       expect(store.messages.map(turn => turn.id)).toEqual(['fresh-a'])
     })
 
+  it('reports a failed initial history load until a retry applies history', async () => {
+      api.fetchSessions.mockResolvedValueOnce({ items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+      ], nextCursor: null })
+      api.fetchMessagesUI.mockRejectedValueOnce(new Error('network down'))
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const store = useChatStore()
+
+        await openSession(store, 'bot-1', 'session-a')
+        await flushPromises()
+
+        const view = store.chatView({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat' })
+        expect(view.initialLoadFailed.value).toBe(true)
+        expect(store.loadingMessages).toBe(false)
+        expect(store.messages).toEqual([])
+
+        api.fetchMessagesUI.mockResolvedValueOnce([{
+          id: 'fresh-a',
+          turn_id: 'fresh-a',
+          role: 'user',
+          text: 'fresh',
+          attachments: [],
+          timestamp: '2026-01-02T00:00:00.000Z',
+        }])
+        await view.transcript.refreshCurrentSession('bot-1', 'session-a')
+
+        expect(view.initialLoadFailed.value).toBe(false)
+        expect(store.messages.map(turn => turn.id)).toEqual(['fresh-a'])
+      } finally {
+        consoleError.mockRestore()
+      }
+    })
+
+  it('keeps cached turns without a failure notice when a revisit cannot reload', async () => {
+      api.fetchSessions.mockResolvedValueOnce({ items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ], nextCursor: null })
+      api.fetchMessagesUI
+        .mockResolvedValueOnce([{
+          id: 'cached-a',
+          turn_id: 'cached-a',
+          role: 'user',
+          text: 'cached',
+          attachments: [],
+          timestamp: '2026-01-01T00:00:00.000Z',
+        }])
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(new Error('network down'))
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const store = useChatStore()
+
+        await openSession(store, 'bot-1', 'session-a')
+        await flushPromises()
+        await store.selectSession('session-b')
+        await flushPromises()
+        await store.selectSession('session-a')
+        await flushPromises()
+
+        const view = store.chatView({ botId: 'bot-1', sessionId: 'session-a', viewId: 'chat' })
+        expect(api.fetchMessagesUI).toHaveBeenCalledTimes(3)
+        expect(view.initialLoadFailed.value).toBe(false)
+        expect(store.messages.map(turn => turn.id)).toEqual(['cached-a'])
+      } finally {
+        consoleError.mockRestore()
+      }
+    })
+
   it('hydrates hidden subagent session summaries after selecting them', async () => {
       api.fetchSessions.mockResolvedValueOnce({ items: [
         { id: 'session-parent', bot_id: 'bot-1', title: 'Parent', type: 'chat' },

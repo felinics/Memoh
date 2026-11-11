@@ -7,6 +7,7 @@ import type {
 } from '@/composables/api/useChat'
 import {
   createChatRealtimeController,
+  INITIAL_SNAPSHOT_WAIT_MS,
   type ChatRealtimeCallbacks,
   type ChatRealtimeTransport,
 } from './realtime'
@@ -307,6 +308,58 @@ describe('chat realtime controller', () => {
 
     expect(prepared).toHaveBeenCalledOnce()
     expect(callbacks.onRuntimeProjection).not.toHaveBeenCalled()
+  })
+
+  it('commits fetched history after a bounded wait when no runtime snapshot arrives', async () => {
+    vi.useFakeTimers()
+    try {
+      const { controller, callbacks } = makeController()
+      const phases: string[] = []
+      callbacks.prepareSessionRuntime = vi.fn(async (_botId, _sessionId, commitInitialHistory) => {
+        await commitInitialHistory(() => phases.push('history'))
+        phases.push('prepared')
+      })
+      controller.startWebSocket('bot-1')
+      controller.startSessionRuntime('bot-1', 'session-1')
+
+      await vi.advanceTimersByTimeAsync(INITIAL_SNAPSHOT_WAIT_MS - 1)
+      expect(phases).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(phases).toEqual(['history', 'prepared'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('applies a runtime snapshot that arrives after the bounded wait', async () => {
+    vi.useFakeTimers()
+    try {
+      const { controller, callbacks, sockets } = makeController()
+      controller.startWebSocket('bot-1')
+      controller.startSessionRuntime('bot-1', 'session-1')
+      await vi.advanceTimersByTimeAsync(INITIAL_SNAPSHOT_WAIT_MS)
+      expect(callbacks.onRuntimeProjection).not.toHaveBeenCalled()
+
+      sockets[0]!.handler({
+        type: 'runtime_snapshot',
+        session_id: 'session-1',
+        epoch: 'epoch-1',
+        seq: 1,
+        snapshot: {
+          bot_id: 'bot-1',
+          session_id: 'session-1',
+          epoch: 'epoch-1',
+          seq: 1,
+          updated_at: '2026-07-27T08:00:00.000Z',
+        },
+      })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(callbacks.onRuntimeProjection).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('unsubscribes a hidden session without stopping another session', async () => {

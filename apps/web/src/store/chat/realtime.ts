@@ -57,6 +57,13 @@ const defaultTransport: ChatRealtimeTransport = {
   createRetryingStream: useRetryingStream,
 }
 
+// Upper bound on how long fetched history waits for the first runtime
+// snapshot. The wait exists so Vue never paints the database-only state, but
+// a socket that cannot connect or a rejected subscription never sends that
+// snapshot. Past this bound the history is shown on its own and a late
+// snapshot is applied through the prepared path, like one after a reconnect.
+export const INITIAL_SNAPSHOT_WAIT_MS = 8_000
+
 function isRuntimeEvent(event: UIStreamEvent): event is UIRuntimeEvent {
   return event.type === 'runtime_snapshot'
     || event.type === 'runtime_delta'
@@ -220,15 +227,22 @@ export function createChatRealtimeController(
     if (!bid || !sid) return
     const key = sessionRuntimeKey(bid, sid)
     if (sessionRuntimeConnections.has(key)) return
-    let resolveInitialSnapshot!: () => void
+    let resolveReady!: () => void
     const initialSnapshotReady = new Promise<void>((resolve) => {
-      resolveInitialSnapshot = resolve
+      resolveReady = resolve
     })
+    const waitTimer = setTimeout(() => {
+      connection.resolveInitialSnapshot?.()
+      connection.resolveInitialSnapshot = null
+    }, INITIAL_SNAPSHOT_WAIT_MS)
     const connection: SessionRuntimeConnection = {
       prepared: false,
       pending: [],
       initialSnapshotReady,
-      resolveInitialSnapshot,
+      resolveInitialSnapshot: () => {
+        clearTimeout(waitTimer)
+        resolveReady()
+      },
     }
     sessionRuntimeConnections.set(key, connection)
     runtimeClient.subscribe(sid)
