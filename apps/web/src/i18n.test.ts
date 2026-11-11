@@ -25,6 +25,20 @@ function collectLocaleMessages(value: unknown, path: string[] = []): LocaleMessa
 }
 
 describe('i18n locale messages', () => {
+  // A key missing from one language renders its fallback (or the raw key) only in
+  // that language, so nothing else catches it; keys left behind after a feature is
+  // removed ship as dead weight in every bundle. Every locale must carry exactly
+  // the keys of en.
+  const enPaths = new Set(collectLocaleMessages(en).map(({ path }) => path))
+  for (const [locale, messages] of Object.entries(localeMessages)) {
+    if (locale === 'en') continue
+    it(`${locale} has the same keys as en`, () => {
+      const paths = new Set(collectLocaleMessages(messages).map(({ path }) => path))
+      expect([...enPaths].filter(path => !paths.has(path)), `keys missing from ${locale}`).toEqual([])
+      expect([...paths].filter(path => !enPaths.has(path)), `keys only in ${locale}`).toEqual([])
+    })
+  }
+
   for (const [locale, messages] of Object.entries(localeMessages)) {
     it(`${locale} messages compile`, () => {
       const entries = collectLocaleMessages(messages)

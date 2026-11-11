@@ -783,6 +783,7 @@
     "loadUserFailed": "Failed to load user data",
     "language": "Language",
     "languagePlaceholder": "Select language",
+    "languageLoadFailed": "Couldn't switch the language. Check your connection and try again.",
     "theme": "Theme",
     "themePlaceholder": "Select Theme",
     "themeLight": "Light",
@@ -1241,6 +1242,10 @@
     },
     "panel": {
       "regionLabel": "Pending items"
+    },
+    "panelLoad": {
+      "reloadPage": "Reload page",
+      "saveBeforeReload": "You have unsaved files. Save them before reloading the page."
     },
     "answers": {
       "skipped": "Skipped",

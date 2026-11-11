@@ -1,8 +1,10 @@
 import type { Locale } from '@/i18n'
+import { loadLocaleMessages, setShownLocale } from '@/i18n/messages'
 import { computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useColorMode, useStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import { toast } from '@felinic/ui'
 import type { BundledTheme } from 'shiki'
 import { isColorSchemeId, type ColorSchemeId } from '@/constants/color-schemes'
 import { syncThemeColorWithBackground } from '@/utils/theme-color'
@@ -124,8 +126,9 @@ export const useSettingsStore = defineStore('settings', () => {
     colorMode.value = value === 'system' ? 'auto' : value
   }, { immediate: true })
 
-  watch(language, (value) => {
+  const applyLanguage = (value: Locale) => {
     i18n.locale.value = value
+    setShownLocale(value)
     // Reflect the active locale onto <html lang> so locale-scoped CSS can target
     // it — chiefly the CJK font-weight de-emphasis (see :lang(zh) in style.css):
     // CJK glyphs render visually heavier than Latin at the same numeric weight, so
@@ -133,6 +136,32 @@ export const useSettingsStore = defineStore('settings', () => {
     if (typeof document !== 'undefined') {
       document.documentElement.lang = value
     }
+  }
+
+  // Loads a language and registers it with vue-i18n (the same step i18n.ts
+  // runs for the starting language).
+  const prepareLocale = (value: Locale) => loadLocaleMessages(value).then((messages) => {
+    if (!i18n.availableLocales.includes(value)) i18n.setLocaleMessage(value, messages)
+  })
+
+  // Languages download on demand, the active one before the first screen and
+  // the others in the background after it (see i18n/messages.ts). setLanguage
+  // stores a pick once its language has loaded, so this normally applies at
+  // once; the starting language is loaded before the app mounts. A change from
+  // another tab (useStorage follows storage events) may name a language this
+  // tab hasn't loaded yet, so load it first.
+  watch(language, (value) => {
+    if (i18n.availableLocales.includes(value)) {
+      applyLanguage(value)
+      return
+    }
+    prepareLocale(value).then(
+      () => {
+        // A later pick may have landed while this one was downloading.
+        if (language.value === value) applyLanguage(value)
+      },
+      (error: unknown) => console.error('[settings] Failed to load language', value, error),
+    )
   }, { immediate: true })
 
   watch(colorScheme, (value) => {
@@ -156,8 +185,23 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTypography()
   }, { immediate: true })
 
+  // Code outside components reads copy in the stored language (API error copy,
+  // chat notices), so store a pick only once its language has loaded. Only the
+  // latest pick is stored: picking again while a download is in flight must not
+  // be overridden when the earlier download finishes later. A failed download
+  // leaves the current language in place and says so; picking again retries.
+  let pickedLanguage: Locale | undefined
   const setLanguage = (value: Locale) => {
-    language.value = value
+    pickedLanguage = value
+    prepareLocale(value).then(
+      () => {
+        if (pickedLanguage === value) language.value = value
+      },
+      (error: unknown) => {
+        console.error('[settings] Failed to load language', value, error)
+        if (pickedLanguage === value) toast.error(i18n.t('settings.languageLoadFailed'))
+      },
+    )
   }
 
   const withViewTransition = (fn: () => void) => {

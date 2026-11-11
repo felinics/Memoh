@@ -1,30 +1,48 @@
 import { h } from 'vue'
 import { RouterView, type RouteLocationNormalized, type RouteRecordRaw } from 'vue-router'
-import { i18nRef } from './i18n'
+import { i18nRef, LOCALE_OPTIONS } from './i18n'
+import { loadLocaleMessages } from './i18n/messages'
 import { getBotBreadcrumbName } from './lib/bot-breadcrumb'
-
-// ── Settings page loaders ────────────────────────────────────────────────────
-// Named consts instead of inline arrows so prefetchSettingsPages warms EXACTLY
-// the functions the routes reference — one copy of each import path, no drift.
-const pageSettings = () => import('@/pages/settings-section/index.vue')
-const pageBots = () => import('@/pages/bots/index.vue')
-const pageBotNew = () => import('@/pages/bots/new.vue')
-const pageBotCreateProgress = () => import('@/pages/bots/new-progress.vue')
-const pageBotDetail = () => import('@/pages/bots/detail.vue')
-const pageProviders = () => import('@/pages/providers/index.vue')
-const pageRuntimes = () => import('@/pages/runtimes/index.vue')
-const pageUsage = () => import('@/pages/usage/index.vue')
-const pagePeople = () => import('@/pages/people/index.vue')
-const pageAppearance = () => import('@/pages/appearance/index.vue')
-const pageKeyboard = () => import('@/pages/keyboard-shortcuts/index.vue')
-const pageProfile = () => import('@/pages/profile/index.vue')
-const pageSupermarket = () => import('@/pages/supermarket/index.vue')
-const pageSupermarketCategory = () => import('@/pages/supermarket/category.vue')
-const pageSupermarketAppDetail = () => import('@/pages/supermarket/app-detail.vue')
-const pageAbout = () => import('@/pages/about/index.vue')
+import { prefetchInIdle } from './lib/idle-prefetch'
+import { withStylesheetRecovery } from './lib/chunk-load-error'
 
 /**
- * Settings page loaders warmed by prefetchSettingsPages, ordered sidebar
+ * The persistent chat workspace (sidebar + dockview). App.vue mounts it outside
+ * RouterView on chat and settings routes and loads it on demand: it carries
+ * the chat UI, Markdown rendering and code highlighting, which the login and
+ * onboarding pages must not wait on. prefetchAppPages warms it first.
+ */
+export const loadMainSection = withStylesheetRecovery(() => import('@/pages/main-section/index.vue'))
+
+/** Whether App.vue mounts the chat workspace on this route: chat routes, and settings routes (rendered above it). */
+export function showsChatWorkspace(route: Pick<RouteLocationNormalized, 'name' | 'path'>): boolean {
+  return route.name === 'home' || route.name === 'bot' || route.path.startsWith('/settings')
+}
+
+// ── Settings page loaders ────────────────────────────────────────────────────
+// Named consts instead of inline arrows so prefetchAppPages warms EXACTLY
+// the functions the routes reference — one copy of each import path, no drift.
+// Each is wrapped with withStylesheetRecovery: a stylesheet that failed during
+// the background warm-up must not leave the page unstyled when it opens.
+const pageSettings = withStylesheetRecovery(() => import('@/pages/settings-section/index.vue'))
+const pageBots = withStylesheetRecovery(() => import('@/pages/bots/index.vue'))
+const pageBotNew = withStylesheetRecovery(() => import('@/pages/bots/new.vue'))
+const pageBotCreateProgress = withStylesheetRecovery(() => import('@/pages/bots/new-progress.vue'))
+const pageBotDetail = withStylesheetRecovery(() => import('@/pages/bots/detail.vue'))
+const pageProviders = withStylesheetRecovery(() => import('@/pages/providers/index.vue'))
+const pageRuntimes = withStylesheetRecovery(() => import('@/pages/runtimes/index.vue'))
+const pageUsage = withStylesheetRecovery(() => import('@/pages/usage/index.vue'))
+const pagePeople = withStylesheetRecovery(() => import('@/pages/people/index.vue'))
+const pageAppearance = withStylesheetRecovery(() => import('@/pages/appearance/index.vue'))
+const pageKeyboard = withStylesheetRecovery(() => import('@/pages/keyboard-shortcuts/index.vue'))
+const pageProfile = withStylesheetRecovery(() => import('@/pages/profile/index.vue'))
+const pageSupermarket = withStylesheetRecovery(() => import('@/pages/supermarket/index.vue'))
+const pageSupermarketCategory = withStylesheetRecovery(() => import('@/pages/supermarket/category.vue'))
+const pageSupermarketAppDetail = withStylesheetRecovery(() => import('@/pages/supermarket/app-detail.vue'))
+const pageAbout = withStylesheetRecovery(() => import('@/pages/about/index.vue'))
+
+/**
+ * Settings page loaders warmed by prefetchAppPages, ordered sidebar
  * destinations FIRST and drill-in sub-pages (only reachable through a list
  * page) LAST — warming drill-ins early just competes with the pages a first
  * click can actually hit. Exported so routes.test.ts can pin it to the route
@@ -40,41 +58,32 @@ export const settingsPageLoaders = [
 ]
 
 /**
- * Warm the settings page chunks during browser idle time.
+ * Warm the chat workspace and the settings page chunks during browser idle time.
+ *
+ * The chat workspace goes first: on the login and onboarding pages it is the
+ * next screen, and it is the largest chunk, so warming it while the user types
+ * lets the chat open right after sign-in. On chat and settings routes it is
+ * already loading (router.ts starts it with the first route), and the warm-up
+ * resolves from the module cache.
  *
  * Every settings page is a lazy route chunk, and vue-router only starts
  * loading one AFTER the nav click — the URL and the page both wait on the
  * download, so on a slow connection a first-time click reads as a dead click
  * (measured ~0.6-0.7s on Slow 4G). Warming during idle makes first clicks hit
  * the module cache instead (ES module requests dedupe by URL, so the later
- * real navigation costs nothing). Skipped under Save-Data; failures are
- * swallowed — a cold click then just pays the normal lazy-load cost.
+ * real navigation costs nothing). The chunks download one at a time; see
+ * lib/idle-prefetch.ts.
  *
- * Chunks are warmed ONE AT A TIME. Firing every loader at once makes a click
- * that lands mid-warmup queue behind the whole swarm — the module map dedupes
- * by URL, so the click cannot be prioritized and can end up slower than the
- * old single lazy import. Sequentially, an in-flight chunk costs a click at
- * most one small chunk, and chunks not yet started leave the connection free
- * for the click itself.
+ * The other UI languages follow (a few dozen KB each), so a language picked
+ * later applies at once. The appearance pages also start them on open, in case
+ * the queue hasn't reached them yet.
  */
-export function prefetchSettingsPages(): void {
-  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
-  if (connection?.saveData) return
-
-  const w = window as Window & {
-    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
-  }
-  const schedule = (cb: () => void) => {
-    if (w.requestIdleCallback) w.requestIdleCallback(cb, { timeout: 3000 })
-    else setTimeout(cb, 2000)
-  }
-  const queue = [...settingsPageLoaders]
-  const warmNext = () => {
-    const load = queue.shift()
-    if (!load) return
-    void load().catch(() => {}).finally(() => schedule(warmNext))
-  }
-  schedule(warmNext)
+export function prefetchAppPages(): void {
+  prefetchInIdle([
+    loadMainSection,
+    ...settingsPageLoaders,
+    ...LOCALE_OPTIONS.map(({ value }) => () => loadLocaleMessages(value)),
+  ])
 }
 
 /** Shared page routes; each host owns its router, history, and navigation guards. */

@@ -779,6 +779,7 @@
     "loadUserFailed": "用户信息加载失败",
     "language": "显示语言",
     "languagePlaceholder": "选择界面语言",
+    "languageLoadFailed": "语言切换失败，请检查网络后重试",
     "theme": "主题模式",
     "themePlaceholder": "选择主题",
     "themeLight": "浅色",
@@ -1253,6 +1254,10 @@
     },
     "panel": {
       "regionLabel": "待处理事项"
+    },
+    "panelLoad": {
+      "reloadPage": "刷新页面",
+      "saveBeforeReload": "有未保存的文件，保存后才能刷新页面。"
     },
     "answers": {
       "skipped": "已跳过",

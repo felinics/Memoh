@@ -41,9 +41,69 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#faf8f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#060606" media="(prefers-color-scheme: dark)" />
+    <!-- Loading splash (#boot-splash below). The styles live here because the
+         splash must draw before the app script runs and this file is outside
+         Tailwind's @source paths. Colors are the app's theme tokens: in a build,
+         the entry stylesheet is a render-blocking <link> in <head>, so the tokens
+         and the dark class set above are in place by the first paint. The logo
+         waits 400ms before fading in, so a cached load that finishes sooner
+         shows only the background. App.vue renders the same .boot-splash
+         markup while the chat workspace is still loading after the first
+         screen; these rules stay in the page after the splash is removed. -->
+    <style>
+      .boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: var(--z-top);
+        display: grid;
+        place-items: center;
+        background: var(--background);
+      }
+      .boot-splash img {
+        width: 3.5rem;
+        height: 3.5rem;
+        opacity: 0;
+        animation: boot-splash-in 300ms ease-out 400ms forwards;
+      }
+      @keyframes boot-splash-in {
+        to { opacity: 1; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-splash img {
+          animation: boot-splash-in 0s linear 400ms forwards;
+        }
+      }
+      /* Load failure shown in the splash's place when a chunk keeps failing
+         (showLoadFailedScreen in src/lib/chunk-load-error.ts). */
+      .load-failed {
+        align-content: center;
+        gap: 0.75rem;
+        padding: 0 1.5rem;
+        text-align: center;
+        font: 0.875rem/1.5 system-ui, sans-serif;
+        color: var(--muted-foreground);
+      }
+      .load-failed p {
+        margin: 0;
+        max-width: 28rem;
+      }
+      .load-failed button {
+        padding: 0.375rem 0.875rem;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        background: var(--background);
+        color: var(--foreground);
+        font: inherit;
+        cursor: pointer;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
+    <!-- Removed by App.vue once the first screen has rendered. -->
+    <div id="boot-splash" class="boot-splash" aria-hidden="true">
+      <img src="/logo.svg" alt="" />
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -20,6 +20,7 @@
     "rename": "名前の変更",
     "open": "開く",
     "search": "検索",
+    "clear": "クリア",
     "loading": "読み込み中...",
     "operation": "アクション",
     "enable": "有効にする",
@@ -91,6 +92,8 @@
     "hide": "非表示",
     "show": "表示",
     "saveChanges": "変更を保存",
+    "expand": "展開",
+    "collapse": "折りたたむ",
     "showSecretField": "{field}を表示",
     "hideSecretField": "{field}を隠す"
   },
@@ -780,6 +783,7 @@
     "loadUserFailed": "ユーザーデータの読み込みに失敗しました",
     "language": "表示言語",
     "languagePlaceholder": "言語を選択",
+    "languageLoadFailed": "言語を切り替えられませんでした。接続を確認してもう一度お試しください。",
     "theme": "テーマ",
     "themePlaceholder": "テーマの選択",
     "themeLight": "ライト",
@@ -1005,15 +1009,28 @@
     },
     "selectSession": "セッションを選択",
     "welcome": {
-      "folder": "{name} で何をしましょうか？"
+      "folder": "{name} で何をしましょうか？",
+      "g1": "どこから始めましょうか？",
+      "g2": "いま気になっていることは？",
+      "g3": "何をお手伝いしましょうか？",
+      "g4": "いつでも始められます",
+      "g5": "今日は何に取り組みますか？",
+      "g6": "何から始めますか？",
+      "g7": "どんなことをしたいですか？",
+      "g8": "さあ、ひとつ片づけましょう",
+      "g9": "今日は何をお手伝いできますか？",
+      "g10": "次にやることは何ですか？",
+      "g11": "必要なことを教えてください",
+      "g12": "まず何から取りかかりましょうか？"
     },
-    "greeting": "こんにちは！今日はどのようにお手伝いできますか?",
     "emptySystemSession": "このシステムセッションにはメッセージが記録されていません",
     "selectBot": "Botを選択してください",
     "selectBotHint": "サイドバーからBotを選択してチャットを開始します",
     "thinking": "依頼への対応を考えています",
     "thinkingInProgress": "依頼への対応を考えています",
     "thinkingDone": "思考完了",
+    "showMore": "もっと見る",
+    "showLess": "折りたたむ",
     "actions": {
       "copy": "コピー",
       "edit": "編集",
@@ -1132,6 +1149,9 @@
       "cancel": "音声入力をキャンセル",
       "confirm": "完了して文字起こし"
     },
+    "attachmentLines": "{count} 行",
+    "pastedBadge": "貼り付け",
+    "pastedViewerTitle": "貼り付けた内容",
     "agent": "エージェント",
     "continueOn": {
       "label": "コンピューター",
@@ -1222,6 +1242,10 @@
     },
     "panel": {
       "regionLabel": "保留中の項目"
+    },
+    "panelLoad": {
+      "reloadPage": "ページを再読み込み",
+      "saveBeforeReload": "未保存のファイルがあります。保存してから再読み込みしてください。"
     },
     "answers": {
       "skipped": "スキップ",
@@ -1504,6 +1528,9 @@
     "sessionModePlaceholder": "セッションモードを選択",
     "sessionModeCaution": "セッションモードを切り替えると、外部 Agent が実行できる操作が変わる場合があります。ツールの承認は別途必要です。",
     "sessionModeChanged": "セッションモードを切り替えました。ツールの承認は引き続き別途必要です。",
+    "agentSwitchTimeout": "切り替えに時間がかかりすぎています。もう一度お試しください。",
+    "modelOptions": "オプション",
+    "modelEffort": "強度",
     "noModels": "利用可能なモデルはありません",
     "defaultExternalAgentLoading": "デフォルトAgentはまだ読み込み中です。少し待ってからもう一度お試しください。",
     "defaultAgentNoWorkspaceExec": "デフォルトAgentは有効ですが、Workspaceコマンドを実行する権限がありません。",
@@ -1671,6 +1698,15 @@
     "sessionInfoRingAriaUsage": "セッション情報、コンテキスト使用率 {percent}%",
     "sessionInfoTooltipHint": "カーソルを合わせるとセッション情報が表示されます",
     "sessionActions": "セッションアクション",
+    "bottomPanel": {
+      "terminal": "ターミナル",
+      "newSession": "新しいターミナル",
+      "closeSession": "閉じる",
+      "closePanel": "パネルを閉じる",
+      "collapse": "折りたたむ",
+      "expand": "展開",
+      "noSessions": "開いているターミナルはありません"
+    },
     "tabBarToolkit": {
       "openMenu": "新規パネル",
       "newTerminal": "新しいターミナルを開く",
@@ -2280,6 +2316,8 @@
     "statusConnected": "接続済み",
     "statusError": "エラー",
     "statusUnknown": "テストされていません",
+    "commandRequired": "保存する前にコマンドを入力してください。",
+    "urlRequired": "保存する前にエンドポイント URL を入力してください。",
     "authRequired": "許可が必要です",
     "oauth": {
       "title": "認証",
@@ -2350,7 +2388,6 @@
       "sse": "SSE"
     },
     "advancedSettings": "詳細設定",
-    "advancedSettingsHint": "環境変数、ヘッダー、OAuth。",
     "advancedHintStdio": "プロセスに渡す環境変数。",
     "advancedHintRemote": "リクエストヘッダー。",
     "expand": "展開",
@@ -2361,7 +2398,6 @@
     "discoveredTools": "検出されたツール",
     "noToolsExposed": "このサーバーから公開されているツールはありません。",
     "more": "もっと",
-    "dangerZoneHint": "このサーバーを完全に削除します。",
     "importSandbox": "設定のインポート",
     "pathCopied": "パスがクリップボードにコピーされました",
     "blindImport": "インポート",
@@ -2384,39 +2420,10 @@
   },
   "bots": {
     "toolApproval": {
-      "posture": {
-        "title": "セキュリティ態勢",
-        "hardened": "強化済み",
-        "description": "承認ポリシーが実行境界を適用しています。"
-      },
-      "metrics": {
-        "activeRules": "アクティブなルール",
-        "totalDefined": "定義済み合計",
-        "blockedCount": "ブロック",
-        "sessionTrust": "セッションの信頼"
-      },
-      "recentActivity": "最近の活動",
-      "trust": "信頼",
-      "actions": {
-        "trustCall": "この呼び出しを信頼",
-        "trustDir": "このディレクトリを信頼"
-      },
-      "noActivity": "最近の活動はありません。",
-      "warnings": {
-        "disabled": "ツール承認は現在無効です。",
-        "breachRisk": "リセットすると、カスタムセキュリティルールがすべて削除されます。"
-      },
-      "restoreSecurity": "ツール承認を有効にする",
-      "examples": "例",
       "status": {
         "on": "承認が有効です",
         "off": "承認が無効です"
       },
-      "dangerZone": "危険な操作",
-      "dangerZoneDesc": "主要なセキュリティポリシーを管理します。",
-      "resetDefaults": "デフォルトにリセット",
-      "confirmReset": "すべてのツール承認ルールをデフォルト状態に戻しますか?",
-      "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
       "title": "ツール呼び出しの承認",
       "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。これらのルールは Memoh が提供するツールにのみ適用されます。Claude Code、Codex、Grok Build の組み込みツールはそれぞれの権限モードに従い、確認の要求はカードとして表示され、該当する Workspace 権限を持つユーザーが判断します。",
       "loading": "承認ルールを読み込んでいます...",
@@ -2480,7 +2487,6 @@
         "execBypass": "ls\npwd\ngit status",
         "execMustReview": "rm -rf *\nsudo *"
       },
-      "unsavedChanges": "未保存の変更",
       "enableTitle": "ツール呼び出しの承認を有効にする"
     },
     "hooks": {
@@ -2545,6 +2551,7 @@
     "agentCreate": {
       "prepare": "Agent を準備",
       "prepareDescription": "Workspace を確認し、この Agent の実行に必要な依存関係をインストールします。",
+      "authorizeAfterCreate": "Bot の作成後、続けてこの Agent を認可します。",
       "typeAriaLabel": "エージェントの種類",
       "oauthSettingsHint": "認可は作成後に行います。Bot の設定でいつでも完了できます。",
       "requiredError": "「{field}」を入力してください",
@@ -3047,44 +3054,9 @@
     },
     "desktop": {
       "title": "Desktop環境",
-      "subtitle": "仮想ディスプレイと対話Sessionを管理します。",
-      "groupInfrastructure": "インフラストラクチャー",
-      "groupEnvironment": "環境",
-      "groupApplication": "応用",
-      "runtimeTitle": "ランタイム",
-      "runtimeButton": "ランタイム",
       "liveTitle": "プライマリディスプレイ",
-      "liveDescription": "WorkspaceDesktopのライブプレビュー。",
-      "previewTitle": "アクティブなSession",
-      "previewDescription": "接続されている他のSessionのスクリーンショット。",
-      "previewEmpty": "プレビューなし",
-      "sessionsTitle": "Session",
-      "summaryDisabled": "無効",
-      "summaryReady": "実行中",
-      "summaryPreparing": "環境を準備しています...",
-      "statusReady": "準備ができて",
-      "statusNotReady": "準備ができていません",
-      "statusRunning": "実行中",
-      "statusStopped": "停止しました",
-      "enabled": "有効",
-      "runtime": "ランタイム",
-      "vnc": "VNC",
-      "desktop": "Desktop",
-      "browser": "Browser",
-      "toolkit": "Toolキット",
-      "system": "システム",
-      "session": "Session",
-      "state": "州",
-      "codec": "コーデック",
-      "createdAt": "開始しました",
-      "actions": "アクション",
-      "noSessions": "アクティブなSessionはありません",
-      "closeSession": "終了",
-      "closeSessionConfirm": "Sessionを終了しますか?",
-      "closeFailed": "Sessionの終了に失敗しました",
       "desktopEnabledSuccess": "Desktop環境が有効になっている",
-      "desktopDisabledSuccess": "Desktop環境が無効になっている",
-      "unknown": "未知"
+      "desktopDisabledSuccess": "Desktop環境が無効になっている"
     },
     "terminal": {
       "title": "Terminal",
@@ -3179,10 +3151,35 @@
     },
     "container": {
       "refactored": {
+        "containerTitle": "ランタイム",
+        "snapshotNew": "新しいスナップショット",
+        "actionsTitle": "操作",
+        "actionsStopTitle": "この Workspace を停止",
+        "actionsStartTitle": "この Workspace を起動",
+        "runtimeUpdated": "更新: {time}",
+        "runtimeUnavailable": "リソースの使用状況を現在取得できません",
+        "manageTitle": "管理",
+        "manageAction": "管理",
+        "detailsTitle": "詳細",
+        "viewAction": "表示",
+        "dataTitle": "スナップショットと復元",
+        "createRestoreToggle": "保存済みデータを復元",
+        "createDialogTitle": "Workspace を作成",
+        "createSubmit": "Workspace を作成",
         "issueLegacyTitle": "旧アーキテクチャを検出しました",
         "issueLegacyHint": "完全な互換性のために再作成してください。データは自動的に保持されます。",
         "issueRecreateTitle": "リソース上限の反映には再構築が必要です",
-        "issueRecreateHint": "CPU やメモリのハード上限は Workspace を再構築するまで反映されません。/data は保持されますが、実行中のセッションは停止します。"
+        "issueRecreateHint": "CPU やメモリのハード上限は Workspace を再構築するまで反映されません。/data は保持されますが、実行中のセッションは停止します。",
+        "dangerDeleteTitle": "この Workspace を削除",
+        "stopDialogTitle": "この Workspace を停止しますか？",
+        "stopDialogBody": "ランタイムが停止し、実行中の処理は終了します。ファイルは保持されるので、いつでも再起動できます。",
+        "deleteDialogTitle": "Workspace を削除",
+        "deleteDialogBodyKeep": "Workspace を削除します。データのコピーは保持されるため、新しい Workspace に復元できます。",
+        "deleteDialogBodyWipe": "Workspace とすべてのデータを完全に削除します。この操作は元に戻せません。",
+        "deleteKeepLabel": "復元用にデータを保持",
+        "deleteKeepDesc": "削除する前に /data をバックアップし、新しい Workspace で復元できるようにします。",
+        "emptyTitle": "Workspace がまだありません",
+        "emptyDescription": "作成すると、この Bot でランタイムのツールを使えるようになります。"
       },
       "title": "Workspace",
       "subtitle": "この Bot がファイルを編集し、コマンドを実行するための環境です。",
@@ -3312,7 +3309,6 @@
       "dataSubtitle": "のインポート、エクスポート、復元を管理する`/data`.",
       "deleteTitle": "Workspace を削除",
       "deleteSubtitle": "保存するかどうかの確認`/data`削除前。",
-      "deleteZoneDesc": "この Workspace を削除すると元に戻せません。慎重に操作してください。",
       "preservedDataAvailable": "保存されたデータは復元可能です。",
       "preservedDataAvailableShort": "利用可能",
       "preservedDataEmpty": "なし",
@@ -3348,7 +3344,9 @@
         "deletePreserve": "保存と削除",
         "snapshot": "作成する",
         "restoreData": "復元する",
-        "rollback": "ロールバック"
+        "rollback": "ロールバック",
+        "edit": "編集",
+        "refresh": "更新"
       }
     },
     "settings": {
@@ -3391,20 +3389,18 @@
       "acpLaunchSection": "起動設定",
       "acpCommand": "コマンド",
       "acpArguments": "起動引数",
-      "acpRequiredField": "{agent} には {field} が必要です。",
+      "acpStatusNeedsConfig": "設定が必要",
+      "acpStatusOff": "無効",
+      "acpEmptyTitle": "利用できる Agent がありません",
+      "acpEmptyDescription": "このサーバーで利用できる Agent プロファイルはありません。",
       "toolApprovalBypass": "バイパス",
       "toolApprovalMustReview": "要検討",
-      "botStatusTitle": "Botのステータス",
-      "botStatusSubtitle": "現在の Workspace と基盤ネットワークの情報です。",
       "networkPageTitle": "ネットワーク",
-      "networkPageSubtitle": "WorkspaceのネットワークステータスとSD-WAN設定。",
-      "networkStatusEmpty": "表示するステータス フィールドはありません。",
       "networkSDWANSectionTitle": "SD-WAN",
       "networkSDWANSectionHint": "仮想オーバーレイと出力。",
       "overlayProviderFieldLabel": "接続タイプ",
       "overlayProviderPlaceholder": "解決策を選択します (スキップするにはオフにします)SD-WAN)",
       "overlayProviderRequired": "有効にする前に接続タイプを選択してください。",
-      "networkStatusPendingSaveTitle": "保存保留中",
       "networkStatusPendingSave": "ネットワーク設定が変更されました。現在のステータスを確認する前に保存してください。",
       "networkWorkspaceStateLabel": "州",
       "networkWorkspaceContainerID": "Workspace 実行 ID",
@@ -3437,14 +3433,8 @@
       "networkLogoutSuccess": "正常にログアウトされました。",
       "networkLogoutFailed": "ログアウトに失敗しました。",
       "networkExitNode": "ノードの終了",
-      "networkExitNodeSectionHint": "透過的なプロキシのために、すべてのアウトバウンド トラフィックを Tailscale 出口ノード経由でルーティングします。",
       "networkExitNodePlaceholder": "ノードの終了を選択します",
       "networkExitNodeDescription": "選択した接続タイプの候補リストから出口ノードを選択します。",
-      "networkExitNodeStatus": "ノードのステータス",
-      "networkExitNodeAddresses": "ノードアドレス",
-      "networkExitNodeOnline": "オンライン",
-      "networkExitNodeOffline": "オフライン",
-      "networkExitNodeRequired": "透過的な出力には、終了ノードを選択する必要があります。",
       "networkNodesPendingSave": "ノードリストを更新する前に、現在のネットワーク設定を保存してください。",
       "networkNodesEmpty": "出口ノードの候補はまだありません。Bot Workspaceが実行中であり、ネットワークが接続されていることを確認します。",
       "networkNodesRefreshFailed": "出口ノードリストの更新に失敗しました",
@@ -3454,8 +3444,6 @@
       "searchModel": "Modelを検索…",
       "noModel": "利用可能なModelはありません",
       "saveSuccess": "設定が保存されました",
-      "saveOnly": "有効にせずに保存する",
-      "saveAndEnable": "保存して有効にする",
       "save": "設定の保存",
       "dangerZone": "危険な操作",
       "deleteBotDescription": "このBotを削除すると元に戻すことはできません。慎重に作業を進めてください。",
@@ -3483,7 +3471,10 @@
         "unsupported": "このランタイムでは使用できません",
         "disabled": "オフ",
         "unknown": "不明"
-      }
+      },
+      "networkDetailsTitle": "接続の詳細",
+      "networkDetailsWorkspaceGroup": "Workspace",
+      "networkLogoutConfirm": "このネットワークからサインアウトしますか？再びサインインするまで、Bot は切断されたままになります。"
     },
     "access": {
       "title": "アクセス制御",
@@ -3508,6 +3499,7 @@
         "permissionWorkspaceExec": "コマンドを実行する",
         "permissionManage": "管理できる",
         "ownerBadge": "所有者",
+        "empty": "個別にアクセス権が付与された Workspace メンバーはまだいません。",
         "removeConfirm": "このメンバーのアクセス権を削除しますか?",
         "atLeastOnePermission": "少なくとも 1 つの許可が必要です。",
         "saved": "アクセスが更新されました",
@@ -3678,6 +3670,11 @@
     },
     "channels": {
       "advancedTitle": "詳細設定",
+      "expandAll": "すべて展開",
+      "collapse": "折りたたむ",
+      "dangerZone": "危険な操作",
+      "deleteTitle": "プラットフォームを削除",
+      "deleteWarning": "この接続を削除すると元に戻せません。慎重に操作してください。",
       "title": "プラットフォーム",
       "addChannel": "プラットフォームの追加",
       "selectType": "プラットフォームの種類を選択してください",
@@ -3688,6 +3685,7 @@
       "credentials": "資格",
       "saveSuccess": "プラットフォーム構成が保存されました",
       "saveFailed": "プラットフォーム構成の保存に失敗しました",
+      "verifying": "確認中…",
       "requiredField": "{field}は必須です",
       "save": "プラットフォーム構成の保存",
       "statusActive": "アクティブ",
@@ -3818,8 +3816,11 @@
     "compaction": {
       "advanced": "詳細設定",
       "title": "圧縮ログ",
+      "settingsTitle": "圧縮の設定",
       "loadFailed": "圧縮ログのロードに失敗しました",
       "empty": "圧縮ログがありません",
+      "emptyHint": "Bot が会話履歴を圧縮すると、ここにログが表示されます。",
+      "filterEmpty": "選択したステータスに一致するログはありません。",
       "status": "ステータス",
       "time": "時間",
       "duration": "間隔",
