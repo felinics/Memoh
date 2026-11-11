@@ -155,11 +155,17 @@ class ResponseErrorTolerantExecutor extends ElectronHttpExecutor {
   }
 }
 
-// AppUpdater keeps its executor in an untyped internal field and hands it to
-// the provider when setFeedURL runs, so this must happen before useFeed.
+// AppUpdater keeps its executor in an undocumented internal field and hands it
+// to the provider when setFeedURL runs, so this must happen before useFeed.
+// The field is not part of the typed API: if an electron-updater upgrade renames
+// it, assigning would silently do nothing, so check it first and say so.
 function useResponseErrorTolerantExecutor(): void {
-  (autoUpdater as unknown as { httpExecutor: ElectronHttpExecutor }).httpExecutor
-    = new ResponseErrorTolerantExecutor((authInfo, callback) => autoUpdater.emit('login', authInfo, callback))
+  const updater = autoUpdater as unknown as { httpExecutor?: unknown }
+  if (!(updater.httpExecutor instanceof ElectronHttpExecutor)) {
+    console.warn('[updates] autoUpdater.httpExecutor is missing; update responses are not guarded against unhandled errors')
+    return
+  }
+  updater.httpExecutor = new ResponseErrorTolerantExecutor((authInfo, callback) => autoUpdater.emit('login', authInfo, callback))
 }
 
 function useFeed(): void {

@@ -1,14 +1,15 @@
 import { app, dialog, shell } from 'electron'
 import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { inspect } from 'node:util'
 
 // 主进程未捕获错误的兜底。
 //
 // Electron 的默认处理是:进程上没有其他 uncaughtException 监听时,弹出
 // 「A JavaScript error occurred in the main process」原生框并展示堆栈。对用户
 // 来说这个框只有看不懂的堆栈,没有任何可操作项;而最常见的来源是网络请求被
-// 重置/超时这类暂时性错误(主进程里走 Electron net 栈的有自动更新与 API 转发,
-// 某条边角路径漏挂 error 监听就会冒到这里),下一次请求自然恢复。
+// 重置/超时这类暂时性错误(某条请求路径漏挂 error 监听就会冒到这里,例如
+// updates.ts 里处理过的自动更新响应),下一次请求自然恢复。
 //
 // 因此这里接管处理:所有未捕获错误都落盘到日志文件,供下次复现时定位源头;
 // 网络类错误只记日志;其他错误仍然弹框,但说明日志位置。真实 bug 不能被静默
@@ -82,14 +83,33 @@ export function installMainProcessErrorHandlers(): void {
   // console.error,于是再报 EPIPE,形成死循环(CPU 空转、日志反复写满轮转)。
   // 终端输出只是日志文件之外的副本,写不出去时没有可做的补救,直接忽略。
   for (const stream of [process.stdout, process.stderr]) stream.on('error', () => {})
+  // 监听体里任何一步再抛(比如被抛出的值连描述都生成不了),Node 会把它当作
+  // 处理器自身失败直接结束进程,既不记日志也不弹框,比没有兜底更糟。所以整体
+  // 兜住,最多退化成只在终端留一行。
   process.on('uncaughtException', (error, origin) => {
-    const network = isNetworkError(error)
-    writeErrorLog(origin, error, network)
-    if (!network) showErrorDialog()
+    try {
+      const network = isNetworkError(error)
+      writeErrorLog(origin, error, network)
+      if (!network) showErrorDialog()
+    } catch (handlerError) {
+      reportHandlerFailure(handlerError)
+    }
   })
   process.on('unhandledRejection', (reason) => {
-    writeErrorLog('unhandledRejection', reason, isNetworkError(reason))
+    try {
+      writeErrorLog('unhandledRejection', reason, isNetworkError(reason))
+    } catch (handlerError) {
+      reportHandlerFailure(handlerError)
+    }
   })
+}
+
+function reportHandlerFailure(handlerError: unknown): void {
+  try {
+    console.error('[main] error handler failed', handlerError)
+  } catch {
+    // 终端也写不了时已无处可报。
+  }
 }
 
 function isNetworkError(value: unknown, depth = 0): boolean {
@@ -106,7 +126,9 @@ function logPath(): string {
 }
 
 function describeError(value: unknown, depth = 0): string {
-  if (!(value instanceof Error)) return String(value)
+  // 非 Error 的值用 inspect:String() 会把普通对象记成 [object Object],遇到无原型
+  // 对象还会直接抛错。
+  if (!(value instanceof Error)) return inspect(value, { depth: 3 })
   const text = value.stack || `${value.name}: ${value.message}`
   if (value.cause === undefined || depth >= 4) return text
   return `${text}\nCaused by: ${describeError(value.cause, depth + 1)}`
