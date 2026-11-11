@@ -9,11 +9,18 @@ const SPLASH_VISIBLE_AFTER_MS = 200
 // The mark finishes fading in at 380ms (200ms delay + 180ms); a failure shown
 // before then holds its message until the mark is in place.
 const MARK_SETTLED_MS = 380
-// The exit pair is the same one login -> home uses (the login page's exit in
+// The motions are the ones login -> home uses (the login page's exit in
 // pages/login/index.vue, then main-section's entry): content scales to 0.88 and
-// fades over 175ms, then the screen behind scales in from 1.15 over 450ms.
+// fades over 175ms, the screen behind scales in from 1.15. Login plays them one
+// after the other because the next page mounts only after the exit. The screen
+// behind the splash has already rendered, so here they run together: in
+// sequence it stayed hidden about 200ms longer after it was ready (the exit,
+// then blank frames before the entry began), which read as lag.
+// The entry is also shorter than login's 450ms: it follows a wait the user did
+// not start, and at 450ms the end of a load still felt slow. Keep in sync with
+// boot-app-enter in index.html.
 const SPLASH_EXIT_MS = 175
-const APP_ENTER_MS = 450
+const APP_ENTER_MS = 300
 
 // Kept after dismissal so showBootFailure can bring the same, already
 // localized markup back instead of drawing a second failure screen.
@@ -32,15 +39,15 @@ export function dismissBootSplash(): void {
     splash.remove()
     return
   }
+  const root = document.documentElement
   splash.classList.add('is-leaving')
+  root.classList.add('boot-entering')
+  window.setTimeout(() => root.classList.remove('boot-entering'), APP_ENTER_MS)
   window.setTimeout(() => {
     // showBootFailure may have taken the splash back over meanwhile.
     if (!splash.classList.contains('is-leaving')) return
     splash.remove()
     splash.classList.remove('is-leaving')
-    const root = document.documentElement
-    root.classList.add('boot-entering')
-    window.setTimeout(() => root.classList.remove('boot-entering'), APP_ENTER_MS)
   }, SPLASH_EXIT_MS)
 }
 

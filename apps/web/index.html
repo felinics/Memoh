@@ -53,9 +53,10 @@
                     loading, a retry button here would only restart the wait)
          Only a failed entry script/stylesheet switches to the error state, which
          is the one place with a Retry. App.vue dismisses the splash once the
-         first screen has rendered (lib/boot-splash.ts) and plays the same exit
-         pair as login -> home: splash content scales to 0.88 and fades (175ms),
-         then the app scales in from 1.15 (450ms).
+         first screen has rendered (lib/boot-splash.ts), with the motions of
+         login -> home run together rather than one after the other: the splash
+         fades out with its content scaling to 0.88 (175ms) while the app scales
+         in from 1.15 (300ms, faster than login's 450ms).
          Colors use the app's theme tokens with fallbacks: in a build the entry
          stylesheet is render-blocking, but under the dev server Vite injects CSS
          from JS, so the tokens do not exist yet on the first frames. The
@@ -77,6 +78,7 @@
         font: 360 14px/20px "Inter Variable", Inter, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei UI", sans-serif;
         letter-spacing: -0.14px;
         -webkit-font-smoothing: antialiased;
+        transition: opacity 175ms ease-out;
       }
       html.dark .boot-splash {
         --boot-bg: var(--background, #060606);
@@ -92,9 +94,12 @@
       .boot-splash-stage {
         position: relative;
         translate: 0 -45px;
-        transition: opacity 175ms ease-out, scale 175ms ease-out;
+        transition: scale 175ms ease-out;
       }
-      .boot-splash.is-leaving .boot-splash-stage { opacity: 0; scale: 0.88; }
+      /* The whole splash fades, background included, so the entering app shows
+         through it at once instead of after it. */
+      .boot-splash.is-leaving { opacity: 0; pointer-events: none; }
+      .boot-splash.is-leaving .boot-splash-stage { scale: 0.88; }
       .boot-splash-mark {
         display: block;
         width: 56px;
@@ -194,9 +199,9 @@
         word-break: break-all;
       }
       /* Entry of the app behind the splash; html clips the 1.15 overshoot so no
-         scrollbar appears for the 450ms. */
+         scrollbar appears while it plays. */
       html.boot-entering { overflow: hidden; }
-      html.boot-entering #app { animation: boot-app-enter 450ms ease-out both; }
+      html.boot-entering #app { animation: boot-app-enter 300ms ease-out both; }
       @keyframes boot-splash-in { to { opacity: 1; } }
       @keyframes boot-splash-out { to { opacity: 0; } }
       @keyframes boot-splash-reveal { from { visibility: visible; } to { opacity: 1; visibility: visible; } }
