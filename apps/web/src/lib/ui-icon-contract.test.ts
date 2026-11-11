@@ -13,7 +13,9 @@ describe('shared UI icon contract', () => {
         class: 'contract-icon',
         'aria-hidden': 'true',
       })))
-      expect(svg).toContain('stroke-width="1.75"')
+      // ErrorIcon keeps lucide's stroke 2 on purpose; the reason is recorded
+      // above its definition in packages/icons/src/ui/index.ts.
+      if (icon !== icons.ErrorIcon) expect(svg).toContain('stroke-width="1.75"')
       expect(svg).toContain('stroke="currentColor"')
       expect(svg).toContain('width="16"')
       expect(svg).toContain('contract-icon')
