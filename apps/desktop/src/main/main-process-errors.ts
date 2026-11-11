@@ -77,6 +77,11 @@ let dialogOpen = false
 export function installMainProcessErrorHandlers(): void {
   if (installed) return
   installed = true
+  // stdout/stderr 是启动方给的管道:从终端启动后终端退出,往里写就会异步报
+  // EPIPE。没有监听时它会成为 uncaughtException,而下面的处理器自己也会
+  // console.error,于是再报 EPIPE,形成死循环(CPU 空转、日志反复写满轮转)。
+  // 终端输出只是日志文件之外的副本,写不出去时没有可做的补救,直接忽略。
+  for (const stream of [process.stdout, process.stderr]) stream.on('error', () => {})
   process.on('uncaughtException', (error, origin) => {
     const network = isNetworkError(error)
     writeErrorLog(origin, error, network)
