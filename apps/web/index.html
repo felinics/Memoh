@@ -48,7 +48,7 @@
            0-200ms  background only, so a fast load never flashes a splash
            200ms    mark fades in
            800ms    indeterminate line (constant speed, no easing)
-           3s       "Connecting to Memoh..."
+           3s       "Loading Memoh..."
            10s      "Taking longer than usual" (no action: the browser is still
                     loading, a retry button here would only restart the wait)
          Only a failed entry script/stylesheet switches to the error state, which
@@ -207,29 +207,6 @@
         .boot-splash-stage { transition: none; }
         .boot-splash-failed { scale: none; }
       }
-      /* Load failure shown in the splash's place when a chunk keeps failing
-         (showLoadFailedScreen in src/lib/chunk-load-error.ts). */
-      .load-failed {
-        align-content: center;
-        gap: 0.75rem;
-        padding: 0 1.5rem;
-        text-align: center;
-        font: 0.875rem/1.5 system-ui, sans-serif;
-        color: var(--muted-foreground);
-      }
-      .load-failed p {
-        margin: 0;
-        max-width: 28rem;
-      }
-      .load-failed button {
-        padding: 0.375rem 0.875rem;
-        border: 1px solid var(--border);
-        border-radius: 0.5rem;
-        background: var(--background);
-        color: var(--foreground);
-        font: inherit;
-        cursor: pointer;
-      }
     </style>
   </head>
   <body>
@@ -249,12 +226,12 @@
         <div class="boot-splash-loading">
           <div class="boot-splash-track" aria-hidden="true"><div class="boot-splash-seg"></div></div>
           <div class="boot-splash-status">
-            <p class="boot-splash-connecting" data-boot-text="connecting">Connecting to Memoh…</p>
-            <p class="boot-splash-slow"><strong data-boot-text="slowTitle">Taking longer than usual</strong><span data-boot-text="slowBody">The server is slow to respond. Still trying…</span></p>
+            <p class="boot-splash-connecting" data-boot-text="connecting">Loading Memoh…</p>
+            <p class="boot-splash-slow"><strong data-boot-text="slowTitle">Taking longer than usual</strong><span data-boot-text="slowBody">Your connection may be slow. Still loading…</span></p>
           </div>
         </div>
         <div class="boot-splash-failed">
-          <p><strong data-boot-text="failedTitle">Can't reach Memoh</strong><span data-boot-text="failedBody">Check your connection, then try again.</span></p>
+          <p><strong data-boot-text="failedTitle">Couldn't load Memoh</strong><span data-boot-text="failedBody">Check your connection, then try again.</span></p>
           <div class="boot-splash-actions">
             <button type="button" data-boot-text="retry" onclick="location.reload()">Retry</button>
             <button type="button" class="boot-splash-ghost" data-boot-text="details" onclick="var d=document.getElementById('boot-splash-detail');d.hidden=!d.hidden">Details</button>
@@ -266,15 +243,26 @@
     <!-- The splash runs before i18n exists, so its few strings are localized
          here from the same saved `language` the settings store reads (default
          English, matching the store). Keep these in step with the locale files'
-         wording when the copy changes. A failed entry script or stylesheet is
-         the only signal that the app cannot start; later chunk failures are
-         handled by the app (reload) once it runs. -->
+         wording when the copy changes. Only the entry's own script, stylesheet
+         and module preloads count as a failure here: they are the ones in the
+         page before the app runs (in a build Vite puts them in <head>; the dev
+         server's entry script follows this one in <body>). Links the app adds
+         later to preload lazy chunks are its own to handle: it reloads once and,
+         if that fails too, switches this splash to the same failure state
+         (lib/boot-splash.ts). -->
     <script>
       (function () {
         var splash = document.getElementById('boot-splash')
+        var entryResources = Array.prototype.slice.call(
+          document.querySelectorAll('script[src], link[rel="stylesheet"], link[rel="modulepreload"]')
+        )
+        function isEntryResource(el) {
+          if (entryResources.indexOf(el) !== -1) return true
+          return el.tagName === 'SCRIPT' && el.parentNode === document.body
+        }
         var copy = {
-          zh: { connecting: '正在连接 Memoh…', slowTitle: '加载时间比平时长', slowBody: '服务器响应较慢，仍在尝试…', failedTitle: '无法连接 Memoh', failedBody: '请检查网络连接后重试。', retry: '重试', details: '详情' },
-          ja: { connecting: 'Memoh に接続しています…', slowTitle: 'いつもより時間がかかっています', slowBody: 'サーバーの応答が遅れています。引き続き接続を試みています…', failedTitle: 'Memoh に接続できません', failedBody: '接続を確認してから、もう一度お試しください。', retry: '再試行', details: '詳細' }
+          zh: { connecting: '正在加载 Memoh…', slowTitle: '加载时间比平时长', slowBody: '网络可能较慢，仍在加载…', failedTitle: 'Memoh 加载失败', failedBody: '请检查网络连接后重试。', retry: '重试', details: '详情' },
+          ja: { connecting: 'Memoh を読み込んでいます…', slowTitle: 'いつもより時間がかかっています', slowBody: 'ネットワークが遅い可能性があります。読み込みを続けています…', failedTitle: 'Memoh を読み込めませんでした', failedBody: '接続を確認してから、もう一度お試しください。', retry: '再試行', details: '詳細' }
         }
         try {
           var strings = copy[localStorage.getItem('language')]
@@ -288,7 +276,7 @@
         } catch (e) {}
         window.addEventListener('error', function (event) {
           var el = event.target
-          if (!el || (el.tagName !== 'SCRIPT' && el.tagName !== 'LINK')) return
+          if (!el || (el.tagName !== 'SCRIPT' && el.tagName !== 'LINK') || !isEntryResource(el)) return
           if (!document.getElementById('boot-splash')) return
           if (splash.classList.contains('is-failed')) return
           // The mark fades in at 200ms over 180ms; an earlier failure holds the

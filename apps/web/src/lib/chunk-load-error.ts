@@ -1,6 +1,3 @@
-import type { Locale } from '@/i18n/messages'
-import { detectLocale } from '@/utils/detect-locale'
-
 // Vite's preload helper reports a lazy chunk's stylesheet that failed to load
 // with this message (vite:preloadError carries the same error).
 const CSS_PRELOAD_FAILED = 'Unable to preload CSS for '
@@ -101,8 +98,8 @@ export function withStylesheetRecovery<T>(load: () => Promise<T>): () => Promise
 // erroring) would reload the page in a loop: measured locally at dozens of
 // page loads in 10s. The time of the last automatic reload is kept in
 // sessionStorage, which survives the reload and is scoped to this tab. A
-// second failure within the cooldown is left to the user (see
-// showLoadFailedScreen) instead of reloading again.
+// second failure within the cooldown is left to the user (see showBootFailure
+// in lib/boot-splash.ts) instead of reloading again.
 const LAST_RELOAD_KEY = 'memoh:chunk-reload-at'
 const RELOAD_COOLDOWN_MS = 60_000
 
@@ -121,47 +118,4 @@ export function reloadForChunkLoadError(): boolean {
   }
   window.location.reload()
   return true
-}
-
-// The copy is built in rather than read from the locale files: this screen is
-// shown when the starting language itself failed to load.
-const LOAD_FAILED_COPY: Record<Locale, { message: string, action: string }> = {
-  en: { message: 'The page couldn\'t load. Check your connection, then reload.', action: 'Reload' },
-  zh: { message: '页面加载失败，请检查网络后刷新。', action: '刷新页面' },
-  ja: { message: 'ページを読み込めませんでした。接続を確認してから再読み込みしてください。', action: '再読み込み' },
-}
-
-function pageLocale(): Locale {
-  try {
-    const stored = localStorage.getItem('language')
-    if (stored === 'en' || stored === 'zh' || stored === 'ja') return stored
-  } catch {
-    // Storage blocked: fall back to the browser language.
-  }
-  return detectLocale()
-}
-
-/**
- * Covers the page with a message and a reload button, for a chunk failure that
- * leaves nothing to show: the starting language, the chat workspace, or the
- * first route's page. Built with plain DOM, without Vue or the locale files,
- * since either may be what failed. Styled by the .load-failed rules in
- * index.html, next to the loading splash it replaces.
- */
-export function showLoadFailedScreen(): void {
-  if (typeof document === 'undefined' || document.getElementById('load-failed')) return
-  const copy = LOAD_FAILED_COPY[pageLocale()]
-  const screen = document.createElement('div')
-  screen.id = 'load-failed'
-  screen.className = 'boot-splash load-failed'
-  screen.setAttribute('role', 'alert')
-  const message = document.createElement('p')
-  message.textContent = copy.message
-  const button = document.createElement('button')
-  button.type = 'button'
-  button.textContent = copy.action
-  button.addEventListener('click', () => window.location.reload())
-  screen.append(message, button)
-  document.getElementById('boot-splash')?.remove()
-  document.body.append(screen)
 }

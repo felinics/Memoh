@@ -4,8 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
-import { isChunkLoadError, reloadForChunkLoadError, showLoadFailedScreen } from '@/lib/chunk-load-error'
-import { dismissBootSplash } from '@/lib/boot-splash'
+import { isChunkLoadError, reloadForChunkLoadError } from '@/lib/chunk-load-error'
+import { dismissBootSplash, showBootFailure } from '@/lib/boot-splash'
 import { holdPrefetchUntil, whenNetworkQuiet } from '@/lib/idle-prefetch'
 import { loadMainSection, prefetchAppPages, showsChatWorkspace } from './routes'
 
@@ -19,8 +19,8 @@ const router = useRouter()
 // workspace before they can render (see loadMainSection). A chunk that fails
 // to load reloads the page, the same recovery the router applies to route
 // chunks; nothing in the workspace has user state yet at this point. Failing
-// again within a minute of that reload, the page shows a load failure with a
-// reload button instead (see reloadForChunkLoadError).
+// again within a minute of that reload, the loading splash switches to its
+// failure state instead (see reloadForChunkLoadError, showBootFailure).
 let markMainSectionSettled!: () => void
 const mainSectionSettled = new Promise<void>((resolve) => {
   markMainSectionSettled = resolve
@@ -51,7 +51,7 @@ const MainSection = defineAsyncComponent({
         return
       }
       console.error('[App] Chat workspace chunk failed to load again after a reload', error)
-      showLoadFailedScreen()
+      showBootFailure(error.message)
     }
     fail()
   },
