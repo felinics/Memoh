@@ -16,11 +16,17 @@ const MARK_SETTLED_MS = 380
 // behind the splash has already rendered, so here they run together: in
 // sequence it stayed hidden about 200ms longer after it was ready (the exit,
 // then blank frames before the entry began), which read as lag.
-// The entry is also shorter than login's 450ms: it follows a wait the user did
-// not start, and at 450ms the end of a load still felt slow. Keep in sync with
-// boot-app-enter in index.html.
+// The entry is also shorter than login's 450ms (300ms): it follows a wait the
+// user did not start, and at 450ms the end of a load still felt slow.
+//
+// They run as a view transition, whose animations (the boot-entering rules in
+// index.html) play on snapshots of the page. The app must not be scaled
+// itself: dockview sizes its panels from their on-screen boxes, so a panel
+// measured while #app was scaled stayed 15% too large until the next resize.
+//
+// Without view transitions only the splash fades out, over SPLASH_EXIT_MS
+// (the is-leaving rules in index.html); the app's entry is skipped.
 const SPLASH_EXIT_MS = 175
-const APP_ENTER_MS = 300
 
 // Kept after dismissal so showBootFailure can bring the same, already
 // localized markup back instead of drawing a second failure screen.
@@ -39,16 +45,35 @@ export function dismissBootSplash(): void {
     splash.remove()
     return
   }
+  if (!('startViewTransition' in document)) {
+    splash.classList.add('is-leaving')
+    window.setTimeout(() => {
+      // showBootFailure may have taken the splash back over meanwhile.
+      if (!splash.classList.contains('is-leaving')) return
+      splash.remove()
+      splash.classList.remove('is-leaving')
+    }, SPLASH_EXIT_MS)
+    return
+  }
   const root = document.documentElement
-  splash.classList.add('is-leaving')
   root.classList.add('boot-entering')
-  window.setTimeout(() => root.classList.remove('boot-entering'), APP_ENTER_MS)
-  window.setTimeout(() => {
-    // showBootFailure may have taken the splash back over meanwhile.
-    if (!splash.classList.contains('is-leaving')) return
-    splash.remove()
-    splash.classList.remove('is-leaving')
-  }, SPLASH_EXIT_MS)
+  const leave = () => {
+    root.classList.remove('boot-entering')
+    // showBootFailure may have taken the splash over meanwhile.
+    if (!splash.classList.contains('is-failed')) splash.remove()
+  }
+  try {
+    const transition = document.startViewTransition(() => {
+      if (!splash.classList.contains('is-failed')) splash.remove()
+    })
+    // A skipped transition (the tab is hidden, say) still removes the splash;
+    // only its animation is dropped, which rejects `ready`.
+    transition.ready.catch(() => {})
+    void transition.finished.then(leave, leave)
+  } catch {
+    // The splash must never be left covering an app that is ready.
+    leave()
+  }
 }
 
 /**

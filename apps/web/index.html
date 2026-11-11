@@ -56,7 +56,8 @@
          first screen has rendered (lib/boot-splash.ts), with the motions of
          login -> home run together rather than one after the other: the splash
          fades out with its content scaling to 0.88 (175ms) while the app scales
-         in from 1.15 (300ms, faster than login's 450ms).
+         in from 1.15 (300ms, faster than login's 450ms). They run as a view
+         transition; see the exit rules below.
          Colors use the app's theme tokens with fallbacks: in a build the entry
          stylesheet is render-blocking, but under the dev server Vite injects CSS
          from JS, so the tokens do not exist yet on the first frames. The
@@ -96,8 +97,9 @@
         translate: 0 -45px;
         transition: scale 175ms ease-out;
       }
-      /* The whole splash fades, background included, so the entering app shows
-         through it at once instead of after it. */
+      /* Exit without view transitions (see the exit rules below): the whole
+         splash fades, background included, over the app already rendered behind
+         it. */
       .boot-splash.is-leaving { opacity: 0; pointer-events: none; }
       .boot-splash.is-leaving .boot-splash-stage { scale: 0.88; }
       .boot-splash-mark {
@@ -198,12 +200,23 @@
         letter-spacing: 0;
         word-break: break-all;
       }
-      /* Entry of the app behind the splash; html clips the 1.15 overshoot so no
-         scrollbar appears while it plays. */
-      html.boot-entering { overflow: hidden; }
-      html.boot-entering #app { animation: boot-app-enter 300ms ease-out both; }
+      /* Exit. The splash leaving and the app entering are a view transition
+         (lib/boot-splash.ts sets boot-entering for its duration), so the motions
+         play on snapshots and the app itself is never scaled. Scaling #app
+         directly broke the chat workspace: dockview sizes its panels from their
+         on-screen boxes, measured them mid-scale, and left them 15% too large.
+         The stage is captured on its own so that it scales while the splash
+         background only fades. Blending is set back to normal because the two
+         root snapshots are not a cross-fade (their durations differ). Browsers
+         without view transitions use the is-leaving rules above and skip the
+         app's entry. */
+      html.boot-entering #boot-splash .boot-splash-stage { view-transition-name: boot-splash-stage; }
+      html.boot-entering::view-transition-old(root) { animation: boot-splash-out 175ms ease-out both; mix-blend-mode: normal; }
+      html.boot-entering::view-transition-new(root) { animation: boot-app-enter 300ms ease-out both; mix-blend-mode: normal; }
+      html.boot-entering::view-transition-old(boot-splash-stage) { animation: boot-splash-stage-out 175ms ease-out both; }
       @keyframes boot-splash-in { to { opacity: 1; } }
       @keyframes boot-splash-out { to { opacity: 0; } }
+      @keyframes boot-splash-stage-out { to { opacity: 0; scale: 0.88; } }
       @keyframes boot-splash-reveal { from { visibility: visible; } to { opacity: 1; visibility: visible; } }
       @keyframes boot-splash-sweep { from { transform: translate3d(-64px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
       @keyframes boot-app-enter { from { opacity: 0; scale: 1.15; } to { opacity: 1; scale: 1; } }
@@ -246,9 +259,10 @@
       </div>
     </div>
     <!-- The splash runs before i18n exists, so its few strings are localized
-         here from the same saved `language` the settings store reads (default
-         English, matching the store). Keep these in step with the locale files'
-         wording when the copy changes. Only the entry's own script, stylesheet
+         here, in the language the app is about to start in: the saved
+         `language`, or on a first visit the browser's (the same choice as
+         getInitialLocale in src/i18n.ts). Keep these in step with the locale
+         files' wording when the copy changes. Only the entry's own script, stylesheet
          and module preloads count as a failure here: they are the ones in the
          page before the app runs (in a build Vite puts them in <head>; the dev
          server's entry script follows this one in <body>). Links the app adds
@@ -269,16 +283,22 @@
           zh: { connecting: '正在加载 Memoh…', slowTitle: '加载时间比平时长', slowBody: '网络可能较慢，仍在加载…', failedTitle: 'Memoh 加载失败', failedBody: '请检查网络连接后重试。', retry: '重试', details: '详情' },
           ja: { connecting: 'Memoh を読み込んでいます…', slowTitle: 'いつもより時間がかかっています', slowBody: 'ネットワークが遅い可能性があります。読み込みを続けています…', failedTitle: 'Memoh を読み込めませんでした', failedBody: '接続を確認してから、もう一度お試しください。', retry: '再試行', details: '詳細' }
         }
+        var language
         try {
-          var strings = copy[localStorage.getItem('language')]
-          if (strings) {
-            document.documentElement.lang = localStorage.getItem('language')
-            splash.querySelectorAll('[data-boot-text]').forEach(function (el) {
-              var key = el.getAttribute('data-boot-text')
-              if (strings[key]) el.textContent = strings[key]
-            })
-          }
+          language = localStorage.getItem('language')
         } catch (e) {}
+        if (language !== 'en' && language !== 'zh' && language !== 'ja') {
+          var browserLanguage = (navigator.language || '').toLowerCase()
+          language = browserLanguage.indexOf('zh') === 0 ? 'zh' : browserLanguage.indexOf('ja') === 0 ? 'ja' : 'en'
+        }
+        var strings = copy[language]
+        if (strings) {
+          document.documentElement.lang = language
+          splash.querySelectorAll('[data-boot-text]').forEach(function (el) {
+            var key = el.getAttribute('data-boot-text')
+            if (strings[key]) el.textContent = strings[key]
+          })
+        }
         window.addEventListener('error', function (event) {
           var el = event.target
           if (!el || (el.tagName !== 'SCRIPT' && el.tagName !== 'LINK') || !isEntryResource(el)) return
