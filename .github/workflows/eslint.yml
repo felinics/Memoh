@@ -114,6 +114,8 @@ jobs:
         run: node --test scripts/publish-auth.test.mjs
       - name: Test display preparation lock recovery
         run: node --test scripts/display-prepare-lock.test.mjs
+      - name: Test settings row guard
+        run: node --test scripts/check-settings-rows.test.mjs
       - name: Test display input and clipboard regressions
         run: pnpm test --run --testTimeout=15000 apps/web/src/composables/display-text-input.test.ts apps/web/src/composables/useDisplayClipboard.test.ts apps/web/src/composables/display-clipboard.test.ts apps/web/src/composables/useBotDisplayConnection.test.ts apps/web/src/utils/api-error.test.ts apps/web/src/composables/api/sse-error.test.ts
       - name: Test server entrypoint
