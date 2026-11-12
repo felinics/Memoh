@@ -206,17 +206,19 @@ export function createChatViews(deps: ChatViewsDeps) {
       || !chatViews.isActivityStreamCovered(botId)
     )
     view.initialLoadFailed.value = false
-    try {
-      await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, { mask })
-    } catch (error) {
-      // Turns already on screen (a cached or client-born view) stay as they
-      // are. Only a view with nothing to show would pass for an empty session.
-      if (!view.initialized && view.transcript.messages.length === 0) {
-        view.initialLoadFailed.value = true
-      }
-      throw error
-    }
-    view.initialized = true
+    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, {
+      mask,
+      onError: () => {
+        // Set before loadingMessages clears in loadInitialMessages's finally so
+        // watchers (such as useSessionViewing) never observe an unmasked,
+        // non-failed frame on a failed cold open. Turns already on screen (a
+        // cached or client-born view) stay as they are; only a view with
+        // nothing to show would pass for an empty session.
+        if (!view.initialized && view.transcript.messages.length === 0) {
+          view.initialLoadFailed.value = true
+        }
+      },
+    })
   }
   const fetchSessionWindow = (botId: string, sessionId: string) =>
     sessionTranscript(botId, sessionId).fetchSessionWindow(botId, sessionId)

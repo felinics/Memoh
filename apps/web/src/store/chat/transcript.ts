@@ -223,7 +223,7 @@ export function createTranscriptController({
     // until fresh history commits. mask=false keeps a trusted cache visible
     // and revalidates in the open. Both paths commit fetched history and its
     // runtime projection together, without a database-only intermediate frame.
-    options: { mask?: boolean } = {},
+    options: { mask?: boolean; onError?: (error: unknown) => void } = {},
   ) {
     const bid = botId.trim()
     const sid = targetSessionId.trim()
@@ -241,9 +241,10 @@ export function createTranscriptController({
     try {
       const turns = await fetchMessages(bid, sid, { limit: PAGE_SIZE })
       if (!isCurrentHistoryContext(bid, sid, generation)) return
-      await commitInitialHistory(() => {
-        applyFetchedHistory(bid, sid, generation, turns, refreshToken)
-      })
+      await commitInitialHistory(() => applyFetchedHistory(bid, sid, generation, turns, refreshToken))
+    } catch (error) {
+      if (isCurrentHistoryContext(bid, sid, generation)) options.onError?.(error)
+      throw error
     } finally {
       if (mask && version === loadingMessagesVersion) loadingMessages.value = false
     }

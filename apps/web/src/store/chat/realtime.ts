@@ -231,18 +231,17 @@ export function createChatRealtimeController(
     const initialSnapshotReady = new Promise<void>((resolve) => {
       resolveReady = resolve
     })
-    const waitTimer = setTimeout(() => {
-      connection.resolveInitialSnapshot?.()
+    const settleInitialSnapshot = () => {
+      clearTimeout(waitTimer)
       connection.resolveInitialSnapshot = null
-    }, INITIAL_SNAPSHOT_WAIT_MS)
+      resolveReady()
+    }
+    const waitTimer = setTimeout(settleInitialSnapshot, INITIAL_SNAPSHOT_WAIT_MS)
     const connection: SessionRuntimeConnection = {
       prepared: false,
       pending: [],
       initialSnapshotReady,
-      resolveInitialSnapshot: () => {
-        clearTimeout(waitTimer)
-        resolveReady()
-      },
+      resolveInitialSnapshot: settleInitialSnapshot,
     }
     sessionRuntimeConnections.set(key, connection)
     runtimeClient.subscribe(sid)
@@ -262,9 +261,16 @@ export function createChatRealtimeController(
       applyHistory()
       applyBufferedProjections()
     }
-    void callbacks.prepareSessionRuntime(bid, sid, commitInitialHistory)
+    let preparation: Promise<void>
+    try {
+      preparation = callbacks.prepareSessionRuntime(bid, sid, commitInitialHistory)
+    } catch (error) {
+      preparation = Promise.reject(error)
+    }
+    void preparation
       .catch(error => console.error('Failed to load session messages:', error))
       .finally(() => {
+        settleInitialSnapshot()
         if (sessionRuntimeConnections.get(key) !== connection) return
         connection.prepared = true
         applyBufferedProjections()

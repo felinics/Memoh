@@ -88,7 +88,7 @@
                    A fresh, writable chat instead gets the centered welcome
                    composer below, never a stray line in a blank pane. -->
               <div
-                v-else-if="messages.length === 0 && !loadingChats && !loadingMessages && composerReadOnly"
+                v-else-if="messages.length === 0 && !loadingChats && !loadingMessages && composerReadOnly && !initialLoadFailed && !activeSessionSummaryFailed"
                 class="flex items-center justify-center min-h-75"
               >
                 <p class="text-muted-foreground text-xs">
@@ -1485,10 +1485,6 @@ const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
 const initialLoadFailed = computed(() => paneView.value.initialLoadFailed.value)
-/** Kept-alive panes behind settings, loading transcripts and inactive splits are not readers. */
-const canReadSession = computed(() => isActive.value && isVisible.value
-  && !loadingMessages.value && !loadingChats.value && CHAT_ROUTE_NAMES.has(String(route.name)))
-useSessionViewing(computed(() => props.sessionId ?? null), canReadSession)
 // Delayed skeleton reveal: local/fast loads finish within a few frames, and
 // flashing the placeholder for a frame or two reads as a glitch. Mount it
 // only when loading actually outlives the delay.
@@ -1524,6 +1520,12 @@ const activeSessionSummaryFailed = computed(() =>
 )
 const composerReadOnly = computed(() => activeChatReadOnly.value && !activeSessionSummaryUnresolved.value)
 const retryingSessionSummary = ref(false)
+/** Kept-alive panes behind settings, loading or failed transcripts/summaries, and inactive splits are not readers. */
+const canReadSession = computed(() => isActive.value && isVisible.value
+  && !loadingMessages.value && !loadingChats.value
+  && !initialLoadFailed.value && !activeSessionSummaryFailed.value && !retryingSessionSummary.value
+  && CHAT_ROUTE_NAMES.has(String(route.name)))
+useSessionViewing(computed(() => props.sessionId ?? null), canReadSession)
 
 async function retryActiveSessionSummary() {
   const { botId, sessionId } = paneTarget.value

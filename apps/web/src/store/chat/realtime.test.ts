@@ -362,6 +362,60 @@ describe('chat realtime controller', () => {
     }
   })
 
+  it('clears the initial snapshot wait timer when hydration settles on an early snapshot', async () => {
+    vi.useFakeTimers()
+    try {
+      const { controller, sockets } = makeController()
+      controller.startWebSocket('bot-1')
+      controller.startSessionRuntime('bot-1', 'session-1')
+      expect(vi.getTimerCount()).toBe(1)
+
+      sockets[0]!.handler({
+        type: 'runtime_snapshot',
+        session_id: 'session-1',
+        epoch: 'epoch-1',
+        seq: 1,
+        snapshot: {
+          bot_id: 'bot-1',
+          session_id: 'session-1',
+          epoch: 'epoch-1',
+          seq: 1,
+          updated_at: '2026-07-27T08:00:00.000Z',
+        },
+      })
+      await flushPromises()
+
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the initial snapshot wait timer when prepareSessionRuntime rejects or settles early', async () => {
+    vi.useFakeTimers()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { controller, callbacks } = makeController()
+      callbacks.prepareSessionRuntime = vi.fn(async () => {
+        throw new Error('network down')
+      })
+      controller.startWebSocket('bot-1')
+      controller.startSessionRuntime('bot-1', 'session-1')
+      expect(vi.getTimerCount()).toBe(1)
+      await flushPromises()
+      expect(vi.getTimerCount()).toBe(0)
+
+      callbacks.prepareSessionRuntime = vi.fn(async () => {})
+      controller.startSessionRuntime('bot-1', 'session-2')
+      expect(vi.getTimerCount()).toBe(1)
+      await flushPromises()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      consoleError.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('unsubscribes a hidden session without stopping another session', async () => {
     const { controller, sockets } = makeController()
     controller.startWebSocket('bot-1')
