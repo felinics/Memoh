@@ -47,6 +47,12 @@ const (
 	StepEnd StreamEventType = "step_end"
 )
 
+// ProgressRuntimeActivity is a Progress status an external runtime emits
+// each time its agent finishes a model request. It carries nothing to show:
+// it tells the idle watchdog the agent is still working, which a tool it
+// left running in the background cannot report for itself.
+const ProgressRuntimeActivity = "runtime_activity"
+
 // NoticeKind names the degradation a RuntimeNotice reports.
 type NoticeKind string
 

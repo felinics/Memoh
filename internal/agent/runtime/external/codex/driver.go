@@ -386,6 +386,11 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	}
 
 	stopSteering()
+	if ctx.Err() == nil {
+		// The turn ended on its own. Commands it left running in the
+		// background are still running; a stop above interrupted them instead.
+		turn.settleBackgroundCommands()
+	}
 	result, resultErr := srv.turnResult(turn)
 	if ctx.Err() != nil && resultErr == nil {
 		// The application layer distinguishes stop from failure by context

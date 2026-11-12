@@ -131,6 +131,11 @@ describe('tool call registry', () => {
   it('names the parameter variants that change what a call does', () => {
     expect(getToolDisplay(toolBlock('exec', { command: 'ls', run_in_background: true })).actionKey)
       .toBe('exec_background')
+    expect(getToolDisplay({
+      ...toolBlock('exec', { command: 'sleep 45' }),
+      done: true,
+      result: { status: 'running_in_background', process_id: '18438' },
+    }).actionKey).toBe('exec_left_running')
     expect(getToolDisplay(toolBlock('read', { path: '/tmp/shot.png' })).actionKey).toBe('read_image')
     expect(getToolDisplay(toolBlock('read', { path: 'a.ts', line_offset: 10, n_lines: 5 })).actionKey)
       .toBe('read_range')

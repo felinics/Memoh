@@ -13,6 +13,12 @@
       {{ exitLabel }}
     </div>
     <div
+      v-if="leftRunningLabel"
+      class="text-muted-foreground"
+    >
+      {{ leftRunningLabel }}
+    </div>
+    <div
       v-if="backgroundMeta.length"
       class="flex flex-wrap gap-x-2 gap-y-0.5 text-caption text-muted-foreground"
     >
@@ -45,7 +51,7 @@
       v-if="fallbackText"
       class="text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-72 overflow-y-auto"
     >{{ fallbackText }}</pre>
-    <EmptyRow v-if="!progressText && !backgroundOutput && !stdout && !stderr && !errorText && !fallbackText">
+    <EmptyRow v-if="!leftRunningLabel && !progressText && !backgroundOutput && !stdout && !stderr && !errorText && !fallbackText">
       {{ isBackgroundActive ? t('chat.tools.detail.waitingOutput') : t('chat.tools.detail.noOutput') }}
     </EmptyRow>
   </div>
@@ -56,6 +62,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import EmptyRow from './tool-detail/empty-row.vue'
+import { execLeftRunning } from './tool-call-exec-status'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
@@ -81,6 +88,16 @@ const exitLabel = computed(() => {
   const code = result?.exit_code ?? result?.exitCode
   return typeof code === 'number' && code !== 0
     ? t('chat.tools.exitCode', { code }) : ''
+})
+
+// The command was still running when its turn ended; there is no exit to show,
+// and "no output" would claim something unknown.
+const leftRunningLabel = computed(() => {
+  const leftRunning = execLeftRunning(resolveResult())
+  if (!leftRunning) return ''
+  return leftRunning.processId
+    ? t('chat.tools.detail.leftRunning', { pid: leftRunning.processId })
+    : t('chat.tools.detail.leftRunningUnknownProcess')
 })
 
 const stdout = computed(() => {
