@@ -274,7 +274,7 @@
     },
     "external_runtime": {
       "auth_required": "This Agent is not signed in, or its credential was rejected. Open Agent settings to sign in again or update the API key.",
-      "busy": "This Agent is finishing an earlier operation. Try again when it has finished.",
+      "busy": "This conversation is still in use by an earlier run of the Agent. Your context is intact; try again shortly.",
       "context_window_exceeded": "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
       "overloaded": "The external Agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
       "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
