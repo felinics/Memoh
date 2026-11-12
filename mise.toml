@@ -351,6 +351,7 @@ description = "Run all linters"
 env = { CI = "true", MISE_YES = "1" }
 run = [
   "mise run lint:contract",
+  "mise run lint:settings-rows",
   "mise run lint:es",
   "mise run lint:go",
 ]
@@ -358,6 +359,10 @@ run = [
 [tasks."lint:contract"]
 description = "UI design-contract guard (disabled opacity, radius tokens, type scale)"
 run = "node scripts/check-ui-contract.mjs"
+
+[tasks."lint:settings-rows"]
+description = "Settings row guard (rows inside a list, no hand-written card inset); needs pnpm install"
+run = "node scripts/check-settings-rows.mjs"
 
 [tasks."lint:fix"]
 description = "Run all linters with auto-fix"

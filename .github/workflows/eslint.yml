@@ -85,6 +85,8 @@ jobs:
         run: node scripts/check-ui-contract.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Settings row guard
+        run: node scripts/check-settings-rows.mjs
       - name: Run ESLint
         run: pnpm lint
 
