@@ -25,7 +25,7 @@
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <span
-            v-if="isFormDirty"
+            v-if="isFormDirty && !isHydratingCredentials"
             class="hidden text-xs text-muted-foreground sm:inline"
           >
             {{ $t('common.unsaved') }}
@@ -34,7 +34,7 @@
             v-if="isEditMode"
             variant="outline"
             size="sm"
-            :disabled="isBusy"
+            :disabled="isBusy || isHydratingCredentials"
             :loading="action === 'toggle'"
             @click="handleToggleDisabled"
           >
@@ -42,7 +42,7 @@
           </Button>
           <Button
             size="sm"
-            :disabled="(!isFormDirty && isEditMode) || isBusy"
+            :disabled="(!isFormDirty && isEditMode) || isBusy || isHydratingCredentials"
             :loading="action === 'save'"
             @click="handleSave"
           >
@@ -59,6 +59,17 @@
         @login-success="handleWeixinLoginSuccess"
       />
     </div>
+
+    <template v-else-if="isHydratingCredentials">
+      <!-- Secret-stripped localStorage cache hydrated before server revalidation
+           finished: wait for real credentials so edits cannot overwrite optional
+           fields (encryptKey, enableStreaming, ...) with blank/default values. -->
+      <SettingsSection :title="$t('bots.channels.credentials')">
+        <InlineLoadingRow surface="card-row">
+          {{ $t('common.loading') }}
+        </InlineLoadingRow>
+      </SettingsSection>
+    </template>
 
     <template v-else>
       <!-- Callback URL the platform console needs (Feishu webhook mode / WeChat OA) -->
@@ -203,7 +214,7 @@
             <Button
               variant="destructive"
               size="sm"
-              :disabled="isBusy"
+              :disabled="isBusy || isHydratingCredentials"
               :loading="action === 'delete'"
             >
               {{ $t('common.delete') }}
@@ -216,7 +227,7 @@
 </template>
 
 <script setup lang="ts">
-import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, SettingsList, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
+import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, InlineLoadingRow, Input, SettingsList, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@felinic/ui'
@@ -259,6 +270,10 @@ const channelTitle = computed(() => channelTypeDisplayName(t, props.channelItem.
 const action = ref<'save' | 'toggle' | 'delete' | 'webhook' | ''>('')
 const isBusy = computed(() => action.value !== '')
 const isEditMode = computed(() => props.channelItem.configured)
+function isItemHydratingCredentials(item: BotChannelItem): boolean {
+  return item.configured && item.config != null && item.config.credentials === undefined
+}
+const isHydratingCredentials = computed(() => isItemHydratingCredentials(props.channelItem))
 const lastSavedConfigId = ref('')
 
 const form = reactive<{ credentials: Record<string, unknown>; disabled: boolean }>({ credentials: {}, disabled: false })
@@ -334,7 +349,7 @@ const webhookCallbackUrl = computed(() => {
 // switch, per-field guard on background refresh (see the composable header).
 const { synced: syncedCredentials, markClean: markCredentialsClean } = useServerSyncedRecord(form.credentials, {
   source: () => props.channelItem,
-  identity: () => `${props.botId}:${platformType.value}`,
+  identity: (item) => `${props.botId}:${platformType.value}:${isItemHydratingCredentials(item) ? 'hydrating' : 'ready'}`,
   server: (item) => {
     const schema = item.meta.config_schema?.fields ?? {}
     const existing = item.config?.credentials ?? {}

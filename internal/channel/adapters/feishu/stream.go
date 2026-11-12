@@ -26,14 +26,15 @@ const (
 )
 
 type feishuOutboundStream struct {
-	adapter       *FeishuAdapter
-	cfg           channel.ChannelConfig
-	target        string
-	reply         *channel.ReplyRef
-	client        *lark.Client
-	receiveID     string
-	receiveType   string
-	cardMessageID string
+	adapter          *FeishuAdapter
+	cfg              channel.ChannelConfig
+	target           string
+	reply            *channel.ReplyRef
+	client           *lark.Client
+	receiveID        string
+	receiveType      string
+	cardMessageID    string
+	disableStreaming bool
 	// useCardKit sends text cards as CardKit card entities so text can be
 	// streamed into them; cardID and cardSequence track the current entity.
 	// When cardID is empty the current card is updated by patching the
@@ -47,6 +48,13 @@ type feishuOutboundStream struct {
 	patchInterval time.Duration
 	closed        atomic.Bool
 	toolMessages  map[string]string
+}
+
+func (s *feishuOutboundStream) cardSeedText(text string) string {
+	if s.disableStreaming {
+		return text
+	}
+	return feishuStreamThinkingText
 }
 
 func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
@@ -64,6 +72,9 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 	switch event.Type {
 	case channel.StreamEventStatus:
 		if event.Status == channel.StreamStatusStarted {
+			if s.disableStreaming {
+				return nil
+			}
 			return s.ensureCard(ctx, feishuStreamThinkingText)
 		}
 		return nil
@@ -72,6 +83,9 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 			return nil
 		}
 		s.textBuffer.WriteString(event.Delta)
+		if s.disableStreaming {
+			return nil
+		}
 		if err := s.ensureCard(ctx, feishuStreamThinkingText); err != nil {
 			return err
 		}
@@ -84,13 +98,15 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		s.textBuffer.Reset()
 		return nil
 	case channel.StreamEventToolCallStart:
-		s.commitSegment(ctx)
+		if err := s.commitSegment(ctx); err != nil {
+			return err
+		}
 		return s.renderToolCallCard(ctx, event.ToolCall, channel.BuildToolCallStart(event.ToolCall))
 	case channel.StreamEventSegmentEnd:
 		// The text before a hidden tool call keeps its own card. With nothing
 		// buffered, keep the placeholder card for the text that follows.
 		if strings.TrimSpace(s.textBuffer.String()) != "" {
-			s.commitSegment(ctx)
+			return s.commitSegment(ctx)
 		}
 		return nil
 	case channel.StreamEventToolCallEnd:
@@ -118,14 +134,18 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventFinal:
-		if event.Final == nil || event.Final.Message.Message.IsEmpty() {
+		if event.Final == nil {
 			return nil
 		}
 		msg := event.Final.Message
 		bufText := strings.TrimSpace(s.textBuffer.String())
+		if msg.Message.IsEmpty() && len(msg.Attachments) == 0 && bufText == "" {
+			s.finishCard(ctx)
+			return nil
+		}
 		finalText := renderFeishuStreamFinalText(msg.Message, bufText)
 		if finalText != "" {
-			if err := s.ensureCard(ctx, feishuStreamThinkingText); err != nil {
+			if err := s.ensureCard(ctx, s.cardSeedText(finalText)); err != nil {
 				return err
 			}
 			if err := s.patchCard(ctx, finalText); err != nil {
@@ -133,6 +153,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 			}
 		}
 		s.finishCard(ctx)
+		s.textBuffer.Reset()
 		if len(msg.Attachments) > 0 {
 			media := msg
 			media.Message.Format = ""
@@ -152,10 +173,11 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		if errText == "" {
 			return nil
 		}
-		if err := s.ensureCard(ctx, feishuStreamThinkingText); err != nil {
+		replyText := channel.ErrorReplyText(event.ErrorCode, errText)
+		if err := s.ensureCard(ctx, s.cardSeedText(replyText)); err != nil {
 			return err
 		}
-		err := s.patchCard(ctx, channel.ErrorReplyText(event.ErrorCode, errText))
+		err := s.patchCard(ctx, replyText)
 		s.finishCard(ctx)
 		return err
 	default:
@@ -163,18 +185,28 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 	}
 }
 
-// commitSegment patches the buffered text into the current card and resets
-// the streaming state, so the next text opens a fresh card.
-func (s *feishuOutboundStream) commitSegment(ctx context.Context) {
+// commitSegment flushes the buffered text into a card and resets the streaming
+// state so the next segment opens a fresh card.
+func (s *feishuOutboundStream) commitSegment(ctx context.Context) error {
 	bufText := strings.TrimSpace(s.textBuffer.String())
-	if s.cardMessageID != "" && bufText != "" {
-		_ = s.patchCard(ctx, bufText)
+	if bufText != "" {
+		if s.disableStreaming && strings.TrimSpace(s.cardMessageID) == "" {
+			if err := s.ensureCard(ctx, bufText); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(s.cardMessageID) != "" {
+			if err := s.patchCard(ctx, bufText); err != nil {
+				return err
+			}
+		}
 	}
 	s.finishCard(ctx)
 	s.cardMessageID = ""
 	s.lastPatched = ""
 	s.lastPatchedAt = time.Time{}
 	s.textBuffer.Reset()
+	return nil
 }
 
 func renderFeishuStreamFinalText(msg channel.Message, buffered string) string {

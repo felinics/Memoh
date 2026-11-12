@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -248,5 +249,192 @@ func TestFeishuStreamSegmentEndKeepsPreToolText(t *testing.T) {
 		if calls[i] != want[i] {
 			t.Fatalf("call %d = %+v, want %+v", i, calls[i], want[i])
 		}
+	}
+}
+
+type feishuRecordedCall struct{ method, path, content string }
+
+type feishuInboundProcessorFunc func(context.Context, channel.ChannelConfig, channel.InboundMessage, channel.StreamReplySender) error
+
+func (fn feishuInboundProcessorFunc) HandleInbound(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, sender channel.StreamReplySender) error {
+	return fn(ctx, cfg, msg, sender)
+}
+
+func newNonStreamingHarness(t *testing.T, failCreate bool) (*FeishuAdapter, channel.ChannelConfig, func() []feishuRecordedCall) {
+	t.Helper()
+	var mu sync.Mutex
+	var calls []feishuRecordedCall
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "tenant_access_token") {
+			_, _ = io.WriteString(w, `{"code":0,"tenant_access_token":"tenant-token","expire":7200}`)
+			return
+		}
+		var body struct{ Content string }
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		calls = append(calls, feishuRecordedCall{r.Method, r.URL.Path, body.Content})
+		id := "om_msg_" + strconv.Itoa(len(calls))
+		mu.Unlock()
+		switch {
+		case strings.Contains(r.URL.Path, "/cardkit/"):
+			t.Errorf("unexpected CardKit call when streaming is disabled: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		case failCreate && r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/im/v1/messages"):
+			_, _ = io.WriteString(w, `{"code":99991400,"msg":"rate limit exceeded"}`)
+		case r.Method == http.MethodPost:
+			_, _ = io.WriteString(w, `{"code":0,"data":{"message_id":"`+id+`"}}`)
+		default:
+			_, _ = io.WriteString(w, `{"code":0}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+	cfg := channel.ChannelConfig{
+		ID: "cfg-nonstream", BotID: "bot-1", ChannelType: Type,
+		Credentials: map[string]any{"appId": "cli_test", "appSecret": "sec_test", "enableStreaming": false},
+	}
+	return &FeishuAdapter{openBaseURL: server.URL}, cfg, func() []feishuRecordedCall {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]feishuRecordedCall(nil), calls...)
+	}
+}
+
+func TestFeishuNonStreamingLifecycle(t *testing.T) {
+	t.Parallel()
+	const singleReply = "Hello Feishu!\nSecond line without incremental patches."
+	textDelta := func(s string) channel.PreparedStreamEvent {
+		return channel.PreparedStreamEvent{Type: channel.StreamEventDelta, Delta: s, Phase: channel.StreamPhaseText}
+	}
+	finalText := func(s string) channel.PreparedStreamEvent {
+		return channel.PreparedStreamEvent{Type: channel.StreamEventFinal, Final: &channel.PreparedStreamFinalizePayload{Message: channel.PreparedMessage{Message: channel.Message{Text: s}}}}
+	}
+	emptyFinal := channel.PreparedStreamEvent{Type: channel.StreamEventFinal, Final: &channel.PreparedStreamFinalizePayload{}}
+
+	for _, tc := range []struct {
+		name           string
+		opts           channel.StreamOptions
+		events         []channel.PreparedStreamEvent
+		wantPathSuffix string
+		wantCards      []string
+	}{
+		{"single card reply", channel.StreamOptions{Reply: &channel.ReplyRef{MessageID: "om_inbound_1"}}, []channel.PreparedStreamEvent{{Type: channel.StreamEventStatus, Status: channel.StreamStatusStarted}, textDelta("Hello Feishu!\n"), textDelta("Second line without incremental patches."), finalText(singleReply)}, "/im/v1/messages/om_inbound_1/reply", []string{singleReply}},
+		{"empty Final flushes once", channel.StreamOptions{}, []channel.PreparedStreamEvent{{Type: channel.StreamEventFinal}, textDelta("Buffered before split flush"), emptyFinal, emptyFinal}, "", []string{"Buffered before split flush"}},
+		{"multi-segment distinct POSTs", channel.StreamOptions{}, []channel.PreparedStreamEvent{textDelta("First segment."), {Type: channel.StreamEventSegmentEnd}, {Type: channel.StreamEventSegmentEnd}, textDelta("Second segment."), finalText("Second segment.")}, "", []string{"First segment.", "Second segment."}},
+		{"reasoning-only sends nothing", channel.StreamOptions{}, []channel.PreparedStreamEvent{{Type: channel.StreamEventStatus, Status: channel.StreamStatusStarted}, {Type: channel.StreamEventDelta, Delta: "chain-of-thought only", Phase: channel.StreamPhaseReasoning}, emptyFinal}, "", nil},
+		{"reset discards draft", channel.StreamOptions{}, []channel.PreparedStreamEvent{textDelta("stale draft"), {Type: channel.StreamEventReset}, textDelta("regenerated reply"), emptyFinal}, "", []string{"regenerated reply"}},
+		{"error sends single card", channel.StreamOptions{}, []channel.PreparedStreamEvent{{Type: channel.StreamEventError, Error: "Upstream provider rate limited.", ErrorCode: "provider.rate_limited"}}, "", []string{"Upstream provider rate limited."}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			adapter, cfg, getCalls := newNonStreamingHarness(t, false)
+			ctx := context.Background()
+			stream, err := adapter.OpenStream(ctx, cfg, "chat_id:oc_123", tc.opts)
+			if err != nil {
+				t.Fatalf("OpenStream: %v", err)
+			}
+			for _, ev := range tc.events {
+				if err := stream.Push(ctx, ev); err != nil {
+					t.Fatalf("Push(%s): %v", ev.Type, err)
+				}
+			}
+			if err := stream.Close(ctx); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			calls := getCalls()
+			if len(calls) != len(tc.wantCards) {
+				t.Fatalf("got %d calls, want %d: %+v", len(calls), len(tc.wantCards), calls)
+			}
+			for i, wantText := range tc.wantCards {
+				wantCard, err := buildFeishuStreamCardContent(wantText)
+				if err != nil {
+					t.Fatalf("build card: %v", err)
+				}
+				if calls[i].method != http.MethodPost || calls[i].content != wantCard || (tc.wantPathSuffix != "" && !strings.HasSuffix(calls[i].path, tc.wantPathSuffix)) {
+					t.Fatalf("call %d = %+v, want POST %q content=%q", i, calls[i], tc.wantPathSuffix, wantCard)
+				}
+			}
+		})
+	}
+}
+
+func TestFeishuNonStreamingLongReplySplitThroughManager(t *testing.T) {
+	t.Parallel()
+	longChunk := strings.Repeat("甲", 6499) + "。"
+	tailChunk := "尾部段落完整保留不丢失：" + strings.Repeat("乙", 2100) + "。"
+	delta := func(s string) channel.StreamEvent {
+		return channel.StreamEvent{Type: channel.StreamEventDelta, Delta: s, Phase: channel.StreamPhaseText}
+	}
+	finalMsg := func(s string) channel.StreamEvent {
+		return channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: s}}}
+	}
+
+	for _, tc := range []struct {
+		name        string
+		events      []channel.StreamEvent
+		wantSubstrs []string
+	}{
+		{"single-segment >8000 runes", []channel.StreamEvent{{Type: channel.StreamEventStatus, Status: channel.StreamStatusStarted}, delta(longChunk), delta(tailChunk), finalMsg(longChunk + tailChunk)}, []string{"甲", "尾部段落完整保留不丢失"}},
+		{"split before SegmentEnd + post-tool answer", []channel.StreamEvent{{Type: channel.StreamEventStatus, Status: channel.StreamStatusStarted}, delta(longChunk), delta("第一段剩余文字。"), {Type: channel.StreamEventSegmentEnd}, delta("工具执行后的最终结论。"), finalMsg("工具执行后的最终结论。")}, []string{"甲", "第一段剩余文字。", "工具执行后的最终结论。"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			adapter, cfg, getCalls := newNonStreamingHarness(t, false)
+			done := make(chan error, 1)
+			mgr := channel.NewManager(nil, nil, nil, feishuInboundProcessorFunc(func(ctx context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, sender channel.StreamReplySender) (err error) {
+				defer func() { done <- err }()
+				stream, err := sender.OpenStream(ctx, "chat_id:oc_long", channel.StreamOptions{})
+				if err != nil {
+					return err
+				}
+				for _, ev := range tc.events {
+					if err = stream.Push(ctx, ev); err != nil {
+						return err
+					}
+				}
+				return stream.Close(ctx)
+			}))
+			mgr.RegisterAdapter(adapter)
+			ctx := context.Background()
+			t.Cleanup(func() { _ = mgr.Shutdown(ctx) })
+
+			if err := mgr.HandleInbound(ctx, cfg, channel.InboundMessage{Channel: Type, ReplyTarget: "chat_id:oc_long", Message: channel.Message{Text: "ping"}}); err != nil {
+				t.Fatalf("HandleInbound: %v", err)
+			}
+			if err := <-done; err != nil {
+				t.Fatalf("stream drive failed: %v", err)
+			}
+			calls := getCalls()
+			if len(calls) != len(tc.wantSubstrs) {
+				t.Fatalf("got %d calls, want %d: %+v", len(calls), len(tc.wantSubstrs), calls)
+			}
+			for i, sub := range tc.wantSubstrs {
+				if calls[i].method != http.MethodPost || !strings.Contains(calls[i].content, sub) {
+					t.Fatalf("call %d = %+v, want POST containing %q", i, calls[i], sub)
+				}
+			}
+		})
+	}
+}
+
+func TestFeishuNonStreamingCommitSegmentPropagatesError(t *testing.T) {
+	t.Parallel()
+	adapter, cfg, _ := newNonStreamingHarness(t, true)
+	ctx := context.Background()
+	stream, err := adapter.OpenStream(ctx, cfg, "chat_id:oc_err", channel.StreamOptions{})
+	if err != nil {
+		t.Fatalf("OpenStream: %v", err)
+	}
+	if err := stream.Push(ctx, channel.PreparedStreamEvent{Type: channel.StreamEventDelta, Delta: "Important pre-tool preamble", Phase: channel.StreamPhaseText}); err != nil {
+		t.Fatalf("Push delta: %v", err)
+	}
+	if err := stream.Push(ctx, channel.PreparedStreamEvent{Type: channel.StreamEventSegmentEnd}); err == nil {
+		t.Fatal("expected SegmentEnd to return error when Feishu card creation fails")
+	}
+	if got := stream.(*feishuOutboundStream).textBuffer.String(); got != "Important pre-tool preamble" {
+		t.Fatalf("textBuffer = %q, want unsent preamble preserved on error", got)
+	}
+	if err := stream.Push(ctx, channel.PreparedStreamEvent{Type: channel.StreamEventToolCallStart, ToolCall: &channel.StreamToolCall{CallID: "call-1", Name: "bash"}}); err == nil {
+		t.Fatal("expected ToolCallStart to return error when commitSegment fails")
 	}
 }
