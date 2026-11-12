@@ -93,6 +93,7 @@ vi.mock('@felinic/ui', () => {
     BackendCard,
     SectionGroup,
     DetailPane,
+    SettingsShell: Passthrough,
     SwapTransition,
     PageShell,
     Button: Passthrough,
@@ -306,6 +307,52 @@ describe('models panel route state', () => {
     expect(root.querySelector('[data-testid="detail-pane-skeleton"]')).not.toBeNull()
     expect(root.querySelector('[data-testid="provider-detail"]')).toBeNull()
     expect(mocks.replace).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  it('shows a load failure with retry instead of an infinite skeleton when deep-linking a provider fails', async () => {
+    mocks.route.query = { provider: 'provider-two' }
+    mocks.providerData.value = undefined
+    mocks.providersLoading.value = false
+    mocks.providersError.value = { status: 500 }
+    let resolveRefetch!: () => void
+    mocks.refetchProviders.mockImplementation(() => {
+      mocks.providersLoading.value = true
+      return new Promise<void>((resolve) => {
+        resolveRefetch = () => {
+          mocks.providerData.value = [
+            { id: 'provider-one', name: 'One', enable: true },
+            { id: 'provider-two', name: 'Two', enable: true },
+          ]
+          mocks.providersError.value = null
+          mocks.providersLoading.value = false
+          resolve()
+        }
+      })
+    })
+
+    const { app, root } = await mountPage()
+
+    expect(root.querySelector('[data-testid="detail-pane"]')).not.toBeNull()
+    expect(root.querySelector('[data-testid="detail-pane-skeleton"]')).toBeNull()
+    expect(root.querySelector('[data-testid="provider-detail"]')).toBeNull()
+    expect(mocks.replace).not.toHaveBeenCalled()
+
+    const banner = root.querySelector('[data-testid="detail-pane"] [data-slot="callout-banner"]')
+    expect(banner?.textContent).toContain('provider.loadFailed')
+
+    const retry = [...banner!.querySelectorAll('div')].find(el => el.textContent?.trim() === 'common.retry')
+    expect(retry).toBeTruthy()
+    retry!.click()
+    expect(mocks.refetchProviders).toHaveBeenCalledOnce()
+
+    resolveRefetch()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
+    expect(root.querySelector('[data-slot="callout-banner"]')).toBeNull()
+    expect(root.querySelector('[data-testid="detail-pane-skeleton"]')).toBeNull()
+    expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toBe('provider-two:Two')
     app.unmount()
   })
 

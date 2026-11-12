@@ -23,7 +23,7 @@ import { getModels, getProviders } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { Boxes, Box, ChevronRight, Plus, Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { BackendCard, DetailPane, PageShell, SectionGroup, SwapTransition } from '@felinic/ui'
+import { BackendCard, DetailPane, PageShell, SectionGroup, SettingsShell, SwapTransition } from '@felinic/ui'
 import AddProvider from '@/components/add-provider/index.vue'
 import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
@@ -463,7 +463,7 @@ function openAddProvider() {
       v-else
       width="narrow"
       :back-label="t('models.title')"
-      :loading="isDetailLoading || !curProvider"
+      :loading="!providersLoadFailed && (isDetailLoading || !curProvider)"
       @back="closeProvider"
     >
       <ModelSetting
@@ -471,6 +471,25 @@ function openAddProvider() {
         v-model:provider="curProvider"
         @materialized="handleMaterialized"
       />
+      <SettingsShell
+        v-else-if="providersLoadFailed"
+        width="narrow"
+      >
+        <CalloutBanner
+          tone="destructive"
+          :title="t('provider.loadFailed')"
+          :description="providersLoadFailedDetail || undefined"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            :loading="providersLoading"
+            @click="void refetchProviders()"
+          >
+            {{ t('common.retry') }}
+          </Button>
+        </CalloutBanner>
+      </SettingsShell>
     </DetailPane>
   </SwapTransition>
 </template>

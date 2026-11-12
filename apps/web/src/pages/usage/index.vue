@@ -82,18 +82,34 @@
         </div>
       </SettingsSection>
 
-      <template v-if="!selectedBotId">
+      <template v-if="isLoading || (!selectedBotId && isBotsInitialLoading)">
+        <div class="flex items-center justify-center py-16">
+          <Spinner class="size-6" />
+        </div>
+      </template>
+
+      <template v-else-if="!selectedBotId && botsLoadFailed">
+        <CalloutBanner
+          tone="destructive"
+          :title="botsLoadFailedMessage"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            :loading="isBotsFetching"
+            @click="void refetchBots()"
+          >
+            {{ $t('common.retry') }}
+          </Button>
+        </CalloutBanner>
+      </template>
+
+      <template v-else-if="!selectedBotId">
         <Empty class="py-12">
           <EmptyHeader>
             <EmptyTitle>{{ $t('usage.selectBotPlaceholder') }}</EmptyTitle>
           </EmptyHeader>
         </Empty>
-      </template>
-
-      <template v-else-if="isLoading">
-        <div class="flex items-center justify-center py-16">
-          <Spinner class="size-6" />
-        </div>
       </template>
 
       <template v-else-if="usageLoadFailed">
@@ -259,6 +275,7 @@
                       <Button
                         variant="outline"
                         size="sm"
+                        :loading="isRecordsFetching"
                         @click="void refetchRecords()"
                       >
                         {{ $t('common.retry') }}
@@ -469,8 +486,14 @@ const datePresets = computed<DateRangePreset[]>(() => [
   { label: t('usage.last90Days'), range: presetRange(90) },
 ])
 
-const { data: botData } = useQuery(getBotsQuery())
+const { data: botData, error: botsError, asyncStatus: botsAsyncStatus, refetch: refetchBots } = useQuery(getBotsQuery())
 const botList = computed(() => botData.value?.items ?? [])
+const isBotsFetching = computed(() => botsAsyncStatus.value === 'loading')
+const isBotsInitialLoading = computed(() => isBotsFetching.value && !botData.value)
+const botsLoadFailed = computed(() => !!botsError.value && !botData.value)
+const botsLoadFailedMessage = computed(() =>
+  resolveApiErrorMessage(botsError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
+)
 
 // Default to the bot already active on the chat page (persisted in chat-selection),
 // so opening Usage continues looking at whatever the user was just chatting with.

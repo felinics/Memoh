@@ -5,20 +5,26 @@ import { createPinia } from 'pinia'
 import { PiniaColada } from '@pinia/colada'
 import UsagePage from './index.vue'
 
-const api = vi.hoisted(() => ({ usage: vi.fn(), records: vi.fn() }))
+const api = vi.hoisted(() => ({
+  bots: vi.fn(),
+  usage: vi.fn(),
+  records: vi.fn(),
+  route: { query: { bot: 'bot-1' } as Record<string, string> },
+  currentBotId: 'bot-1',
+}))
 vi.mock('@memohai/sdk', () => ({
   getBotsByBotIdTokenUsage: api.usage,
   getBotsByBotIdTokenUsageRecords: api.records,
 }))
 vi.mock('@memohai/sdk/colada', () => ({
-  getBotsQuery: () => ({ key: ['bots'], query: async () => ({ items: [{ id: 'bot-1', display_name: 'Bot' }] }) }),
+  getBotsQuery: () => ({ key: ['bots'], query: () => api.bots() }),
 }))
 vi.mock('vue-i18n', async () => {
   const { ref } = await import('vue')
   return { useI18n: () => ({ t: (key: string) => key, locale: ref('en') }) }
 })
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: { bot: 'bot-1' } }),
+  useRoute: () => api.route,
   useRouter: () => ({ replace: vi.fn() }),
 }))
 vi.mock('vue-echarts', () => ({ default: () => h('div', { 'data-testid': 'chart' }) }))
@@ -27,7 +33,7 @@ vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
 vi.mock('echarts/charts', () => ({ LineChart: {}, BarChart: {}, PieChart: {} }))
 vi.mock('echarts/components', () => ({ GridComponent: {}, TooltipComponent: {}, LegendComponent: {} }))
 vi.mock('@/components/bot-select/index.vue', () => ({ default: () => h('div') }))
-vi.mock('@/store/chat-selection', () => ({ useChatSelectionStore: () => ({ currentBotId: 'bot-1' }) }))
+vi.mock('@/store/chat-selection', () => ({ useChatSelectionStore: () => ({ get currentBotId() { return api.currentBotId } }) }))
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
 
 let app: App | null = null
@@ -35,10 +41,13 @@ afterEach(() => {
   app?.unmount()
   app = null
   document.body.innerHTML = ''
+  api.route.query = { bot: 'bot-1' }
+  api.currentBotId = 'bot-1'
   vi.clearAllMocks()
 })
 
 async function mountPage(): Promise<HTMLElement> {
+  api.bots.mockResolvedValue({ items: [{ id: 'bot-1', display_name: 'Bot' }] })
   const root = document.createElement('div')
   document.body.append(root)
   app = createApp(UsagePage)
@@ -84,6 +93,38 @@ describe('usage page load failures', () => {
     await vi.waitFor(() => expect(api.usage.mock.calls.length).toBeGreaterThan(calls))
     await new Promise(resolve => setTimeout(resolve, 0))
     await nextTick()
+    expect(root.textContent).toContain('usage.overview')
+    expect(root.textContent).not.toContain('usage.loadFailed')
+  })
+
+  it('shows a load failure with retry instead of the select-bot empty state when loading bots fails without a bot param', async () => {
+    api.route.query = {}
+    api.currentBotId = ''
+    api.bots.mockRejectedValueOnce({ status: 500 })
+    api.usage.mockResolvedValue({ data: { by_model: [], by_day: [] } })
+    api.records.mockResolvedValue({ data: { items: [], total: 0 } })
+
+    const root = document.createElement('div')
+    document.body.append(root)
+    app = createApp(UsagePage)
+    app.use(createPinia()).use(PiniaColada)
+    app.config.globalProperties.$t = (key: string) => key
+    app.mount(root)
+    await vi.waitFor(() => expect(api.bots).toHaveBeenCalledOnce())
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
+    expect(root.textContent).toContain('usage.loadFailed')
+    expect(root.textContent).not.toContain('usage.selectBotPlaceholder')
+
+    api.bots.mockResolvedValue({ items: [{ id: 'bot-1', display_name: 'Bot' }] })
+    const retry = [...root.querySelectorAll('button')].find(b => b.textContent?.includes('common.retry'))
+    expect(retry).toBeTruthy()
+    retry!.click()
+    await vi.waitFor(() => expect(api.usage).toHaveBeenCalled())
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
     expect(root.textContent).toContain('usage.overview')
     expect(root.textContent).not.toContain('usage.loadFailed')
   })
