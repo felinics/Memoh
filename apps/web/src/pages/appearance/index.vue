@@ -191,6 +191,9 @@
       </DialogHeader>
 
       <DialogBody class="space-y-6">
+        <!-- ui-allow-loose-row: a single setting alone in the dialog body. With
+             no neighbouring rows it needs no row height or hairline, and the
+             body's own padding already lines it up with the dialog title. -->
         <SettingsRow
           :label="t('settings.appearance.showExamplesEntry')"
           :description="t('settings.appearance.showExamplesEntryDescription')"

@@ -1,10 +1,10 @@
 <template>
-  <!-- `embedded` hands the card to the caller: the bot-creation form folds this
-       list into its own Access Control section, so a SettingsSection here would
-       draw a second card inside the first. A plain <div> still sits inside the
-       caller's card, so the rows keep the card's inset and list rhythm, and the
-       last row still drops its hairline because the members list is the last
-       block in that card. -->
+  <!-- ui-allow-loose-row: `embedded` hands the card to the caller: the
+       bot-creation form folds this list into its own Access Control section, so
+       a SettingsSection here would draw a second card inside the first. A plain
+       <div> still sits inside the caller's card, so the rows keep the card's
+       inset and list rhythm, and the last row still drops its hairline because
+       the members list is the last block in that card. -->
   <component :is="embedded ? 'div' : SettingsSection">
     <SettingsRow
       :label="$t('bots.access.userAccess.title')"

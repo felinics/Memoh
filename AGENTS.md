@@ -104,6 +104,7 @@ Bot persona templates (not developer guides):
 
 - The dev component wall at `apps/web/src/pages/dev/components/` is the living reference for `@felinic/ui` components and tokens. Use it to verify visual changes locally.
 - `scripts/check-ui-contract.mjs` is a mechanical guard wired into `mise run lint`. It enforces the design token contract from `packages/ui/AGENTS.md` (no raw colors, no invented shadows, no off-list arbitrary radius). Run lint before committing UI changes.
+- `scripts/check-settings-rows.mjs` (`mise run lint:settings-rows`, also part of `mise run lint`) checks the settings layout contract across component boundaries: every settings row renders inside a `SettingsSection` / `SettingsList`, and nothing inside a settings card re-adds the card's horizontal inset. It parses templates with `vue/compiler-sfc`, so run `pnpm install` first. For a deliberate exception, put `<!-- ui-allow-loose-row: <reason> -->` or `<!-- ui-allow-card-inset: <reason> -->` directly before the element.
 
 ### Mandatory Runtime and UI Verification
 
