@@ -122,9 +122,7 @@ jobs:
       - name: Run Vitest
         # Runs every project (web, desktop, runtime, docker). The timeout is generous
         # because a full run cold-loads every module on a small runner.
-        # ui-icon-contract is excluded until design decides whether a labelled
-        # icon button must use the muted tone; remove the flag once it passes.
-        run: pnpm test --run --testTimeout=60000 --exclude '**/src/lib/ui-icon-contract.test.ts'
+        run: pnpm test --run --testTimeout=60000
       - name: Typecheck SDK
         run: pnpm --filter @memohai/sdk typecheck
       - name: Typecheck Web

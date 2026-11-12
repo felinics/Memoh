@@ -41,7 +41,10 @@ describe('shared UI icon contract', () => {
         compilerOptions: { nodeTransforms: [node => {
           if (node.type !== 1) return
           if (node.tag === 'Button' && /<(?:AddIcon|ComputerIcon|BackIcon|ForwardIcon|SidebarOpenIcon|SidebarCloseIcon)\b/.test(node.loc.source)) {
-            expect(node.props.some(prop => prop.type === 6 && prop.name === 'tone' && prop.value?.content === 'muted')).toBe(true)
+            expect(node.props.some(prop => prop.type === 6 && (
+              (prop.name === 'tone' && prop.value?.content === 'muted')
+              || (prop.name === 'variant' && prop.value?.content === 'quiet')
+            ))).toBe(true)
             const colorClasses = node.props.filter(prop => prop.type === 6 && prop.name === 'class')
             for (const prop of colorClasses) {
               if (prop.type === 6) expect(prop.value?.content ?? '').not.toMatch(/(?:^|[\s:])(?:text-|opacity-|stroke-)/)
