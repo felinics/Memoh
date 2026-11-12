@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
+import { useQueryCache } from '@pinia/colada'
 import type { QueryCache, UseQueryEntry } from '@pinia/colada'
 import {
   QUERY_CACHE_STORAGE_KEY,
@@ -43,9 +45,7 @@ describe('persistableQueryFilter', () => {
       ['providers'],
       ['bot-settings', 'bot-1'],
       ['bot', 'qf-2'],
-      ['fetch-providers'],
       ['memory-providers'],
-      ['search-providers'],
       ['speech-providers'],
       ['video-providers'],
       [{ _id: 'getBots', baseUrl: 'http://x' }],
@@ -58,6 +58,12 @@ describe('persistableQueryFilter', () => {
 
   it('excludes whole-payload secrets, volatile state, and opaque workspace files', () => {
     for (const key of [['remote-runtimes'], ['session-status', 'b', 's'], ['bot-hooks-config', 'bot-1']]) {
+      expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
+    }
+  })
+
+  it('keeps lists whose edit form overwrites the whole stored config off disk', () => {
+    for (const key of [['search-providers'], ['fetch-providers']]) {
       expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
     }
   })
@@ -77,14 +83,14 @@ describe('QUERY_CACHE_STORAGE_KEY', () => {
 describe('saveQueryCacheToDiskNow', () => {
   it('persists provider lists and strips secrets recursively', () => {
     const storage = memoryStorage()
-    const fetchProviders = entryWith(['fetch-providers'], 'success', [
+    const speechProviders = entryWith(['speech-providers'], 'success', [
       { id: 'p1', name: 'WeakReference', provider: 'native', config: { api_key: 'sk-1', timeout: 30 } },
     ])
     const memoryProviders = entryWith(['memory-providers'], 'success', [
       { id: 'm1', name: 'MemoryProvider', provider: 'builtin', config: { memory_mode: 'graph', token: 't-1' } },
     ])
 
-    saveQueryCacheToDiskNow(cacheWith([fetchProviders, memoryProviders]), storage)
+    saveQueryCacheToDiskNow(cacheWith([speechProviders, memoryProviders]), storage)
     const raw = storage.getItem(QUERY_CACHE_STORAGE_KEY)
     expect(raw).toBeTruthy()
     // Display fields survive…
@@ -301,5 +307,80 @@ describe('createQueryCachePersistencePlugin', () => {
     vi.advanceTimersByTime(2000)
     expect(setItemSpy).not.toHaveBeenCalled()
     expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
+  })
+})
+
+// What can go wrong when a reload restores the on-disk copy:
+// 1. The copy was written moments after its fetch, so the restored entry
+//    counts as fresh and the page never asks the server again.
+// 2. The entry had been invalidated before it was written and comes back fresh.
+// 3. A query that never goes stale on its own keeps the restored copy forever.
+// 4. Restoring wrongly marks data fetched in this page session as outdated.
+// 5. The restored copy is no longer available for the first paint.
+describe('restoring the on-disk copy', () => {
+  const models = [{ id: 'm1', name: 'Model One' }]
+
+  /** Write `['models']` to disk from a first page session, as the plugin would. */
+  function diskWrittenBy(prepare?: (queryCache: QueryCache) => void) {
+    const storage = memoryStorage()
+    const firstSession = useQueryCache(createPinia())
+    firstSession.setQueryData(['models'], models)
+    prepare?.(firstSession)
+    saveQueryCacheToDiskNow(firstSession, storage)
+    return storage
+  }
+
+  /** Boot a second page session from `storage`. */
+  function reloadFrom(storage: Storage) {
+    const queryCache = useQueryCache(createPinia())
+    createQueryCachePersistencePlugin({ storage })({ queryCache } as never)
+    return queryCache
+  }
+
+  afterEach(() => cancelPendingQueryCacheSave())
+
+  it('keeps the restored data for the first paint', () => {
+    const queryCache = reloadFrom(diskWrittenBy())
+    expect(queryCache.getQueryData(['models'])).toEqual(models)
+  })
+
+  it('asks the server again on mount even when the copy was written right after its fetch', async () => {
+    const queryCache = reloadFrom(diskWrittenBy())
+    const query = vi.fn(async () => models)
+    const entry = queryCache.ensure({ key: ['models'], query })
+
+    await queryCache.refresh(entry)
+    expect(query).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks the server again for an entry that was invalidated before it was written', async () => {
+    const storage = diskWrittenBy((firstSession) => {
+      for (const entry of firstSession.getEntries({ key: ['models'] })) firstSession.invalidate(entry)
+    })
+    const queryCache = reloadFrom(storage)
+    const query = vi.fn(async () => models)
+    const entry = queryCache.ensure({ key: ['models'], query })
+
+    await queryCache.refresh(entry)
+    expect(query).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks the server again for a query that otherwise never goes stale', async () => {
+    const queryCache = reloadFrom(diskWrittenBy())
+    const query = vi.fn(async () => models)
+    const entry = queryCache.ensure({ key: ['models'], query, staleTime: Number.POSITIVE_INFINITY })
+
+    await queryCache.refresh(entry)
+    expect(query).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves data fetched in this page session fresh', async () => {
+    const queryCache = reloadFrom(diskWrittenBy())
+    queryCache.setQueryData(['bots'], [{ id: 'b1' }])
+    const query = vi.fn(async () => [{ id: 'b1' }])
+    const entry = queryCache.ensure({ key: ['bots'], query })
+
+    await queryCache.refresh(entry)
+    expect(query).not.toHaveBeenCalled()
   })
 })

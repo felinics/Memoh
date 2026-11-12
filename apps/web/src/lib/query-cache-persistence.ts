@@ -12,7 +12,8 @@ import {
  * Three layers to keep in mind:
  * 1. In-memory query cache — live API results inside the SPA session.
  * 2. localStorage (`memoh:query-cache`) — display-safe copy that survives Cmd+R.
- * 3. Server — source of truth; Colada revalidates stale entries in the background.
+ * 3. Server — source of truth. A restored entry only covers the first paint:
+ *    it is marked stale on restore, so the query refetches when it mounts.
  *
  * Every successful query persists by default; on write, `deepStripSecrets`
  * recursively removes secret-bearing fields (api_key, token, …) so provider
@@ -55,6 +56,11 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   'bot-hooks-config',
   // Per-turn context audit: a debug surface with no reload value.
   'context-lifecycle',
+  // These endpoints return secrets in clear and replace the stored config with
+  // whatever the edit form sends back. A copy with its secrets stripped would
+  // fill that form, and saving it would erase the stored keys and headers.
+  'search-providers',
+  'fetch-providers',
 ])
 
 /**
@@ -242,7 +248,15 @@ export function createQueryCachePersistencePlugin(options?: {
       }
       try {
         const stored = storage.getItem(key)
-        if (stored) hydrateQueryCache(queryCache, JSON.parse(stored))
+        if (stored) {
+          hydrateQueryCache(queryCache, JSON.parse(stored))
+          // Colada restores an entry with only the age it had when it was
+          // written, so the time spent on disk does not count and a copy
+          // written right after its fetch comes back as fresh. Restored data
+          // is from an earlier page session and has had its secrets stripped;
+          // mark it stale so every query refetches when it mounts.
+          for (const entry of queryCache.getEntries()) queryCache.invalidate(entry)
+        }
       } catch {
         // Corrupt on-disk copy — cold start.
       }
