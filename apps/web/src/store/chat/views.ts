@@ -201,7 +201,8 @@ export function createChatViews(deps: ChatViewsDeps) {
     const clientBorn = view.clientBorn
     view.clientBorn = false
     const mask = !clientBorn && (
-      view.transcript.messages.length === 0
+      !view.initialized
+      || view.transcript.messages.length === 0
       || view.staleWhileHidden
       || !chatViews.isActivityStreamCovered(botId)
     )
@@ -211,10 +212,10 @@ export function createChatViews(deps: ChatViewsDeps) {
       onError: () => {
         // Set before loadingMessages clears in loadInitialMessages's finally so
         // watchers (such as useSessionViewing) never observe an unmasked,
-        // non-failed frame on a failed cold open. Turns already on screen (a
-        // cached or client-born view) stay as they are; only a view with
-        // nothing to show would pass for an empty session.
-        if (!view.initialized && view.transcript.messages.length === 0) {
+        // non-failed frame on a failed cold open. Cached (initialized) and
+        // client-born views keep their turns unflagged; an uninitialized server
+        // session still lacks its history even if a live runtime turn arrived.
+        if (!clientBorn && !view.initialized) {
           view.initialLoadFailed.value = true
         }
       },
