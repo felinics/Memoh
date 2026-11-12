@@ -62,8 +62,8 @@ describe('persistableQueryFilter', () => {
     }
   })
 
-  it('keeps lists whose edit form overwrites the whole stored config off disk', () => {
-    for (const key of [['search-providers'], ['fetch-providers']]) {
+  it('keeps lists whose edit form overwrites the whole stored config and their field-schema meta off disk', () => {
+    for (const key of [['search-providers'], ['fetch-providers'], ['search-providers-meta'], ['fetch-providers-meta']]) {
       expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
     }
   })
@@ -160,6 +160,12 @@ describe('saveQueryCacheToDiskNow', () => {
       entryWith(['remote-runtimes'], 'success', { key: 'runtime-key' }),
       entryWith(['session-status', 'b', 's']),
       entryWith(['bot-hooks-config', 'bot-1'], 'success', '{"env":{"OPENAI_API_KEY":"sk-1"}}'),
+      entryWith(['search-providers-meta'], 'success', [
+        { provider: 'brave', config_schema: { fields: { api_key: { required: true, secret: true } } } },
+      ]),
+      entryWith(['fetch-providers-meta'], 'success', [
+        { provider: 'cloudflare_markdown', config_schema: { fields: { api_token: { required: true, secret: true } } } },
+      ]),
     ]
 
     saveQueryCacheToDiskNow(cacheWith(entries), storage)
