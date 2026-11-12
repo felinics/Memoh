@@ -49,7 +49,12 @@ const {
   },
 })
 
-const { data: fetchProviderMetaData } = useQuery({
+const {
+  data: fetchProviderMetaData,
+  isLoading: fetchProviderMetaLoading,
+  error: fetchProviderMetaError,
+  refetch: refetchFetchProviderMeta,
+} = useQuery({
   key: () => ['fetch-providers-meta'],
   query: async () => {
     const { data } = await getFetchProvidersMeta({ throwOnError: true })
@@ -57,7 +62,12 @@ const { data: fetchProviderMetaData } = useQuery({
   },
 })
 
-const { data: searchProviderMetaData } = useQuery({
+const {
+  data: searchProviderMetaData,
+  isLoading: searchProviderMetaLoading,
+  error: searchProviderMetaError,
+  refetch: refetchSearchProviderMeta,
+} = useQuery({
   key: () => ['search-providers-meta'],
   query: async () => {
     const { data } = await getSearchProvidersMeta({ throwOnError: true })
@@ -92,12 +102,15 @@ const fetchProviderMetas = computed<FetchprovidersProviderMeta[]>(() =>
   Array.isArray(fetchProviderMetaData.value) ? fetchProviderMetaData.value : [],
 )
 
-// Gate synthesized placeholders until the server list resolves: rendering
-// unconfigured placeholders while `providerData === undefined` flashes every
-// card as disabled and lets deep-linked detail routes mount an empty-secret
-// form that would overwrite stored credentials if saved.
+const searchReady = computed(() => providerData.value !== undefined && searchProviderMetaData.value !== undefined)
+const fetchReady = computed(() => fetchProviderData.value !== undefined && fetchProviderMetaData.value !== undefined)
+
+// Gate synthesized placeholders until both the server list and its schema meta
+// resolve: rendering placeholders before `providerData` and `*-meta` settle
+// flashes disabled cards, breaks meta-driven provider catalogs (Cloud fetch),
+// and lets deep-linked detail routes mount without credentials or field schemas.
 const searchItems = computed<SearchprovidersGetResponse[]>(() => {
-  if (providerData.value === undefined) return []
+  if (!searchReady.value) return []
   return SEARCH_PROVIDER_TYPES.map((provider) => {
     const meta = searchProviderMetas.value.find(item => item.provider === provider)
     return providers.value.find(item => item.provider === provider)
@@ -115,7 +128,7 @@ const fetchProviders = computed<FetchprovidersGetResponse[]>(() =>
   Array.isArray(fetchProviderData.value) ? fetchProviderData.value : [],
 )
 const fetchItems = computed<FetchprovidersGetResponse[]>(() => {
-  if (fetchProviderData.value === undefined) return []
+  if (!fetchReady.value) return []
   return FETCH_PROVIDER_TYPES.map((provider) => {
     const meta = fetchProviderMetas.value.find(item => item.provider === provider)
     return fetchProviders.value.find(item => item.provider === provider)
@@ -129,10 +142,20 @@ const fetchItems = computed<FetchprovidersGetResponse[]>(() => {
   })
 })
 
-const searchLoadFailed = computed(() => providerData.value === undefined && Boolean(providersError.value))
-const fetchLoadFailed = computed(() => fetchProviderData.value === undefined && Boolean(fetchProvidersError.value))
-const searchInitialLoading = computed(() => providerData.value === undefined && providersLoading.value && !searchLoadFailed.value)
-const fetchInitialLoading = computed(() => fetchProviderData.value === undefined && fetchProvidersLoading.value && !fetchLoadFailed.value)
+const searchError = computed(() =>
+  (providerData.value === undefined ? providersError.value : null)
+  ?? (searchProviderMetaData.value === undefined ? searchProviderMetaError.value : null),
+)
+const fetchError = computed(() =>
+  (fetchProviderData.value === undefined ? fetchProvidersError.value : null)
+  ?? (fetchProviderMetaData.value === undefined ? fetchProviderMetaError.value : null),
+)
+const searchBusy = computed(() => providersLoading.value || searchProviderMetaLoading.value)
+const fetchBusy = computed(() => fetchProvidersLoading.value || fetchProviderMetaLoading.value)
+const searchLoadFailed = computed(() => Boolean(searchError.value))
+const fetchLoadFailed = computed(() => Boolean(fetchError.value))
+const searchInitialLoading = computed(() => !searchReady.value && searchBusy.value && !searchLoadFailed.value)
+const fetchInitialLoading = computed(() => !fetchReady.value && fetchBusy.value && !fetchLoadFailed.value)
 
 // The search box lives in the Providers container's fixed header and pipes the
 // query in as a prop; this panel only filters. (No Add button for this scope —
@@ -178,13 +201,13 @@ const {
   },
   getRouteValue: detail => `${detail.kind}:${detail.provider.provider}`,
   isLoading: (routeValue) => {
-    if (routeValue.startsWith('search:')) return providersLoading.value
-    if (routeValue.startsWith('fetch:')) return fetchProvidersLoading.value
+    if (routeValue.startsWith('search:')) return searchBusy.value
+    if (routeValue.startsWith('fetch:')) return fetchBusy.value
     return false
   },
   isReady: (routeValue) => {
-    if (routeValue.startsWith('search:')) return providerData.value !== undefined
-    if (routeValue.startsWith('fetch:')) return fetchProviderData.value !== undefined
+    if (routeValue.startsWith('search:')) return searchReady.value
+    if (routeValue.startsWith('fetch:')) return fetchReady.value
     return true
   },
 })
@@ -195,18 +218,23 @@ const activeDetailKind = computed<WebDetailKind>(() => {
   return detailKind.value
 })
 
-const detailLoadError = computed(() => {
-  if (activeDetailKind.value === 'fetch') {
-    return fetchProviderData.value === undefined ? fetchProvidersError.value : null
-  }
-  return providerData.value === undefined ? providersError.value : null
-})
+const detailLoadError = computed(() => (activeDetailKind.value === 'fetch' ? fetchError.value : searchError.value))
 const detailLoadFailed = computed(() => Boolean(detailLoadError.value))
-const detailRetrying = computed(() => (activeDetailKind.value === 'fetch' ? fetchProvidersLoading.value : providersLoading.value))
+const detailRetrying = computed(() => (activeDetailKind.value === 'fetch' ? fetchBusy.value : searchBusy.value))
+
+function retrySearchLoad() {
+  if (providerData.value === undefined) void refetchSearchProviders()
+  if (searchProviderMetaData.value === undefined) void refetchSearchProviderMeta()
+}
+
+function retryFetchLoad() {
+  if (fetchProviderData.value === undefined) void refetchFetchProviders()
+  if (fetchProviderMetaData.value === undefined) void refetchFetchProviderMeta()
+}
 
 function retryDetailLoad() {
-  if (activeDetailKind.value === 'fetch') void refetchFetchProviders()
-  else void refetchSearchProviders()
+  if (activeDetailKind.value === 'fetch') retryFetchLoad()
+  else retrySearchLoad()
 }
 
 function loadErrorDescription(err: unknown): string {
@@ -262,14 +290,14 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
             v-else-if="searchLoadFailed"
             tone="destructive"
             :title="t('common.loadFailed')"
-            :description="loadErrorDescription(providersError)"
+            :description="loadErrorDescription(searchError)"
           >
             <Button
               type="button"
               variant="outline"
               size="sm"
-              :loading="providersLoading"
-              @click="refetchSearchProviders()"
+              :loading="searchBusy"
+              @click="retrySearchLoad()"
             >
               {{ t('common.retry') }}
             </Button>
@@ -316,14 +344,14 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
             v-else-if="fetchLoadFailed"
             tone="destructive"
             :title="t('common.loadFailed')"
-            :description="loadErrorDescription(fetchProvidersError)"
+            :description="loadErrorDescription(fetchError)"
           >
             <Button
               type="button"
               variant="outline"
               size="sm"
-              :loading="fetchProvidersLoading"
-              @click="refetchFetchProviders()"
+              :loading="fetchBusy"
+              @click="retryFetchLoad()"
             >
               {{ t('common.retry') }}
             </Button>

@@ -59,13 +59,14 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   // These endpoints return secrets in clear and replace the stored config with
   // whatever the edit form sends back. A copy with its secrets stripped would
   // fill that form, and saving it would erase the stored keys and headers.
-  // Their *-meta companions key config_schema.fields by secret field names
-  // (api_key, secret_key, api_token) and carry `secret: true`, which
-  // deepStripSecrets would strip out of the schema before refetch completes.
+  // Their *-meta companions and bot-channels also key config_schema.fields by
+  // secret field names (api_key, secret_key, api_token, appSecret, botToken),
+  // which deepStripSecrets would strip out of the schema before refetch completes.
   'search-providers',
   'fetch-providers',
   'search-providers-meta',
   'fetch-providers-meta',
+  'bot-channels',
 ])
 
 /**
