@@ -24,9 +24,10 @@
 // followed so a component's own template is judged where it is used. Per
 // component the guard derives, to a fixed point across imports:
 //   · needsList  — rows sit at its root, so every usage must be inside a list;
-//   · slotCtx    — whether its default slot renders inside a list, outside one,
-//                  or inherits the usage site;
-//   · rootInsets — card-inset classes at its root, an error only when the
+//   · slots      — per slot name, whether that slot renders inside a list,
+//                  outside one, or inherits the usage site;
+//   · rootInsets — card-inset classes at its root, including those of
+//                  components it renders at its root; an error only when the
 //                  component is used inside a card.
 // Overlay components (Dialog, Sheet, Popover, …) teleport their content to
 // <body>, so their content counts as outside any list. Inside a row and inside
@@ -36,7 +37,8 @@
 //   <!-- ui-allow-loose-row: <why this row needs no list rhythm> -->
 //   <!-- ui-allow-card-inset: <why this block offsets by the card inset> -->
 // The reason is required. Use it for a deliberate layout (a single row alone
-// in a dialog body), not to silence a real collapse.
+// in a dialog body), not to silence a real collapse. Before a component usage,
+// ui-allow-card-inset also covers the insets at that component's root.
 //
 // Usage: node scripts/check-settings-rows.mjs [src-dir]   (default apps/web/src)
 import { readdirSync, readFileSync } from 'node:fs'
@@ -87,7 +89,7 @@ for (const file of files) {
   for (const m of script.matchAll(/import\s+(\w+)\s*(?:,\s*\{[^}]*\})?\s+from\s+['"]([^'"]+\.vue)['"]/g)) {
     imports[m[1]] = m[2].startsWith('@/') ? join(SRC, m[2].slice(2)) : resolve(dirname(file), m[2])
   }
-  comps.set(file, { ast: descriptor.template.ast, imports, needsList: false, slotCtx: 'inherit', rootInsets: [] })
+  comps.set(file, { ast: descriptor.template.ast, imports, needsList: false, slots: {}, rootInsets: [] })
 }
 
 const rel = f => (relative(ROOT, f).startsWith('..') ? relative(SRC, f) : relative(ROOT, f))
@@ -112,15 +114,33 @@ function allowed(siblings, index, marker) {
   return false
 }
 
+// The slot a child of a component usage fills: `<template #name>` / `v-slot:name`
+// names one; anything else is the default slot. A dynamic name is unknown (null).
+const slotOf = node => {
+  if (node.tag !== 'template') return 'default'
+  const dir = node.props?.find(p => p.type === DIRECTIVE && p.name === 'slot')
+  if (!dir) return 'default'
+  if (!dir.arg) return 'default'
+  return dir.arg.isStatic === false ? null : dir.arg.content
+}
+
 // list: 'yes' | 'no' | 'root' (decided by each usage site of this component)
 function analyze(file) {
   const comp = comps.get(file)
-  const out = { needsList: false, slotCtx: null, rootInsets: [], errors: [] }
+  const out = { needsList: false, slots: {}, rootInsets: [], errors: [] }
   const where = node => `${rel(file)}:${node.loc.start.line}`
 
   const visit = (node, ctx, siblings, index) => {
     if (node.type !== NODE_ELEMENT) return
-    if (node.tag === 'slot') { out.slotCtx ??= ctx.list; return }
+    if (node.tag === 'slot') {
+      // A slot whose name is bound at runtime cannot be matched to a usage.
+      if (!bound(node, 'name')) {
+        const name = attr(node, 'name') ?? 'default'
+        // The same slot rendered twice keeps the first outlet's context.
+        out.slots[name] ??= ctx.list === 'root' ? 'inherit' : ctx.list
+      }
+      return
+    }
     const tag = pascal(node.tag)
     const here = PORTAL.test(tag) ? { list: 'no', row: false, bleed: false } : ctx
     const child = comps.get(comp.imports[node.tag] ?? comp.imports[tag])
@@ -131,8 +151,9 @@ function analyze(file) {
       else if (here.list === 'no') out.errors.push(`${where(node)}  <${node.tag}> is a settings row outside any SettingsSection / SettingsList — it gets no row height, padding or hairline. Wrap the rows in SettingsList (inside a dialog body) or a SettingsSection.`)
     }
 
+    const insetAllowed = allowed(siblings, index, 'ui-allow-card-inset')
     const insetChecked = !here.row && !here.bleed && !rowish && !LIST_TAGS.has(tag) && !PORTAL.test(tag)
-    if (insetChecked && !allowed(siblings, index, 'ui-allow-card-inset')) {
+    if (insetChecked && !insetAllowed) {
       const cls = classes(node)
       const hits = [...cls.matchAll(CARD_INSET)].map(m => m[1])
       if (hits.length && !OWN_SURFACE.test(cls)) {
@@ -141,8 +162,16 @@ function analyze(file) {
         else if (here.list === 'root') out.rootInsets.push(`${where(node)}  ${msg}`)
       }
     }
-    if (child && here.list === 'yes' && !here.row && !here.bleed) {
-      for (const inset of child.rootInsets) out.errors.push(`${inset} inside a settings card (rendered by ${where(node)}) — the card already insets its content by --settings-inset.`)
+    // The insets at a child component's root land where this usage sits: inside
+    // a card they are an error; at this component's own root they become part
+    // of its rootInsets, so a wrapper cannot hide them from the card above it.
+    if (child && !here.row && !here.bleed && !insetAllowed) {
+      if (here.list === 'yes') {
+        for (const inset of child.rootInsets) out.errors.push(`${inset} inside a settings card (rendered by ${where(node)}) — the card already insets its content by --settings-inset.`)
+      }
+      else if (here.list === 'root') {
+        for (const inset of child.rootInsets) out.rootInsets.push(`${inset} (via ${where(node)})`)
+      }
     }
 
     let next = here
@@ -158,24 +187,32 @@ function analyze(file) {
         next = { list: 'yes', row: false, bleed: false }
       }
     }
-    else if (child && child.slotCtx !== 'inherit') next = { list: child.slotCtx, row: false, bleed: false }
+    else if (child) {
+      // Each child fills one of the component's slots; it renders in that
+      // slot's context, or in the usage site's when the slot inherits it.
+      node.children.forEach((c, i) => {
+        const name = slotOf(c)
+        const slot = name === null ? 'inherit' : (child.slots[name] ?? 'inherit')
+        visit(c, slot === 'inherit' ? here : { list: slot, row: false, bleed: false }, node.children, i)
+      })
+      return
+    }
 
     node.children.forEach((c, i) => visit(c, next, node.children, i))
   }
 
   const top = comp.ast.children
   top.forEach((c, i) => visit(c, { list: 'root', row: false, bleed: false }, top, i))
-  if (out.slotCtx === 'root' || out.slotCtx === null) out.slotCtx = 'inherit'
   return out
 }
 
-// Propagate needsList / slotCtx / rootInsets through imports to a fixed point.
+// Propagate needsList / slots / rootInsets through imports to a fixed point.
 for (let pass = 0; pass < 50; pass++) {
   let changed = false
   for (const [file, comp] of comps) {
     const r = analyze(file)
-    if (r.needsList !== comp.needsList || r.slotCtx !== comp.slotCtx || r.rootInsets.join() !== comp.rootInsets.join()) changed = true
-    Object.assign(comp, { needsList: r.needsList, slotCtx: r.slotCtx, rootInsets: r.rootInsets })
+    if (r.needsList !== comp.needsList || JSON.stringify(r.slots) !== JSON.stringify(comp.slots) || r.rootInsets.join() !== comp.rootInsets.join()) changed = true
+    Object.assign(comp, { needsList: r.needsList, slots: r.slots, rootInsets: r.rootInsets })
   }
   if (!changed) break
 }
