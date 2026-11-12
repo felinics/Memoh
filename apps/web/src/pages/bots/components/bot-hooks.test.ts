@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createApp, nextTick, type App } from 'vue'
+import { createApp, h, nextTick, ref, type App, type Ref } from 'vue'
 import { createPinia, type Pinia } from 'pinia'
 import { PiniaColada, useQueryCache } from '@pinia/colada'
 import BotHooks from './bot-hooks.vue'
@@ -24,14 +24,19 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function mountPage(): Promise<HTMLElement> {
+function mountRaw(botIdRef: Ref<string> = ref('bot-1')): HTMLElement {
   const root = document.createElement('div')
   document.body.append(root)
-  app = createApp(BotHooks, { botId: 'bot-1' })
+  app = createApp({ render: () => h(BotHooks, { botId: botIdRef.value }) })
   pinia = createPinia()
   app.use(pinia).use(PiniaColada)
   app.config.globalProperties.$t = (key: string) => key
   app.mount(root)
+  return root
+}
+
+async function mountPage(): Promise<HTMLElement> {
+  const root = mountRaw()
   await vi.waitFor(() => expect(api.read).toHaveBeenCalled())
   await new Promise(resolve => setTimeout(resolve, 0))
   await nextTick()
@@ -122,5 +127,96 @@ describe('bot hooks editor', () => {
     await nextTick()
     expect(root.querySelector('textarea')!.value).toBe('{"hooks":[]}')
     expect(root.textContent).not.toContain('common.unsaved')
+  })
+
+  it('does not flash invalid JSON or allow pre-hydration edits while initial config is loading', async () => {
+    api.events.mockResolvedValue({ data: { events: [] } })
+    let resolveRead!: (value: { data: { content: string } }) => void
+    api.read.mockReturnValue(new Promise((resolve) => {
+      resolveRead = resolve
+    }))
+
+    const root = mountRaw()
+    await nextTick()
+    await vi.waitFor(() => expect(api.read).toHaveBeenCalledOnce())
+
+    const editor = root.querySelector('textarea')!
+    const buttons = () => [...root.querySelectorAll('button')]
+    const templateBtn = buttons().find(b => b.textContent?.includes('bots.hooks.template'))!
+
+    expect(root.textContent).not.toContain('bots.hooks.invalidJson')
+    expect(root.textContent).not.toContain('bots.hooks.missing')
+    expect(root.textContent).not.toContain('bots.hooks.missingDescription')
+    expect(editor.getAttribute('aria-invalid')).not.toBe('true')
+    expect(editor.disabled).toBe(true)
+    expect(templateBtn.disabled).toBe(true)
+
+    // Pre-hydration template click or input event must not mark the draft dirty.
+    templateBtn.click()
+    editor.value = '{"hooks":[{"name":"premature"}]}'
+    editor.dispatchEvent(new Event('input'))
+    await nextTick()
+    expect(root.textContent).not.toContain('common.unsaved')
+
+    resolveRead({ data: { content: '{"hooks":[{"name":"server-hook"}]}' } })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
+    expect(editor.disabled).toBe(false)
+    expect(templateBtn.disabled).toBe(false)
+    expect(editor.value).toBe('{"hooks":[{"name":"server-hook"}]}')
+    expect(root.textContent).not.toContain('common.unsaved')
+  })
+
+  it('keeps save scoped to the originating bot when switching bots mid-flight', async () => {
+    api.events.mockResolvedValue({ data: { events: [] } })
+    api.read.mockImplementation(async ({ path }: { path: { bot_id: string } }) => ({
+      data: {
+        content: path.bot_id === 'bot-1'
+          ? '{"hooks":[]}'
+          : '{"hooks":[{"name":"bot-2-only"}]}',
+      },
+    }))
+
+    let resolveWrite!: (value: { data: Record<string, never> }) => void
+    api.write.mockImplementation(() => new Promise((resolve) => {
+      resolveWrite = resolve
+    }))
+
+    const botId = ref('bot-1')
+    const root = mountRaw(botId)
+    await vi.waitFor(() => expect(api.read).toHaveBeenCalled())
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
+    const editor = root.querySelector('textarea')!
+    expect(editor.value).toBe('{"hooks":[]}')
+
+    editor.value = '{"hooks":[],"enabled":false}'
+    editor.dispatchEvent(new Event('input'))
+    await nextTick()
+
+    const saveBtn = [...root.querySelectorAll('button')].find(b => b.textContent?.includes('bots.hooks.save'))!
+    saveBtn.click()
+    await vi.waitFor(() => expect(api.write).toHaveBeenCalledOnce())
+    expect(api.write).toHaveBeenCalledWith(expect.objectContaining({
+      path: { bot_id: 'bot-1' },
+    }))
+
+    // Switch to bot-2 before bot-1's save resolves.
+    botId.value = 'bot-2'
+    await nextTick()
+    await vi.waitFor(() => expect(root.querySelector('textarea')!.value).toBe('{"hooks":[{"name":"bot-2-only"}]}'))
+
+    resolveWrite({ data: {} })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+
+    // bot-2's editor and cache must stay untouched; bot-1's cache gets the saved config.
+    expect(root.querySelector('textarea')!.value).toBe('{"hooks":[{"name":"bot-2-only"}]}')
+    expect(root.textContent).not.toContain('common.unsaved')
+    const cache = useQueryCache(pinia)
+    expect(cache.getQueryData(['bot-hooks-config', 'bot-1'])).toBe(JSON.stringify({ hooks: [], enabled: false }, null, 2))
+    expect(cache.getQueryData(['bot-hooks-config', 'bot-2'])).toBe('{"hooks":[{"name":"bot-2-only"}]}')
   })
 })
