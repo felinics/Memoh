@@ -60,7 +60,7 @@
           variant="ghost"
           class="size-[26px] shrink-0 p-0 text-muted-foreground/70 hover:text-foreground"
           :title="t('common.refresh')"
-          @click="reloadAndBroadcast"
+          @click="reloadAndBroadcast({ notifyOnError: true })"
         >
           <RefreshCw class="size-4" />
         </Button>
@@ -132,6 +132,18 @@
       </span>
     </div>
 
+    <div
+      v-if="treeLoadError"
+      class="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5 text-caption"
+    >
+      <span
+        class="min-w-0 truncate text-muted-foreground"
+        :title="treeLoadError"
+      >
+        {{ treeLoadError }}
+      </span>
+    </div>
+
     <div class="flex-1 min-h-0 relative">
       <div class="absolute inset-0">
         <ContextMenu>
@@ -166,7 +178,7 @@
               </ContextMenuItem>
               <ContextMenuSeparator />
             </template>
-            <ContextMenuItem @select="reloadAndBroadcast">
+            <ContextMenuItem @select="reloadAndBroadcast({ notifyOnError: true })">
               <RefreshCw class="mr-2 size-3.5" />
               {{ t('common.refresh') }}
             </ContextMenuItem>
@@ -335,7 +347,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { CloudUpload, Download, FilePlus, FolderPlus, ListChecks, RefreshCw, Trash2, Upload, X } from 'lucide-vue-next'
@@ -374,6 +386,7 @@ import FileTree from '@/components/file-manager/file-tree.vue'
 import SidebarPanelHeader from './panel-header.vue'
 import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
 import { useFileDropZone } from '@/composables/useFileDropZone'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { readDroppedContents, type DroppedContents } from '@/utils/dropped-files'
 import { FileTreeKey } from '@/components/file-manager/file-tree-context'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
@@ -491,12 +504,20 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 // List a single directory's entries (with a short retry for transient workspace
-// errors). Used by the tree per folder; failures surface as a toast and an empty
-// folder rather than breaking the whole tree.
-async function listDirectory(path: string): Promise<HandlersFsFileInfo[]> {
+// errors on explicit loads). Background polls fail silently into panel state
+// instead of spamming toast.error every poll interval when the container stops.
+const treeLoadError = ref('')
+let activeDirectoryLoads = 0
+let notifyNextLoadError = false
+
+async function listDirectory(
+  path: string,
+  options: { retryTransient?: boolean } = {},
+): Promise<HandlersFsFileInfo[]> {
   if (!props.botId) return []
+  const maxAttempts = options.retryTransient === false ? 1 : 3
   let lastError: unknown
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const { data } = await getBotsByBotIdContainerFsList({
         path: { bot_id: props.botId },
@@ -506,7 +527,7 @@ async function listDirectory(path: string): Promise<HandlersFsFileInfo[]> {
       return data.entries ?? []
     } catch (error) {
       lastError = error
-      if (attempt < 2 && isTransientWorkspaceError(error)) {
+      if (attempt < maxAttempts - 1 && isTransientWorkspaceError(error)) {
         await wait(500 * (attempt + 1))
         continue
       }
@@ -517,15 +538,28 @@ async function listDirectory(path: string): Promise<HandlersFsFileInfo[]> {
 }
 
 async function safeListDirectory(path: string): Promise<HandlersFsFileInfo[]> {
+  const shouldNotify = notifyNextLoadError
+  activeDirectoryLoads += 1
   try {
-    return await listDirectory(path)
+    const entries = await listDirectory(path, { retryTransient: shouldNotify })
+    treeLoadError.value = ''
+    if (path === rootPath) notifyNextLoadError = false
+    return entries
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.files.loadFailed')))
+    const message = resolveApiErrorMessage(error, t('bots.files.loadFailed'))
+    treeLoadError.value = message
+    if (notifyNextLoadError) {
+      notifyNextLoadError = false
+      toast.error(message)
+    }
     return []
+  } finally {
+    activeDirectoryLoads = Math.max(0, activeDirectoryLoads - 1)
   }
 }
 
-function reload() {
+function reload(options: { notifyOnError?: boolean } = {}) {
+  if (options.notifyOnError) notifyNextLoadError = true
   refreshKey.value++
 }
 
@@ -533,41 +567,21 @@ function reload() {
 // store so any open file viewer / preview reloads its content. Keep this OFF
 // the fsChangedAt watcher path or the watcher would re-bump fsChangedAt and
 // loop forever.
-function reloadAndBroadcast() {
-  reload()
+function reloadAndBroadcast(options: { notifyOnError?: boolean } = {}) {
+  reload(options)
   chatStore.markFsChanged()
 }
 
-let treePollTimer: number | null = null
-
-function isDocumentVisible(): boolean {
-  return typeof document === 'undefined' || document.visibilityState === 'visible'
-}
-
-function pollTree() {
-  if (!props.botId || !props.active || !isDocumentVisible()) return
-  reload()
-}
-
-function startTreePoll() {
-  if (treePollTimer !== null || !props.botId || !props.active) return
-  treePollTimer = window.setInterval(pollTree, FILE_TREE_POLL_MS)
-}
-
-function stopTreePoll() {
-  if (treePollTimer === null) return
-  window.clearInterval(treePollTimer)
-  treePollTimer = null
-}
-
-function handleVisibilityChange() {
-  if (!props.active || !isDocumentVisible()) {
-    stopTreePoll()
-    return
-  }
-  reload()
-  startTreePoll()
-}
+useVisiblePoll(
+  () => {
+    if (activeDirectoryLoads > 0 || operationLoading.value) return
+    reload()
+  },
+  FILE_TREE_POLL_MS,
+  {
+    enabled: () => Boolean(props.botId && props.active),
+  },
+)
 
 // Reveal a path in the tree (expand its ancestors + scroll into view). Used by
 // the store's openFilesAt deep-link.
@@ -1194,6 +1208,8 @@ watch(() => props.botId, () => {
   selectedEntries.value = new Map()
   selectionMode.value = false
   revealPath.value = null
+  treeLoadError.value = ''
+  notifyNextLoadError = false
   reload()
 }, { immediate: true })
 
@@ -1205,23 +1221,10 @@ watch(fsChangedAt, () => {
   reload()
 })
 
-watch(() => [props.botId, props.active] as const, ([botId, active]) => {
-  if (botId && active && isDocumentVisible()) {
+watch(() => props.active, (active, wasActive) => {
+  if (active && wasActive === false && props.botId) {
     reload()
-    startTreePoll()
-  } else {
-    stopTreePoll()
   }
-}, { immediate: true })
-
-onMounted(() => {
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  if (props.active && isDocumentVisible()) startTreePoll()
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  stopTreePoll()
 })
 
 defineExpose({

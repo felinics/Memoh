@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { FileText } from 'lucide-vue-next'
@@ -42,6 +42,7 @@ import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { getBotsByBotIdContainerFsRead } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isMarkdownFile, isHtmlFile } from '@/components/file-manager/utils'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { useChatStore } from '@/store/chat-list'
 import { usePanelVisible } from './use-panel-visible'
 import PanelBreadcrumb from './panel-breadcrumb.vue'
@@ -75,6 +76,7 @@ const isHtml = computed(() => isHtmlFile(filename.value))
 const canPreview = computed(() => isMd.value || isHtml.value)
 
 const content = ref('')
+const lastRevision = ref('')
 const loading = ref(false)
 // True once the preview has been rendered at least once for the current path,
 // so subsequent reloads can update content in place without flashing a spinner.
@@ -82,11 +84,6 @@ const loaded = ref(false)
 // One in-flight load at a time; a new load aborts the old one so stale
 // fast-fire responses can't clobber newer content.
 let activeLoadController: AbortController | null = null
-let previewPollTimer: number | null = null
-
-function isDocumentVisible(): boolean {
-  return typeof document === 'undefined' || document.visibilityState === 'visible'
-}
 
 async function load(options: { notifyOnError?: boolean } = {}) {
   const botId = currentBotId.value
@@ -103,7 +100,11 @@ async function load(options: { notifyOnError?: boolean } = {}) {
       throwOnError: true,
     })
     if (controller.signal.aborted) return
-    content.value = data.content ?? ''
+    const nextRevision = data?.revision ?? ''
+    if (!loaded.value || !nextRevision || nextRevision !== lastRevision.value) {
+      content.value = data?.content ?? ''
+    }
+    lastRevision.value = nextRevision
     loaded.value = true
   } catch (error) {
     if (controller.signal.aborted) return
@@ -118,14 +119,16 @@ async function load(options: { notifyOnError?: boolean } = {}) {
   }
 }
 
-function pollPreview() {
-  if (!visible.value || !loaded.value || loading.value || !isDocumentVisible()) return
-  void load({ notifyOnError: false })
-}
-
-function handleVisibilityChange() {
-  if (visible.value && isDocumentVisible()) void load({ notifyOnError: false })
-}
+useVisiblePoll(
+  async () => {
+    if (loading.value) return
+    await load({ notifyOnError: false })
+  },
+  PREVIEW_POLL_MS,
+  {
+    enabled: () => Boolean(currentBotId.value && filePath.value && canPreview.value && visible.value),
+  },
+)
 
 // Load when the panel first becomes visible / its target changes, and refresh
 // when the agent mutates the workspace. Path change starts the "loaded" clock
@@ -133,6 +136,7 @@ function handleVisibilityChange() {
 // fetch.
 watch(filePath, () => {
   loaded.value = false
+  lastRevision.value = ''
   content.value = ''
 })
 watch([visible, filePath], ([isVisible]) => {
@@ -145,17 +149,7 @@ watch(fsChangedAt, () => {
   void load()
 })
 
-onMounted(() => {
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  previewPollTimer = window.setInterval(pollPreview, PREVIEW_POLL_MS)
-})
-
 onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  if (previewPollTimer !== null) {
-    window.clearInterval(previewPollTimer)
-    previewPollTimer = null
-  }
   activeLoadController?.abort()
 })
 </script>

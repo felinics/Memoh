@@ -15,7 +15,8 @@ vi.mock('@memohai/sdk', async (importOriginal) => {
   const original = await importOriginal<typeof import('@memohai/sdk')>()
   return { ...original, ...sdk }
 })
-vi.mock('vue-i18n', () => ({
+vi.mock('vue-i18n', async importOriginal => ({
+  ...await importOriginal<typeof import('vue-i18n')>(),
   useI18n: () => ({
     t: (key: string) => key,
   }),

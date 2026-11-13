@@ -5,6 +5,7 @@ import {
   postBotsByBotIdContainerDisplayWebrtcOffer,
 } from '@memohai/sdk'
 import i18n from '@/i18n'
+import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { decodeClipboardMessage, encodeClipboardPaste } from './display-clipboard'
 import {
@@ -362,6 +363,23 @@ export class BotDisplayConnection {
     this.deleteSession(sessionID)
   }
 
+  dispose() {
+    this.cancelHiddenRelease()
+    this.cancelReconnect()
+    this.recovering = false
+    this.reconnectAttempts = 0
+    this.refs = 0
+    this.acquireAbort?.abort()
+    this.acquireAbort = null
+    this.acquirePromise = null
+    this.ensureReadyPromise = null
+    this.cleanupPeer()
+    this.sessionId.value = ''
+    this.prepareProgress.value = null
+    this.unavailableReason.value = ''
+    this.status.value = 'idle'
+  }
+
   private deleteSession(sessionID?: string) {
     if (!sessionID) return
     void deleteBotsByBotIdContainerDisplaySessionsBySessionId({
@@ -537,6 +555,18 @@ export class BotDisplayConnection {
   }
 }
 
+onAuthSessionCleared(() => {
+  for (const entry of connections.values()) {
+    if (entry.retentionTimer !== null) {
+      window.clearTimeout(entry.retentionTimer)
+      entry.retentionTimer = null
+    }
+    entry.consumers = 0
+    entry.connection.dispose()
+  }
+  connections.clear()
+})
+
 export function useBotDisplayConnection(botId: string, visible: MaybeRefOrGetter<boolean> = true) {
   let entry = connections.get(botId)
   if (!entry) {
@@ -564,8 +594,8 @@ export function useBotDisplayConnection(botId: string, visible: MaybeRefOrGetter
   onScopeDispose(() => {
     stop()
     if (viewing) conn.removeRef()
-    current.consumers--
-    if (current.consumers === 0) {
+    if (current.consumers > 0) current.consumers--
+    if (current.consumers === 0 && connections.get(botId) === current) {
       current.retentionTimer = window.setTimeout(() => {
         current.retentionTimer = null
         if (current.consumers === 0 && connections.get(botId) === current) connections.delete(botId)

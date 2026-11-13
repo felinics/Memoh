@@ -357,6 +357,7 @@ import BotComputerAccessDialog from '@/components/computer/bot-computer-access-d
 import ComputerAccessList from '@/components/computer/computer-access-list.vue'
 import ConnectComputerDialog from '@/components/computer/connect-computer-dialog.vue'
 import { useAccountRuntimes, useComputerAccessActions, useComputerAccessGrants } from '@/components/computer/use-computer-access'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
@@ -734,11 +735,11 @@ watch(desktopRuntimeDialogOpen, (open) => {
   connectForm.resetForm({ values: { name: '' } })
 })
 
-let pollTimer: number | undefined
 let unsubscribeDesktopRuntime: (() => void) | undefined
-function refreshVisibleRuntimes(): void {
-  if (document.visibilityState === 'visible') void refetchRuntimes()
-}
+
+useVisiblePoll(async () => {
+  await refetchRuntimes()
+}, 5000)
 
 onMounted(() => {
   if (desktopRuntimeBridge) {
@@ -749,13 +750,9 @@ onMounted(() => {
     })
     void loadDesktopRuntimeState()
   }
-  pollTimer = window.setInterval(refreshVisibleRuntimes, 5000)
-  document.addEventListener('visibilitychange', refreshVisibleRuntimes)
 })
 
 onBeforeUnmount(() => {
   unsubscribeDesktopRuntime?.()
-  if (pollTimer !== undefined) window.clearInterval(pollTimer)
-  document.removeEventListener('visibilitychange', refreshVisibleRuntimes)
 })
 </script>

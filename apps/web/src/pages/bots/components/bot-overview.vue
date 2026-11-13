@@ -267,7 +267,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onActivated, onDeactivated, onBeforeUnmount, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
@@ -289,6 +289,7 @@ import {
 } from '@memohai/sdk'
 import { useBotQuery } from '@/composables/api/useBot'
 import { useBotChannels } from '@/composables/api/useBotChannels'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import BotChecksPanel from './bot-checks-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
@@ -452,48 +453,19 @@ const containerRunning = computed(() => {
 
 const containerPaused = computed(() => resolveRuntimeStatusKey(container.value?.status) === 'paused')
 
-// Poll metrics (and container state) every 10s while running, mirroring the
-// detail-page pattern. KeepAlive wraps this tab, so onUnmounted never fires on
-// tab switch — gate on onActivated/onDeactivated instead, and stop polling once
-// the container isn't running so we don't hammer a backend with nothing to say.
+// Poll metrics (and container state) every 10s while visible and running/paused.
+// Paused keeps polling so a runtime woken by a message updates without reload.
 const POLL_MS = 10_000
-let pollTimer: ReturnType<typeof setInterval> | null = null
-let isActive = true
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-function syncPolling() {
-  // Paused keeps polling: a runtime that resumes on its own (e.g. a hosted
-  // sandbox woken by the next message) updates without a reload.
-  const shouldPoll = isActive && isContainerBot.value && (containerRunning.value || containerPaused.value)
-  if (shouldPoll && !pollTimer) {
-    pollTimer = setInterval(() => {
-      void refetchMetrics()
-      void refetchContainer()
-    }, POLL_MS)
-  } else if (!shouldPoll) {
-    stopPolling()
-  }
-}
-
-watch([isContainerBot, containerRunning, containerPaused], syncPolling, { immediate: true })
-
-onActivated(() => {
-  isActive = true
-  syncPolling()
-})
-
-onDeactivated(() => {
-  isActive = false
-  stopPolling()
-})
-
-onBeforeUnmount(stopPolling)
+useVisiblePoll(
+  () => {
+    void refetchMetrics()
+    void refetchContainer()
+  },
+  POLL_MS,
+  {
+    enabled: () => isContainerBot.value && (containerRunning.value || containerPaused.value),
+  },
+)
 
 // Status label reuses the Container tab's status vocabulary so the two pages
 // never disagree on "is it running". Badge is always secondary (neutral gray) —

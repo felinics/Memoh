@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { fetchWorkdirs, type BotWorkdir } from '@/composables/api/useWorkdirs'
+import { onAuthSessionCleared } from '@/lib/auth-session'
 
 // Client state around bot workdirs: the per-bot workdir list (shared by the
 // sidebar grouping, the composer chip, and session creation) plus the per-bot
@@ -11,11 +12,27 @@ export const useWorkdirsStore = defineStore('workdirs', () => {
   const workdirsByBot = ref<Record<string, BotWorkdir[]>>({})
   const loadedBots = new Set<string>()
   const pendingLoads = new Map<string, Promise<void>>()
+  let userScopeGeneration = 0
 
   const workingWorkdirByBot = useLocalStorage<Record<string, string>>(
     'workspace-working-workdir',
     {},
   )
+
+  function reset() {
+    userScopeGeneration += 1
+    workdirsByBot.value = {}
+    loadedBots.clear()
+    pendingLoads.clear()
+    workingWorkdirByBot.value = {}
+  }
+
+  const stopAuthSessionListener = onAuthSessionCleared(() => {
+    reset()
+  })
+  onScopeDispose(() => {
+    stopAuthSessionListener()
+  })
 
   function workdirsFor(botId: string | null | undefined): BotWorkdir[] {
     const bid = (botId ?? '').trim()
@@ -37,13 +54,15 @@ export const useWorkdirsStore = defineStore('workdirs', () => {
     if (!bid || loadedBots.has(bid)) return
     const pending = pendingLoads.get(bid)
     if (pending) return pending
+    const generation = userScopeGeneration
     const load = fetchWorkdirs(bid)
       .then((workdirs) => {
+        if (generation !== userScopeGeneration) return
         workdirsByBot.value = { ...workdirsByBot.value, [bid]: workdirs }
         loadedBots.add(bid)
       })
       .finally(() => {
-        pendingLoads.delete(bid)
+        if (pendingLoads.get(bid) === load) pendingLoads.delete(bid)
       })
     pendingLoads.set(bid, load)
     return load

@@ -18,6 +18,7 @@ export interface RuntimeProjectionChange {
   previous: RuntimeProjectionState
   current: RuntimeProjectionState
   event: Exclude<UIRuntimeEvent, { type: 'runtime_dropped' }>
+  reconnected?: boolean
 }
 
 export interface RuntimeClientDeps {

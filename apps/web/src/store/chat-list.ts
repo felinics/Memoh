@@ -1,5 +1,5 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, onScopeDispose } from 'vue'
 import { toast } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkdirsStore } from '@/store/workdirs'
@@ -82,7 +82,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   const {
     focusedViewId: focusedChatViewId,
-    draftPromoted,
+    draftPromoted, userSentInSession, recordUserSent,
     projectionVersion: runtimeProjectionVersion,
     chatViews, assistantStreams, firstSend, draftSessionCreations,
     draftCreationKey: draftSessionCreationKey,
@@ -94,7 +94,7 @@ export const useChatStore = defineStore('chat', () => {
     clearHistoryView, prepareForInitialization, markHistoryEmpty,
     refreshCurrentSession, resyncRuntimeTranscript, loadInitialMessages, fetchSessionWindow,
     loadOlderMessages, findMessageIdByExternalId, locateMessageByExternalId,
-    isSessionStreaming, streamingSessionId, streamingSessionIds, streaming, isChatViewStreaming, isChatViewStopping,
+    isSessionStreaming, streamingSessionId, streamingSessionIds, streaming, isChatViewStreaming, isChatViewStopping, canRefreshIdleSession,
     workspaceTargetSelectionFor, setWorkspaceTargetSelection,
     initializeWorkspaceTargetSelection, resetWorkspaceTargetSelection,
     releaseHiddenSessionView, releaseSessionRuntime, bindChatView, setChatViewVisible, unbindChatView,
@@ -153,10 +153,10 @@ export const useChatStore = defineStore('chat', () => {
   const { refreshSessionsList, resetRefreshCoordinator } = refreshCoordinator
   const {
     ensureSessionSummary, ensureVisibleSessionSummary, visibleSessionSummaryFailed, loadMoreSessions,
-    handleActivity: handleBotSessionsActivityEvent,
+    handleActivity: handleBotSessionsActivityEvent, handleRuntimeSnapshotReconnected,
     scheduleActivityRevisions,
     isSessionCompacting, beginSessionCompaction,
-    reset: resetSessionActivity,
+    dispose: disposeSessionActivity, reset: resetSessionActivity,
   } = createSessionActivity({
     currentBotId,
     sessionId,
@@ -180,6 +180,8 @@ export const useChatStore = defineStore('chat', () => {
     },
     markSessionViewStale: chatViews.markSessionStale,
     markAllSessionViewsStale: chatViews.markAllSessionsStale,
+    reconcileOnVisibilityResume: true,
+    canRefreshIdleSession,
   })
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
@@ -210,23 +212,6 @@ export const useChatStore = defineStore('chat', () => {
     commandEvent, commandEventForScope, rememberCommandEvent, beginCommandEvent, showCommandError,
     clearCommandEvent, rescopeSessionCommandEventToComposer, resetCommandEvents,
   } = commandEventRegistry
-  const userSentInSession = ref<{
-    id: string
-    botId: string
-    viewId: string
-    wasDraft: boolean
-    seq: number
-  } | null>(null)
-  let userSendSeq = 0
-  function recordUserSent(botId: string, targetSessionId: string, viewId: string, wasDraft: boolean) {
-    userSentInSession.value = {
-      id: targetSessionId,
-      botId,
-      viewId,
-      wasDraft,
-      seq: ++userSendSeq,
-    }
-  }
   const { realtime, decisions, integration: runtimeIntegration } =
     createChatRuntimeLayer({
     currentBotId,
@@ -263,6 +248,7 @@ export const useChatStore = defineStore('chat', () => {
     showError: message => toast.error(message),
     onBotSessionsActivityEvent: handleBotSessionsActivityEvent,
     onActivityStreamCoverageChanged: chatViews.setActivityStreamCoverage,
+    onRuntimeSnapshotReconnected: handleRuntimeSnapshotReconnected,
   })
   const {
     startWebSocket,
@@ -511,6 +497,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   onScopeDispose(() => {
     stopAuthSessionListener()
+    disposeSessionActivity()
     stopStreams()
     stopWebSocket()
   })

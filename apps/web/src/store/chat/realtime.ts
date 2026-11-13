@@ -92,7 +92,13 @@ export function createChatRealtimeController(
         }
         return
       }
-      callbacks.onRuntimeProjection(botId, sessionId, change)
+      callbacks.onRuntimeProjection(
+        botId,
+        sessionId,
+        change.event.type === 'runtime_snapshot'
+          ? { ...change, reconnected: true }
+          : change,
+      )
     },
   })
 
