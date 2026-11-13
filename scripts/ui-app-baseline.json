@@ -1,4 +1,5 @@
 {
+  "apps/desktop/src/renderer/src/connect/ConnectServer.vue": 1,
   "apps/web/src/components/add-provider/index.vue": 2,
   "apps/web/src/components/color-scheme-card/index.vue": 1,
   "apps/web/src/components/config-schema-form/index.vue": 2,
@@ -18,7 +19,7 @@
   "apps/web/src/pages/bots/components/bot-checks-panel.vue": 3,
   "apps/web/src/pages/bots/components/bot-compaction.vue": 1,
   "apps/web/src/pages/bots/components/bot-container.vue": 1,
-  "apps/web/src/pages/bots/components/bot-create-terminal.vue": 9,
+  "apps/web/src/pages/bots/components/bot-create-terminal.vue": 12,
   "apps/web/src/pages/bots/components/bot-import-panel.vue": 3,
   "apps/web/src/pages/bots/components/bot-mcp.vue": 2,
   "apps/web/src/pages/bots/components/bot-memory.vue": 3,

@@ -138,5 +138,19 @@ export default defineConfig(({ command }) => {
         '@': fileURLToPath(new URL('./src', import.meta.url))
       },
     },
+    optimizeDeps: {
+      entries: [
+        'src/main.ts',
+      ],
+      // Pre-bundle Monaco's lazy ESM sub-modules once at startup (aligned with
+      // apps/desktop/electron.vite.config.ts) so mounting a code viewer or
+      // bot-settings editor tab in dev mode does not discover new deps
+      // mid-session and trigger a 504 Outdated Optimize Dep full-page reload.
+      include: [
+        'monaco-editor',
+        'stream-monaco',
+        'shiki',
+      ],
+    },
   }
 })
