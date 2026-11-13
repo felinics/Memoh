@@ -68,8 +68,8 @@ const app = createApp(App)
   .use(pinia)
   .use(PiniaColada, {
     plugins: [
-      // Persist whitelisted catalog/config queries across reloads; hydrated
-      // entries revalidate on mount (see lib/query-cache-persistence.ts).
+      // Persist query results across reloads for the first paint; restored
+      // entries refetch on mount (see lib/query-cache-persistence.ts).
       createQueryCachePersistencePlugin(),
     ],
   })
