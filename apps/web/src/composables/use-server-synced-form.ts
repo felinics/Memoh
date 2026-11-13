@@ -72,11 +72,18 @@ export function useServerSyncedRecord<S>(
   }, { immediate: true, deep: options.deep })
 
   /**
-   * Call after a successful save: until the refetch lands, the form's current
-   * values ARE the new server state, so they become the guard baseline.
+   * Call after a successful save: record the submitted snapshot (or the form's
+   * current values when omitted) as the new server baseline so edits typed
+   * while the save was in flight stay dirty instead of being overwritten when
+   * the save response or refetch lands. Pass `nextIdentity` when creating a
+   * draft record assigns its server ID so self-materialization reconciles
+   * per-field instead of triggering a hard reset.
    */
-  function markClean() {
-    synced.value = { ...form }
+  function markClean(baseline?: Record<string, unknown>, nextIdentity?: string) {
+    synced.value = baseline ? { ...baseline } : { ...form }
+    if (nextIdentity !== undefined) {
+      lastIdentity = nextIdentity
+    }
   }
 
   return { synced: readonly(synced), markClean }
@@ -114,8 +121,11 @@ export function useServerSyncedScalar<S, T>(
   }, { immediate: true, deep: options.deep })
 
   /** See useServerSyncedRecord.markClean. */
-  function markClean() {
-    synced.value = target.value
+  function markClean(baseline?: T, nextIdentity?: string) {
+    synced.value = baseline !== undefined ? baseline : target.value
+    if (nextIdentity !== undefined) {
+      lastIdentity = nextIdentity
+    }
   }
 
   return { synced: readonly(synced), markClean }
