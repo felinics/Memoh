@@ -4,12 +4,10 @@ import {
   postBotsByBotIdDependenciesByDepIdUpdate,
 } from '@memohai/sdk'
 import {
-  fetchSSEProblem,
   isSSEErrorEvent,
-  localizeSSEErrorEvent,
-  normalizeSSEFailure,
   type SSEErrorEvent,
 } from './sse-error'
+import { streamJsonSse } from './stream-json-sse'
 import type { DependencyOperationAction } from './useWorkspaceDependencies'
 
 // codesync(workspace-dependency-stream): keep these manual SSE payload types in
@@ -96,60 +94,32 @@ export async function* streamDependencyOperation(
   action: DependencyOperationAction,
   options: WorkspaceDependencyStreamRequestOptions = {},
 ): AsyncGenerator<WorkspaceDependencyStreamEvent, void, unknown> {
-  let streamError: unknown
-
-  // One options object for the three generated SSE functions: their *Data
-  // shapes are identical (path bot_id/dep_id),
-  // and the generated functions keep each route's URL single-sourced.
-  const request = {
-    path: { bot_id: botId, dep_id: depId },
-    headers: { Accept: 'text/event-stream' },
-    signal: options.signal,
-    fetch: fetchSSEProblem,
-    onSseError: (error: unknown) => {
-      streamError = error
-    },
-    responseValidator: async (data: unknown) => {
-      if (!isWorkspaceDependencyStreamEvent(data)) {
-        throw new Error(INVALID_EVENT)
-      }
-    },
-    sseMaxRetryAttempts: 1,
-  }
-
   // An empty version sends no body: the Server then resolves the latest (or
   // the manifest pin), which is exactly what "leave blank" promises.
   const version = options.version?.trim() ?? ''
   const definitionRevision = options.definitionRevision?.trim() ?? ''
   const sessionId = options.sessionId?.trim() ?? ''
-  const versioned = {
-    ...request,
-    body: version || definitionRevision || sessionId || options.prerequisiteRevisions ? {
-      version: version || undefined,
-      definition_revision: definitionRevision || undefined,
-      session_id: sessionId || undefined,
-      prerequisite_revisions: options.prerequisiteRevisions,
-    } : undefined,
-  }
+  const body = version || definitionRevision || sessionId || options.prerequisiteRevisions
+    ? {
+        version: version || undefined,
+        definition_revision: definitionRevision || undefined,
+        session_id: sessionId || undefined,
+        prerequisite_revisions: options.prerequisiteRevisions,
+      }
+    : undefined
 
-  const result = action === 'update'
-    ? await postBotsByBotIdDependenciesByDepIdUpdate(versioned)
-    : action === 'reinstall'
-      ? await postBotsByBotIdDependenciesByDepIdReinstall(versioned)
-      : await postBotsByBotIdDependenciesByDepIdInstall(versioned)
-
-  for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
-    if (!isWorkspaceDependencyStreamEvent(event)) {
-      throw new Error(INVALID_EVENT)
-    }
-    yield event.type === 'error'
-      ? localizeSSEErrorEvent(event)
-      : event
-  }
-
-  if (streamError) {
-    throw normalizeSSEFailure(streamError, 'Workspace dependency stream failed')
-  }
+  yield* streamJsonSse<WorkspaceDependencyStreamEvent>({
+    signal: options.signal,
+    invalidEventMessage: INVALID_EVENT,
+    failureMessage: 'Workspace dependency stream failed',
+    isEvent: isWorkspaceDependencyStreamEvent,
+    open: (common) => {
+      const request = { ...common, path: { bot_id: botId, dep_id: depId }, body }
+      if (action === 'update') return postBotsByBotIdDependenciesByDepIdUpdate(request)
+      if (action === 'reinstall') return postBotsByBotIdDependenciesByDepIdReinstall(request)
+      return postBotsByBotIdDependenciesByDepIdInstall(request)
+    },
+  })
 }
 
 /** Options-object form of `streamDependencyOperation`, same generator. */

@@ -73,7 +73,7 @@
 | 设置页（带标题的分组卡片 + 行列表） | `pages/bots/components/bot-overview.vue`、`pages/usage/index.vue` | `pages/bots/components/bot-tool-approval.vue`（堆砌底色、裸透明度、自造指标卡的典型脏页面） |
 | 列表与详情左右推拉切换 | `pages/web-search/index.vue`（`useViewSwap` + `SwapTransition` + `BackendCard` + `DetailPane`） | — |
 | 带统计数值块与图表的概览页 | `pages/bots/components/bot-overview.vue`（细线分隔数值块 + 黑白灰 ECharts） | `bot-tool-approval.vue` |
-| 表单或新建/编辑弹窗 | `pages/bots/components/bot-schedule.vue`（新建任务弹窗：`DialogTitle`、字段间距、折叠更多选项、底部按钮排布） | — |
+| 表单或新建/编辑弹窗 | `pages/bots/components/schedule-editor.vue`（新建/编辑任务表单：字段间距、折叠更多选项、底部按钮排布） | — |
 | 全部原子组件与业务 owner 活体目录 | `pages/dev/components/`（开发模式下设置 `localStorage.setItem('memoh:dev-tools', '1')`，按 `Cmd/Ctrl+Shift+D` 打开） | — |
 
 ## 宿主页面局部原语（Surface-scoped owners）
