@@ -86,10 +86,13 @@ Compiled runtime requirements bind official dependency IDs to launcher commands.
 
 PostgreSQL stores immutable release/archive bytes separately from installation
 intent. The cache key includes normalized source URL, registry, dependency ID and
-revision. Tables use the existing connection-bound team RLS. Catalog pointer updates
-use a generation compare-and-swap so a delayed Server cannot overwrite a newer
-snapshot published by another Server. Definitions needed by installed or historical
-operations remain available in the persistent cache.
+revision. The content depends only on the server-level Supermarket source and is
+verified by digest on every read, so the tables live in the global `template` schema
+with no team column: every team reads one copy of each definition and one catalog
+per source. Catalog pointer updates use a generation compare-and-swap so a delayed
+Server cannot overwrite a newer snapshot published by another Server. Definitions
+are append-only and reading one never writes, so installed and historical
+operations can always resolve the revision they recorded.
 
 - The Server starts without connecting to Supermarket. A nonblocking worker refreshes
   the catalog at startup and at the configured interval (ten minutes by default).
@@ -199,7 +202,8 @@ Required validation includes:
   rejection, bounded archives and concurrent publisher behavior.
 - Producer-generated wire fixtures consumed by Go, including manifest/script and
   archive digests.
-- Persistent cache across restarts, source/team isolation, generation CAS, absent
+- Persistent cache across restarts, source isolation, one catalog shared by all
+  teams, generation CAS, absent
   upstream with/without cache, retirement and runtime command validation.
 - Preview/execute revision consistency while a newer definition is published.
 - Real HTTP installation, software version selection, update, reinstall, removal,

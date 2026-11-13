@@ -108,11 +108,11 @@ type RemoteCatalog struct {
 	snapshotCatalog  *catalog.Catalog
 
 	// revalidateMu guards lifetime and revalidatedAt. lifetime ends the
-	// refreshes reads start once Start's worker stops; revalidatedAt holds,
-	// per team, when a read last started one.
+	// refreshes reads start once Start's worker stops; revalidatedAt holds
+	// when a read last started one for this source.
 	revalidateMu  sync.Mutex
 	lifetime      context.Context
-	revalidatedAt map[string]time.Time
+	revalidatedAt time.Time
 	revalidations sync.WaitGroup
 }
 
@@ -312,7 +312,7 @@ func (p *RemoteCatalog) refresh(ctx context.Context, previous CachedCatalog) (Ca
 	if len(encoded) > catalog.MaxCatalogBytes {
 		return CatalogResult{}, fmt.Errorf("%w: cached catalog exceeds budget", ErrDefinitionInvalid)
 	}
-	updated := CachedCatalog{TeamID: previous.TeamID, SourceURL: p.sourceURL, Data: encoded, Generation: previous.Generation, FetchedAt: p.now().UTC()}
+	updated := CachedCatalog{SourceURL: p.sourceURL, Data: encoded, Generation: previous.Generation, FetchedAt: p.now().UTC()}
 	validatedCatalog, err := p.buildCatalog(ctx, updated)
 	if err != nil {
 		return CatalogResult{}, err
@@ -326,13 +326,6 @@ func (p *RemoteCatalog) refresh(ctx context.Context, previous CachedCatalog) (Ca
 	}
 	updated.Generation++
 	p.cacheSnapshot(updated, validatedCatalog)
-	if pruner, ok := p.store.(interface {
-		PruneDefinitions(context.Context, string) error
-	}); ok {
-		if err := pruner.PruneDefinitions(ctx, p.sourceURL); err != nil {
-			p.logger.WarnContext(ctx, "prune unused dependency definitions", slog.Any("error", err))
-		}
-	}
 	return p.catalogResult(updated, validatedCatalog), nil
 }
 
@@ -351,23 +344,19 @@ func (p *RemoteCatalog) revalidate(ctx context.Context, entry CachedCatalog) boo
 		return true
 	}
 	p.revalidateMu.Lock()
-	last, tried := p.revalidatedAt[entry.TeamID]
 	stopped := p.lifetime != nil && p.lifetime.Err() != nil
-	if stopped || (tried && p.now().Sub(last) < catalogRevalidateBackoff) {
+	if stopped || (!p.revalidatedAt.IsZero() && p.now().Sub(p.revalidatedAt) < catalogRevalidateBackoff) {
 		p.revalidateMu.Unlock()
 		<-p.refreshGate
 		return false
 	}
-	if p.revalidatedAt == nil {
-		p.revalidatedAt = make(map[string]time.Time)
-	}
-	p.revalidatedAt[entry.TeamID] = p.now()
+	p.revalidatedAt = p.now()
 	lifetime := p.lifetime
 	p.revalidations.Add(1)
 	p.revalidateMu.Unlock()
 
 	// Detached from the request, which ends before the refresh does; the
-	// context keeps its values so the refresh writes the reader's catalog.
+	// context keeps its values, such as the reader's database connection scope.
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), catalogRefreshTimeout)
 	stop := func() bool { return false }
 	if lifetime != nil {
@@ -402,7 +391,7 @@ func (p *RemoteCatalog) hydrate(ctx context.Context, entry CachedCatalog) (Catal
 	p.snapshotMu.Lock()
 	cachedEntry, cachedCatalog := p.snapshotEntry, p.snapshotCatalog
 	p.snapshotMu.Unlock()
-	if cachedCatalog != nil && entry.TeamID == cachedEntry.TeamID && entry.SourceURL == cachedEntry.SourceURL && bytes.Equal(entry.Data, cachedEntry.Data) {
+	if cachedCatalog != nil && entry.SourceURL == cachedEntry.SourceURL && bytes.Equal(entry.Data, cachedEntry.Data) {
 		return p.catalogResult(entry, cachedCatalog), nil
 	}
 	cat, err := p.buildCatalog(ctx, entry)
@@ -418,7 +407,7 @@ func (p *RemoteCatalog) hydrate(ctx context.Context, entry CachedCatalog) (Catal
 func (p *RemoteCatalog) cacheSnapshot(entry CachedCatalog, cat *catalog.Catalog) {
 	p.snapshotMu.Lock()
 	defer p.snapshotMu.Unlock()
-	if p.snapshotCatalog != nil && entry.TeamID == p.snapshotEntry.TeamID && entry.SourceURL == p.snapshotEntry.SourceURL && entry.Generation < p.snapshotEntry.Generation {
+	if p.snapshotCatalog != nil && entry.SourceURL == p.snapshotEntry.SourceURL && entry.Generation < p.snapshotEntry.Generation {
 		return
 	}
 	p.snapshotEntry = entry

@@ -1107,21 +1107,33 @@ func (s *Service) ScriptPreview(ctx context.Context, depID string, action catalo
 // ReapStale reconciles abandoned operations against current workspace facts.
 // A live process is never expired by the Server's wall clock. Stopped native
 // workspaces retain intent until a reachable workspace can fence late starts.
+// The catalog is loaded only when some operation is left to reconcile.
 func (s *Service) ReapStale(ctx context.Context) (int, error) {
-	ctx, _, err := s.prepareCatalog(ctx, false, true)
-	if err != nil {
-		return 0, err
-	}
 	records, err := s.store.ListStaleOperations(ctx, 0)
 	if err != nil {
 		return 0, fmt.Errorf("workspacedeps: list unfinished operations: %w", err)
 	}
+	abandoned := records[:0]
+	for _, rec := range records {
+		key := InstallationKey{BotID: rec.BotID, DependencyID: rec.DependencyID}
+		if rec.Status.InProgress() && !s.locks.locked(key) {
+			abandoned = append(abandoned, rec)
+		}
+	}
+	if len(abandoned) == 0 {
+		return 0, nil
+	}
+	ctx, _, err = s.prepareCatalog(ctx, false, true)
+	if err != nil {
+		return 0, err
+	}
 	recovered := 0
 	var errs []error
 	snapshots := make(map[string]Snapshot)
-	for _, rec := range records {
+	for _, rec := range abandoned {
 		key := InstallationKey{BotID: rec.BotID, DependencyID: rec.DependencyID}
-		if !rec.Status.InProgress() || s.locks.locked(key) {
+		// An operation may have started here while the catalog loaded.
+		if s.locks.locked(key) {
 			continue
 		}
 		state, err := s.workspace.State(ctx, rec.BotID)
