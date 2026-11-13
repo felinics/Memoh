@@ -33,6 +33,10 @@ export function useBotChannels(botId: MaybeRefOrGetter<string>) {
         }),
       )
     },
+    // Persisted localStorage cache strips config.credentials via deepStripSecrets,
+    // so always revalidate on mount instead of serving a secret-stripped entry within
+    // Colada's default 5s staleTime window.
+    staleTime: 0,
     enabled: () => !!toValue(botId),
   })
 }

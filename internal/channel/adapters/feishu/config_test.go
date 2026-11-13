@@ -50,6 +50,28 @@ func TestNormalizeConfig(t *testing.T) {
 	if got["inboundMode"] != inboundModeWebsocket {
 		t.Fatalf("unexpected default inbound mode: %#v", got["inboundMode"])
 	}
+	if got["enableStreaming"] != true {
+		t.Fatalf("unexpected default enableStreaming: %#v", got["enableStreaming"])
+	}
+}
+
+func TestNormalizeConfigEnableStreaming(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		val  any
+		want bool
+	}{
+		{true, true}, {false, false}, {"false", false}, {"0", false}, {"OFF", false}, {"true", true}, {"maybe", true},
+	} {
+		got, err := normalizeConfig(map[string]any{"appId": "app", "appSecret": "secret", "enableStreaming": tc.val})
+		if err != nil || got["enableStreaming"] != tc.want {
+			t.Fatalf("enableStreaming=%#v -> (%#v, %v), want %v", tc.val, got["enableStreaming"], err, tc.want)
+		}
+	}
+	got, err := normalizeConfig(map[string]any{"app_id": "app", "app_secret": "secret", "enable_streaming": false})
+	if err != nil || got["enableStreaming"] != false {
+		t.Fatalf("snake_case enable_streaming=false -> (%#v, %v), want false", got["enableStreaming"], err)
+	}
 }
 
 func TestNormalizeConfigRequiresApp(t *testing.T) {

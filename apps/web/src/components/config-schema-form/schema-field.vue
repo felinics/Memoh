@@ -73,7 +73,7 @@
         class="flex sm:justify-end"
       >
         <Switch
-          :model-value="!!modelValue"
+          :model-value="boolValue"
           :disabled="field.readonly"
           @update:model-value="(v: boolean) => emit('update:modelValue', !!v)"
         />
@@ -185,6 +185,11 @@ const stringValue = computed(() => {
   return typeof v === 'string' || typeof v === 'number' ? String(v) : ''
 })
 const numberValue = computed(() => (typeof props.modelValue === 'number' ? props.modelValue : undefined))
+const boolValue = computed(() =>
+  props.modelValue === undefined || props.modelValue === null
+    ? props.field.example === true
+    : Boolean(props.modelValue),
+)
 
 function pairsToRecord(pairs: KeyValuePair[]): Record<string, string> {
   return Object.fromEntries(pairs
