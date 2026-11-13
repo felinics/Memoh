@@ -65,10 +65,10 @@ Infrastructure dependencies:
 
 Top-level layout — see `docs/codebase-map.md` for the full annotated tree, container/workspace internals, the desktop bootstrap, and recent major subsystems:
 
-- `cmd/` — Go entry points (`agent`, `channel`, `bridge`, `mcp`, …)
+- `cmd/` — Go entry points (`agent`, `channel`, `bridge`, …)
 - `internal/` — Go backend domain packages (`agent`, `channel`, `chat`, `workspace`, …)
 - `apps/` — `web` (Vue 3 management UI) and `desktop` (Electron native client)
-- `packages/` — shared TypeScript libraries (`ui`, `sdk`, `icons`, `config`)
+- `packages/` — shared TypeScript libraries (`ui`, `sdk`, `icons`, `config`, `runtime`)
 - `db/postgres/` — migrations + sqlc queries; `conf/` — config templates; `docker/` — production Docker; `devenv/` — dev environment; `docs/` — reference docs
 
 ## Development Guide
