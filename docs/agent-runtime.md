@@ -356,8 +356,10 @@ Forks use Codex's native `thread/fork` on the running app-server; the branch
 records its own rollout path. Threads created before this behaviour still
 resume by their thread id and gain a rollout path after their next turn.
 
-Custom ACP agents run with `HOME=/data` and keep their sessions wherever the
-agent stores them under it. The thread records the agent's session id with the
+Custom ACP agents run in the workspace user environment
+(`internal/workspace/userenv`, `HOME=/data`), the one the workspace terminal
+has, so a sign-in or config made in the terminal is the agent's too. They
+keep their sessions wherever the agent stores them under it. The thread records the agent's session id with the
 thread it belongs to (`acp_native_session`). ACP lets one connection host
 several concurrent sessions, so an Agent's conversations share its process,
 each on a session of its own; an agent that cannot host concurrent sessions

@@ -33,8 +33,8 @@ what else it opens under (`Session`), what a newly opened session needs
 `client/` is the protocol client both use: the connection, sessions, event
 mapping and permission handling.
 
-- `StartProcess` launches a user-supplied agent with `HOME=/data` and the
-  workspace shell's PATH (see the invariants below). Grok's `Launch` starts
+- `StartProcess` launches a user-supplied agent in the workspace user
+  environment (`HOME=/data`) with the workspace shell's PATH (see the invariants below). Grok's `Launch` starts
   its CLI on a clean environment instead; both go through `agentproc`.
 - `Connect` / `ConnectWith` perform the handshake. A `Conn` hosts sessions,
   delivers each inbound call to the session it names, and applies updates in
@@ -118,9 +118,12 @@ These hold for the processes and sessions `SessionPool` starts. Grok Build
 owns its own process environment and keeps its session id under its own key
 (see `docs/agent-runtime.md`).
 
-- A pool-started ACP process runs with `HOME=/data` (the workspace volume),
-  `NPM_CONFIG_CACHE=/tmp/memoh-acp-cache/npm`, and the PATH the workspace
-  shell reports, so an agent installed from the workspace terminal is found.
+- A pool-started ACP process runs in the workspace user environment
+  (`internal/workspace/userenv`: `HOME=/data`, the XDG directories and npm
+  prefix under it), the one the workspace terminal has, with
+  `NPM_CONFIG_CACHE=/tmp/memoh-acp-cache/npm` and the PATH the workspace
+  shell reports, so an agent installed or signed in from the workspace
+  terminal is found as it is there.
   Memoh prepares no directory for it and stages or syncs nothing: the agent
   owns its own files on `/data`.
 - Conversation continuity is the agent's own session files. Thread runtime

@@ -13,15 +13,14 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspace/shellenv"
+	"github.com/felinics/memoh/internal/workspace/userenv"
 )
 
 const (
 	// defaultContainerPath is the PATH ACP agents start from; the user's shell
-	// configuration extends it (see resolveContainerPath). The managed
-	// dependency shim directory comes first so a managed overlay
-	// of an image runtime (node, python, uv) wins over the toolkit copy.
-	defaultContainerPath = dataMountPath + "/.memoh/deps/bin:" + containerToolkitBin + ":/usr/local/bin:/usr/bin:/bin"
-	containerToolkitBin  = "/opt/memoh/toolkit/bin"
+	// configuration extends it (see processEnv).
+	defaultContainerPath = userenv.Path
+	containerToolkitBin  = userenv.ToolkitBinDir
 	noProjectWorkDirPart = "/.memoh/acp-work/no-project/"
 )
 
@@ -64,14 +63,16 @@ type Process struct {
 const npmCacheDir = "/tmp/memoh-acp-cache/npm"
 
 // processEnv is the environment an agent and its terminals run with, and the
-// inherited names it replaces. The PATH probe runs the user's shell
+// inherited names it replaces: the workspace user environment (userenv), the
+// same one the user's terminal has. The PATH probe runs the user's shell
 // configuration, which keys its PATH additions off HOME, so an agent
 // installed from the workspace terminal is found; a failed probe falls back
 // to the default PATH.
 func processEnv(ctx context.Context, client *bridge.Client, opts ProcessOptions) ([]string, []string) {
-	owned := []string{"HOME", "PATH", "NPM_CONFIG_CACHE"}
+	owned := append(slices.Clone(userenv.Names), "NPM_CONFIG_CACHE")
 	env := withoutEnvKeys(withoutBlockedEnvNames(opts.Env, opts.UnsetEnv), owned...)
-	env = append(env, "HOME="+dataMountPath, "NPM_CONFIG_CACHE="+npmCacheDir)
+	env = append(env, userenv.HomeEnv()...)
+	env = append(env, "NPM_CONFIG_CACHE="+npmCacheDir)
 	unset := mergeEnvNames(opts.UnsetEnv, owned)
 	containerPath, err := shellenv.ResolvePath(ctx, client, defaultContainerPath, env, unset)
 	if err != nil {
@@ -121,9 +122,10 @@ func StartProcess(ctx context.Context, client *bridge.Client, command string, ar
 	}
 	// The process outlives the request that happened to start it.
 	child, err := agentproc.SpawnWith(context.WithoutCancel(ctx), client, buildShellCommand(resolved, args), workDir, bridge.ExecOptions{
-		Env:      env,
-		UnsetEnv: unset,
-		CleanEnv: opts.CleanEnv,
+		Env:           env,
+		UnsetEnv:      unset,
+		CleanEnv:      opts.CleanEnv,
+		UserShellPath: true,
 	})
 	if err != nil {
 		return nil, errs.WrapDependency(err, "start "+buildShellCommand(command, args))
@@ -222,8 +224,9 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 
 func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string, opts ProcessOptions) (*bridge.ExecResult, error) {
 	result, err := client.ExecWithOptions(ctx, check, workDir, 10, nil, bridge.ExecOptions{
-		Env:      env,
-		UnsetEnv: opts.UnsetEnv,
+		Env:           env,
+		UnsetEnv:      opts.UnsetEnv,
+		UserShellPath: true,
 	})
 	if err != nil {
 		return nil, errs.WrapDependency(err, "")
