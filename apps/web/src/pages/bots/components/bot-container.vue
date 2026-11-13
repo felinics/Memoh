@@ -25,6 +25,7 @@ import {
   type HandlersListSnapshotsResponse,
 } from '@memohai/sdk'
 import { useBotQuery } from '@/composables/api/useBot'
+import { containerLayerProgressPercent } from '@/composables/api/container-stream-events'
 import {
   postBotsByBotIdContainerStream,
   type ContainerCreateLayerStatus,
@@ -107,17 +108,9 @@ interface CreateProgress {
 }
 const createProgress = ref<CreateProgress | null>(null)
 
-const createProgressPercent = computed(() => {
-  const layers = createProgress.value?.layers
-  if (!layers || layers.length === 0) return 0
-  let totalOffset = 0
-  let totalSize = 0
-  for (const l of layers) {
-    totalOffset += l.offset
-    totalSize += l.total
-  }
-  return totalSize > 0 ? Math.round((totalOffset / totalSize) * 100) : 0
-})
+const createProgressPercent = computed(() =>
+  containerLayerProgressPercent(createProgress.value?.layers),
+)
 
 const capabilitiesStore = useCapabilitiesStore()
 const routeIdentifier = computed(() => route.params.botName as string)
