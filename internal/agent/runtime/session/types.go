@@ -443,7 +443,9 @@ type Command struct {
 
 	// StreamOutput is fixed at admission and travels to the owner with the command.
 	// It must not depend on subscriber liveness: disconnecting cannot change a run.
-	StreamOutput bool `json:"stream_output,omitempty"`
+	StreamOutput     bool   `json:"stream_output,omitempty"`
+	StreamClaimToken string `json:"stream_claim_token,omitempty"`
+	StreamClaimTTLMS int64  `json:"stream_claim_ttl_ms,omitempty"`
 }
 
 // DecisionTarget is the durable identity of one approval or user-input
@@ -513,8 +515,11 @@ type DecisionResponse struct {
 	RunID      string
 	Payload    json.RawMessage
 
+	DeferRelease, ReleaseOutput bool
 	// Only StreamDecisionResponse enables channel output capture.
-	streamOutput bool
+	streamOutput     bool
+	streamClaimToken string
+	streamClaimTTL   time.Duration
 }
 
 // DecisionResponseResult separates "this is a runtime decision" from "the
@@ -528,7 +533,9 @@ type DecisionResponseResult struct {
 	Applied    bool
 
 	// Replayed acknowledges an earlier submission without rerunning its output.
-	Replayed bool
+	Replayed           bool
+	recoveredCommandID string
+	coalesced          bool
 }
 
 type Subscription struct {
@@ -575,19 +582,25 @@ type DecisionOutputLimits struct {
 	MaxEvents int
 }
 
+type DecisionOutputRun struct {
+	SessionID, RunID, Generation string
+}
+
 // DecisionOutputState is the log's committed position after an append or read.
 type DecisionOutputState struct {
-	Exists  bool
-	Length  int
-	Bytes   int
-	Done    bool
-	Failed  bool
-	Claimed bool
+	Exists   bool
+	Length   int
+	Bytes    int
+	Done     bool
+	Failed   bool
+	Claimed  bool
+	Released bool
 	// Applied reports whether this append changed the log. Replays of an
 	// already-committed seq and writes after a terminal marker are no-ops.
 	Applied bool
 	// Exceeded reports that this append tripped the limits and failed the log.
 	Exceeded bool
+	Run      DecisionOutputRun
 }
 
 // DecisionOutputPage is a read from a cursor to the current end of the log.
@@ -595,6 +608,14 @@ type DecisionOutputPage struct {
 	DecisionOutputState
 	Events []json.RawMessage
 }
+
+type DecisionOutputClaimOutcome uint8
+
+const (
+	DecisionOutputClaimUnavailable DecisionOutputClaimOutcome = iota
+	DecisionOutputClaimAcquired
+	DecisionOutputClaimBusy
+)
 
 // DecisionOutputStore is an append-only raw event log with the same
 // lifetime/TTL as live state. It is separate from Snapshot so session state
@@ -608,15 +629,24 @@ type DecisionOutputPage struct {
 // retry that arrives after delivery must still lose the claim, never replay
 // the run's output to the channel a second time.
 type DecisionOutputStore interface {
+	InitDecisionOutput(ctx context.Context, ref DecisionOutputRef, run DecisionOutputRun) error
+	DiscardDecisionOutput(ctx context.Context, ref DecisionOutputRef) error
 	AppendDecisionOutput(ctx context.Context, ref DecisionOutputRef, seq int64, payload json.RawMessage, limits DecisionOutputLimits) (DecisionOutputState, error)
 	ReadDecisionOutput(ctx context.Context, ref DecisionOutputRef, from int) (DecisionOutputPage, error)
-	ClaimDecisionOutput(ctx context.Context, ref DecisionOutputRef) (bool, error)
-	ReleaseDecisionOutput(ctx context.Context, ref DecisionOutputRef) error
+	ClaimDecisionOutput(ctx context.Context, ref DecisionOutputRef, token string, leaseTTL time.Duration) (DecisionOutputClaimOutcome, error)
+	RenewDecisionOutputClaim(ctx context.Context, ref DecisionOutputRef, token string, leaseTTL time.Duration) (bool, error)
+	UnclaimDecisionOutput(ctx context.Context, ref DecisionOutputRef, token string) error
+	ReleaseDecisionOutput(ctx context.Context, ref DecisionOutputRef, token string) error
 }
 
 // ErrDecisionOutputSequenceGap reports an append whose seq skips uncommitted
 // entries. The producer treats it as a failed checkpoint write.
 var ErrDecisionOutputSequenceGap = errors.New("decision output sequence gap")
+
+var (
+	ErrDecisionOutputInterrupted = errors.New("decision output stream interrupted")
+	ErrDecisionOutputBusy        = errors.New("decision output already claimed by active reader")
+)
 
 // DistributedBackend adds cross-process run ownership and command routing.
 // MemoryBackend intentionally does not implement this interface.

@@ -26,6 +26,8 @@ import (
 
 type ToolApprovalResponseInput struct {
 	ControlID              string
+	DeferRelease           bool `json:"-"`
+	ReleaseOutput          bool `json:"-"`
 	BotID                  string
 	ThreadID               string
 	ActorChannelIdentityID string

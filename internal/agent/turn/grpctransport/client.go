@@ -102,6 +102,18 @@ func (c *Client) RespondUserInput(ctx context.Context, input turn.UserInputRespo
 	return receiveContinuation(ctx, stream.Recv, eventCh)
 }
 
+func (c *Client) ReleaseToolApprovalOutput(ctx context.Context, input turn.ToolApprovalResponse) error {
+	input.DeferRelease = false
+	input.ReleaseOutput = true
+	return c.RespondToolApproval(ctx, input, nil)
+}
+
+func (c *Client) ReleaseUserInputOutput(ctx context.Context, input turn.UserInputResponse) error {
+	input.DeferRelease = false
+	input.ReleaseOutput = true
+	return c.RespondUserInput(ctx, input, nil)
+}
+
 func (c *Client) AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error) {
 	data, err := json.Marshal(input)
 	if err != nil {
@@ -128,6 +140,9 @@ func receiveContinuation(ctx context.Context, recv continuationReceiver, eventCh
 		}
 		if err != nil {
 			return mapClientError(err)
+		}
+		if eventCh == nil {
+			continue
 		}
 		select {
 		case eventCh <- json.RawMessage(event.GetPayload()):

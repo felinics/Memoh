@@ -11,12 +11,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	tele "gopkg.in/telebot.v4"
 
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/errs"
@@ -2158,5 +2160,142 @@ func TestTelegramAdapter_ProcessingRefreshSendsTypingToReplyTarget(t *testing.T)
 	}
 	if err := adapter.ProcessingRefresh(context.Background(), cfg, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{}); err != nil || len(actions) != 1 {
 		t.Fatalf("refresh without a reply target sent %d actions, err %v; want none", len(actions)-1, err)
+	}
+}
+
+func TestHandleTelegramApprovalCallbackPreservesButtonsOnHandlerFailure(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	markupEdits := make(chan struct{}, 4)
+	okHeader := http.Header{"Content-Type": []string{"application/json"}}
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/editMessageReplyMarkup") {
+			markupEdits <- struct{}{}
+			return &http.Response{StatusCode: http.StatusOK, Header: okHeader, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":77,"chat":{"id":-10055,"type":"group"}}}`))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: okHeader, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`))}, nil
+	}))
+	update := &tele.Update{
+		ID: 501,
+		Callback: &tele.Callback{
+			ID: "cb-approve-1", Data: "approve:approval-xyz", Sender: &tele.User{ID: 42, Username: "alice"},
+			Message: &tele.Message{ID: 77, Text: "Approve tool call?", Chat: &tele.Chat{ID: -10055, Type: tele.ChatGroup, Title: "Ops"}},
+		},
+	}
+	failDone := make(chan struct{})
+	adapter.handleTelegramCallback(context.Background(), channel.ChannelConfig{}, func(context.Context, channel.ChannelConfig, channel.InboundMessage) error {
+		defer close(failDone)
+		return errors.New("continuation stream interrupted")
+	}, bot, update)
+	<-failDone
+	select {
+	case <-markupEdits:
+		t.Fatal("approval buttons were cleared despite handler failure")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	adapter.handleTelegramCallback(context.Background(), channel.ChannelConfig{}, func(context.Context, channel.ChannelConfig, channel.InboundMessage) error {
+		return nil
+	}, bot, update)
+	select {
+	case <-markupEdits:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval buttons were not cleared after handler succeeded")
+	}
+}
+
+type retryableWizardStore struct {
+	askUserInteractionService
+	req userinput.Request
+}
+
+func (s *retryableWizardStore) Get(_ context.Context, id string) (userinput.Request, error) {
+	if id != s.req.ID {
+		return userinput.Request{}, userinput.ErrNotFound
+	}
+	return s.req, nil
+}
+
+func (s *retryableWizardStore) AdvanceInteraction(_ context.Context, in userinput.AdvanceInteractionInput) (userinput.AdvanceInteractionResult, error) {
+	if s.req.Status != userinput.StatusPending || in.Op.Kind != userinput.OpSelectOption {
+		return userinput.AdvanceInteractionResult{Handled: false}, nil
+	}
+	s.req.Interaction = userinput.TextInteractionState{
+		Completed: true, Answers: []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+	}
+	return userinput.AdvanceInteractionResult{Handled: true, Changed: true, Request: s.req}, nil
+}
+
+func TestTelegramAskUserWizardCallbackPreservesButtonsOnFailureAndRecoversOnSecondTap(t *testing.T) {
+	reqID := "88888888-8888-4888-8888-888888888888"
+	store := &retryableWizardStore{req: userinput.Request{
+		ID: reqID, BotID: "bot-aui", SourcePlatform: "telegram", ReplyTarget: "123", PromptExternalMessageID: "88", Status: userinput.StatusPending,
+		UIPayload: userinput.UIPayload{Version: 2, Questions: []userinput.UIQuestion{{
+			ID: "q1", Kind: userinput.QuestionKindSingleSelect, Text: "Choose environment",
+			Options: []userinput.UIOption{{ID: "q1.o1", Label: "Staging"}, {ID: "q1.o2", Label: "Prod"}},
+		}}},
+	}}
+	adapter := NewTelegramAdapter(nil)
+	adapter.userInput = store
+	adapter.SetUserInputAuthorizer(func(context.Context, channel.ChannelConfig, channel.InboundMessage) (bool, error) { return true, nil })
+
+	editBodies := make(chan string, 8)
+	callbackAlerts := make(chan bool, 8)
+	okHeader := http.Header{"Content-Type": []string{"application/json"}}
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		raw, _ := io.ReadAll(req.Body)
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/editMessageText"), strings.HasSuffix(req.URL.Path, "/editMessageReplyMarkup"):
+			editBodies <- string(raw)
+			return &http.Response{StatusCode: http.StatusOK, Header: okHeader, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":88,"chat":{"id":123,"type":"private"}}}`))}, nil
+		case strings.HasSuffix(req.URL.Path, "/answerCallbackQuery"):
+			alert, _ := decodeTelegramBody(t, raw)["show_alert"].(bool)
+			callbackAlerts <- alert
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: okHeader, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`))}, nil
+	}))
+	cfg := channel.ChannelConfig{ID: "cfg-aui", BotID: "bot-aui", Credentials: map[string]any{"bot_token": "fake"}}
+	rawMsg := &tele.Message{ID: 88, Text: "Choose environment", Chat: &tele.Chat{ID: 123, Type: tele.ChatPrivate}}
+	mkTap := func(id int, cbID string) *tele.Update {
+		return &tele.Update{ID: id, Callback: &tele.Callback{ID: cbID, Sender: &tele.User{ID: 42, Username: "alice"}, Message: rawMsg, Data: encodeAskUserCallback("s", reqID, "en", 0, 0)}}
+	}
+
+	tap1Done := make(chan struct{})
+	if !adapter.handleAskUserWizardCallback(context.Background(), cfg, func(context.Context, channel.ChannelConfig, channel.InboundMessage) error {
+		defer close(tap1Done)
+		store.req.Status = userinput.StatusSubmitted
+		return errors.New("stream interrupted after submit")
+	}, bot, mkTap(701, "cb-aui-1")) {
+		t.Fatal("expected handleAskUserWizardCallback to handle tap 1")
+	}
+	<-tap1Done
+	select {
+	case edited := <-editBodies:
+		t.Fatalf("aui~ buttons were wiped despite handler failure: %s", edited)
+	case <-time.After(80 * time.Millisecond):
+	}
+	if <-callbackAlerts {
+		t.Fatal("tap 1 unexpectedly showed alert")
+	}
+
+	var tap2Called atomic.Bool
+	if !adapter.handleAskUserWizardCallback(context.Background(), cfg, func(context.Context, channel.ChannelConfig, channel.InboundMessage) error {
+		tap2Called.Store(true)
+		return nil
+	}, bot, mkTap(702, "cb-aui-2")) {
+		t.Fatal("expected handleAskUserWizardCallback to handle tap 2")
+	}
+	if <-callbackAlerts {
+		t.Fatal("tap 2 showed expired alert instead of retrying submitted continuation")
+	}
+	select {
+	case edited := <-editBodies:
+		if strings.Contains(edited, "aui~") || !strings.Contains(edited, "Staging") {
+			t.Fatalf("expected buttonless submitted summary with 'Staging', got: %s", edited)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("tap 2 did not update card to submitted summary")
+	}
+	if !tap2Called.Load() {
+		t.Fatal("tap 2 did not invoke inbound handler")
 	}
 }

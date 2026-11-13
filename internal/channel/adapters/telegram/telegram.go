@@ -578,10 +578,17 @@ func isTelegramMediaGroupForChat(groupKey string, chatID int64) bool {
 }
 
 func (a *TelegramAdapter) dispatchInbound(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, msg channel.InboundMessage) {
+	a.dispatchInboundWithHook(ctx, cfg, handler, msg, nil)
+}
+
+func (a *TelegramAdapter) dispatchInboundWithHook(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, msg channel.InboundMessage, done func(error)) {
 	a.logTelegramInbound(ctx, cfg.ID, msg)
 	go func() {
 		// The inbound unit writes the result line of the message.
-		_ = handler(ctx, cfg, msg)
+		err := handler(ctx, cfg, msg)
+		if done != nil {
+			done(err)
+		}
 	}()
 }
 
@@ -657,9 +664,14 @@ func (a *TelegramAdapter) handleTelegramCallback(ctx context.Context, cfg channe
 	}
 
 	// Legacy tool-approval and user-input (option) callbacks.
+	// Keep the inline buttons until the handler finishes without error so a
+	// transient submission or continuation failure can be retried in place.
 	if msg, ok := a.buildTelegramCallbackInboundMessage(cfg, update); ok {
-		_ = clearTelegramCallbackButtons(bot, cb)
-		a.dispatchInbound(ctx, cfg, handler, msg)
+		a.dispatchInboundWithHook(ctx, cfg, handler, msg, func(err error) {
+			if err == nil {
+				_ = clearTelegramCallbackButtons(bot, cb)
+			}
+		})
 	}
 }
 
@@ -803,6 +815,18 @@ func (a *TelegramAdapter) handleAskUserWizardCallback(ctx context.Context, cfg c
 		return true
 	}
 	if !result.Handled {
+		if existing, getErr := a.userInput.Get(ctx, parsed.RequestID); getErr == nil &&
+			existing.BotID == cfg.BotID &&
+			existing.Status == userinput.StatusSubmitted &&
+			canRetrySubmittedAskUserCallback(op, existing) {
+			if len(existing.Interaction.Answers) == 0 {
+				existing.Interaction.Answers = userinput.QuestionAnswersFromRequest(existing)
+			}
+			existing.Interaction.Completed = true
+			_ = bot.Respond(cb, &tele.CallbackResponse{})
+			a.submitAskUser(ctx, cfg, handler, bot, update, loc, existing, chatID, msgID)
+			return true
+		}
 		// Not pending anymore: answered elsewhere, canceled, or expired.
 		_ = bot.Respond(cb, &tele.CallbackResponse{Text: loc.T("cmd.userInput.expired"), ShowAlert: true})
 		return true
@@ -976,24 +1000,58 @@ func (a *TelegramAdapter) submitAskUser(ctx context.Context, cfg channel.Channel
 	}()
 }
 
-func (a *TelegramAdapter) finishAskUserSubmission(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, msg channel.InboundMessage, cardChatID int64, cardMsgID int) error {
-	// The inbound unit writes the result line of the message, so its error is
-	// not returned here.
-	_ = handler(ctx, cfg, msg)
-	// Ingress can return nil after a permission denial. Only durable acceptance
-	// authorizes a submitted summary, never mere completion of the handler.
-	accepted, err := a.userInput.Get(ctx, req.ID)
-	if err != nil {
-		return err
+func canRetrySubmittedAskUserCallback(op userinput.InteractionOp, req userinput.Request) bool {
+	if op.Kind == userinput.OpSubmit {
+		return true
 	}
-	if accepted.Status != userinput.StatusSubmitted {
+	qs := req.UIPayload.Questions
+	if op.Kind != userinput.OpSelectOption || op.QuestionIndex < 0 || op.QuestionIndex >= len(qs) || op.OptionIndex < 0 || op.OptionIndex >= len(qs[op.QuestionIndex].Options) {
+		return false
+	}
+	q := qs[op.QuestionIndex]
+	optID := strings.TrimSpace(q.Options[op.OptionIndex].ID)
+	for _, a := range userinput.QuestionAnswersFromRequest(req) {
+		if a.QuestionID == q.ID {
+			return len(a.OptionIDs) == 1 && strings.TrimSpace(a.OptionIDs[0]) == optID
+		}
+	}
+	return false
+}
+
+func hasRetryableAskUserCallbackButtons(msg channel.InboundMessage, req userinput.Request) bool {
+	if cbID, ok := msg.Metadata["callback_query_id"].(string); ok && strings.TrimSpace(cbID) != "" {
+		return true
+	}
+	return len(req.UIPayload.Questions) > 1 || slices.ContainsFunc(req.UIPayload.Questions, func(q userinput.UIQuestion) bool {
+		return len(q.Options) > 0 || q.Kind == userinput.QuestionKindMultiSelect
+	})
+}
+
+func submittedAskUserInteraction(req userinput.Request, fallback userinput.TextInteractionState) userinput.TextInteractionState {
+	out := req.Interaction
+	if len(out.Answers) == 0 {
+		if answers := userinput.QuestionAnswersFromRequest(req); len(answers) > 0 {
+			out.Answers = answers
+		} else {
+			out = fallback
+		}
+	}
+	return out
+}
+
+func (a *TelegramAdapter) finishAskUserSubmission(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, msg channel.InboundMessage, cardChatID int64, cardMsgID int) error {
+	if handlerErr := handler(ctx, cfg, msg); handlerErr != nil && hasRetryableAskUserCallbackButtons(msg, req) {
 		return nil
 	}
-	if bot != nil && cardChatID != 0 && cardMsgID != 0 {
-		summary := formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
-		return editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil)
+	accepted, err := a.userInput.Get(ctx, req.ID)
+	if err != nil || accepted.Status != userinput.StatusSubmitted || bot == nil || cardChatID == 0 || cardMsgID == 0 {
+		return err
 	}
-	return nil
+	payload := accepted.UIPayload
+	if len(payload.Questions) == 0 {
+		payload = req.UIPayload
+	}
+	return editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, formatAskUserSubmittedSummary(loc, payload, submittedAskUserInteraction(accepted, req.Interaction)), "", nil)
 }
 
 func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, update *tele.Update, req userinput.Request, cardMsgID int) (channel.InboundMessage, bool) {
@@ -1014,7 +1072,11 @@ func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, u
 		raw := &rawCopy
 		raw.Text = "/respond"
 		raw.Sender = update.Callback.Sender
-		msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, "/respond", nil, extraMeta(update.ID))
+		meta := extraMeta(update.ID)
+		if cbID := strings.TrimSpace(update.Callback.ID); cbID != "" {
+			meta["callback_query_id"] = cbID
+		}
+		msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, "/respond", nil, meta)
 		if !ok {
 			return channel.InboundMessage{}, false
 		}
@@ -2661,7 +2723,7 @@ func (a *TelegramAdapter) UpdateUserInputCard(ctx context.Context, cfg channel.C
 	var actions []channel.Action
 	switch req.Status {
 	case userinput.StatusSubmitted:
-		text = formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
+		text = formatAskUserSubmittedSummary(loc, req.UIPayload, submittedAskUserInteraction(req, req.Interaction))
 	case userinput.StatusPending:
 		if req.Interaction.Completed {
 			return false, nil

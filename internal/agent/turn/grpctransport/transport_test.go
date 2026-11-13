@@ -10,6 +10,7 @@ import (
 	"net"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -593,5 +594,98 @@ func TestInternalTurnErrorHasOneResultLine(t *testing.T) {
 	}
 	if record["error"] != "start turn: private diagnostic" {
 		t.Fatalf("error = %v", record["error"])
+	}
+}
+
+type decisionOutputTransportService struct {
+	fakeService
+	mu               sync.Mutex
+	approvalReqs     []turn.ToolApprovalResponse
+	inputReqs        []turn.UserInputResponse
+	err              error
+	blockUntilCancel bool
+	runCanceled      chan struct{}
+}
+
+func (s *decisionOutputTransportService) RespondToolApproval(ctx context.Context, req turn.ToolApprovalResponse, eventCh chan<- json.RawMessage) error {
+	s.mu.Lock()
+	s.approvalReqs = append(s.approvalReqs, req)
+	err, block := s.err, s.blockUntilCancel && !req.ReleaseOutput
+	s.mu.Unlock()
+	if req.ReleaseOutput {
+		return nil
+	}
+	if eventCh != nil {
+		eventCh <- json.RawMessage(`{"type":"decision_accepted","decision_id":"approval-1"}`)
+	}
+	if block {
+		<-ctx.Done()
+		close(s.runCanceled)
+		return ctx.Err()
+	}
+	return err
+}
+
+func (s *decisionOutputTransportService) RespondUserInput(_ context.Context, req turn.UserInputResponse, eventCh chan<- json.RawMessage) error {
+	s.mu.Lock()
+	s.inputReqs = append(s.inputReqs, req)
+	err := s.err
+	s.mu.Unlock()
+	if req.ReleaseOutput {
+		return nil
+	}
+	if eventCh != nil {
+		eventCh <- json.RawMessage(`{"type":"decision_accepted","decision_id":"input-1"}`)
+	}
+	return err
+}
+
+func TestDecisionOutputTransportErrorsDeferReleaseAndStreamCancel(t *testing.T) {
+	svc := &decisionOutputTransportService{runCanceled: make(chan struct{})}
+	client, cleanup := newTestClient(t, svc, "secret")
+	defer cleanup()
+
+	for _, sentinel := range []error{turn.ErrDecisionOutputInterrupted, turn.ErrDecisionOutputBusy} {
+		svc.mu.Lock()
+		svc.err = fmt.Errorf("wrapped: %w", sentinel)
+		svc.mu.Unlock()
+		if err := client.RespondToolApproval(context.Background(), turn.ToolApprovalResponse{ControlID: "c1", BotID: "b1", ThreadID: "t1", ApprovalID: "a1", Decision: "approve"}, make(chan json.RawMessage, 4)); !errors.Is(err, sentinel) {
+			t.Fatalf("RespondToolApproval err = %v, want %v", err, sentinel)
+		}
+		if err := client.RespondUserInput(context.Background(), turn.UserInputResponse{ControlID: "c2", BotID: "b1", ThreadID: "t1", UserInputID: "u1", TextAnswer: "yes"}, make(chan json.RawMessage, 4)); !errors.Is(err, sentinel) {
+			t.Fatalf("RespondUserInput err = %v, want %v", err, sentinel)
+		}
+	}
+
+	svc.mu.Lock()
+	svc.err, svc.blockUntilCancel, svc.approvalReqs, svc.inputReqs = nil, true, nil, nil
+	svc.mu.Unlock()
+	streamCtx, cancel := context.WithCancel(context.Background())
+	eventCh, done := make(chan json.RawMessage, 4), make(chan error, 1)
+	go func() {
+		done <- client.RespondToolApproval(streamCtx, turn.ToolApprovalResponse{ControlID: "c-def", DeferRelease: true, BotID: "b1", ThreadID: "t1", ApprovalID: "a1", Decision: "approve"}, eventCh)
+	}()
+	<-eventCh
+	cancel()
+	<-done
+	select {
+	case <-svc.runCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream RespondToolApproval ctx was not canceled on stream disconnect")
+	}
+	if err := client.ReleaseToolApprovalOutput(context.Background(), turn.ToolApprovalResponse{ControlID: "c-def", BotID: "b1", ThreadID: "t1", ApprovalID: "a1", Decision: "approve"}); err != nil {
+		t.Fatalf("ReleaseToolApprovalOutput: %v", err)
+	}
+	if err := client.ReleaseUserInputOutput(context.Background(), turn.UserInputResponse{ControlID: "c-def-u", BotID: "b1", ThreadID: "t1", UserInputID: "u1"}); err != nil {
+		t.Fatalf("ReleaseUserInputOutput: %v", err)
+	}
+
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if len(svc.approvalReqs) != 2 || !svc.approvalReqs[0].DeferRelease || !svc.approvalReqs[1].ReleaseOutput {
+		t.Fatalf("approvalReqs = %+v", svc.approvalReqs)
+	}
+	if len(svc.inputReqs) != 1 || !svc.inputReqs[0].ReleaseOutput {
+		t.Fatalf("inputReqs = %+v", svc.inputReqs)
 	}
 }

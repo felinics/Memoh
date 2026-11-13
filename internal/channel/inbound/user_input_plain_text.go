@@ -73,7 +73,10 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	if err != nil {
 		return true, err
 	}
-	if p.updateUserInputCard(ctx, cfg, result.Request.ID, loc) {
+	if r, ok := sender.(interface{ DecisionCardRefreshed(string) bool }); ok && r.DecisionCardRefreshed(result.Request.ID) {
+		return true, nil
+	}
+	if p.updateUserInputCard(ctx, cfg, result.Request.ID, loc) || result.Request.Status == userinput.StatusSubmitted {
 		return true, nil
 	}
 	return true, sender.Send(ctx, channel.OutboundMessage{
@@ -185,7 +188,9 @@ func (p *ChannelInboundProcessor) updateUserInputCard(ctx context.Context, cfg c
 	}
 	updated, err := updater.UpdateUserInputCard(ctx, cfg, requestID, loc)
 	if err != nil {
-		p.logger.WarnContext(ctx, "update user input card failed", slog.Any("error", err))
+		if p.logger != nil {
+			p.logger.WarnContext(ctx, "update user input card failed", slog.Any("error", err))
+		}
 		return false
 	}
 	return updated

@@ -156,8 +156,8 @@ func (s *Server) RespondToolApproval(req *turnpb.JsonRequest, stream turnpb.Turn
 	if err := unmarshalToolApprovalResponse(req.GetJson(), &input); err != nil {
 		return status.Error(codes.InvalidArgument, "invalid tool approval payload")
 	}
-	return s.streamContinuation(stream.Context(), stream.Send, func(ch chan<- json.RawMessage) error {
-		return s.service.RespondToolApproval(stream.Context(), input, ch)
+	return s.streamContinuation(stream.Context(), stream.Send, func(runCtx context.Context, ch chan<- json.RawMessage) error {
+		return s.service.RespondToolApproval(runCtx, input, ch)
 	})
 }
 
@@ -166,16 +166,18 @@ func (s *Server) RespondUserInput(req *turnpb.JsonRequest, stream turnpb.TurnSer
 	if err := unmarshalUserInputResponse(req.GetJson(), &input); err != nil {
 		return status.Error(codes.InvalidArgument, "invalid user input payload")
 	}
-	return s.streamContinuation(stream.Context(), stream.Send, func(ch chan<- json.RawMessage) error {
-		return s.service.RespondUserInput(stream.Context(), input, ch)
+	return s.streamContinuation(stream.Context(), stream.Send, func(runCtx context.Context, ch chan<- json.RawMessage) error {
+		return s.service.RespondUserInput(runCtx, input, ch)
 	})
 }
 
-func (s *Server) streamContinuation(ctx context.Context, send func(*turnpb.EventResponse) error, run func(chan<- json.RawMessage) error) error {
+func (s *Server) streamContinuation(ctx context.Context, send func(*turnpb.EventResponse) error, run func(context.Context, chan<- json.RawMessage) error) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	eventCh := make(chan json.RawMessage, 64)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- run(eventCh)
+		errCh <- run(runCtx, eventCh)
 		close(eventCh)
 	}()
 	var seq int64
@@ -189,6 +191,10 @@ func (s *Server) streamContinuation(ctx context.Context, send func(*turnpb.Event
 			}
 			seq++
 			if err := send(&turnpb.EventResponse{Seq: seq, Kind: kindOf(payload), Payload: payload}); err != nil {
+				cancel()
+				if errCh != nil {
+					<-errCh
+				}
 				return err
 			}
 		case err := <-errCh:

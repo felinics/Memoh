@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -290,11 +291,12 @@ func TestDecisionOutputRedisRecoveryAndClaimOptional(t *testing.T) {
 	}
 	claims := make(chan claimResult, 2)
 	start := make(chan struct{})
-	for _, manager := range []*Manager{producer, consumer} {
+	for i, manager := range []*Manager{producer, consumer} {
+		token := []string{"claim-producer", "claim-consumer"}[i]
 		go func() {
 			<-start
-			claimed, err := manager.backend.ClaimDecisionOutput(ctx, ref)
-			claims <- claimResult{claimed, err}
+			outcome, err := manager.backend.ClaimDecisionOutput(ctx, ref, token, time.Minute)
+			claims <- claimResult{outcome == DecisionOutputClaimAcquired, err}
 		}()
 	}
 	close(start)
@@ -320,8 +322,8 @@ func TestDecisionOutputRedisRecoveryAndClaimOptional(t *testing.T) {
 	if err := producer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if claimed, err := reader.ClaimDecisionOutput(ctx, ref); err != nil || claimed {
-		t.Fatalf("output updates or publisher close lost the claim: claimed=%v err=%v", claimed, err)
+	if outcome, err := reader.ClaimDecisionOutput(ctx, ref, "other-token", time.Minute); err != nil || outcome != DecisionOutputClaimBusy {
+		t.Fatalf("output updates or publisher close lost the claim: outcome=%v err=%v", outcome, err)
 	}
 	out := make(chan json.RawMessage, 133)
 	if err := consumer.readDecisionOutput(ctx, DecisionResponse{}, "", "", ref, sub, out); err != nil {
@@ -330,7 +332,7 @@ func TestDecisionOutputRedisRecoveryAndClaimOptional(t *testing.T) {
 	if len(out) != 133 {
 		t.Fatalf("recovered %d events", len(out))
 	}
-	if page, err := reader.ReadDecisionOutput(ctx, ref, 0); err != nil || !page.Done || !page.Claimed || page.Length != 0 {
+	if page, err := reader.ReadDecisionOutput(ctx, ref, 0); err != nil || !page.Done || !page.Claimed || !page.Released || page.Length != 0 {
 		t.Fatalf("finished Redis log was not reclaimed with its markers kept: %+v err=%v", page.DecisionOutputState, err)
 	}
 }
@@ -385,11 +387,11 @@ func TestDecisionOutputLogAppendContract(t *testing.T) {
 	if err != nil || len(page.Events) != 1 || string(page.Events[0]) != `{"n":2}` || page.Length != 2 {
 		t.Fatalf("read from cursor: %+v %v", page, err)
 	}
-	if claimed, err := b.ClaimDecisionOutput(ctx, ref); err != nil || !claimed {
-		t.Fatalf("first claim: %v %v", claimed, err)
+	if outcome, err := b.ClaimDecisionOutput(ctx, ref, "token-1", time.Minute); err != nil || outcome != DecisionOutputClaimAcquired {
+		t.Fatalf("first claim: %v %v", outcome, err)
 	}
-	if claimed, err := b.ClaimDecisionOutput(ctx, ref); err != nil || claimed {
-		t.Fatalf("second claim must lose: %v %v", claimed, err)
+	if outcome, err := b.ClaimDecisionOutput(ctx, ref, "token-2", time.Minute); err != nil || outcome != DecisionOutputClaimBusy {
+		t.Fatalf("second claim must report busy: %v %v", outcome, err)
 	}
 	closed, err := b.AppendDecisionOutput(ctx, ref, 3, nil, limits)
 	if err != nil || !closed.Applied || !closed.Done || !closed.Claimed {
@@ -398,15 +400,15 @@ func TestDecisionOutputLogAppendContract(t *testing.T) {
 	if after, err := b.AppendDecisionOutput(ctx, ref, 4, json.RawMessage(`{}`), limits); err != nil || after.Applied {
 		t.Fatalf("append after close must be ignored: %+v %v", after, err)
 	}
-	if err := b.ReleaseDecisionOutput(ctx, ref); err != nil {
+	if err := b.ReleaseDecisionOutput(ctx, ref, "token-1"); err != nil {
 		t.Fatal(err)
 	}
 	// Entries are gone; the markers that guard against a second forwarder stay.
-	if page, err := b.ReadDecisionOutput(ctx, ref, 0); err != nil || page.Length != 0 || len(page.Events) != 0 || !page.Done || !page.Claimed {
+	if page, err := b.ReadDecisionOutput(ctx, ref, 0); err != nil || page.Length != 0 || len(page.Events) != 0 || !page.Done || !page.Claimed || !page.Released {
 		t.Fatalf("released log: %+v %v", page.DecisionOutputState, err)
 	}
-	if claimed, err := b.ClaimDecisionOutput(ctx, ref); err != nil || claimed {
-		t.Fatalf("release must not reopen the claim: %v %v", claimed, err)
+	if outcome, err := b.ClaimDecisionOutput(ctx, ref, "token-3", time.Minute); err != nil || outcome != DecisionOutputClaimUnavailable {
+		t.Fatalf("release must not reopen the claim: %v %v", outcome, err)
 	}
 }
 
@@ -474,4 +476,305 @@ func (s *concurrentDecisionStore) ResolveRuntimeDecision(ctx context.Context, ki
 		return DecisionTarget{}, ctx.Err()
 	}
 	return s.fakeDecisionStore.ResolveRuntimeDecision(ctx, kind, id)
+}
+
+type decisionOutputBackendCase struct {
+	name string
+	open func(t *testing.T) (Backend, Backend)
+}
+
+func decisionOutputBackendCases(t *testing.T) []decisionOutputBackendCase {
+	t.Helper()
+	cases := []decisionOutputBackendCase{{
+		name: "memory",
+		open: func(*testing.T) (Backend, Backend) { b := NewMemoryBackend(); return b, b },
+	}}
+	if url := os.Getenv("MEMOH_TEST_REDIS_URL"); url != "" {
+		cases = append(cases, decisionOutputBackendCase{
+			name: "redis",
+			open: func(t *testing.T) (Backend, Backend) {
+				t.Helper()
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				opts := RedisOptions{URL: url, KeyPrefix: uniqueRuntimeBackendPrefix("decision-output-suite"), StateTTL: time.Minute}
+				first, err := NewRedisBackend(ctx, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				second, err := NewRedisBackend(ctx, opts)
+				if err != nil {
+					_ = first.Close()
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = first.Close(); _ = second.Close() })
+				return first, second
+			},
+		})
+	}
+	return cases
+}
+
+func seedDecisionManagerPair(
+	t *testing.T, b1, b2 Backend, sessionID, runID, generation string, token int64, ownerStore, followerStore DecisionStore, opts Options,
+) (*Manager, *Manager) {
+	t.Helper()
+	runs := newFakeLedger()
+	runs.InsertClaimed(runID, sessionID, token, generation)
+	if _, applied, err := runs.SetWaitingDecision(context.Background(), runID, token); err != nil || !applied {
+		t.Fatalf("park fake ledger run: applied=%v err=%v", applied, err)
+	}
+	opts.Ledger, opts.OwnerID, opts.Fence = runs, "owner-"+sessionID, &fakeFence{}
+	owner := NewManager(b1, opts)
+	owner.SetDecisionStore(ownerStore)
+	now := time.Now().UTC()
+	leaseDeadline := now.Add(time.Minute)
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	t.Cleanup(lifecycleCancel)
+	ctrl := &runControl{
+		botID: testBotID, sessionID: sessionID, runID: runID, generation: generation, fencingToken: token,
+		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel, leaseValidUntil: leaseDeadline,
+		converter: chatview.NewUIMessageStreamConverter(), ready: make(chan struct{}),
+	}
+	ctrl.markReady()
+	owner.controls[ctrl.key()] = ctrl
+	key := Key{BotID: testBotID, SessionID: sessionID}
+	dist, isDist := b1.(DistributedBackend)
+	seed := func(s Snapshot, _ bool) (Snapshot, bool, error) {
+		s = EmptySnapshot(testBotID, sessionID)
+		s.Epoch = "epoch-" + sessionID
+		view := &CurrentRunView{
+			RunID: runID, TurnID: runID + "-turn", Generation: generation, FencingToken: token,
+			Status: RunStatusWaitingDecision, StartedAt: now, UpdatedAt: now, Messages: []chatview.UIMessage{},
+		}
+		if isDist {
+			view.OwnerID, view.OwnerLeaseExpiresAt = owner.ownerID, &leaseDeadline
+		}
+		s.CurrentRunView = view
+		return s, true, nil
+	}
+	var changed bool
+	var err error
+	if isDist {
+		ref := RunRef{BotID: testBotID, SessionID: sessionID, RunID: runID, OwnerID: owner.ownerID, Generation: generation, FencingToken: token}
+		_, changed, err = dist.StartRun(context.Background(), key, ref, seed)
+	} else {
+		_, changed, err = b1.Update(context.Background(), key, seed)
+	}
+	if err != nil || !changed {
+		t.Fatalf("seed live run: changed=%v err=%v", changed, err)
+	}
+	t.Cleanup(func() { _ = owner.Close() })
+	if !isDist {
+		return owner, owner
+	}
+	if err := owner.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fOpts := opts
+	fOpts.OwnerID = "follower-" + owner.ownerID
+	follower := NewManager(b2, fOpts)
+	follower.SetDecisionStore(followerStore)
+	if err := follower.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = follower.Close() })
+	return owner, follower
+}
+
+type blockingResolveDecisionStore struct {
+	*fakeDecisionStore
+	entered chan struct{}
+	release chan struct{}
+	once    atomic.Bool
+}
+
+func (s *blockingResolveDecisionStore) ResolveRuntimeDecision(ctx context.Context, kind, id string) (DecisionTarget, error) {
+	if s.once.CompareAndSwap(false, true) {
+		close(s.entered)
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return DecisionTarget{}, ctx.Err()
+		}
+	}
+	return s.fakeDecisionStore.ResolveRuntimeDecision(ctx, kind, id)
+}
+
+func TestDecisionOutputLeaseFencingExpiryRenewalAndSlowDrain(t *testing.T) {
+	for _, bc := range decisionOutputBackendCases(t) {
+		t.Run(bc.name, func(t *testing.T) {
+			b1, b2 := bc.open(t)
+			ctx := context.Background()
+			ref := decisionOutputRef(testBotID, "lease-contract")
+			if out, err := b1.ClaimDecisionOutput(ctx, ref, "tok-1", 80*time.Millisecond); err != nil || out != DecisionOutputClaimUnavailable {
+				t.Fatalf("missing ref claim = (%v, %v)", out, err)
+			}
+			if err := b1.InitDecisionOutput(ctx, ref, DecisionOutputRun{SessionID: "s1", RunID: "r1", Generation: "g1"}); err != nil {
+				t.Fatal(err)
+			}
+			for _, tc := range []struct {
+				b    Backend
+				tok  string
+				want DecisionOutputClaimOutcome
+			}{
+				{b1, "tok-1", DecisionOutputClaimAcquired},
+				{b1, "tok-1", DecisionOutputClaimAcquired},
+				{b2, "tok-2", DecisionOutputClaimBusy},
+			} {
+				if out, err := tc.b.ClaimDecisionOutput(ctx, ref, tc.tok, 80*time.Millisecond); err != nil || out != tc.want {
+					t.Fatalf("claim(%s) = (%v, %v), want %v", tc.tok, out, err, tc.want)
+				}
+			}
+			_ = b2.UnclaimDecisionOutput(ctx, ref, "wrong-tok")
+			if ok, err := b2.RenewDecisionOutputClaim(ctx, ref, "wrong-tok", 80*time.Millisecond); err != nil || ok {
+				t.Fatalf("wrong renew = (%v, %v)", ok, err)
+			}
+			if ok, err := b1.RenewDecisionOutputClaim(ctx, ref, "tok-1", 80*time.Millisecond); err != nil || !ok {
+				t.Fatalf("owner renew = (%v, %v)", ok, err)
+			}
+			time.Sleep(120 * time.Millisecond)
+			if out, err := b2.ClaimDecisionOutput(ctx, ref, "tok-2", time.Minute); err != nil || out != DecisionOutputClaimAcquired {
+				t.Fatalf("expired preemption = (%v, %v)", out, err)
+			}
+			_ = b1.ReleaseDecisionOutput(ctx, ref, "tok-1")
+			_ = b2.UnclaimDecisionOutput(ctx, ref, "tok-2")
+			if out, err := b1.ClaimDecisionOutput(ctx, ref, "tok-3", time.Minute); err != nil || out != DecisionOutputClaimAcquired {
+				t.Fatalf("reclaim = (%v, %v)", out, err)
+			}
+			_ = b1.ReleaseDecisionOutput(ctx, ref, "tok-3")
+			if out, err := b2.ClaimDecisionOutput(ctx, ref, "tok-4", time.Minute); err != nil || out != DecisionOutputClaimUnavailable {
+				t.Fatalf("claim after release = (%v, %v)", out, err)
+			}
+
+			store := &fakeDecisionStore{target: DecisionTarget{
+				Type: CommandUserInputResponse, ID: "dec-slow", BotID: testBotID,
+				SessionID: "sess-slow", RunID: "run-slow", TurnID: "run-slow-turn", Status: "pending", FencingToken: 21,
+			}}
+			owner, follower := seedDecisionManagerPair(t, b1, b2, "sess-slow", "run-slow", "gen-slow", 21, store, store, Options{DecisionOutputClaimTTL: 90 * time.Millisecond})
+			owner.SetCommandHandler(func(ctx context.Context, cmd Command) error {
+				store.mu.Lock()
+				store.target.Status, store.target.ControlID, store.target.PayloadHash = "submitted", cmd.ID, cmd.PayloadHash
+				store.mu.Unlock()
+				for i := 1; i <= 3; i++ {
+					_ = owner.PublishDecisionOutput(ctx, cmd, int64(i), json.RawMessage(fmt.Sprintf(`{"type":"text_delta","delta":"p%d"}`, i)))
+				}
+				return owner.PublishDecisionOutput(ctx, cmd, 4, nil)
+			})
+			resp := DecisionResponse{ControlID: "ctrl-slow", Type: CommandUserInputResponse, DecisionID: "dec-slow", BotID: testBotID, SessionID: "sess-slow", Payload: json.RawMessage(`{"answer":"ok"}`)}
+			slowOut, done := make(chan json.RawMessage), make(chan error, 1)
+			go func() { _, err := owner.StreamDecisionResponse(ctx, resp, slowOut); done <- err }()
+			<-slowOut
+			<-slowOut
+			time.Sleep(230 * time.Millisecond)
+			if _, err := follower.StreamDecisionResponse(ctx, resp, make(chan json.RawMessage, 8)); !errors.Is(err, ErrDecisionOutputBusy) {
+				t.Fatalf("competing reader during slow drain got err=%v, want ErrDecisionOutputBusy", err)
+			}
+			<-slowOut
+			<-slowOut
+			if err := <-done; err != nil {
+				t.Fatalf("slow reader err = %v", err)
+			}
+		})
+	}
+}
+
+func TestDecisionOutputStatelessFullReplayAndTwoPhaseDeferRelease(t *testing.T) {
+	for _, bc := range decisionOutputBackendCases(t) {
+		t.Run(bc.name, func(t *testing.T) {
+			b1, b2 := bc.open(t)
+			ctx := context.Background()
+			baseStore := &fakeDecisionStore{target: DecisionTarget{
+				Type: CommandUserInputResponse, ID: "dec-replay", BotID: testBotID,
+				SessionID: "sess-replay", RunID: "run-replay", TurnID: "run-replay-turn", Status: "pending", FencingToken: 31,
+			}}
+			gateStore := &blockingResolveDecisionStore{fakeDecisionStore: baseStore, entered: make(chan struct{}), release: make(chan struct{})}
+			owner, follower := seedDecisionManagerPair(t, b1, b2, "sess-replay", "run-replay", "gen-replay", 31, gateStore, baseStore, Options{})
+
+			var executions atomic.Int32
+			part1Published, allowPart2, bgDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			owner.SetCommandHandler(func(cmdCtx context.Context, cmd Command) error {
+				executions.Add(1)
+				baseStore.mu.Lock()
+				baseStore.target.Status, baseStore.target.ControlID, baseStore.target.PayloadHash = "submitted", cmd.ID, cmd.PayloadHash
+				baseStore.mu.Unlock()
+				_ = owner.PublishDecisionOutput(cmdCtx, cmd, 1, json.RawMessage(`{"type":"text_delta","delta":"seg-1"}`))
+				close(part1Published)
+				<-allowPart2
+				_ = owner.PublishDecisionOutput(cmdCtx, cmd, 2, json.RawMessage(`{"type":"text_delta","delta":"seg-2"}`))
+				err := owner.PublishDecisionOutput(cmdCtx, cmd, 3, nil)
+				close(bgDone)
+				return err
+			})
+
+			preCtx, preCancel := context.WithCancel(ctx)
+			preDone := make(chan error, 1)
+			resp1 := DecisionResponse{
+				ControlID: "ctrl-1", DeferRelease: true, Type: CommandUserInputResponse, DecisionID: "dec-replay",
+				BotID: testBotID, SessionID: "sess-replay", Payload: json.RawMessage(`{"answers":[{"question_id":"q1","option_ids":["opt_b","opt_a"]}]}`),
+			}
+			go func() {
+				_, err := owner.StreamDecisionResponse(preCtx, resp1, make(chan json.RawMessage, 8))
+				preDone <- err
+			}()
+			<-gateStore.entered
+			preCancel()
+			close(gateStore.release)
+			if err := <-preDone; !errors.Is(err, context.Canceled) || executions.Load() != 0 {
+				t.Fatalf("pre-accept err=%v executions=%d", err, executions.Load())
+			}
+
+			midCtx, midCancel := context.WithCancel(ctx)
+			midDone := make(chan error, 1)
+			go func() {
+				_, err := owner.StreamDecisionResponse(midCtx, resp1, make(chan json.RawMessage, 8))
+				midDone <- err
+			}()
+			<-part1Published
+			if _, err := follower.StreamDecisionResponse(ctx, resp1, make(chan json.RawMessage, 8)); !errors.Is(err, ErrDecisionOutputBusy) {
+				t.Fatalf("coalesced DeferRelease caller got err=%v, want Busy", err)
+			}
+			midCancel()
+			if err := <-midDone; !errors.Is(err, ErrDecisionOutputInterrupted) {
+				t.Fatalf("mid-stream cancel err=%v", err)
+			}
+			close(allowPart2)
+			<-bgDone
+			if !follower.HasPendingDecisionOutput(ctx, CommandUserInputResponse, testBotID, "dec-replay", "ctrl-1") {
+				t.Fatal("expected pending unreleased output")
+			}
+
+			retryResp := resp1
+			retryResp.ControlID = "ctrl-retry-2"
+			retryResp.Payload = json.RawMessage(`{"answers":[{"question_id":"q1","option_ids":["opt_a","opt_b"]}]}`)
+			out2 := make(chan json.RawMessage, 8)
+			if res2, err := follower.StreamDecisionResponse(ctx, retryResp, out2); err != nil || !res2.Applied || executions.Load() != 1 || len(out2) != 3 {
+				t.Fatalf("stateless full replay: res=%+v executions=%d len=%d err=%v", res2, executions.Load(), len(out2), err)
+			}
+			if a, b, c := string(<-out2), string(<-out2), string(<-out2); !strings.Contains(a, "decision_accepted") || !strings.Contains(b, "seg-1") || !strings.Contains(c, "seg-2") {
+				t.Fatalf("replayed = (%s, %s, %s)", a, b, c)
+			}
+			if !follower.HasPendingDecisionOutput(ctx, CommandUserInputResponse, testBotID, "dec-replay", "ctrl-1") {
+				t.Fatal("DeferRelease=true must retain log until ReleaseOutput")
+			}
+
+			origRef := decisionOutputRef(testBotID, decisionControlCommandID(CommandUserInputResponse, testBotID, "dec-replay", "ctrl-1"))
+			_, _ = b2.ClaimDecisionOutput(ctx, origRef, "active-hold", time.Minute)
+			relResp := retryResp
+			relResp.DeferRelease, relResp.ReleaseOutput = false, true
+			_, _ = follower.StreamDecisionResponse(ctx, relResp, nil)
+			if !follower.HasPendingDecisionOutput(ctx, CommandUserInputResponse, testBotID, "dec-replay", "ctrl-1") {
+				t.Fatal("ReleaseOutput clobbered active reader lease")
+			}
+			_ = b2.UnclaimDecisionOutput(ctx, origRef, "active-hold")
+			if resRel, err := follower.StreamDecisionResponse(ctx, relResp, nil); err != nil || !resRel.Handled || !resRel.Applied {
+				t.Fatalf("ReleaseOutput = (%+v, %v)", resRel, err)
+			}
+			if follower.HasPendingDecisionOutput(ctx, CommandUserInputResponse, testBotID, "dec-replay", "ctrl-1") {
+				t.Fatal("output remained pending after ReleaseOutput")
+			}
+			if afterRel, err := follower.StreamDecisionResponse(ctx, retryResp, make(chan json.RawMessage, 4)); err != nil || !afterRel.Handled || afterRel.Applied {
+				t.Fatalf("after release = (%+v, %v)", afterRel, err)
+			}
+		})
+	}
 }

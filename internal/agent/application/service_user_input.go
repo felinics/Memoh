@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -14,6 +16,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -35,11 +39,64 @@ func (s *Service) AdvancePlainTextUserInput(ctx context.Context, input userinput
 	if s.userInput == nil {
 		return userinput.AdvanceTextResult{}, errors.New("user input service not configured")
 	}
-	return s.userInput.AdvanceText(ctx, input)
+	rows, hasRows := s.listSessionUserInputs(ctx, input.BotID, input.SessionID)
+	now, hasPending := time.Now(), false
+	for i := range rows {
+		hasPending = hasPending || isPendingUserInputRow(rows[i], now)
+	}
+	if hasRows && !hasPending {
+		return s.recoverSubmittedPlainTextUserInputFromRows(ctx, input, rows), nil
+	}
+	if result, err := s.userInput.AdvanceText(ctx, input); err != nil || result.Handled || !hasRows {
+		return result, err
+	}
+	return s.recoverSubmittedPlainTextUserInputFromRows(ctx, input, rows), nil
+}
+
+func (s *Service) listSessionUserInputs(ctx context.Context, rawBotID, rawSessionID string) ([]dbsqlc.UserInputRequest, bool) {
+	botID, err1 := db.ParseUUID(rawBotID)
+	sessionID, err2 := db.ParseUUID(rawSessionID)
+	if s == nil || s.queries == nil || err1 != nil || err2 != nil {
+		return nil, false
+	}
+	rows, err := s.queries.ListUserInputsBySession(ctx, dbsqlc.ListUserInputsBySessionParams{BotID: botID, SessionID: sessionID})
+	return rows, err == nil && len(rows) > 0
+}
+
+func (s *Service) recoverSubmittedPlainTextUserInputFromRows(ctx context.Context, input userinput.AdvanceTextInput, rows []dbsqlc.UserInputRequest) userinput.AdvanceTextResult {
+	if s == nil || s.decisionRuntime == nil || len(rows) == 0 {
+		return userinput.AdvanceTextResult{}
+	}
+	explicit, replyID := strings.TrimSpace(input.ExplicitID), strings.TrimSpace(input.ReplyExternalMessageID)
+	var candidate *dbsqlc.UserInputRequest
+	shortID, parseErr := strconv.Atoi(explicit)
+	for i := len(rows) - 1; i >= 0; i-- {
+		r := &rows[i]
+		if (explicit != "" && ((parseErr == nil && int(r.ShortID) == shortID) || (parseErr != nil && strings.EqualFold(decisionUUIDString(r.ID), explicit)))) ||
+			(explicit == "" && (replyID == "" || strings.TrimSpace(r.PromptExternalMessageID) == replyID)) {
+			candidate = r
+			break
+		}
+	}
+	if candidate == nil && explicit == "" && replyID != "" {
+		candidate = &rows[len(rows)-1]
+	}
+	if candidate == nil || strings.TrimSpace(candidate.Status) != userinput.StatusSubmitted || !candidate.RuntimeFencingToken.Valid ||
+		!s.hasPendingDecisionOutputForRow(ctx, sessionruntime.CommandUserInputResponse, input.BotID, decisionUUIDString(candidate.ID), pgText(candidate.ResponseControlID)) {
+		return userinput.AdvanceTextResult{}
+	}
+	req := userinput.RequestFromSQLRow(*candidate)
+	if answers, ok := userinput.MatchesSubmittedText(req, input.Text, input.UILanguage); ok {
+		req.Interaction.Completed, req.Interaction.Answers = true, answers
+		return userinput.AdvanceTextResult{Handled: true, Request: req}
+	}
+	return userinput.AdvanceTextResult{}
 }
 
 type UserInputResponseInput struct {
 	ControlID                  string
+	DeferRelease               bool `json:"-"`
+	ReleaseOutput              bool `json:"-"`
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string

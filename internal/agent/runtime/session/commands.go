@@ -528,7 +528,10 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		return DecisionResponseResult{Handled: true}, err
 	} else if ok {
 		err := commandResultErrorFor(Command{PayloadHash: requestHash}, stored)
-		return DecisionResponseResult{Handled: true, Applied: err == nil, Replayed: true}, err
+		return DecisionResponseResult{
+			Handled: true, Applied: err == nil, Replayed: true,
+			SessionID: stored.SessionID, RunID: stored.RunID, Generation: stored.Generation,
+		}, err
 	}
 
 	m.mu.Lock()
@@ -554,11 +557,15 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		return result, ErrCommandTargetMismatch
 	}
 	if target.ControlID != "" {
-		if target.ControlID == response.ControlID {
+		targetCommandID := decisionControlCommandID(response.Type, response.BotID, response.DecisionID, target.ControlID)
+		if target.ControlID == response.ControlID || targetCommandID == commandID {
 			if target.PayloadHash != requestHash {
 				return result, ErrCommandPayloadConflict
 			}
-			return DecisionResponseResult{Handled: true, Applied: true, Replayed: true}, nil
+			return DecisionResponseResult{Handled: true, Applied: true, Replayed: true, SessionID: target.SessionID, RunID: target.RunID}, nil
+		}
+		if response.streamOutput && target.PayloadHash == requestHash {
+			result.recoveredCommandID = targetCommandID
 		}
 		return result, nil
 	}
@@ -606,13 +613,15 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		BotID: target.BotID, SessionID: target.SessionID, RunID: target.RunID,
 		Generation: ref.Generation, FencingToken: target.FencingToken,
 		TargetID: target.ID, DecisionResolved: true, StreamOutput: response.streamOutput,
+		StreamClaimToken: response.streamClaimToken, StreamClaimTTLMS: response.streamClaimTTL.Milliseconds(),
 		Payload: append([]byte(nil), response.Payload...), PayloadHash: requestHash,
 		CreatedAt: createdAt, ExpiresAt: createdAt.Add(m.commandTimeout()),
 	}
 	if m.distributed == nil || ref.OwnerID == m.ownerID {
-		stored := m.executeRoutedCommand(ctx, cmd)
+		stored, coalesced := m.executeRoutedDecisionCommand(ctx, cmd)
 		err := commandResultErrorFor(cmd, stored)
 		result.Applied = err == nil
+		result.coalesced = coalesced
 		return result, err
 	}
 	err = m.dispatchRemoteCommand(ctx, ref.OwnerID, cmd)
@@ -620,7 +629,16 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 	return result, err
 }
 
+// DecisionControlCommandID returns the deterministic idempotent command ID for
+// a decision response control token.
+func DecisionControlCommandID(commandType, botID, decisionID, controlID string) string {
+	return decisionControlCommandID(commandType, botID, decisionID, controlID)
+}
+
 func decisionControlCommandID(commandType, botID, decisionID, controlID string) string {
+	if trimmed := strings.TrimSpace(controlID); strings.HasPrefix(trimmed, "decision-control-") && len(trimmed) == len("decision-control-")+64 {
+		return trimmed
+	}
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		strings.TrimSpace(commandType),
 		strings.TrimSpace(botID),
@@ -785,6 +803,7 @@ func canonicalRuntimeAnswers(value any) []map[string]any {
 		for _, optionID := range optionValues {
 			optionIDs = append(optionIDs, runtimeCommandString(optionID))
 		}
+		sort.Strings(optionIDs)
 		answer := map[string]any{
 			"question_id": runtimeCommandString(runtimeCommandMapValue(raw, "question_id")),
 			"option_ids":  optionIDs,
@@ -933,44 +952,87 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 		return ErrCommandBusy
 	}
 	defer m.endCommandTarget(cmd)
+	if cmd.StreamOutput && m.backend != nil {
+		ref, tok := decisionOutputRef(cmd.BotID, cmd.ID), strings.TrimSpace(cmd.StreamClaimToken)
+		if initErr := m.backend.InitDecisionOutput(commandCtx, ref, DecisionOutputRun{
+			SessionID: cmd.SessionID, RunID: cmd.RunID, Generation: cmd.Generation,
+		}); initErr != nil {
+			return initErr
+		}
+		if tok != "" {
+			_, _ = m.backend.ClaimDecisionOutput(commandCtx, ref, tok, min(time.Duration(cmd.StreamClaimTTLMS)*time.Millisecond, m.commandTimeout()))
+		}
+		defer func() {
+			if err != nil {
+				cCtx, cancel := context.WithTimeout(context.WithoutCancel(commandCtx), m.commandTimeout())
+				defer cancel()
+				if tok != "" {
+					_ = m.backend.UnclaimDecisionOutput(cCtx, ref, tok)
+				}
+				_ = m.backend.DiscardDecisionOutput(cCtx, ref)
+			}
+		}()
+	}
 	err = handler(commandCtx, cmd)
 	return err
 }
 
 func (m *Manager) executeRoutedCommand(ctx context.Context, cmd Command) Command {
+	stored, _ := m.executeRoutedDecisionCommand(ctx, cmd)
+	return stored
+}
+
+func (m *Manager) executeRoutedDecisionCommand(ctx context.Context, cmd Command) (Command, bool) {
+	loadDone := func() (Command, bool) {
+		result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID)
+		if err != nil {
+			return newCommandResult(cmd, errs.WrapDependency(err, "load runtime command result")), true
+		}
+		if !ok {
+			return Command{}, false
+		}
+		if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
+			return newCommandResult(cmd, ErrCommandPayloadConflict), true
+		}
+		return result, true
+	}
 	leader, executionDone := m.beginCommandExecution(cmd.ID)
 	if !leader {
 		select {
 		case <-executionDone:
 		case <-ctx.Done():
-			return newCommandResult(cmd, ctx.Err())
+			return newCommandResult(cmd, ctx.Err()), true
 		}
-		if result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID); err != nil {
-			return newCommandResult(cmd, errs.WrapDependency(err, "load runtime command result"))
-		} else if ok {
-			if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
-				return newCommandResult(cmd, ErrCommandPayloadConflict)
-			}
-			return result
+		if res, ok := loadDone(); ok {
+			return res, true
 		}
-		return newCommandResult(cmd, errors.New("runtime command result is unavailable"))
+		return newCommandResult(cmd, errors.New("runtime command result is unavailable")), true
 	}
-	defer m.finishCommandExecution(cmd.ID, executionDone)
-
-	if result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID); err != nil {
-		return newCommandResult(cmd, errs.WrapDependency(err, "load runtime command result"))
-	} else if ok {
-		if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
-			return newCommandResult(cmd, ErrCommandPayloadConflict)
+	if res, ok := loadDone(); ok {
+		m.finishCommandExecution(cmd.ID, executionDone)
+		return res, true
+	}
+	var stored Command
+	run := func(runCtx context.Context) {
+		commandCtx, cancel, err := m.activeCommandContext(runCtx, cmd)
+		if err == nil {
+			err = m.applyRoutedCommand(commandCtx, cmd)
 		}
-		return result
+		cancel()
+		stored = m.persistCommandResult(runCtx, cmd, err)
+		m.finishCommandExecution(cmd.ID, executionDone)
 	}
-	commandCtx, cancel, err := m.activeCommandContext(ctx, cmd)
-	if err == nil {
-		err = m.applyRoutedCommand(commandCtx, cmd)
+	if !cmd.StreamOutput {
+		run(ctx)
+		return stored, false
 	}
-	cancel()
-	return m.persistCommandResult(ctx, cmd, err)
+	go run(context.WithoutCancel(ctx))
+	select {
+	case <-executionDone:
+		return stored, false
+	case <-ctx.Done():
+		return newCommandResult(cmd, ctx.Err()), true
+	}
 }
 
 func newCommandResult(request Command, err error) Command {
@@ -978,7 +1040,8 @@ func newCommandResult(request Command, err error) Command {
 		Type: CommandResult, ID: request.ID, BotID: request.BotID, SessionID: request.SessionID,
 		RunID: request.RunID, Generation: request.Generation, FencingToken: request.FencingToken,
 		TargetID: request.TargetID, DecisionResolved: request.DecisionResolved,
-		PayloadHash: request.PayloadHash, CreatedAt: time.Now().UTC(),
+		StreamOutput: request.StreamOutput,
+		PayloadHash:  request.PayloadHash, CreatedAt: time.Now().UTC(),
 	}
 	if err == nil {
 		return result

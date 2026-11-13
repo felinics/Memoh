@@ -954,6 +954,30 @@ func mapLookupErr(err error) error {
 	return err
 }
 
+func RequestFromSQLRow(row sqlc.UserInputRequest) Request { return requestFromRow(row) }
+
+func QuestionAnswersFromRequest(req Request) []QuestionAnswer {
+	if len(req.Interaction.Answers) > 0 {
+		return append([]QuestionAnswer(nil), req.Interaction.Answers...)
+	}
+	var out []QuestionAnswer
+	for _, entry := range AnswersFromResult(req.Result) {
+		qa := QuestionAnswer{
+			QuestionID: strings.TrimSpace(entry.QuestionID), CustomText: strings.TrimSpace(entry.CustomText),
+			Text: strings.TrimSpace(entry.Text), Skipped: entry.Skipped,
+		}
+		for _, opt := range entry.Selected {
+			if id := strings.TrimSpace(opt.ID); id != "" {
+				qa.OptionIDs = append(qa.OptionIDs, id)
+			}
+		}
+		if qa.QuestionID != "" {
+			out = append(out, qa)
+		}
+	}
+	return out
+}
+
 func requestFromRow(row sqlc.UserInputRequest) Request {
 	req := Request{
 		ID:                      uuid.UUID(row.ID.Bytes).String(),

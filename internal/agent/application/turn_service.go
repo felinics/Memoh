@@ -342,7 +342,18 @@ func (s *Service) RespondToolApproval(ctx context.Context, input turn.ToolApprov
 	if handled, err := s.routeToolApprovalResponse(ctx, converted, eventCh); handled || err != nil {
 		return err
 	}
+	if converted.ReleaseOutput {
+		return nil
+	}
 	return s.respondToolApproval(ctx, converted, eventCh)
+}
+
+// ReleaseToolApprovalOutput acknowledges external platform delivery of a deferred
+// tool approval continuation stream.
+func (s *Service) ReleaseToolApprovalOutput(ctx context.Context, input turn.ToolApprovalResponse) error {
+	input.DeferRelease = false
+	input.ReleaseOutput = true
+	return s.RespondToolApproval(ctx, input, nil)
 }
 
 // RespondUserInput resumes a turn deferred on ask_user.
@@ -351,7 +362,18 @@ func (s *Service) RespondUserInput(ctx context.Context, input turn.UserInputResp
 	if handled, err := s.routeUserInputResponse(ctx, converted, eventCh); handled || err != nil {
 		return err
 	}
+	if converted.ReleaseOutput {
+		return nil
+	}
 	return s.respondUserInput(ctx, converted, eventCh)
+}
+
+// ReleaseUserInputOutput acknowledges external platform delivery of a deferred
+// user-input continuation stream.
+func (s *Service) ReleaseUserInputOutput(ctx context.Context, input turn.UserInputResponse) error {
+	input.DeferRelease = false
+	input.ReleaseOutput = true
+	return s.RespondUserInput(ctx, input, nil)
 }
 
 func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {

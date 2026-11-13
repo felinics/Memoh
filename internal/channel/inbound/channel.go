@@ -2,7 +2,9 @@ package inbound
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +20,10 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/google/uuid"
 	"golang.org/x/sync/singleflight"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/acl"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
@@ -3756,21 +3761,87 @@ func splitFirstCommandField(text string) (head, tail string) {
 	return text, ""
 }
 
+const continuationReleaseAckTimeout = 5 * time.Second
+
+func inboundDecisionControlID(kind string, msg channel.InboundMessage, botID, sessionID, targetKey string) string {
+	deliveryID := ""
+	for _, k := range []string{"callback_query_id", "update_id", "event_id"} {
+		if s := strings.TrimSpace(fmt.Sprint(msg.Metadata[k])); msg.Metadata[k] != nil && s != "" {
+			deliveryID = k + ":" + s
+			break
+		}
+	}
+	if deliveryID == "" && strings.TrimSpace(msg.Message.ID) != "" {
+		deliveryID = "msg:" + strings.TrimSpace(msg.Message.ID)
+	}
+	if deliveryID == "" {
+		return uuid.NewString()
+	}
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		"channel_decision", strings.TrimSpace(kind), strings.TrimSpace(msg.Channel.String()),
+		strings.TrimSpace(botID), strings.TrimSpace(sessionID), strings.TrimSpace(targetKey), deliveryID,
+	}, "\x00")))
+	return "ch-dec-" + hex.EncodeToString(sum[:16])
+}
+
+func isRecoverableContinuationError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	st, ok := status.FromError(err)
+	return ctx.Err() != nil || errors.Is(err, turn.ErrDecisionOutputInterrupted) || errors.Is(err, turn.ErrDecisionOutputBusy) ||
+		(ok && (st.Code() == codes.Unavailable || st.Code() == codes.Canceled || st.Code() == codes.DeadlineExceeded))
+}
+
 func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, _ string, approvalRunner ToolApprovalRunner, input turn.ToolApprovalResponse) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, input.ThreadID, func(runCtx context.Context, eventCh chan<- json.RawMessage) error {
+	if strings.TrimSpace(input.ControlID) == "" {
+		key := strings.ToLower(strings.TrimSpace(input.Decision))
+		if t := firstNonEmptyTrimmed(input.ExplicitID, input.ApprovalID, input.ReplyExternalMessageID); t != "" {
+			key += ":" + t
+		}
+		input.ControlID = inboundDecisionControlID("tool_approval", msg, input.BotID, input.ThreadID, key)
+	}
+	releaser, canRelease := approvalRunner.(turn.ToolApprovalOutputReleaser)
+	input.DeferRelease = canRelease
+	return p.streamDecisionContinuation(ctx, msg, sender, identity, input.ThreadID, func(runCtx context.Context, eventCh chan<- json.RawMessage) error {
 		return approvalRunner.RespondToolApproval(runCtx, input, eventCh)
+	}, func(releaseCtx context.Context, id string) {
+		if canRelease {
+			req := input
+			if id != "" {
+				req.ApprovalID, req.ExplicitID = id, id
+			}
+			_ = releaser.ReleaseToolApprovalOutput(releaseCtx, req)
+		}
 	})
 }
 
 func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, _ string, userInputRunner UserInputRunner, input turn.UserInputResponse) error {
-	return p.streamContinuationCommand(ctx, msg, sender, identity, input.ThreadID, func(runCtx context.Context, eventCh chan<- json.RawMessage) error {
+	if strings.TrimSpace(input.ControlID) == "" {
+		input.ControlID = inboundDecisionControlID("user_input", msg, input.BotID, input.ThreadID, firstNonEmptyTrimmed(input.ExplicitID, input.UserInputID, input.ReplyExternalMessageID))
+	}
+	releaser, canRelease := userInputRunner.(turn.UserInputOutputReleaser)
+	input.DeferRelease = canRelease
+	return p.streamDecisionContinuation(ctx, msg, sender, identity, input.ThreadID, func(runCtx context.Context, eventCh chan<- json.RawMessage) error {
 		return userInputRunner.RespondUserInput(runCtx, input, eventCh)
+	}, func(releaseCtx context.Context, id string) {
+		if canRelease {
+			req := input
+			if id != "" {
+				req.UserInputID, req.ExplicitID = id, id
+			}
+			_ = releaser.ReleaseUserInputOutput(releaseCtx, req)
+		}
 	})
 }
 
 type streamContinuationFunc func(context.Context, chan<- json.RawMessage) error
 
 func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, sessionID string, run streamContinuationFunc) error {
+	return p.streamDecisionContinuation(ctx, msg, sender, identity, sessionID, run, nil)
+}
+
+func (p *ChannelInboundProcessor) streamDecisionContinuation(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, sessionID string, run streamContinuationFunc, onRelease func(context.Context, string)) error {
 	publicationStart := time.Now()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -3821,6 +3892,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	loc := p.localizer(ctx, identity.BotID)
 	var finalMessages []turn.ModelMessage
 	var continuationErr error
+	var acceptedDecisionID string
 	accepted := false
 	for eventCh != nil || errCh != nil {
 		select {
@@ -3835,6 +3907,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 			}
 			if json.Unmarshal(chunk, &receipt) == nil && receipt.Type == "decision_accepted" {
 				accepted = true
+				acceptedDecisionID = strings.TrimSpace(receipt.DecisionID)
 				if receiver, ok := sender.(interface{ AcceptDecision(context.Context, string) }); ok {
 					receiver.AcceptDecision(ctx, receipt.DecisionID)
 				}
@@ -3884,18 +3957,42 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 		}
 	}
 
+	ackAndFinalize := func() {
+		if onRelease != nil {
+			releaseCtx, releaseCancel := context.WithTimeout(context.WithoutCancel(ctx), continuationReleaseAckTimeout)
+			onRelease(releaseCtx, acceptedDecisionID)
+			releaseCancel()
+		}
+		if finalizer, ok := sender.(interface{ FinalizeDecision(context.Context) }); ok {
+			finalizer.FinalizeDecision(context.WithoutCancel(ctx))
+		}
+	}
 	if continuationErr != nil {
 		if !accepted {
+			if errors.Is(continuationErr, turn.ErrDecisionOutputBusy) {
+				return continuationErr
+			}
 			_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: loc.T("cmd.userInput.submitFailed")})
 			return continuationErr
 		}
 		if p.logger != nil {
 			p.logger.WarnContext(ctx, "accepted decision delivery interrupted", slog.Any("error", continuationErr))
 		}
+		if isRecoverableContinuationError(ctx, continuationErr) {
+			if ctx.Err() == nil {
+				_ = stream.Push(ctx, channel.CodeEvent(loc, apperror.CodeAgentResponseInterrupted, nil))
+			}
+			_ = closeStream()
+			return continuationErr
+		}
 		if err := stream.Push(ctx, channel.CodeEvent(loc, apperror.CodeAgentResponseInterrupted, nil)); err != nil {
 			return err
 		}
-		return closeStream()
+		if err := closeStream(); err != nil {
+			return err
+		}
+		ackAndFinalize()
+		return nil
 	}
 	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)
 	if !suppressReplies {
@@ -3917,7 +4014,11 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventStatus, Status: channel.StreamStatusCompleted}); err != nil {
 		return err
 	}
-	return closeStream()
+	if err := closeStream(); err != nil {
+		return err
+	}
+	ackAndFinalize()
+	return nil
 }
 
 func hasUserInputAction(actions []channel.Action) bool {

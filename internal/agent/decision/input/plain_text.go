@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -254,4 +255,34 @@ func isSkipCommand(text string) bool {
 	default:
 		return false
 	}
+}
+
+// MatchesSubmittedText reports whether rawText parses to the same final answer
+// as req, returning the full submitted answers for stateless replay recovery.
+func MatchesSubmittedText(req Request, rawText, uiLanguage string) ([]QuestionAnswer, bool) {
+	submitted, qs, cmd := QuestionAnswersFromRequest(req), req.UIPayload.Localized(i18n.New(uiLanguage)).Questions, strings.ToLower(strings.TrimSpace(rawText))
+	if len(submitted) == 0 || len(qs) == 0 || cmd == "" || isBackCommand(cmd) {
+		return nil, false
+	}
+	lastQ := qs[len(qs)-1]
+	var parsed QuestionAnswer
+	if isSkipCommand(cmd) {
+		if questionIsExplicitlyRequired(lastQ) {
+			return nil, false
+		}
+		parsed = QuestionAnswer{Skipped: true}
+	} else if a, err := parseTextAnswer(lastQ, rawText); err == nil {
+		parsed = a
+	} else {
+		return nil, false
+	}
+	for _, want := range submitted {
+		if want.QuestionID == lastQ.ID {
+			aIDs, bIDs := cleanIDs(parsed.OptionIDs), cleanIDs(want.OptionIDs)
+			return submitted, parsed.Skipped == want.Skipped && slices.Equal(aIDs, bIDs) &&
+				strings.EqualFold(strings.TrimSpace(parsed.Text), strings.TrimSpace(want.Text)) &&
+				strings.EqualFold(strings.TrimSpace(parsed.CustomText), strings.TrimSpace(want.CustomText))
+		}
+	}
+	return nil, false
 }

@@ -37,6 +37,15 @@ var ErrTurnDeferred = errors.New("turn: deferred until current run completes")
 // closed instead of silently reading and writing the default team's data.
 var ErrTeamNotServed = errors.New("turn: team not served by this instance")
 
+// ErrDecisionOutputInterrupted reports that an accepted decision's continuation
+// output stream stopped before terminal delivery completed. Channel callers may
+// retry statelessly to replay the full buffered continuation output.
+var ErrDecisionOutputInterrupted = errors.New("turn: decision continuation output stream interrupted")
+
+// ErrDecisionOutputBusy reports that another active stream currently holds the
+// continuation output reader lease for the same decision command.
+var ErrDecisionOutputBusy = errors.New("turn: decision continuation output reader busy")
+
 // Mode selects the turn orchestration path.
 type Mode string
 
@@ -193,6 +202,8 @@ type DiscussRunResolvedPayload struct {
 // (RFC ResumeApprovalCommand).
 type ToolApprovalResponse struct {
 	ControlID              string
+	DeferRelease           bool `json:"DeferRelease,omitempty"`
+	ReleaseOutput          bool `json:"ReleaseOutput,omitempty"`
 	BotID                  string
 	ThreadID               string
 	ActorChannelIdentityID string
@@ -212,6 +223,8 @@ type ToolApprovalResponse struct {
 // (RFC ResumeUserInputCommand).
 type UserInputResponse struct {
 	ControlID                  string
+	DeferRelease               bool `json:"DeferRelease,omitempty"`
+	ReleaseOutput              bool `json:"ReleaseOutput,omitempty"`
 	BotID                      string
 	ThreadID                   string
 	ActorChannelIdentityID     string
@@ -279,4 +292,16 @@ type Stopper interface {
 // not.
 type DeferredTurnService interface {
 	EnqueueDeferredTurn(context.Context, StartTurnCommand) error
+}
+
+// ToolApprovalOutputReleaser acknowledges external IM delivery of a deferred-release
+// tool approval continuation stream so the server can reclaim the output log.
+type ToolApprovalOutputReleaser interface {
+	ReleaseToolApprovalOutput(ctx context.Context, input ToolApprovalResponse) error
+}
+
+// UserInputOutputReleaser acknowledges external IM delivery of a deferred-release
+// user-input continuation stream so the server can reclaim the output log.
+type UserInputOutputReleaser interface {
+	ReleaseUserInputOutput(ctx context.Context, input UserInputResponse) error
 }

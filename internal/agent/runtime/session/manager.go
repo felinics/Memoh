@@ -55,6 +55,8 @@ type Manager struct {
 	newEpoch       func() string
 	newGeneration  func() string
 
+	decisionOutputClaimTTL time.Duration
+
 	mu                      sync.Mutex
 	controls                map[runControlKey]*runControl
 	commandHandler          func(context.Context, Command) error
@@ -396,6 +398,7 @@ type Options struct {
 	// required together with Ledger.
 	Fence                  FenceActivator
 	CommandAckTTL          time.Duration
+	DecisionOutputClaimTTL time.Duration
 	CommandWorkerLimit     int
 	Logger                 *slog.Logger
 	EpochGenerator         func() string
@@ -414,6 +417,8 @@ const (
 	defaultCommandAckTTL        = 2 * time.Second
 	defaultCommandWorkerLimit   = 32
 	defaultCommandRejectBacklog = 256
+
+	defaultDecisionOutputClaimTTL = 20 * time.Second
 )
 
 func NewManager(backend Backend, opts Options) *Manager {
@@ -432,6 +437,10 @@ func NewManager(backend Backend, opts Options) *Manager {
 	commandAckTTL := opts.CommandAckTTL
 	if commandAckTTL <= 0 {
 		commandAckTTL = defaultCommandAckTTL
+	}
+	decisionOutputClaimTTL := opts.DecisionOutputClaimTTL
+	if decisionOutputClaimTTL <= 0 {
+		decisionOutputClaimTTL = defaultDecisionOutputClaimTTL
 	}
 	commandWorkers := opts.CommandWorkerLimit
 	if commandWorkers <= 0 {
@@ -466,6 +475,7 @@ func NewManager(backend Backend, opts Options) *Manager {
 		ownerID:                ownerID,
 		stateTTL:               stateTTL,
 		commandAckTTL:          commandAckTTL,
+		decisionOutputClaimTTL: decisionOutputClaimTTL,
 		commandWorkers:         commandWorkers,
 		logger:                 log.With(slog.String("component", "session_runtime")),
 		newEpoch:               newEpoch,

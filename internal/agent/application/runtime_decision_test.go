@@ -7,14 +7,24 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 	sessiontest "github.com/felinics/memoh/internal/testutil/sessionruntime"
 )
 
@@ -540,5 +550,279 @@ func TestStopTurnAbortsParkedDecision(t *testing.T) {
 	}
 	if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status != sessionruntime.RunStatusAborted {
 		t.Fatalf("run = %#v", snapshot.CurrentRunView)
+	}
+}
+
+type interruptReadDecisionBackend struct {
+	*sessionruntime.MemoryBackend
+	failRead atomic.Bool
+}
+
+func (b *interruptReadDecisionBackend) ReadDecisionOutput(ctx context.Context, ref sessionruntime.DecisionOutputRef, from int) (sessionruntime.DecisionOutputPage, error) {
+	if b.failRead.Load() {
+		return sessionruntime.DecisionOutputPage{}, errors.New("redis connection reset")
+	}
+	return b.MemoryBackend.ReadDecisionOutput(ctx, ref, from)
+}
+
+type staticDecisionStore struct {
+	target sessionruntime.DecisionTarget
+}
+
+func (s *staticDecisionStore) ResolveRuntimeDecision(context.Context, string, string) (sessionruntime.DecisionTarget, error) {
+	return s.target, nil
+}
+
+func (*staticDecisionStore) PendingRuntimeDecisions(context.Context, string) ([]sessionruntime.DecisionTarget, error) {
+	return nil, nil
+}
+
+func (*staticDecisionStore) ParkedRunMessages(context.Context, ledger.Run) ([]chatview.UIMessage, error) {
+	return nil, nil
+}
+
+func TestRouteRuntimeDecisionErrorMappingAndStatelessFullReplay(t *testing.T) {
+	backend := &interruptReadDecisionBackend{MemoryBackend: sessionruntime.NewMemoryBackend()}
+	manager, handle := newWaitingDecisionRuntime(t, backend)
+	snap, _ := manager.Snapshot(context.Background(), handle.BotID, handle.SessionID)
+	decisionID := "44444444-4444-4444-8444-444444444444"
+	manager.SetDecisionStore(&staticDecisionStore{target: sessionruntime.DecisionTarget{
+		Type: sessionruntime.CommandToolApprovalResponse, ID: decisionID,
+		BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID,
+		TurnID: snap.CurrentRunView.TurnID, Status: "pending", FencingToken: handle.FencingToken,
+	}})
+	manager.SetCommandHandler(func(ctx context.Context, cmd sessionruntime.Command) error {
+		_ = manager.PublishDecisionOutput(ctx, cmd, 1, json.RawMessage(`{"type":"text_delta","delta":"one"}`))
+		_ = manager.PublishDecisionOutput(ctx, cmd, 2, json.RawMessage(`{"type":"text_delta","delta":"two"}`))
+		return manager.PublishDecisionOutput(ctx, cmd, 3, nil)
+	})
+	svc := &Service{decisionRuntime: manager}
+	in := ToolApprovalResponseInput{ControlID: "ctrl-app-interrupt", BotID: handle.BotID, ThreadID: handle.SessionID, ApprovalID: decisionID, Decision: "approve"}
+
+	backend.failRead.Store(true)
+	if handled, err := svc.routeToolApprovalResponse(context.Background(), in, make(chan WSStreamEvent, 8)); !handled || !errors.Is(err, turn.ErrDecisionOutputInterrupted) {
+		t.Fatalf("interrupted = (%v, %v)", handled, err)
+	}
+	backend.failRead.Store(false)
+	replayCh := make(chan WSStreamEvent, 8)
+	if handled, err := svc.routeToolApprovalResponse(context.Background(), in, replayCh); !handled || err != nil || len(replayCh) != 3 {
+		t.Fatalf("stateless replay = (%v, %v), len=%d", handled, err, len(replayCh))
+	}
+	if a, b, c := string(<-replayCh), string(<-replayCh), string(<-replayCh); !strings.Contains(a, "decision_accepted") || !strings.Contains(b, `"one"`) || !strings.Contains(c, `"two"`) {
+		t.Fatalf("replayed events = (%s, %s, %s)", a, b, c)
+	}
+
+	eofMgr, eofHandle := newWaitingDecisionRuntime(t, sessionruntime.NewMemoryBackend())
+	eofSnap, _ := eofMgr.Snapshot(context.Background(), eofHandle.BotID, eofHandle.SessionID)
+	eofMgr.SetDecisionStore(&staticDecisionStore{target: sessionruntime.DecisionTarget{
+		Type: sessionruntime.CommandUserInputResponse, ID: decisionID, BotID: eofHandle.BotID,
+		SessionID: eofHandle.SessionID, RunID: eofHandle.RunID, TurnID: eofSnap.CurrentRunView.TurnID,
+		Status: "pending", FencingToken: eofHandle.FencingToken,
+	}})
+	eofMgr.SetCommandHandler(func(ctx context.Context, cmd sessionruntime.Command) error {
+		oversized, _ := json.Marshal(strings.Repeat("x", 9<<20))
+		_ = eofMgr.PublishDecisionOutput(ctx, cmd, 1, oversized)
+		return nil
+	})
+	eofCh := make(chan WSStreamEvent, 8)
+	if handled, err := (&Service{decisionRuntime: eofMgr}).routeUserInputResponse(context.Background(), UserInputResponseInput{
+		ControlID: "ctrl-eof", BotID: eofHandle.BotID, ThreadID: eofHandle.SessionID, UserInputID: decisionID, TextAnswer: "ok",
+	}, eofCh); !handled || err != nil {
+		t.Fatalf("permanent EOF = (%v, %v)", handled, err)
+	}
+	var sawError bool
+	for len(eofCh) > 0 {
+		var ev native.StreamEvent
+		if json.Unmarshal(<-eofCh, &ev) == nil && ev.Type == native.EventError {
+			sawError = true
+		}
+	}
+	if !sawError || implicitDecisionControlID(sessionruntime.CommandToolApprovalResponse, "dec-1", false) == implicitDecisionControlID(sessionruntime.CommandToolApprovalResponse, "dec-1", true) {
+		t.Fatal("expected EventError on permanent EOF and distinct streaming/non-streaming ControlIDs")
+	}
+}
+
+type nonUUIDDecisionQueries struct {
+	dbstore.Queries
+	mu        sync.Mutex
+	approvals []sqlc.ToolApprovalRequest
+	inputs    []sqlc.UserInputRequest
+}
+
+func (q *nonUUIDDecisionQueries) GetToolApprovalRequest(_ context.Context, id pgtype.UUID) (sqlc.ToolApprovalRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, r := range q.approvals {
+		if r.ID == id {
+			return r, nil
+		}
+	}
+	return sqlc.ToolApprovalRequest{}, pgx.ErrNoRows
+}
+
+func (q *nonUUIDDecisionQueries) ListToolApprovalsBySession(_ context.Context, arg sqlc.ListToolApprovalsBySessionParams) ([]sqlc.ToolApprovalRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var out []sqlc.ToolApprovalRequest
+	for _, r := range q.approvals {
+		if r.BotID == arg.BotID && r.SessionID == arg.SessionID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (q *nonUUIDDecisionQueries) GetUserInputRequest(_ context.Context, id pgtype.UUID) (sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, r := range q.inputs {
+		if r.ID == id {
+			return r, nil
+		}
+	}
+	return sqlc.UserInputRequest{}, pgx.ErrNoRows
+}
+
+func (q *nonUUIDDecisionQueries) ListUserInputsBySession(_ context.Context, arg sqlc.ListUserInputsBySessionParams) ([]sqlc.UserInputRequest, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var out []sqlc.UserInputRequest
+	for _, r := range q.inputs {
+		if r.BotID == arg.BotID && r.SessionID == arg.SessionID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func TestRouteRuntimeDecisionTargetResolutionAndPinning(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		explicit string
+		replyMsg string
+		promptID string
+	}{
+		{name: "short_id", explicit: "7", promptID: "ext-prompt-77"},
+		{name: "reply_matching_prompt", replyMsg: "ext-prompt-77", promptID: "ext-prompt-77"},
+		{name: "reply_empty_prompt_fallback", replyMsg: "feishu-card-1", promptID: ""},
+		{name: "bare_latest_session", promptID: "ext-prompt-77"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &interruptReadDecisionBackend{MemoryBackend: sessionruntime.NewMemoryBackend()}
+			manager, handle := newWaitingDecisionRuntime(t, backend)
+			snap, _ := manager.Snapshot(context.Background(), handle.BotID, handle.SessionID)
+			approvalUUID := "55555555-5555-4555-8555-555555555555"
+			q := &nonUUIDDecisionQueries{approvals: []sqlc.ToolApprovalRequest{{
+				ID: db.ParseUUIDOrEmpty(approvalUUID), BotID: db.ParseUUIDOrEmpty(handle.BotID),
+				SessionID: db.ParseUUIDOrEmpty(handle.SessionID), RunID: db.ParseUUIDOrEmpty(handle.RunID),
+				TurnID: db.ParseUUIDOrEmpty(snap.CurrentRunView.TurnID), ToolName: "bash", ShortID: 7,
+				Status: "pending", PromptExternalMessageID: tc.promptID,
+				RuntimeFencingToken: pgtype.Int8{Int64: handle.FencingToken, Valid: true},
+			}}}
+			svc := &Service{queries: q, decisionRuntime: manager}
+			manager.SetDecisionStore(svc)
+			manager.SetCommandHandler(func(ctx context.Context, cmd sessionruntime.Command) error {
+				q.mu.Lock()
+				q.approvals[0].Status = "approved"
+				q.approvals[0].ResponseControlID = pgtype.Text{String: cmd.ID, Valid: true}
+				q.approvals[0].ResponsePayloadHash = pgtype.Text{String: cmd.PayloadHash, Valid: true}
+				q.mu.Unlock()
+				_ = manager.PublishDecisionOutput(ctx, cmd, 1, json.RawMessage(`{"type":"text_delta","delta":"part-1"}`))
+				_ = manager.PublishDecisionOutput(ctx, cmd, 2, json.RawMessage(`{"type":"text_delta","delta":"part-2"}`))
+				return manager.PublishDecisionOutput(ctx, cmd, 3, nil)
+			})
+			backend.failRead.Store(true)
+			in := ToolApprovalResponseInput{
+				ControlID: "ctrl-init", DeferRelease: true, BotID: handle.BotID, ThreadID: handle.SessionID,
+				ExplicitID: tc.explicit, ReplyExternalMessageID: tc.replyMsg, Decision: "approve",
+			}
+			if handled, err := svc.routeToolApprovalResponse(context.Background(), in, make(chan WSStreamEvent, 8)); !handled || !errors.Is(err, turn.ErrDecisionOutputInterrupted) {
+				t.Fatalf("initial = (%v, %v)", handled, err)
+			}
+			backend.failRead.Store(false)
+			in.ControlID = "ctrl-retry-new"
+			out := make(chan WSStreamEvent, 8)
+			if handled, err := svc.routeToolApprovalResponse(context.Background(), in, out); !handled || err != nil || len(out) != 3 {
+				t.Fatalf("retry = (%v, %v), len=%d, want 3 full-replay events", handled, err, len(out))
+			}
+		})
+	}
+
+	// Cross-surface UserInput retry (/respond 9 -> Answers), ControlID pinning, reply guard, and stateless plain-text recovery.
+	backend := &interruptReadDecisionBackend{MemoryBackend: sessionruntime.NewMemoryBackend()}
+	manager, handle := newWaitingDecisionRuntime(t, backend)
+	snap, _ := manager.Snapshot(context.Background(), handle.BotID, handle.SessionID)
+	u1UUID, u2UUID := "66666666-6666-4666-8666-666666666666", "66666666-6666-4666-8666-777777777777"
+	uiJSON, _ := json.Marshal(userinput.UIPayload{
+		Version: 2,
+		Questions: []userinput.UIQuestion{{
+			ID: "q1", Kind: userinput.QuestionKindSingleSelect, Text: "Pick one",
+			Options: []userinput.UIOption{{ID: "q1.o1", Label: "Alpha"}, {ID: "q1.o2", Label: "Beta"}},
+		}},
+	})
+	interactionJSON, _ := json.Marshal(userinput.TextInteractionState{
+		Completed: true, Answers: []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+	})
+	q := &nonUUIDDecisionQueries{inputs: []sqlc.UserInputRequest{{
+		ID: db.ParseUUIDOrEmpty(u1UUID), BotID: db.ParseUUIDOrEmpty(handle.BotID),
+		SessionID: db.ParseUUIDOrEmpty(handle.SessionID), RunID: db.ParseUUIDOrEmpty(handle.RunID),
+		TurnID: db.ParseUUIDOrEmpty(snap.CurrentRunView.TurnID), ToolName: "ask_user", ShortID: 9,
+		Status: "pending", UiPayloadJson: uiJSON, PromptExternalMessageID: "ext-input-9",
+		RuntimeFencingToken: pgtype.Int8{Int64: handle.FencingToken, Valid: true},
+	}}}
+	svc := &Service{queries: q, userInput: &fakeUserInputService{}, decisionRuntime: manager}
+	manager.SetDecisionStore(svc)
+	manager.SetCommandHandler(func(ctx context.Context, cmd sessionruntime.Command) error {
+		q.mu.Lock()
+		q.inputs[0].Status, q.inputs[0].InteractionJson = userinput.StatusSubmitted, interactionJSON
+		q.inputs[0].ResponseControlID = pgtype.Text{String: cmd.ID, Valid: true}
+		q.inputs[0].ResponsePayloadHash = pgtype.Text{String: cmd.PayloadHash, Valid: true}
+		q.mu.Unlock()
+		_ = manager.PublishDecisionOutput(ctx, cmd, 1, json.RawMessage(`{"type":"text_delta","delta":"ans-1"}`))
+		return manager.PublishDecisionOutput(ctx, cmd, 2, nil)
+	})
+	backend.failRead.Store(true)
+	if _, err := svc.routeUserInputResponse(context.Background(), UserInputResponseInput{
+		ControlID: "ctrl-u1", DeferRelease: true, BotID: handle.BotID, ThreadID: handle.SessionID,
+		ExplicitID: "9", TextAnswer: "Alpha", UILanguage: "en",
+	}, make(chan WSStreamEvent, 8)); !errors.Is(err, turn.ErrDecisionOutputInterrupted) {
+		t.Fatal("expected initial /respond 9 interruption")
+	}
+	backend.failRead.Store(false)
+	outU := make(chan WSStreamEvent, 8)
+	if handled, err := svc.routeUserInputResponse(context.Background(), UserInputResponseInput{
+		ControlID: "ctrl-u2", DeferRelease: true, BotID: handle.BotID, ThreadID: handle.SessionID,
+		ExplicitID: "9", Answers: []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+	}, outU); !handled || err != nil || len(outU) != 2 {
+		t.Fatalf("cross-surface retry = (%v, %v), len=%d", handled, err, len(outU))
+	}
+	if _, _, okWrong := svc.resolveRuntimeUserInputID(context.Background(), UserInputResponseInput{
+		ControlID: "ctrl-wrong", BotID: handle.BotID, ThreadID: handle.SessionID, ReplyExternalMessageID: "other-msg",
+	}); okWrong {
+		t.Fatal("reply to unrelated message must not resolve when PromptExternalMessageID is set")
+	}
+
+	// Stateless plain-text recovery matches submitted option ("1"/"Alpha") only while unreleased.
+	if res, err := svc.AdvancePlainTextUserInput(context.Background(), userinput.AdvanceTextInput{BotID: handle.BotID, SessionID: handle.SessionID, Text: "Beta"}); err != nil || res.Handled {
+		t.Fatalf("different answer should not match: %+v %v", res, err)
+	}
+	if res, err := svc.AdvancePlainTextUserInput(context.Background(), userinput.AdvanceTextInput{BotID: handle.BotID, SessionID: handle.SessionID, Text: "1"}); err != nil || !res.Handled || res.Request.ID != u1UUID {
+		t.Fatalf("matching unreleased plain-text recovery failed: %+v %v", res, err)
+	}
+
+	q.inputs = append(q.inputs, sqlc.UserInputRequest{
+		ID: db.ParseUUIDOrEmpty(u2UUID), BotID: db.ParseUUIDOrEmpty(handle.BotID),
+		SessionID: db.ParseUUIDOrEmpty(handle.SessionID), Status: userinput.StatusPending, ShortID: 10,
+	})
+	if gotID, _, ok := svc.resolveRuntimeUserInputID(context.Background(), UserInputResponseInput{
+		ControlID: "ctrl-u1", BotID: handle.BotID, ThreadID: handle.SessionID,
+	}); !ok || gotID != u1UUID {
+		t.Fatalf("ControlID pinning resolved (%q, %v), want (%q, true)", gotID, ok, u1UUID)
+	}
+
+	q.inputs = q.inputs[:1]
+	_ = backend.ReleaseDecisionOutput(context.Background(), sessionruntime.DecisionOutputRef{BotID: handle.BotID, CommandID: q.inputs[0].ResponseControlID.String}, "")
+	if res, err := svc.AdvancePlainTextUserInput(context.Background(), userinput.AdvanceTextInput{BotID: handle.BotID, SessionID: handle.SessionID, Text: "Alpha"}); err != nil || res.Handled {
+		t.Fatalf("released output must not intercept subsequent chat: %+v %v", res, err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,10 +21,12 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 type continuationLifecycleResult struct {
@@ -152,93 +155,224 @@ func pgText(value pgtype.Text) string {
 	return value.String
 }
 
+func (s *Service) hasPendingDecisionOutputForRow(ctx context.Context, commandType, botID, decisionID, responseControlID string) bool {
+	if s == nil || s.decisionRuntime == nil || strings.TrimSpace(decisionID) == "" {
+		return false
+	}
+	ctrl := firstNonEmpty(strings.TrimSpace(responseControlID), implicitDecisionControlID(commandType, decisionID, true))
+	return s.decisionRuntime.HasPendingDecisionOutput(ctx, commandType, botID, decisionID, ctrl)
+}
+
+func isPendingUserInputRow(row dbsqlc.UserInputRequest, now time.Time) bool {
+	return strings.TrimSpace(row.Status) == userinput.StatusPending && (!row.ExpiresAt.Valid || row.ExpiresAt.Time.After(now))
+}
+
+type runtimeDecisionCandidate struct {
+	id, promptMessageID, controlID string
+	shortID                        int
+	pending, decided               bool
+}
+
+func matchesDecisionResponseControlID(commandType, botID, decisionID, stored, input string) bool {
+	stored, input = strings.TrimSpace(stored), strings.TrimSpace(input)
+	return stored != "" && input != "" && (stored == input || stored == sessionruntime.DecisionControlCommandID(commandType, botID, decisionID, input))
+}
+
+func (s *Service) selectRuntimeDecisionIndex(ctx context.Context, commandType, botID, controlID, rawID, replyID string, items []runtimeDecisionCandidate) (int, bool) {
+	controlID, rawID, replyID = strings.TrimSpace(controlID), strings.TrimSpace(rawID), strings.TrimSpace(replyID)
+	find := func(pred func(runtimeDecisionCandidate) bool) (int, bool) {
+		for i := len(items) - 1; i >= 0; i-- {
+			if pred(items[i]) {
+				return i, true
+			}
+		}
+		return -1, false
+	}
+	pickDecided := func(match func(runtimeDecisionCandidate) bool) (int, bool) {
+		fallback := -1
+		for i := len(items) - 1; i >= 0; i-- {
+			if match(items[i]) && items[i].decided {
+				if s.hasPendingDecisionOutputForRow(ctx, commandType, botID, items[i].id, items[i].controlID) {
+					return i, true
+				}
+				if fallback < 0 {
+					fallback = i
+				}
+			}
+		}
+		return fallback, fallback >= 0
+	}
+	matchCtrl := func(c runtimeDecisionCandidate) bool {
+		return controlID != "" && matchesDecisionResponseControlID(commandType, botID, c.id, c.controlID, controlID)
+	}
+	if rawID == "" {
+		if i, ok := find(matchCtrl); ok {
+			return i, true
+		}
+	} else {
+		shortID, err := strconv.Atoi(rawID)
+		if err != nil {
+			return -1, false
+		}
+		if i, ok := find(func(c runtimeDecisionCandidate) bool { return c.shortID == shortID && (matchCtrl(c) || c.pending) }); ok {
+			return i, true
+		}
+		return pickDecided(func(c runtimeDecisionCandidate) bool { return c.shortID == shortID })
+	}
+	if replyID != "" {
+		if i, ok := find(func(c runtimeDecisionCandidate) bool { return c.promptMessageID == replyID && c.pending }); ok {
+			return i, true
+		}
+		if i, ok := pickDecided(func(c runtimeDecisionCandidate) bool { return c.promptMessageID == replyID }); ok {
+			return i, true
+		}
+	}
+	if i, ok := find(func(c runtimeDecisionCandidate) bool { return c.pending }); ok {
+		return i, true
+	}
+	if n := len(items); n > 0 && (replyID == "" || items[n-1].promptMessageID == "") && items[n-1].decided &&
+		s.hasPendingDecisionOutputForRow(ctx, commandType, botID, items[n-1].id, items[n-1].controlID) {
+		return n - 1, true
+	}
+	return -1, false
+}
+
+func (s *Service) resolveRuntimeToolApprovalID(ctx context.Context, input ToolApprovalResponseInput) (string, bool) {
+	rawID := strings.TrimSpace(firstNonEmpty(input.ExplicitID, input.ApprovalID))
+	if _, err := db.ParseUUID(rawID); rawID != "" && err == nil {
+		return rawID, true
+	}
+	botID, err1 := db.ParseUUID(input.BotID)
+	sessionID, err2 := db.ParseUUID(input.ThreadID)
+	if s.queries == nil || err1 != nil || err2 != nil {
+		if s.toolApproval != nil {
+			t, err := s.toolApproval.ResolveTarget(ctx, toolapproval.ResolveInput{BotID: input.BotID, SessionID: input.ThreadID, ExplicitID: rawID, ReplyExternalMessageID: input.ReplyExternalMessageID})
+			return strings.TrimSpace(t.ID), err == nil && strings.TrimSpace(t.ID) != ""
+		}
+		return "", false
+	}
+	rows, err := s.queries.ListToolApprovalsBySession(ctx, dbsqlc.ListToolApprovalsBySessionParams{BotID: botID, SessionID: sessionID})
+	items := make([]runtimeDecisionCandidate, len(rows))
+	for i, r := range rows {
+		st := strings.ToLower(strings.TrimSpace(r.Status))
+		items[i] = runtimeDecisionCandidate{id: decisionUUIDString(r.ID), shortID: int(r.ShortID), promptMessageID: strings.TrimSpace(r.PromptExternalMessageID), controlID: pgText(r.ResponseControlID), pending: st == "pending", decided: st == "approved" || st == "rejected"}
+	}
+	if idx, ok := s.selectRuntimeDecisionIndex(ctx, sessionruntime.CommandToolApprovalResponse, input.BotID, input.ControlID, rawID, input.ReplyExternalMessageID, items); err == nil && ok {
+		return items[idx].id, true
+	}
+	return "", false
+}
+
+func (s *Service) resolveRuntimeUserInputID(ctx context.Context, input UserInputResponseInput) (string, *userinput.UIPayload, bool) {
+	rawID := strings.TrimSpace(firstNonEmpty(input.ExplicitID, input.UserInputID))
+	if parsed, err := db.ParseUUID(rawID); rawID != "" && err == nil {
+		if len(input.Answers) == 0 && strings.TrimSpace(input.TextAnswer) != "" && s.queries != nil {
+			if row, getErr := s.queries.GetUserInputRequest(ctx, parsed); getErr == nil {
+				p := userinput.RequestFromSQLRow(row).UIPayload
+				return rawID, &p, true
+			}
+		}
+		return rawID, nil, true
+	}
+	rows, ok := s.listSessionUserInputs(ctx, input.BotID, input.ThreadID)
+	if !ok {
+		if s.queries == nil && s.userInput != nil {
+			t, err := s.userInput.ResolveTarget(ctx, userinput.ResolveInput{BotID: input.BotID, SessionID: input.ThreadID, ExplicitID: rawID, ReplyExternalMessageID: input.ReplyExternalMessageID})
+			return strings.TrimSpace(t.ID), &t.UIPayload, err == nil && strings.TrimSpace(t.ID) != ""
+		}
+		return "", nil, false
+	}
+	now, items := time.Now(), make([]runtimeDecisionCandidate, len(rows))
+	for i, r := range rows {
+		st := strings.TrimSpace(r.Status)
+		items[i] = runtimeDecisionCandidate{id: decisionUUIDString(r.ID), shortID: int(r.ShortID), promptMessageID: strings.TrimSpace(r.PromptExternalMessageID), controlID: pgText(r.ResponseControlID), pending: isPendingUserInputRow(r, now), decided: st == userinput.StatusSubmitted || st == userinput.StatusCanceled}
+	}
+	if idx, found := s.selectRuntimeDecisionIndex(ctx, sessionruntime.CommandUserInputResponse, input.BotID, input.ControlID, rawID, input.ReplyExternalMessageID, items); found {
+		p := userinput.RequestFromSQLRow(rows[idx]).UIPayload
+		return items[idx].id, &p, true
+	}
+	return "", nil, false
+}
+
 func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) (bool, error) {
 	if s == nil || s.decisionRuntime == nil {
 		return false, nil
 	}
-	if input.ControlID == "" {
-		input.ControlID = implicitDecisionControlID(sessionruntime.CommandToolApprovalResponse, firstNonEmpty(input.ExplicitID, input.ApprovalID))
+	if id, ok := s.resolveRuntimeToolApprovalID(ctx, input); ok && id != "" {
+		p := input
+		p.ControlID, p.ApprovalID, p.ExplicitID, p.ReplyExternalMessageID = "", id, id, ""
+		return s.marshalAndStreamDecision(ctx, sessionruntime.DecisionResponse{ControlID: strings.TrimSpace(input.ControlID), DeferRelease: input.DeferRelease, ReleaseOutput: input.ReleaseOutput, Type: sessionruntime.CommandToolApprovalResponse, DecisionID: id, BotID: input.BotID, SessionID: input.ThreadID}, p, eventCh, toolapproval.ErrAlreadyDecided)
 	}
-	payload, err := json.Marshal(input)
-	if err != nil {
-		return true, err
-	}
-	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, sessionruntime.DecisionResponse{
-		ControlID: input.ControlID, Type: sessionruntime.CommandToolApprovalResponse,
-		DecisionID: firstNonEmpty(input.ExplicitID, input.ApprovalID),
-		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
-	}, eventCh)
-	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		if result.Applied && eventCh != nil {
-			if s.logger != nil {
-				s.logger.WarnContext(ctx, "accepted decision output interrupted", slog.Any("error", err))
-			}
-			raw, _ := json.Marshal(agentFailureStreamEvent(err))
-			select {
-			case eventCh <- raw:
-				return true, nil
-			case <-ctx.Done():
-				return true, ctx.Err()
-			}
-		}
-		return true, err
-	}
-	if !result.Handled {
-		return false, nil
-	}
-	if !result.Applied {
-		return true, toolapproval.ErrAlreadyDecided
-	}
-	return true, nil
+	return false, nil
 }
 
 func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) (bool, error) {
 	if s == nil || s.decisionRuntime == nil {
 		return false, nil
 	}
-	if input.ControlID == "" {
-		input.ControlID = implicitDecisionControlID(sessionruntime.CommandUserInputResponse, firstNonEmpty(input.ExplicitID, input.UserInputID))
-	}
-	payload, err := json.Marshal(input)
-	if err != nil {
-		return true, err
-	}
-	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, sessionruntime.DecisionResponse{
-		ControlID: input.ControlID, Type: sessionruntime.CommandUserInputResponse,
-		DecisionID: firstNonEmpty(input.ExplicitID, input.UserInputID),
-		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
-	}, eventCh)
-	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
+	id, uiPayload, ok := s.resolveRuntimeUserInputID(ctx, input)
+	if !ok || id == "" {
 		return false, nil
 	}
-	if err != nil {
-		if result.Applied && eventCh != nil {
-			if s.logger != nil {
-				s.logger.WarnContext(ctx, "accepted decision output interrupted", slog.Any("error", err))
-			}
-			raw, _ := json.Marshal(agentFailureStreamEvent(err))
-			select {
-			case eventCh <- raw:
-				return true, nil
-			case <-ctx.Done():
-				return true, ctx.Err()
-			}
+	p := input
+	p.ControlID, p.UserInputID, p.ExplicitID, p.ReplyExternalMessageID = "", id, id, ""
+	if !p.Canceled && len(p.Answers) == 0 && strings.TrimSpace(p.TextAnswer) != "" && uiPayload != nil {
+		if answers, err := userInputAnswersFromText(uiPayload.Localized(i18n.New(p.UILanguage)), p.TextAnswer); err == nil && len(answers) > 0 {
+			p.Answers = answers
 		}
-		return true, err
 	}
-	if !result.Handled {
-		return false, nil
+	if len(p.Answers) > 0 {
+		p.TextAnswer, p.UILanguage = "", ""
 	}
-	if !result.Applied {
-		return true, userinput.ErrAlreadyDecided
-	}
-	return true, nil
+	return s.marshalAndStreamDecision(ctx, sessionruntime.DecisionResponse{ControlID: strings.TrimSpace(input.ControlID), DeferRelease: input.DeferRelease, ReleaseOutput: input.ReleaseOutput, Type: sessionruntime.CommandUserInputResponse, DecisionID: id, BotID: input.BotID, SessionID: input.ThreadID}, p, eventCh, userinput.ErrAlreadyDecided)
 }
 
-func implicitDecisionControlID(commandType, decisionID string) string {
+func (s *Service) marshalAndStreamDecision(ctx context.Context, resp sessionruntime.DecisionResponse, payloadInput any, eventCh chan<- WSStreamEvent, alreadyDecidedErr error) (bool, error) {
+	payload, err := json.Marshal(payloadInput)
+	if err != nil {
+		return true, err
+	}
+	resp.Payload = payload
+	if resp.ControlID == "" {
+		resp.ControlID = implicitDecisionControlID(resp.Type, resp.DecisionID, eventCh != nil)
+	}
+	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, resp, eventCh)
+	switch {
+	case errors.Is(err, sessionruntime.ErrDecisionNotFound):
+		return false, nil
+	case errors.Is(err, sessionruntime.ErrDecisionOutputBusy):
+		return true, fmt.Errorf("%w: %w", turn.ErrDecisionOutputBusy, err)
+	case errors.Is(err, sessionruntime.ErrDecisionOutputInterrupted):
+		if s.logger != nil {
+			s.logger.WarnContext(ctx, "accepted decision output stream interrupted", slog.Any("error", err))
+		}
+		return true, fmt.Errorf("%w: %w", turn.ErrDecisionOutputInterrupted, err)
+	case err != nil && result.Applied && eventCh != nil:
+		if s.logger != nil {
+			s.logger.WarnContext(ctx, "accepted decision output interrupted", slog.Any("error", err))
+		}
+		raw, _ := json.Marshal(agentFailureStreamEvent(err))
+		select {
+		case eventCh <- raw:
+			return true, nil
+		case <-ctx.Done():
+			return true, ctx.Err()
+		}
+	case err != nil:
+		return true, err
+	case !result.Handled:
+		return false, nil
+	case !result.Applied:
+		return true, alreadyDecidedErr
+	default:
+		return true, nil
+	}
+}
+
+func implicitDecisionControlID(commandType, decisionID string, streamOutput bool) string {
+	if streamOutput {
+		return "implicit-stream:" + commandType + ":" + decisionID
+	}
 	return "implicit:" + commandType + ":" + decisionID
 }
 
@@ -269,7 +403,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		input.ReplyExternalMessageID = ""
 		input.SuppressActivePromptAttach = true
 		ctx = decision.WithResponseIdentity(ctx, decision.ResponseIdentity{
-			ControlID: input.ControlID, PayloadHash: command.PayloadHash,
+			ControlID: firstNonEmpty(input.ControlID, command.ID), PayloadHash: command.PayloadHash,
 		})
 
 		committed, err := s.CommitUserInputResponse(ctx, input)
@@ -318,7 +452,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		input.ReplyExternalMessageID = ""
 		input.SuppressActivePromptAttach = true
 		ctx = decision.WithResponseIdentity(ctx, decision.ResponseIdentity{
-			ControlID: input.ControlID, PayloadHash: command.PayloadHash,
+			ControlID: firstNonEmpty(input.ControlID, command.ID), PayloadHash: command.PayloadHash,
 		})
 
 		committed, err := s.CommitToolApprovalResponse(ctx, input)

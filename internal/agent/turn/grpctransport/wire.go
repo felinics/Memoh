@@ -22,6 +22,8 @@ var turnReasons = rpc.Reasons{
 	// queued message.
 	{Err: turn.ErrTurnDeferred, Reason: "turn.deferred", Code: codes.ResourceExhausted, Message: "turn deferred"},
 	{Err: turn.ErrTeamNotServed, Reason: "turn.team_not_served", Code: codes.PermissionDenied, Message: "team is not served"},
+	{Err: turn.ErrDecisionOutputBusy, Reason: "turn.decision_output_busy", Code: codes.Unavailable, Message: "decision output stream busy"},
+	{Err: turn.ErrDecisionOutputInterrupted, Reason: "turn.decision_output_interrupted", Code: codes.Unavailable, Message: "decision output stream interrupted"},
 }
 
 // The authenticated server-channel RPC predates the internal Thread
