@@ -1,11 +1,12 @@
-import { classify, typeLabels, validate } from './contribution-policy.mjs';
+import { classify, sizeLabel, typeLabels, validate } from './contribution-policy.mjs';
 
 const marker = '<!-- memoh-contribution-format:v1 -->';
 
-// Reserve at least 20% of the 5,000/hr installation pool so non-blocking governance never starves code CI.
+// Reserve 20% of the token's hourly core REST pool (up to 1,000 requests) so non-blocking governance never starves code CI.
 export const MIN_REMAINING_QUOTA = 1000;
-export const MAX_API_CALLS = 15;
+export const MAX_API_CALLS = 25;
 export const MAX_FILE_PAGES = 5;
+export const MAX_COMMENT_PAGES = 5;
 
 export function createBudgetedGithub(github, { maxCalls = MAX_API_CALLS } = {}) {
   let calls = 0;
@@ -39,13 +40,19 @@ export function createBudgetedGithub(github, { maxCalls = MAX_API_CALLS } = {}) 
   };
 }
 
-export async function hasSufficientQuota(github, core, minRemaining = MIN_REMAINING_QUOTA) {
+export async function hasSufficientQuota(github, core, { manual = false } = {}) {
   if (typeof github.rest?.rateLimit?.get !== 'function') return true;
   const { data } = await github.rest.rateLimit.get();
-  const remaining = data?.resources?.core?.remaining ?? data?.rate?.remaining;
-  if (typeof remaining === 'number' && remaining < minRemaining) {
+  const coreRate = data?.resources?.core ?? data?.rate;
+  const remaining = coreRate?.remaining;
+  const limit = coreRate?.limit;
+  const autoFloor = typeof limit === 'number' && limit > 0
+    ? Math.min(MIN_REMAINING_QUOTA, Math.floor(limit * 0.2))
+    : MIN_REMAINING_QUOTA;
+  const floor = manual ? Math.min(MAX_API_CALLS, autoFloor) : autoFloor;
+  if (typeof remaining === 'number' && remaining < floor) {
     const warn = core.warning ?? core.info;
-    warn?.call(core, `Skipping contribution governance: GitHub API rate limit remaining (${remaining}) is below safety floor (${minRemaining}).`);
+    warn?.call(core, `Skipping contribution governance: GitHub API rate limit remaining (${remaining}) is below safety floor (${floor}).`);
     return false;
   }
   return true;
@@ -72,9 +79,27 @@ async function listPRFilesBounded(client, repo, number, expectedCount) {
   return files;
 }
 
+const isMarkerComment = comment => comment.user?.login === 'github-actions[bot]' && comment.body?.startsWith(marker);
+
+async function findBotCommentBounded(client, repo, issue) {
+  const { data: firstPage } = await client.rest.issues.listComments({ ...repo, issue_number: issue.number, per_page: 100, page: 1 });
+  const inFirst = firstPage.find(isMarkerComment);
+  if (inFirst || firstPage.length < 100) return inFirst;
+
+  const totalComments = typeof issue.comments === 'number' ? issue.comments : 0;
+  const estimatedLastPage = totalComments >= 100 ? Math.ceil((totalComments + 1) / 100) : MAX_COMMENT_PAGES;
+  const remainingBudget = MAX_COMMENT_PAGES - 1;
+  const startPage = Math.max(2, estimatedLastPage - remainingBudget + 1);
+  for (let page = startPage; page < startPage + remainingBudget; page++) {
+    const { data: batch } = await client.rest.issues.listComments({ ...repo, issue_number: issue.number, per_page: 100, page });
+    const match = batch.find(isMarkerComment);
+    if (match || batch.length < 100) return match;
+  }
+  return undefined;
+}
+
 async function publishComment(client, repo, issue, errors) {
-  const { data: comments } = await client.rest.issues.listComments({ ...repo, issue_number: issue.number, per_page: 100, page: 1 });
-  const previous = comments.find(comment => comment.user?.login === 'github-actions[bot]' && comment.body?.startsWith(marker));
+  const previous = await findBotCommentBounded(client, repo, issue);
   if (!errors.length && !previous) return;
   const body = errors.length
     ? `${marker}\n@${issue.user.login} Please complete the following information using the template:\n\n${errors.map(error => `- ${error}`).join('\n')}\n\nEditing the description triggers another check; format feedback does not block or cancel code CI.`
@@ -96,7 +121,11 @@ export async function inspectPR({ github, context, core }, number) {
   let classificationError;
   const maxFiles = MAX_FILE_PAGES * 100;
   const skippedLargeDiff = pr.changed_files > maxFiles;
-  if (!skippedLargeDiff) {
+  let fallbackSize;
+  if (skippedLargeDiff) {
+    fallbackSize = sizeLabel(pr.additions, pr.deletions);
+    wanted.push(fallbackSize);
+  } else {
     try {
       const files = await listPRFilesBounded(client, repo, number, pr.changed_files);
       if (files.length !== pr.changed_files) throw new Error(`Incomplete PR file list: ${files.length}/${pr.changed_files}`);
@@ -107,14 +136,21 @@ export async function inspectPR({ github, context, core }, number) {
     }
   }
 
-  await syncLabels(client, repo, pr, wanted, name => typeLabels.includes(name) || name === 'needs:format'
-    || Boolean(classification && (name.startsWith('size:') || name.startsWith('change:'))));
+  await syncLabels(
+    client,
+    repo,
+    pr,
+    wanted,
+    name => typeLabels.includes(name) || name === 'needs:format'
+      || Boolean((classification || skippedLargeDiff) && name.startsWith('size:'))
+      || Boolean(classification && name.startsWith('change:')),
+  );
   await publishComment(client, repo, pr, errors);
 
   const scopeNote = classification
     ? `Filtered additions/deletions: ${classification.additions}/${classification.deletions}; Excluded ${classification.ignored} files; ${classification.size}; ${classification.changes.join(', ')}`
     : skippedLargeDiff
-      ? `Skipped file classification: PR changes ${pr.changed_files} files (cap ${maxFiles}); existing size/change labels were preserved.`
+      ? `Skipped per-file classification: PR changes ${pr.changed_files} files (cap ${maxFiles}); applied ${fallbackSize} from PR totals and preserved existing change labels.`
       : 'Classification failed; existing size/change labels were preserved.';
   await core.summary
     .addHeading(`PR #${number}`)
@@ -126,8 +162,9 @@ export async function inspectPR({ github, context, core }, number) {
 
 export async function run({ github, context, core }) {
   const payload = context.payload ?? {};
+  const isManual = context.eventName === 'workflow_dispatch';
   let dispatchPRNumber;
-  if (context.eventName === 'workflow_dispatch') {
+  if (isManual) {
     const raw = String(payload.inputs?.pr_number ?? '').trim();
     const parsed = Number(raw);
     if (!/^\d+$/.test(raw) || !Number.isSafeInteger(parsed) || parsed <= 0) {
@@ -138,7 +175,7 @@ export async function run({ github, context, core }) {
     throw new Error(`Unsupported event for contribution governance: ${context.eventName}`);
   }
 
-  if (!await hasSufficientQuota(github, core)) return;
+  if (!await hasSufficientQuota(github, core, { manual: isManual })) return;
   const client = createBudgetedGithub(github);
   const args = { github: client, context, core };
 
@@ -163,8 +200,8 @@ export async function run({ github, context, core }) {
 // Reconcile open PRs created by GITHUB_TOKEN right after an internal automation workflow finishes, without scheduled polling.
 export async function governBotPRs({ github, context, core }) {
   if (!await hasSufficientQuota(github, core)) return;
-  const client = createBudgetedGithub(github);
-  const { data: openPRs } = await client.rest.pulls.list({
+  const listClient = createBudgetedGithub(github);
+  const { data: openPRs } = await listClient.rest.pulls.list({
     ...context.repo,
     state: 'open',
     sort: 'updated',
@@ -174,7 +211,11 @@ export async function governBotPRs({ github, context, core }) {
   });
   const botPRs = openPRs.filter(item => item.user?.login === 'github-actions[bot]').slice(0, 2);
   for (const item of botPRs) {
-    await inspectPR({ github: client, context, core }, item.number);
+    try {
+      await inspectPR({ github: createBudgetedGithub(github), context, core }, item.number);
+    } catch (error) {
+      core.setFailed?.(`PR #${item.number}: ${error.message}`);
+    }
   }
 }
 
