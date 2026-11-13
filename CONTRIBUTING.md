@@ -154,7 +154,7 @@ git status --short
 
 ## Issues and Pull Requests
 
-Contributors can submit an issue or PR before format checks run. GitHub Actions validates the description, synchronizes labels, and requests corrections. PR lint, test, and build jobs run independently of description format. A separate controller approves pending first-time contributor workflow runs automatically. Workflow approval does not approve a code review, merge, or release.
+Contributors can submit an issue or PR before format checks run. GitHub Actions validates the description, synchronizes labels, and requests corrections. PR lint, test, and build jobs run independently of description format. External fork PR workflow approval follows repository GitHub Actions settings; workflow approval does not approve a code review, merge, or release.
 
 ### Label Configuration
 
@@ -237,29 +237,25 @@ Human QA uses a single `- [ ] Human QA passed` status checkbox without an additi
 
 ### Workflow Behavior
 
-`Contribution governance` uses trusted default-branch scripts. PR events use `pull_request_target`; issues use `issues`. The controller does not check out or execute PR code. It reads the current API description, validates it, synchronizes the type label, and calculates PR size/scope labels.
+`Contribution governance` uses trusted default-branch scripts with sparse `.github` checkout. PR events use `pull_request_target`; issues use `issues`. It runs only on item creation, description edits, reopenings, PR commits, and explicit single-PR manual dispatch — never on scheduled polling, label mutations, or `workflow_run` fan-out. The workflow does not check out or execute PR code. It reads the current API description, validates it, synchronizes the type label, and calculates PR size/scope labels within bounded pagination.
 
 An invalid description receives `needs:format` and one identifiable bot comment mentioning the author and listing corrections. Editing the description triggers another check. Once corrected, the label is removed and the existing comment is updated instead of posting another one. An initially valid submission does not receive an extra success comment.
 
-#### Independent Format Feedback and Workflow Approval
+#### Independent Format Feedback and Quota Guardrails
 
-Format feedback appears through `needs:format` and the existing bot comment. The `PR Format` status always reports success, with a description distinguishing passed validation from needed corrections, so existing required-status configurations do not block code checks or merging on description format. This status only indicates that feedback was processed, not that code checks passed. The controller loads trusted default-branch rules without executing contributor code.
+Format feedback appears solely through `needs:format` and the existing bot comment; no separate `PR Format` commit status is created, so description format never blocks code checks or merging. The workflow loads trusted default-branch rules without executing contributor code.
 
-Code CI does not depend on format jobs or wait for the controller. Description changes do not cause the controller to cancel or rerun CI; contributors or maintainers handle test failures and manual cancellations. Existing path filters, read-only tokens, GitHub-hosted runners, and publishing permission boundaries remain unchanged. Docker PR builds still use `publish: false` and receive no publishing secrets.
+Code CI does not depend on format jobs or wait for governance. Description changes do not cancel or rerun CI; contributors or maintainers handle test failures and manual cancellations. Existing path filters, read-only tokens, GitHub-hosted runners, and publishing permission boundaries remain unchanged. Docker PR builds still use `publish: false` and receive no publishing secrets.
 
-Pending external-contributor workflows are still approved automatically. Approval checks the repository, PR, current head, and existing workflow allowlist independently of description format. Release, deployment, and documentation maintenance workflows are excluded. Workflow-run events and scheduled scans every five minutes reconcile approvals; authorization failures are reported explicitly.
+External contributor workflow runs follow repository GitHub Actions approval settings and are not auto-approved by a bot controller. Older PR branches may still reference `contribution-format.yml`, so its compatibility entry point remains as a no-op without description validation or status polling.
 
-Older PR branches may still reference `contribution-format.yml`, so its compatibility entry point remains as a no-op without description validation or status polling. A legacy `PR Format cancellation / <run id>` status is retired only on the current head when its latest record was created by `github-actions[bot]` and reports failure. Real test statuses and other accounts' statuses are preserved; historical jobs are not rerun automatically. Previously skipped or cancelled CI requires a manual rerun or a new commit.
-
-Scheduled scans skip older PRs that predate governance and have never participated, avoiding bulk notifications. PRs created with `GITHUB_TOKEN` may not trigger ordinary PR CI; this controller does not create replacement runs. Use a GitHub App that produces normal PR events or a subsequent commit.
-
-API operations retain bounded retries. An incomplete file list preserves existing size/scope labels and reports a classification error rather than a description error. Format feedback does not establish code trust or replace code review, merge authorization, or human QA.
+To protect shared GitHub Actions installation API quota for code CI, automatic `Contribution governance` runs skip execution cleanly when remaining core REST quota drops below 20% of the token's hourly limit (capped at `1,000` requests; manual `workflow_dispatch` runs require only `50` remaining requests), and enforce a hard per-PR API call cap (`50` counted requests) with bounded pagination up to GitHub's `3,000`-file PR diff ceiling (`30` file pages / `5` comment pages max). PRs exceeding `3,000` changed files or receiving unexpectedly truncated file responses preserve existing size/scope labels rather than overwriting them with unfiltered line totals. Format feedback does not establish code trust or replace code review, merge authorization, or human QA.
 
 #### Maintenance
 
-Maintainers can supply a PR number to `Contribution governance` through workflow_dispatch to reconcile it. An empty input scans eligible open PRs. `Sync labels` also supports manual dispatch and writes only from main in the primary repository.
+Maintainers can supply a specific `pr_number` to `Contribution governance` through `workflow_dispatch` to inspect that PR on demand. Internal documentation PRs created with `GITHUB_TOKEN` (such as `Update AGENTS.md`) run a lightweight follow-up job in their own workflow to apply labels immediately without repository-wide cron scans. `Sync labels` also supports manual dispatch and writes only from main in the primary repository.
 
-The controller adopts the new behavior only after it lands on the default branch. PR tests can verify the parser, independent CI configuration, and mocked API behavior, but cannot prove that the default-branch controller has updated. After merging, verify automatic approval, description edits, and legacy status cleanup with a real external contributor fork PR. Workflow YAML still requires normal review.
+The workflow adopts changes only after they land on the default branch. PR tests verify the parser, independent CI configuration, workflow trigger/permission invariants, quota circuit breaker, and mocked API behavior, while post-merge checks confirm live event handling on the default branch. Workflow YAML still requires normal review.
 
 ### Migration and Verification
 
@@ -281,6 +277,6 @@ node --test .github/scripts/*.test.mjs
 # Use actionlint to validate workflow configuration.
 ```
 
-Tests cover issue forms, author/type selections, nested section headings, QA declarations and notes, code blocks and comments, duplicate fields, placeholders, size classification, idempotent labels, comment reuse, current-head checks, independent workflow approval, and legacy cancellation cleanup. All ordinary PR workflows are checked for format-job dependencies.
+Tests cover issue forms, author/type selections, nested section headings, QA declarations and notes, code blocks and comments, duplicate fields, placeholders, size classification, idempotent labels, comment reuse, bounded file pagination, rate-limit circuit breaking, per-run API call caps, and event-driven workflow permissions. All ordinary PR workflows are checked for format-job dependencies.
 
-Post-merge verification must confirm that invalid descriptions only produce feedback while code CI runs normally; description edits do not cancel or rerun CI; allowlisted workflows from real first-time contributors are still approved automatically; and legacy cancellation statuses are retired while real failures remain. Local mocked tests do not replace these checks.
+Post-merge verification must confirm that invalid descriptions only produce label/comment feedback while code CI runs normally, and that description edits synchronize labels and comments without cancelling or rerunning CI. Local mocked tests do not replace these checks.
