@@ -75,7 +75,7 @@
             <!-- Backend-specific fields declared by /search-providers/meta. -->
             <SchemaField
               v-for="field in configFields"
-              :key="field.key"
+              :key="`${formEpoch}:${field.key}`"
               :field="field"
               :field-key="field.key"
               id-prefix="search-provider"
@@ -118,7 +118,7 @@ import {
 import LoadingButton from '@/components/loading-button/index.vue'
 import { Trash2 } from 'lucide-vue-next'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
@@ -134,6 +134,7 @@ import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, FieldStack, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import { normalizeProviderConfigFields, providerConfigDefaults } from '@/utils/provider-template'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useServerSyncedRecord, useServerSyncedScalar } from '@/composables/use-server-synced-form'
 
 const { t } = useI18n()
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())
@@ -154,13 +155,6 @@ const { data: metaData } = useQuery({
   },
 })
 
-const currentMeta = computed(() =>
-  (metaData.value as SearchprovidersProviderMeta[] | undefined)
-    ?.find(item => item.provider === curProvider.value?.provider) ?? null,
-)
-
-const configFields = computed(() => normalizeProviderConfigFields(currentMeta.value?.config_schema))
-
 // ---- form ----
 const providerSchema = toTypedSchema(z.object({
   name: z.string().min(1, t('webSearch.nameRequired')),
@@ -171,90 +165,178 @@ const form = useForm({
   validationSchema: providerSchema,
 })
 
-// Store config separately since it varies by provider type
-const configData = ref<Record<string, unknown>>({})
-let hydratedIdentity = ''
+const activeProvider = computed(() => curProvider.value?.provider || form.values.provider || '')
 
-function providerIdentity(provider: SearchprovidersGetResponse | undefined): string {
-  if (!provider) return ''
-  return provider.id ? `id:${provider.id}` : `draft:${provider.provider ?? ''}`
+const currentMeta = computed(() =>
+  (metaData.value as SearchprovidersProviderMeta[] | undefined)
+    ?.find(item => item.provider === activeProvider.value) ?? null,
+)
+
+const configFields = computed(() => normalizeProviderConfigFields(currentMeta.value?.config_schema))
+
+// Store config separately since it varies by provider type
+const configData = reactive<Record<string, unknown>>({})
+
+function cloneConfigRecord(raw: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, val] of Object.entries(raw)) {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      out[key] = { ...(val as Record<string, unknown>) }
+    } else if (Array.isArray(val)) {
+      out[key] = [...val]
+    } else {
+      out[key] = val
+    }
+  }
+  return out
 }
 
 function setConfigField(key: string, value: unknown) {
   if (value === undefined) {
-    const next = { ...configData.value }
-    delete next[key]
-    configData.value = next
+    delete configData[key]
     return
   }
-  configData.value = { ...configData.value, [key]: value }
+  configData[key] = value
 }
 
-watch([curProvider, currentMeta], ([newVal, meta]) => {
-  if (!newVal) return
-  const nextIdentity = providerIdentity(newVal)
-  const defaults = providerConfigDefaults(meta?.config_schema)
-  if (nextIdentity !== hydratedIdentity) {
-    hydratedIdentity = nextIdentity
-    form.setValues({
-      name: newVal.name ?? '',
-      provider: newVal.provider ?? '',
-    })
-    configData.value = { ...defaults, ...(newVal.config ?? {}) }
-    return
-  }
-  // If schema metadata arrives after initial mount, backfill unset optional defaults
-  // without clobbering any field already present in the draft.
-  for (const [key, fallback] of Object.entries(defaults)) {
-    if (configData.value[key] === undefined && newVal.config?.[key] === undefined) {
-      configData.value = { ...configData.value, [key]: fallback }
-    }
-  }
+const providerName = computed({
+  get: () => form.values.name ?? '',
+  set: (value: string) => form.setFieldValue('name', value),
+})
+
+// The list query hands back a new provider object on every refetch (window
+// focus, the enable switch, a save), and the page re-selects it. Distinguish
+// unmaterialized placeholders (`draft:<type>`) from persisted records
+// (`id:<uuid>`) so initial server hydration hard-resets the placeholder while
+// same-record refreshes only update fields the user has not touched. During the
+// leave transition (`undefined`), keep current values and identity intact.
+let lastActiveIdentity = ''
+function providerIdentity(provider: SearchprovidersGetResponse | undefined): string {
+  if (!provider) return lastActiveIdentity
+  lastActiveIdentity = provider.id ? `id:${provider.id}` : `draft:${provider.provider ?? ''}`
+  return lastActiveIdentity
+}
+
+const formEpoch = ref(0)
+
+const { markClean: markNameClean } = useServerSyncedScalar(providerName, {
+  source: () => curProvider.value,
+  identity: providerIdentity,
+  server: provider => (provider ? provider.name ?? '' : providerName.value),
+})
+
+const { markClean: markConfigClean } = useServerSyncedRecord(configData, {
+  source: () => (curProvider.value
+    ? { provider: curProvider.value, schema: currentMeta.value?.config_schema }
+    : undefined),
+  identity: source => providerIdentity(source?.provider),
+  server: source => (source
+    ? cloneConfigRecord({
+        ...providerConfigDefaults(source.schema),
+        ...(source.provider.config ?? {}),
+      })
+    : cloneConfigRecord(configData)),
+  onSync: (hardReset) => {
+    if (hardReset && curProvider.value) formEpoch.value++
+  },
+})
+
+// Not editable in this form, so it simply follows the selection.
+watch(() => curProvider.value?.provider, (provider) => {
+  if (provider) form.setFieldValue('provider', provider)
 }, { immediate: true })
+
+function findMissingRequiredField() {
+  return configFields.value.find((field) => {
+    if (!field.required) return false
+    const value = configData[field.key]
+    if (field.type === 'bool' || field.type === 'boolean') return value === undefined || value === null
+    return !String(value ?? '').trim()
+  })
+}
 
 async function handleToggleEnable(value: boolean) {
   if (!curProvider.value) return
 
-  const prev = curProvider.value.enable ?? true
+  const targetId = curProviderId.value
+  if (!targetId && value) {
+    const missing = findMissingRequiredField()
+    if (missing) {
+      toast.error(t('provider.requiredField', { field: missing.title }))
+      return
+    }
+  }
+
+  const targetIdentity = providerIdentity(curProvider.value)
+  let materialized: SearchprovidersGetResponse | undefined
+  let prev = curProvider.value.id ? (curProvider.value.enable ?? true) : (curProvider.value.enable ?? false)
   curProvider.value = { ...curProvider.value, enable: value }
 
   enableLoading.value = true
   try {
-    if (!curProviderId.value) {
-      await materializeProvider({
+    if (!targetId) {
+      const created = await materializeProvider({
         name: form.values.name,
-        provider: form.values.provider as SearchprovidersCreateRequest['provider'],
-        config: configData.value,
-      }, value)
+        provider: (activeProvider.value || form.values.provider) as SearchprovidersCreateRequest['provider'],
+        config: cloneConfigRecord(configData),
+      })
+      materialized = created
+      prev = created.enable ?? false
+      if (prev !== value && created.id) {
+        const response = await putSearchProvidersById({
+          path: { id: created.id },
+          body: { enable: value },
+          throwOnError: true,
+        })
+        const updated = response.data ?? { ...created, enable: value }
+        if (curProvider.value?.id === created.id) {
+          curProvider.value = updated
+        }
+        emit('materialized', updated)
+      }
       toast.success(t('webSearch.saveSuccess'))
       return
     }
     await putSearchProvidersById({
-      path: { id: curProviderId.value },
+      path: { id: targetId },
       body: { enable: value },
       throwOnError: true,
     })
-    queryCache.invalidateQueries({ key: ['search-providers'] })
     toast.success(t('webSearch.saveSuccess'))
   } catch (error) {
-    curProvider.value = { ...curProvider.value, enable: prev }
+    if (materialized?.id && curProvider.value?.id === materialized.id) {
+      const restored = { ...materialized, enable: prev }
+      curProvider.value = restored
+      emit('materialized', restored)
+    } else if (curProvider.value && providerIdentity(curProvider.value) === targetIdentity) {
+      curProvider.value = { ...curProvider.value, enable: prev }
+    }
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   } finally {
     enableLoading.value = false
+    if (targetId || materialized?.id) {
+      queryCache.invalidateQueries({ key: ['search-providers'] })
+    }
   }
 }
 
 // ---- mutations ----
 const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
   mutation: async (data: SearchprovidersUpdateRequest) => {
-    if (!curProviderId.value) {
+    const targetIdentity = providerIdentity(curProvider.value)
+    const targetId = curProviderId.value
+    if (!targetId) {
       return materializeProvider(data as SearchprovidersCreateRequest)
     }
     const { data: result } = await putSearchProvidersById({
-      path: { id: curProviderId.value },
+      path: { id: targetId },
       body: data,
       throwOnError: true,
     })
+    if (providerIdentity(curProvider.value) === targetIdentity) {
+      markNameClean()
+      markConfigClean()
+    }
     return result
   },
   onSuccess: () => {
@@ -266,34 +348,28 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
   onSettled: () => queryCache.invalidateQueries({ key: ['search-providers'] }),
 })
 
-async function materializeProvider(data: SearchprovidersCreateRequest, enable = false) {
+async function materializeProvider(data: SearchprovidersCreateRequest) {
   if (curProvider.value?.id) return curProvider.value
   if (materializePromise) return materializePromise
 
+  const targetProvider = data.provider ?? curProvider.value?.provider as SearchprovidersCreateRequest['provider']
+  const fallbackName = curProvider.value?.name || ''
   materializePromise = (async () => {
     const { data: created } = await postSearchProviders({
       body: {
-        name: data.name?.trim() || curProvider.value?.name || '',
-        provider: data.provider ?? curProvider.value?.provider as SearchprovidersCreateRequest['provider'],
-        config: data.config ?? configData.value,
+        name: data.name?.trim() || fallbackName,
+        provider: targetProvider,
+        config: data.config ?? cloneConfigRecord(configData),
       },
       throwOnError: true,
     })
     if (!created?.id) throw new Error('search provider creation returned no id')
 
-    let result = created
-    if (enable) {
-      const response = await putSearchProvidersById({
-        path: { id: created.id },
-        body: { enable: true },
-        throwOnError: true,
-      })
-      result = response.data ?? { ...created, enable: true }
+    if (curProvider.value?.provider === created.provider && !curProvider.value?.id) {
+      curProvider.value = created
     }
-
-    curProvider.value = result
-    emit('materialized', result)
-    return result
+    emit('materialized', created)
+    return created
   })()
 
   try {
@@ -318,12 +394,7 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
 })
 
 const editProvider = form.handleSubmit(async (values) => {
-  const missing = configFields.value.find((field) => {
-    if (!field.required) return false
-    const value = configData.value[field.key]
-    if (field.type === 'bool' || field.type === 'boolean') return value === undefined || value === null
-    return !String(value ?? '').trim()
-  })
+  const missing = findMissingRequiredField()
   if (missing) {
     toast.error(t('provider.requiredField', { field: missing.title }))
     return
@@ -331,7 +402,7 @@ const editProvider = form.handleSubmit(async (values) => {
   submitUpdate({
     name: values.name,
     provider: values.provider as SearchprovidersUpdateRequest['provider'],
-    config: configData.value,
+    config: cloneConfigRecord(configData),
   })
 })
 </script>
