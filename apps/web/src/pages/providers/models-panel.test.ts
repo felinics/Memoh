@@ -283,8 +283,24 @@ describe('models panel route state', () => {
     expect(cardNames(root)).toContain('302.AI')
 
     const retry = [...banner!.querySelectorAll('div')].find(el => el.textContent?.trim() === 'common.retry')
+    let resolveRefetch!: () => void
+    mocks.refetchProviders.mockImplementation(() => {
+      mocks.providersLoading.value = true
+      return new Promise<void>((resolve) => {
+        resolveRefetch = () => {
+          mocks.providersLoading.value = false
+          resolve()
+        }
+      })
+    })
     retry!.click()
+    await nextTick()
     expect(mocks.refetchProviders).toHaveBeenCalledOnce()
+    // While retry is in flight, keep the failure notice and static gallery mounted
+    // instead of flashing back to the initial card-grid skeleton.
+    expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
+    expect(root.querySelector('[data-slot="callout-banner"]')).not.toBeNull()
+    resolveRefetch()
     app.unmount()
   })
 

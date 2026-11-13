@@ -80,17 +80,22 @@ describe('usage page load failures', () => {
     expect(root.textContent).toContain('usage.loadFailed')
   })
 
-  it('retries both requests from the failure banner', async () => {
+  it('retries both requests from the failure banner without flashing a full-page spinner mid-retry', async () => {
     api.usage.mockRejectedValue({ status: 500 })
     api.records.mockRejectedValue({ status: 500 })
     const root = await mountPage()
-    api.usage.mockResolvedValue({ data: { by_model: [], by_day: [] } })
+    let resolveUsage!: (val: unknown) => void
+    api.usage.mockImplementation(() => new Promise((resolve) => { resolveUsage = resolve }))
     api.records.mockResolvedValue({ data: { items: [], total: 0 } })
     const calls = api.usage.mock.calls.length
     const retry = [...root.querySelectorAll('button')].find(b => b.textContent?.includes('common.retry'))
     expect(retry).toBeTruthy()
     retry!.click()
     await vi.waitFor(() => expect(api.usage.mock.calls.length).toBeGreaterThan(calls))
+    await nextTick()
+    expect(root.textContent).toContain('usage.loadFailed')
+
+    resolveUsage({ data: { by_model: [], by_day: [] } })
     await new Promise(resolve => setTimeout(resolve, 0))
     await nextTick()
     expect(root.textContent).toContain('usage.overview')

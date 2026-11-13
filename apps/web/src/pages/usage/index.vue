@@ -93,14 +93,14 @@
           tone="destructive"
           :title="botsLoadFailedMessage"
         >
-          <Button
+          <LoadingButton
             variant="outline"
             size="sm"
             :loading="isBotsFetching"
             @click="void refetchBots()"
           >
             {{ $t('common.retry') }}
-          </Button>
+          </LoadingButton>
         </CalloutBanner>
       </template>
 
@@ -117,14 +117,14 @@
           tone="destructive"
           :title="usageLoadFailedMessage"
         >
-          <Button
+          <LoadingButton
             variant="outline"
             size="sm"
             :loading="isFetching"
             @click="retryUsage"
           >
             {{ $t('common.retry') }}
-          </Button>
+          </LoadingButton>
         </CalloutBanner>
       </template>
 
@@ -272,14 +272,14 @@
                       class="flex flex-col items-center gap-3"
                     >
                       {{ recordsLoadFailedMessage }}
-                      <Button
+                      <LoadingButton
                         variant="outline"
                         size="sm"
                         :loading="isRecordsFetching"
                         @click="void refetchRecords()"
                       >
                         {{ $t('common.retry') }}
-                      </Button>
+                      </LoadingButton>
                     </div>
                     <template v-else>
                       {{ $t('usage.noRecords') }}
@@ -372,7 +372,6 @@ import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
 import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date'
 import {
-  Button,
   CalloutBanner,
   type DateRange,
   DateRangePicker,
@@ -405,6 +404,7 @@ import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memohai/sdk'
 import { MetricReadout, PageShell, SectionGroup, SettingsSection } from '@felinic/ui'
 import BotSelect from '@/components/bot-select/index.vue'
+import LoadingButton from '@/components/loading-button/index.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -489,8 +489,8 @@ const datePresets = computed<DateRangePreset[]>(() => [
 const { data: botData, error: botsError, asyncStatus: botsAsyncStatus, refetch: refetchBots } = useQuery(getBotsQuery())
 const botList = computed(() => botData.value?.items ?? [])
 const isBotsFetching = computed(() => botsAsyncStatus.value === 'loading')
-const isBotsInitialLoading = computed(() => isBotsFetching.value && !botData.value)
 const botsLoadFailed = computed(() => !!botsError.value && !botData.value)
+const isBotsInitialLoading = computed(() => !botsLoadFailed.value && isBotsFetching.value && !botData.value)
 const botsLoadFailedMessage = computed(() =>
   resolveApiErrorMessage(botsError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
 )
@@ -543,10 +543,11 @@ const { data: usageData, error: usageError, asyncStatus, refetch } = useQuery({
 })
 
 const isFetching = computed(() => asyncStatus.value === 'loading')
-const isLoading = computed(() => isFetching.value && !usageData.value)
-// A failed request with nothing cached must not fall through to the overview:
-// it would render every total as 0, which reads as "this bot used nothing".
+// A failed request with nothing cached must not fall through to the overview
+// (which would render every total as 0) or tear down the retry banner back into
+// a full-page spinner while a retry is in flight.
 const usageLoadFailed = computed(() => !!usageError.value && !usageData.value)
+const isLoading = computed(() => !usageLoadFailed.value && isFetching.value && !usageData.value)
 const usageLoadFailedMessage = computed(() =>
   resolveApiErrorMessage(usageError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
 )
@@ -598,8 +599,8 @@ const { data: recordsData, error: recordsError, asyncStatus: recordsAsyncStatus,
 
 const recordsList = computed<HandlersTokenUsageRecord[]>(() => recordsData.value?.items ?? [])
 const isRecordsFetching = computed(() => recordsAsyncStatus.value === 'loading')
-const isRecordsInitialLoading = computed(() => isRecordsFetching.value && !recordsData.value)
 const recordsLoadFailed = computed(() => !!recordsError.value && !recordsData.value)
+const isRecordsInitialLoading = computed(() => !recordsLoadFailed.value && isRecordsFetching.value && !recordsData.value)
 const recordsLoadFailedMessage = computed(() =>
   resolveApiErrorMessage(recordsError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
 )
