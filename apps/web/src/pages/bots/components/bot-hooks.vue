@@ -36,14 +36,14 @@
         :label="$t('bots.hooks.loadFailed')"
         :description="resolveApiErrorMessage(loadError, $t('common.loadFailed'))"
       >
-        <Button
+        <LoadingButton
           variant="outline"
           size="sm"
           :loading="loading"
           @click="void reload()"
         >
           {{ $t('common.retry') }}
-        </Button>
+        </LoadingButton>
       </SettingsRow>
     </SettingsSection>
 
@@ -265,6 +265,7 @@ import {
 } from '@memohai/sdk'
 import type { HandlersHookEventInfo } from '@memohai/sdk'
 import { SectionGroup, SettingsRow, SettingsSection } from '@felinic/ui'
+import LoadingButton from '@/components/loading-button/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useServerSyncedScalar } from '@/composables/use-server-synced-form'
 
