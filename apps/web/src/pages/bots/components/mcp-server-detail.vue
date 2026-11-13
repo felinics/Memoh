@@ -1063,6 +1063,7 @@ async function handleOAuthFlow() {
       }
     }
     const onMessage = async (event: MessageEvent) => {
+      if (!popup || event.origin !== window.location.origin || event.source !== popup) return
       if (event.data?.type === 'mcp-oauth-callback') {
         await finishOAuth(event.data.status === 'success' ? 'success' : 'error', event.data.error)
       }
@@ -1102,13 +1103,27 @@ async function handleOAuthFlow() {
   }
 }
 
+function parseSafeOAuthURL(rawUrl: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    throw new Error('invalid_oauth_url')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('invalid_oauth_url')
+  }
+  return parsed.toString()
+}
+
 async function openOAuthURL(url: string): Promise<Window | null> {
+  const safeUrl = parseSafeOAuthURL(url)
   const desktopOpenExternal = window.api?.desktop?.openExternalUrl
   if (desktopOpenExternal) {
-    await desktopOpenExternal(url)
+    await desktopOpenExternal(safeUrl)
     return null
   }
-  return window.open(url, 'mcp-oauth', 'width=600,height=700')
+  return window.open(safeUrl, 'mcp-oauth', 'width=600,height=700')
 }
 
 async function handleOAuthRevoke() {

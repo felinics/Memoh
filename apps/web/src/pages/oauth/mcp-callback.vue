@@ -62,8 +62,8 @@ const requestId = ref('')
 // On success the opener takes over and the popup closes itself. A failure
 // stays open so the reason and request id can be read and copied.
 function notify(status: 'success' | 'error', error?: string) {
-  if (!window.opener) return
-  window.opener.postMessage({ type: 'mcp-oauth-callback', status, error }, '*')
+  if (!window.opener || window.location.origin === 'null') return
+  window.opener.postMessage({ type: 'mcp-oauth-callback', status, error }, window.location.origin)
   if (status === 'success') setTimeout(() => window.close(), 800)
 }
 

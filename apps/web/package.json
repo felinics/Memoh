@@ -69,9 +69,9 @@
     "vee-validate": "^4.15.1",
     "vue": "^3.5.44",
     "vue-echarts": "^8.0.1",
-    "vue-i18n": "^11.4.8",
+    "vue-i18n": "^11.4.14",
     "vue-router": "^5.2.0",
-    "zod": "^4.3.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@memohai/config": "workspace:*",

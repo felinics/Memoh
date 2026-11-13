@@ -58,7 +58,7 @@
     "electron-vite": "^4.0.0",
     "katex": "^0.18.10",
     "lucide-vue-next": "^0.562.0",
-    "markstream-vue": "1.0.7",
+    "markstream-vue": "2.0.0",
     "monaco-editor": "^0.52.2",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
@@ -71,9 +71,9 @@
     "vite": "~8.1.6",
     "vite-plugin-vue-devtools": "^8.2.1",
     "vue": "^3.5.44",
-    "vue-i18n": "^11.4.8",
+    "vue-i18n": "^11.4.14",
     "vue-router": "^5.2.0",
     "vue-tsc": "^3.3.8",
-    "zod": "^4.4.1"
+    "zod": "^4.6.6"
   }
 }

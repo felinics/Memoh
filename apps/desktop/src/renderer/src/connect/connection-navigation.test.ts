@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { decidePostConnectNavigation, isCurrentServerProbe } from './connection-navigation'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  applyPostConnectSessionCleanup,
+  decidePostConnectNavigation,
+  isCurrentServerProbe,
+  shouldRedirectOnUnauthorized,
+} from './connection-navigation'
 
 describe('startup server probe', () => {
   it('ignores a failed probe after the user has switched servers', () => {
@@ -60,5 +65,55 @@ describe('post-connect navigation', () => {
       hasToken: true,
       returnTo: '//example.com',
     }).destination).toBe('/')
+  })
+})
+
+describe('server-switch session cleanup & unauthorized route preservation', () => {
+  // Failure modes:
+  // 1. Switching servers (`clearAuth: true`) only removed `localStorage['token']`
+  //    without calling `userStore.exitLogin()`, leaving previous server's `userInfo`,
+  //    `queryCache`, `user`, and `sessionStorage` alive across hosts.
+  // 2. Re-probing the same server (`clearAuth: false`) accidentally wiped an active session.
+  // 3. Background 401 from old server while on `/connect` or `/oauth/*` hijacked
+  //    Desktop away from `/connect` into `/login`.
+  it('runs exitLogin(), removes persisted user record, and clears sessionStorage when switching servers', () => {
+    const exitLogin = vi.fn()
+    const removeItem = vi.fn()
+    const clear = vi.fn()
+
+    applyPostConnectSessionCleanup(true, {
+      exitLogin,
+      localStorage: { removeItem },
+      sessionStorage: { clear },
+    })
+
+    expect(exitLogin).toHaveBeenCalledTimes(1)
+    expect(removeItem).toHaveBeenCalledWith('user')
+    expect(clear).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves active session state when reconnecting to the same server', () => {
+    const exitLogin = vi.fn()
+    const removeItem = vi.fn()
+    const clear = vi.fn()
+
+    applyPostConnectSessionCleanup(false, {
+      exitLogin,
+      localStorage: { removeItem },
+      sessionStorage: { clear },
+    })
+
+    expect(exitLogin).not.toHaveBeenCalled()
+    expect(removeItem).not.toHaveBeenCalled()
+    expect(clear).not.toHaveBeenCalled()
+  })
+
+  it('suppresses /login redirect on /connect and /oauth/* while redirecting normal routes', () => {
+    expect(shouldRedirectOnUnauthorized('/connect')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/oauth/mcp-callback')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/oauth/provider')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/')).toBe(true)
+    expect(shouldRedirectOnUnauthorized('/bot/kitty-3')).toBe(true)
+    expect(shouldRedirectOnUnauthorized(undefined)).toBe(true)
   })
 })

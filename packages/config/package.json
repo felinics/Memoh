@@ -16,6 +16,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "toml": "^4.3.0"
+    "toml": "^5.0.1"
   }
 }
