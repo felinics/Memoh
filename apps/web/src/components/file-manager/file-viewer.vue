@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, useId, watch } from 'vue'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { useVisiblePoll } from '@/composables/useVisiblePoll'
@@ -29,10 +29,12 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import MonacoDiff from '@/components/monaco-editor/diff.vue'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
+import { fetchBoundedBlob } from '@/lib/bounded-fetch'
 import { formatRelativeTime } from '@/utils/date-time'
-import { isTextFile, isImageFile } from './utils'
+import { formatFileSize, getDocumentMimeType, getDocumentPreviewKind, getDocumentPreviewMaxBytes, isImageFile, isTextFile } from './utils'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
+import DocumentPreview from './document-preview.vue'
 
 const props = defineProps<{
   botId: string
@@ -58,6 +60,8 @@ const saving = ref(false)
 const savingContent = ref<string | null>(null)
 let fileGeneration = 0
 const imageUrl = ref('')
+const documentBlob = ref<Blob | null>(null)
+const documentOversizedBytes = ref<number | null>(null)
 // True once the file has been read at least once for the current path. Used
 // to suppress the full-area spinner on subsequent reloads — the editor / image
 // stays mounted and the content swaps in place, the way VS Code handles
@@ -83,8 +87,10 @@ const compareDiskContent = ref('')
 const compareStale = ref(false)
 let compareController: AbortController | null = null
 const observedExternalRevision = ref('')
-const imageMetadataFingerprint = ref('')
+const binaryMetadataFingerprint = ref('')
 let externalPollController: AbortController | null = null
+let isKeepAliveDeactivated = false
+let deferredDocumentReloadOnActivate = false
 // Stable ids so the chip buttons can aria-describedby the relevant inline
 // message span, giving keyboard / screen-reader users the "why is this here"
 // context. The compare-toolbar Refresh button uses the staleNotice id by the
@@ -105,6 +111,8 @@ const filename = computed(() => props.file.name ?? '')
 const filePath = computed(() => props.file.path ?? '')
 const isText = computed(() => isTextFile(filename.value))
 const isImage = computed(() => isImageFile(filename.value))
+const documentKind = computed(() => getDocumentPreviewKind(filename.value))
+const isDocument = computed(() => documentKind.value !== null)
 const isDirty = computed(() => content.value !== originalContent.value
   || (savingContent.value !== null && content.value !== savingContent.value))
 
@@ -249,7 +257,7 @@ async function pollTextFile(signal: AbortSignal) {
   if (conflictState.value === 'none') conflictState.value = 'chip'
 }
 
-async function pollImageFile(signal: AbortSignal) {
+async function pollBinaryFile(signal: AbortSignal) {
   const { data } = await getBotsByBotIdContainerFs({
     path: { bot_id: props.botId },
     query: { path: filePath.value },
@@ -258,34 +266,43 @@ async function pollImageFile(signal: AbortSignal) {
   })
   if (signal.aborted) return
   const nextFingerprint = fileMetadataFingerprint(data)
-  if (!imageMetadataFingerprint.value) {
-    imageMetadataFingerprint.value = nextFingerprint
+  const hasHealthyBinary = diskState.value === 'available' && (
+    isImage.value
+      ? Boolean(imageUrl.value)
+      : (documentBlob.value !== null || documentOversizedBytes.value !== null)
+  )
+  if (!binaryMetadataFingerprint.value && hasHealthyBinary) {
+    binaryMetadataFingerprint.value = nextFingerprint
     return
   }
-  if (nextFingerprint === imageMetadataFingerprint.value) return
-  const previousFingerprint = imageMetadataFingerprint.value
-  await loadImageBlob({ notifyOnError: false })
-  imageMetadataFingerprint.value = diskState.value === 'available'
-    ? nextFingerprint
-    : previousFingerprint
+  if (hasHealthyBinary && nextFingerprint === binaryMetadataFingerprint.value) return
+  const previousFingerprint = binaryMetadataFingerprint.value
+  if (isImage.value) await loadImageBlob({ notifyOnError: false })
+  else await loadDocumentBlob({ notifyOnError: false })
+  if (signal.aborted) return
+  binaryMetadataFingerprint.value = diskState.value === 'available' ? nextFingerprint : previousFingerprint
 }
 
 async function pollExternalFile() {
+  if (isKeepAliveDeactivated) return
   if (!props.botId || !loaded.value || loading.value || saving.value || externalPollController) return
-  if (!isText.value && !isImage.value) return
+  if (!isText.value && !isImage.value && !isDocument.value) return
 
   const controller = new AbortController()
   externalPollController = controller
   try {
     if (isText.value) await pollTextFile(controller.signal)
-    else if (isImage.value) await pollImageFile(controller.signal)
+    else await pollBinaryFile(controller.signal)
   } catch (error) {
     if (controller.signal.aborted) return
     if (isHttpStatus(error, 404)) {
+      cleanupImageUrl()
+      documentBlob.value = null
+      documentOversizedBytes.value = null
       diskState.value = 'deleted'
       loaded.value = true
       observedExternalRevision.value = 'deleted'
-      imageMetadataFingerprint.value = ''
+      binaryMetadataFingerprint.value = ''
       dropToChipForBadDiskState()
       return
     }
@@ -298,8 +315,30 @@ async function pollExternalFile() {
 }
 
 useVisiblePoll(pollExternalFile, EXTERNAL_FILE_POLL_MS, {
-  enabled: () => Boolean(props.botId && (isText.value || isImage.value)),
+  enabled: () => Boolean(props.botId && (isText.value || isImage.value || isDocument.value)),
 })
+
+function applyReadError(error: unknown, notifyOnError?: boolean) {
+  loaded.value = true
+  if (isHttpStatus(error, 404)) {
+    diskState.value = 'deleted'
+    dropToChipForBadDiskState()
+    return
+  }
+  diskState.value = 'stale'
+  dropToChipForBadDiskState()
+  if (notifyOnError !== false) toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+}
+
+function markBinaryLoaded(size?: number) {
+  binaryMetadataFingerprint.value = size !== undefined && !loaded.value && props.file.modTime
+    ? fileMetadataFingerprint({ path: filePath.value, isDir: false, size, modTime: props.file.modTime })
+    : ''
+  lastLoadedAt.value = Date.now()
+  loaded.value = true
+  diskState.value = 'available'
+  if (conflictState.value !== 'compare') conflictState.value = 'none'
+}
 
 async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
   activeReadController?.abort()
@@ -340,18 +379,7 @@ async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: 
     if (conflictState.value !== 'compare') conflictState.value = 'none'
   } catch (error) {
     if (controller.signal.aborted) return
-    if (isHttpStatus(error, 404)) {
-      diskState.value = 'deleted'
-      loaded.value = true
-      dropToChipForBadDiskState()
-      return
-    }
-    diskState.value = 'stale'
-    loaded.value = true
-    dropToChipForBadDiskState()
-    if (options.notifyOnError !== false) {
-      toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
-    }
+    applyReadError(error, options.notifyOnError)
   } finally {
     if (activeReadController === controller) {
       activeReadController = null
@@ -380,35 +408,44 @@ async function loadImageBlob(options: { notifyOnError?: boolean } = {}) {
     cleanupImageUrl()
     imageUrl.value = url
     url = ''
-    imageMetadataFingerprint.value = fileMetadataFingerprint({
-      path: filePath.value,
-      isDir: false,
-      size: blob.size,
-      modTime: props.file.modTime,
-    })
-    lastLoadedAt.value = Date.now()
-    loaded.value = true
-    diskState.value = 'available'
-    if (conflictState.value !== 'compare') conflictState.value = 'none'
+    markBinaryLoaded(blob.size)
   } catch (error) {
     if (controller.signal.aborted) return
-    // Release any stale blob URL from a prior successful load so the deleted /
-    // stale states don't keep a now-detached <img> source alive.
     cleanupImageUrl()
-    if (isHttpStatus(error, 404)) {
-      diskState.value = 'deleted'
-      loaded.value = true
-      dropToChipForBadDiskState()
-      return
-    }
-    diskState.value = 'stale'
-    loaded.value = true
-    dropToChipForBadDiskState()
-    if (options.notifyOnError !== false) {
-      toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
-    }
+    applyReadError(error, options.notifyOnError)
   } finally {
     if (url) URL.revokeObjectURL(url)
+    if (activeReadController === controller) {
+      activeReadController = null
+      loading.value = false
+    }
+  }
+}
+
+async function loadDocumentBlob(options: { notifyOnError?: boolean } = {}) {
+  const kind = documentKind.value
+  if (!kind) return
+  activeReadController?.abort()
+  const controller = new AbortController()
+  activeReadController = controller
+  loading.value = true
+  try {
+    const result = await fetchBoundedBlob({
+      target: { url: '/bots/{bot_id}/container/fs/download', path: { bot_id: props.botId }, query: { path: filePath.value } },
+      maxBytes: getDocumentPreviewMaxBytes(kind),
+      mimeType: getDocumentMimeType(kind),
+      signal: controller.signal,
+    })
+    if (controller.signal.aborted) return
+    documentBlob.value = result.ok ? result.blob : null
+    documentOversizedBytes.value = result.ok ? null : result.maxBytes
+    markBinaryLoaded(result.ok ? result.blob.size : undefined)
+  } catch (error) {
+    if (controller.signal.aborted) return
+    documentBlob.value = null
+    documentOversizedBytes.value = null
+    applyReadError(error, options.notifyOnError)
+  } finally {
     if (activeReadController === controller) {
       activeReadController = null
       loading.value = false
@@ -567,6 +604,8 @@ watch([() => props.botId, () => props.file.path], () => {
   compareController?.abort()
   compareController = null
   cleanupImageUrl()
+  documentBlob.value = null
+  documentOversizedBytes.value = null
   content.value = ''
   originalContent.value = ''
   baseRevision.value = ''
@@ -576,12 +615,16 @@ watch([() => props.botId, () => props.file.path], () => {
   compareStale.value = false
   lastLoadedAt.value = 0
   observedExternalRevision.value = ''
-  imageMetadataFingerprint.value = ''
+  binaryMetadataFingerprint.value = ''
+  deferredDocumentReloadOnActivate = false
   loaded.value = false
   if (isText.value) {
     void loadTextContent()
   } else if (isImage.value) {
     void loadImageBlob()
+  } else if (isDocument.value) {
+    if (isKeepAliveDeactivated) deferredDocumentReloadOnActivate = true
+    else void loadDocumentBlob()
   }
 }, { immediate: true })
 
@@ -607,6 +650,13 @@ watch(fsChangedAt, () => {
   }
   if (isText.value) void loadTextContent({ notifyOnError: false })
   else if (isImage.value) void loadImageBlob({ notifyOnError: false })
+  else if (isDocument.value) {
+    if (isKeepAliveDeactivated) {
+      deferredDocumentReloadOnActivate = true
+      return
+    }
+    void loadDocumentBlob({ notifyOnError: false })
+  }
 })
 
 async function acceptExternalChange() {
@@ -617,6 +667,7 @@ async function acceptExternalChange() {
   const wasInCompare = conflictState.value === 'compare'
   if (isText.value) await loadTextContent({ forceApply: true })
   else if (isImage.value) await loadImageBlob()
+  else if (isDocument.value) await loadDocumentBlob()
   if (wasInCompare && diskState.value === 'available') {
     compareController?.abort()
     compareController = null
@@ -714,6 +765,28 @@ onMounted(() => {
   nowTickInterval = setInterval(() => { nowTick.value = Date.now() }, 60_000)
 })
 
+onActivated(() => {
+  isKeepAliveDeactivated = false
+  if (isDocument.value && (deferredDocumentReloadOnActivate || (!loaded.value && !loading.value))) {
+    deferredDocumentReloadOnActivate = false
+    void loadDocumentBlob({ notifyOnError: false })
+  } else {
+    void pollExternalFile()
+  }
+})
+
+onDeactivated(() => {
+  isKeepAliveDeactivated = true
+  externalPollController?.abort()
+  externalPollController = null
+  if (isDocument.value && activeReadController) {
+    activeReadController.abort()
+    activeReadController = null
+    loading.value = false
+    deferredDocumentReloadOnActivate = true
+  }
+})
+
 onBeforeUnmount(() => {
   fileGeneration++
   if (nowTickInterval) clearInterval(nowTickInterval)
@@ -723,6 +796,7 @@ onBeforeUnmount(() => {
   activeReadController?.abort()
   compareController?.abort()
   cleanupImageUrl()
+  documentBlob.value = null
 })
 </script>
 
@@ -888,11 +962,11 @@ onBeforeUnmount(() => {
         class="h-full"
       />
 
-      <PanePlaceholder v-else-if="isImage && diskState === 'deleted'">
+      <PanePlaceholder v-else-if="(isImage || isDocument) && diskState === 'deleted'">
         <template #icon>
           <FileX class="size-12 text-destructive opacity-40" />
         </template>
-        {{ t('bots.files.imageDeleted') }}
+        {{ t(isImage ? 'bots.files.imageDeleted' : 'bots.files.documentDeleted') }}
       </PanePlaceholder>
 
       <div
@@ -906,11 +980,34 @@ onBeforeUnmount(() => {
         >
       </div>
 
+      <DocumentPreview
+        v-else-if="isDocument && documentKind && documentBlob"
+        :key="`${botId}:${filePath}`"
+        :blob="documentBlob"
+        :kind="documentKind"
+        :filename="filename"
+      >
+        <template #action>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="handleDownload"
+          >
+            <Download class="mr-1.5 size-3" />
+            {{ t('bots.files.download') }}
+          </Button>
+        </template>
+      </DocumentPreview>
+
       <PanePlaceholder v-else>
         <template #icon>
           <File class="size-12 opacity-30" />
         </template>
-        {{ t('bots.files.previewNotAvailable') }}
+        {{ isDocument && documentOversizedBytes !== null
+          ? t('bots.files.previewTooLarge', { size: formatFileSize(documentOversizedBytes) })
+          : isDocument && diskState === 'stale'
+            ? t('bots.files.previewFailed')
+            : t('bots.files.previewNotAvailable') }}
         <template #action>
           <Button
             variant="outline"

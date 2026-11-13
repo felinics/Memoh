@@ -43,7 +43,7 @@ import {
   isTrustedRendererUrl,
   type RendererTrustOptions,
 } from './renderer-trust'
-import { normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
+import { attachGuestWindowOpenGuard, createExternalWindowOpenHandler, normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
 import { registerDesktopUpdates, installDesktopUpdate, installDesktopUpdateOnQuit, recoverDesktopUpdate } from './updates'
 import {
   normalizeBaseUrl,
@@ -329,21 +329,15 @@ function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
   )
 }
 
+const openExternalFromWindowOpen = (url: string): Promise<void> =>
+  shell.openExternal(url).catch(error => console.error('failed to open external URL', url, error))
+const warnBlockedWindowOpen = (url: string): void => console.warn('blocked unsupported window.open URL', url)
+
 function attachExternalLinkGuards(webContents: Electron.WebContents): void {
   if (guardedExternalLinkWebContents.has(webContents)) return
   guardedExternalLinkWebContents.add(webContents)
 
-  webContents.setWindowOpenHandler(({ url }) => {
-    const external = normalizeExternalUrl(url)
-    if (!external.supported) {
-      console.warn('blocked unsupported window.open URL', external.url || url)
-      return { action: 'deny' }
-    }
-    void shell.openExternal(external.url).catch((error) => {
-      console.error('failed to open external URL', external.url, error)
-    })
-    return { action: 'deny' }
-  })
+  webContents.setWindowOpenHandler(createExternalWindowOpenHandler(openExternalFromWindowOpen, warnBlockedWindowOpen))
 
   // `will-navigate` only ever fires for the main frame, but `will-redirect` fires
   // for every frame — so this handler must check `isMainFrame` itself. Without it,
@@ -370,6 +364,31 @@ function attachExternalLinkGuards(webContents: Electron.WebContents): void {
   }
   webContents.on('will-navigate', guardNavigation)
   webContents.on('will-redirect', guardNavigation)
+  webContents.on('will-frame-navigate', (details) => {
+    if (details.isMainFrame) return
+    let frameUrl = ''
+    let initiatorUrl = ''
+    const ancestorFrameUrls: string[] = []
+    try {
+      frameUrl = details.frame?.url ?? ''
+      for (let p = details.frame?.parent, d = 0; p && p !== webContents.mainFrame && d < 16; p = p.parent, d++) {
+        ancestorFrameUrls.push(p.url ?? '')
+      }
+    } catch { /* detached frame */ }
+    try { initiatorUrl = details.initiator?.url ?? '' } catch { /* detached initiator */ }
+    const action = resolveNavigationGuardAction({
+      url: details.url,
+      isMainFrame: false,
+      isTrustedRenderer: isTrustedRendererNavigation(details.url),
+      frameUrl,
+      initiatorUrl,
+      ancestorFrameUrls,
+    })
+    if (action.kind === 'allow') return
+    details.preventDefault()
+    if (action.kind === 'block') console.warn('blocked untrusted subframe navigation URL', action.url)
+    else void shell.openExternal(action.url).catch(err => console.error('failed to open external subframe navigation URL', action.url, err))
+  })
 }
 
 async function openExternalUrl(rawURL: unknown): Promise<void> {
@@ -777,6 +796,9 @@ app.whenReady().then(async () => {
   app.on('browser-window-created', (_, window) => {
     attachDevelopmentWindowShortcuts(window)
     attachExternalLinkGuards(window.webContents)
+  })
+  app.on('web-contents-created', (_event, contents) => {
+    attachGuestWindowOpenGuard(contents, openExternalFromWindowOpen, warnBlockedWindowOpen)
   })
 
   remoteRuntimeManager = new DesktopRemoteRuntimeManager({

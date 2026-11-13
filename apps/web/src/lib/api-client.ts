@@ -64,7 +64,12 @@ export function sdkWebSocketUrl(options: SdkUrlOptions): string {
 }
 
 let onUnauthorizedHook: (() => void) | undefined
+let configuredBaseFetch: typeof fetch | undefined
 let unauthorizedNotified = false
+
+export function sdkRawFetch(): typeof fetch {
+  return configuredBaseFetch ?? globalThis.fetch
+}
 
 interface ApiFetchContext {
   input: Parameters<typeof fetch>[0]
@@ -161,6 +166,7 @@ export function setupApiClient(options: SetupApiClientOptions = {}) {
   void agentBaseUrl
 
   onUnauthorizedHook = options.onUnauthorized
+  configuredBaseFetch = options.fetch
 
   client.setConfig({
     baseUrl: apiBaseUrl,

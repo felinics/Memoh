@@ -53,6 +53,7 @@ declare module '@memohai/web/api-client' {
     fetch?: typeof fetch
     onUnauthorized?: () => void
   }
+  export function sdkRawFetch(): typeof fetch
   export interface SdkUrlOptions {
     url: string
     path?: Record<string, unknown>
