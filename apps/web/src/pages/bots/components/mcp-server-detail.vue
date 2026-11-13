@@ -457,6 +457,7 @@ import { ConfirmPopover, SettingsRow, SettingsSection } from '@felinic/ui'
 import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import KeyValueEditor from '@/components/key-value-editor/index.vue'
 import type { KeyValuePair } from '@/components/key-value-editor/index.vue'
+import { canOpenDesktopExternalUrl, openDesktopExternalUrl, parseSafeHttpUrl } from '@/lib/external-url'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { joinShellWords, splitShellWords } from '@/utils/shell-words'
 import type { McpItem } from './mcp-types'
@@ -1030,7 +1031,7 @@ async function handleOAuthFlow() {
     if (!data?.authorization_url) throw new Error(t('mcp.oauth.flowInitFailed'))
 
     const popup = await openOAuthURL(data.authorization_url)
-    if (!popup && !window.api?.desktop?.openExternalUrl) {
+    if (!popup && !canOpenDesktopExternalUrl()) {
       // window.open returned null: the browser blocked the popup. Fail fast
       // with a signpost — with no window handle, the poll below has no close
       // signal and would spin silently for 120s before a generic failure.
@@ -1103,24 +1104,11 @@ async function handleOAuthFlow() {
   }
 }
 
-function parseSafeOAuthURL(rawUrl: string): string {
-  let parsed: URL
-  try {
-    parsed = new URL(rawUrl)
-  } catch {
-    throw new Error('invalid_oauth_url')
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('invalid_oauth_url')
-  }
-  return parsed.toString()
-}
-
 async function openOAuthURL(url: string): Promise<Window | null> {
-  const safeUrl = parseSafeOAuthURL(url)
-  const desktopOpenExternal = window.api?.desktop?.openExternalUrl
-  if (desktopOpenExternal) {
-    await desktopOpenExternal(safeUrl)
+  const safeUrl = parseSafeHttpUrl(url, 'invalid_oauth_url')
+  const desktopOpenResult = openDesktopExternalUrl(safeUrl)
+  if (desktopOpenResult) {
+    await desktopOpenResult
     return null
   }
   return window.open(safeUrl, 'mcp-oauth', 'width=600,height=700')

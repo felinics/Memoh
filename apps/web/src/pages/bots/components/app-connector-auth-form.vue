@@ -117,6 +117,7 @@ import {
   prepareConnectorOAuthPopup,
   waitForConnectorOAuth,
 } from '@/composables/useConnectorOAuth'
+import { canOpenDesktopExternalUrl } from '@/lib/external-url'
 import { useUserStore } from '@/store/user'
 
 const props = defineProps<{
@@ -194,7 +195,7 @@ onMounted(async () => {
   // A popup must be reserved by the Install click, before the streamed install.
   // Later connectors without a reserved window use the visible Connect button.
   if (props.autoStart && selectedMethod.value?.type === 'oauth2'
-    && (reservedPopup || window.api?.desktop?.openExternalUrl)) void connect()
+    && (reservedPopup || canOpenDesktopExternalUrl())) void connect()
 })
 defineExpose({ connect, cancel, phase, formId })
 
@@ -205,7 +206,7 @@ async function connect() {
   errorMessage.value = ''
   const oauthPopup = method?.type === 'oauth2' ? (reservedPopup ?? prepareConnectorOAuthPopup(t('common.loading'))) : null
   reservedPopup = null
-  if (method?.type === 'oauth2' && !oauthPopup && !window.api?.desktop?.openExternalUrl) {
+  if (method?.type === 'oauth2' && !oauthPopup && !canOpenDesktopExternalUrl()) {
     errorMessage.value = t('connectors.oauthPopupBlocked')
     return
   }

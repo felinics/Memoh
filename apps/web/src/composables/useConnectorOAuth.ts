@@ -1,4 +1,5 @@
 import { getBotsByBotIdConnectorsByConnectionId, postBotsByBotIdConnectorsByConnectionIdReauth } from '@memohai/sdk'
+import { canOpenDesktopExternalUrl, openDesktopExternalUrl, parseSafeHttpUrl } from '@/lib/external-url'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
@@ -41,7 +42,7 @@ export function isConnectorOAuthCancelled(error: unknown): boolean {
 }
 
 export function prepareConnectorOAuthPopup(loadingMessage: string): Window | null {
-  if (window.api?.desktop?.openExternalUrl) return null
+  if (canOpenDesktopExternalUrl()) return null
   const popup = window.open('', 'connect-it-oauth', 'width=600,height=700')
   if (!popup) return null
 
@@ -63,30 +64,17 @@ export function prepareConnectorOAuthPopup(loadingMessage: string): Window | nul
   return popup
 }
 
-function parseSafeOAuthURL(rawUrl: string): string {
-  let parsed: URL
-  try {
-    parsed = new URL(rawUrl)
-  } catch {
-    throw new Error('oauth_failed')
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('oauth_failed')
-  }
-  return parsed.toString()
-}
-
 export async function openConnectorOAuthURL(url: string, popup: Window | null): Promise<void> {
   let safeUrl: string
   try {
-    safeUrl = parseSafeOAuthURL(url)
+    safeUrl = parseSafeHttpUrl(url, 'oauth_failed')
   } catch (error) {
     popup?.close()
     throw error
   }
-  const desktopOpenExternal = window.api?.desktop?.openExternalUrl
-  if (desktopOpenExternal) {
-    await desktopOpenExternal(safeUrl)
+  const desktopOpenResult = openDesktopExternalUrl(safeUrl)
+  if (desktopOpenResult) {
+    await desktopOpenResult
     return
   }
   if (!popup || popup.closed) {

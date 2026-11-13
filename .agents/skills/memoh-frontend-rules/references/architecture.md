@@ -56,7 +56,7 @@
 - **业务共享组件（`components/`）**：跨两个以上页面复用的业务 owner（如 `sidebar/`、`master-detail-sidebar-layout/`、
   `file-manager/`、`terminal/`、`monaco-editor/`、`loading-button/`、`form-dialog-shell/` 等）。选型前先查
   `packages/ui/skills/ui-owners/SKILL.md`。
-- **组合式函数（`composables/`）**：接口与流封装在 `composables/api/`（`useChat.*`、`sse-error.ts`、
+- **组合式函数（`composables/`）**：接口与流封装在 `composables/api/`（`useChat.*`、`sse-error.ts`、`stream-json-sse.ts`、
   `useContainerStream.ts`、`useWorkspaceDependencyStream.ts`）；通用交互封装在顶层（`use-server-synced-form.ts`、
   `useDialogMutation.ts`、`useRetryingStream.ts`、`useSyncedQueryParam.ts`、`useViewSwap.ts`）。
 - **客户端状态（`store/`）**：只放纯客户端状态（见下方 Store 分工表）。
@@ -70,9 +70,9 @@
 | 你要写的页面类型 | 标准参考样板页 | 反面教材（严禁照抄） |
 |---|---|---|
 | 内容精简、只有几张卡片的页面 | `pages/about/index.vue`（居中分组 + 底部元信息） | — |
-| 设置页（带标题的分组卡片 + 行列表） | `pages/bots/components/bot-overview.vue`、`pages/usage/index.vue` | `pages/bots/components/bot-tool-approval.vue`（堆砌底色、裸透明度、自造指标卡的典型脏页面） |
+| 设置页（带标题的分组卡片 + 行列表） | `pages/bots/components/bot-overview.vue`、`pages/usage/index.vue` | — |
 | 列表与详情左右推拉切换 | `pages/web-search/index.vue`（`useViewSwap` + `SwapTransition` + `BackendCard` + `DetailPane`） | — |
-| 带统计数值块与图表的概览页 | `pages/bots/components/bot-overview.vue`（细线分隔数值块 + 黑白灰 ECharts） | `bot-tool-approval.vue` |
+| 带统计数值块与图表的概览页 | `pages/bots/components/bot-overview.vue`（细线分隔数值块 + 黑白灰 ECharts） | — |
 | 表单或新建/编辑弹窗 | `pages/bots/components/schedule-editor.vue`（新建/编辑任务表单：字段间距、折叠更多选项、底部按钮排布） | — |
 | 全部原子组件与业务 owner 活体目录 | `pages/dev/components/`（开发模式下设置 `localStorage.setItem('memoh:dev-tools', '1')`，按 `Cmd/Ctrl+Shift+D` 打开） | — |
 

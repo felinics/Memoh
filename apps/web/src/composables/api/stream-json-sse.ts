@@ -15,7 +15,7 @@ export interface JsonSseRequestOptions {
 }
 
 export interface StreamJsonSseConfig<TEvent extends { type: string }> {
-  signal?: AbortSignal
+  signal?: AbortSignal | null
   invalidEventMessage: string
   failureMessage: string
   isEvent: (value: unknown) => value is TEvent
@@ -24,18 +24,18 @@ export interface StreamJsonSseConfig<TEvent extends { type: string }> {
 }
 
 /**
- * Shared JSON-SSE consumption loop for workspace App and Dependency streams:
- * attaches Problem Details connection error handling (`fetchSSEProblem`),
- * validates every frame, localizes `error` SSE envelopes by stable code, and
- * normalizes mid-stream transport errors after the iterator ends.
+ * Opens one JSON-SSE stream immediately and wraps the returned generator with
+ * Problem Details error decoding (`fetchSSEProblem`), frame validation, stale
+ * error clearing on valid frames, `error` envelope localization, and
+ * mid-stream failure normalization.
  */
-export async function* streamJsonSse<TEvent extends { type: string }>(
+export async function openJsonSseStream<TEvent extends { type: string }>(
   config: StreamJsonSseConfig<TEvent>,
-): AsyncGenerator<TEvent, void, unknown> {
+): Promise<{ stream: AsyncGenerator<TEvent, void, unknown> }> {
   let streamError: unknown
   const request: JsonSseRequestOptions = {
     headers: { Accept: 'text/event-stream' },
-    signal: config.signal,
+    signal: config.signal ?? undefined,
     fetch: fetchSSEProblem,
     onSseError: (error: unknown) => {
       streamError = error
@@ -48,15 +48,31 @@ export async function* streamJsonSse<TEvent extends { type: string }>(
 
   const result = await config.open(request)
 
-  for await (const raw of result.stream as AsyncGenerator<unknown, void, unknown>) {
-    if (!config.isEvent(raw)) throw new Error(config.invalidEventMessage)
-    const localized = raw.type === 'error'
-      ? (localizeSSEErrorEvent(raw as unknown as SSEErrorEvent) as unknown as TEvent)
-      : raw
-    yield config.normalizeEvent ? config.normalizeEvent(localized) : localized
-  }
+  return {
+    stream: (async function* () {
+      for await (const raw of result.stream as AsyncGenerator<unknown, void, unknown>) {
+        if (!config.isEvent(raw)) throw new Error(config.invalidEventMessage)
+        streamError = undefined
+        const localized = raw.type === 'error'
+          ? (localizeSSEErrorEvent(raw as unknown as SSEErrorEvent) as unknown as TEvent)
+          : raw
+        yield config.normalizeEvent ? config.normalizeEvent(localized) : localized
+      }
 
-  if (streamError) {
-    throw normalizeSSEFailure(streamError, config.failureMessage)
+      if (streamError) {
+        throw normalizeSSEFailure(streamError, config.failureMessage)
+      }
+    })(),
   }
+}
+
+/**
+ * Shared JSON-SSE consumption loop for lazy generator callers such as
+ * workspace App and Dependency streams.
+ */
+export async function* streamJsonSse<TEvent extends { type: string }>(
+  config: StreamJsonSseConfig<TEvent>,
+): AsyncGenerator<TEvent, void, unknown> {
+  const { stream } = await openJsonSseStream(config)
+  yield* stream
 }

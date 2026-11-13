@@ -1,14 +1,13 @@
 import { client } from '@memohai/sdk/client'
 import type { Options } from '@memohai/sdk'
 import type { BotsBot, HandlersCreateContainerResponse, PostBotsData } from '@memohai/sdk'
-import type { ContainerCreateLayerStatus } from './useContainerStream'
 import {
-  fetchSSEProblem,
-  isSSEErrorEvent,
-  localizeSSEErrorEvent,
-  normalizeSSEFailure,
-  type SSEErrorEvent,
-} from './sse-error'
+  containerLayerProgressPercent,
+  isContainerCreateStreamEvent,
+  type ContainerCreateLayerStatus,
+} from './container-stream-events'
+import type { SSEErrorEvent } from './sse-error'
+import { openJsonSseStream } from './stream-json-sse'
 
 // codesync(bot-create-stream): keep these manual SSE payload types in sync
 // with internal/handlers/users.go.
@@ -43,15 +42,7 @@ export type BotCreateProgressState = {
 }
 
 export function botCreateProgressPercent(progress: BotCreateProgress | null | undefined): number {
-  const layers = progress?.layers
-  if (!layers || layers.length === 0) return 0
-  let totalOffset = 0
-  let totalSize = 0
-  for (const layer of layers) {
-    totalOffset += layer.offset
-    totalSize += layer.total
-  }
-  return totalSize > 0 ? Math.round((totalOffset / totalSize) * 100) : 0
+  return containerLayerProgressPercent(progress?.layers)
 }
 
 export function reduceBotCreateProgressEvent(
@@ -142,14 +133,6 @@ export async function collectBotCreateProgressStream(
   return state
 }
 
-function isLayerStatus(value: unknown): value is ContainerCreateLayerStatus {
-  return !!value
-    && typeof value === 'object'
-    && typeof (value as { ref?: unknown }).ref === 'string'
-    && typeof (value as { offset?: unknown }).offset === 'number'
-    && typeof (value as { total?: unknown }).total === 'number'
-}
-
 function isBot(value: unknown): value is BotsBot {
   return !!value && typeof value === 'object'
 }
@@ -158,28 +141,10 @@ function isBotCreateStreamEvent(value: unknown): value is BotCreateStreamEvent {
   if (!value || typeof value !== 'object') return false
 
   const event = value as Record<string, unknown>
-  switch (event.type) {
-    case 'bot_created':
-    case 'ready':
-      return isBot(event.bot)
-    case 'pulling':
-      return typeof event.image === 'string'
-    case 'pull_progress':
-      return Array.isArray(event.layers) && event.layers.every(isLayerStatus)
-    case 'pull_skipped':
-    case 'pull_delegated':
-      return typeof event.image === 'string'
-        && (event.message === undefined || typeof event.message === 'string')
-    case 'creating':
-    case 'restoring':
-      return true
-    case 'complete':
-      return !!event.container && typeof event.container === 'object'
-    case 'error':
-      return isSSEErrorEvent(event)
-    default:
-      return false
+  if (event.type === 'bot_created' || event.type === 'ready') {
+    return isBot(event.bot)
   }
+  return isContainerCreateStreamEvent(value)
 }
 
 function toError(error: unknown): Error {
@@ -191,44 +156,22 @@ function toError(error: unknown): Error {
 export async function postBotsStream(
   options: Options<PostBotsData>,
 ): Promise<BotCreateStreamResult> {
-  let streamError: unknown
-
   const { throwOnError: _throwOnError, ...rest } = options
-  const result = await client.sse.post<BotCreateStreamEvent>({
-    url: '/bots',
-    ...rest,
-    headers: {
-      ...options.headers as Record<string, string>,
-      Accept: 'text/event-stream',
-      'Content-Type': 'application/json',
-    },
-    fetch: fetchSSEProblem,
-    onSseError: (error) => {
-      streamError = error
-    },
-    responseValidator: async (data) => {
-      if (!isBotCreateStreamEvent(data)) {
-        throw new Error('Invalid bot create stream event')
-      }
-    },
-    sseMaxRetryAttempts: 1,
+  return openJsonSseStream<BotCreateStreamEvent>({
+    signal: options.signal,
+    invalidEventMessage: 'Invalid bot create stream event',
+    failureMessage: 'Bot create stream failed',
+    isEvent: isBotCreateStreamEvent,
+    open: request =>
+      client.sse.post<BotCreateStreamEvent>({
+        url: '/bots',
+        ...rest,
+        ...request,
+        headers: {
+          ...options.headers as Record<string, string>,
+          ...request.headers,
+          'Content-Type': 'application/json',
+        },
+      }),
   })
-
-  return {
-    stream: (async function* () {
-      for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
-        if (!isBotCreateStreamEvent(event)) {
-          throw new Error('Invalid bot create stream event')
-        }
-        streamError = undefined
-        yield event.type === 'error'
-          ? localizeSSEErrorEvent(event)
-          : event
-      }
-
-      if (streamError) {
-        throw normalizeSSEFailure(streamError, 'Bot create stream failed')
-      }
-    })(),
-  }
 }
