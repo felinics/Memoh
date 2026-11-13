@@ -270,6 +270,20 @@ func (b *MemoryBackend) Load(ctx context.Context, key Key) (Snapshot, bool, erro
 	return cloned, true, err
 }
 
+func (b *MemoryBackend) LoadCursor(ctx context.Context, key Key) (Cursor, bool, error) {
+	if err := contextError(ctx); err != nil {
+		return Cursor{}, false, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.purgeExpiredLocked(time.Now())
+	snapshot, ok := b.snapshots[key.String()]
+	if !ok {
+		return Cursor{}, false, nil
+	}
+	return snapshot.cursor(), true, nil
+}
+
 func (b *MemoryBackend) Update(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error) {
 	if update == nil {
 		return Snapshot{}, false, errors.New("snapshot update is required")
@@ -467,8 +481,16 @@ func cloneUIMessages(messages []chatview.UIMessage) ([]chatview.UIMessage, error
 				}
 			}
 		}
-		if err := cloneJSON(messages[i].Attachments, &message.Attachments); err != nil {
-			return nil, err
+		if messages[i].Attachments != nil {
+			message.Attachments = make([]chatview.UIAttachment, len(messages[i].Attachments))
+			for j, attachment := range messages[i].Attachments {
+				metadata, err := cloneJSONValue(attachment.Metadata)
+				if err != nil {
+					return nil, err
+				}
+				attachment.Metadata, _ = metadata.(map[string]any)
+				message.Attachments[j] = attachment
+			}
 		}
 		if messages[i].Approval != nil {
 			approval := *messages[i].Approval
@@ -490,15 +512,51 @@ func cloneUIMessages(messages []chatview.UIMessage) ([]chatview.UIMessage, error
 	return out, nil
 }
 
+// cloneJSONValue returns what a JSON round trip of value would, without the
+// round trip when value is already a decoded JSON tree. Tool inputs, outputs
+// and progress are such trees and are the bulk of a run's snapshot, so this is
+// what keeps isolating a snapshot proportional to its size rather than to its
+// encoding cost. Anything else (a typed value a producer handed over) still
+// goes through JSON, which is what gives the copy JSON's types.
 func cloneJSONValue(value any) (any, error) {
-	if value == nil {
+	switch value := value.(type) {
+	case nil:
 		return nil, nil
+	case string, bool, float64:
+		return value, nil
+	case map[string]any:
+		if value == nil {
+			return nil, nil
+		}
+		out := make(map[string]any, len(value))
+		for key, item := range value {
+			cloned, err := cloneJSONValue(item)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = cloned
+		}
+		return out, nil
+	case []any:
+		if value == nil {
+			return nil, nil
+		}
+		out := make([]any, len(value))
+		for i, item := range value {
+			cloned, err := cloneJSONValue(item)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = cloned
+		}
+		return out, nil
+	default:
+		var out any
+		if err := cloneJSON(value, &out); err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
-	var out any
-	if err := cloneJSON(value, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (b *MemoryBackend) purgeExpiredLocked(now time.Time) {

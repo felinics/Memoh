@@ -1334,6 +1334,7 @@ func TestLocalRuntimeDoesNotUseOwnerLeases(t *testing.T) {
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{Type: native.EventTextDelta, Delta: "still running"}); err != nil {
 		t.Fatalf("handle local event after lease TTL: %v", err)
 	}
+	commitHeldRunOutput(t, manager, handle)
 	snapshot, err := manager.Snapshot(context.Background(), testBotID, "session-local-no-lease")
 	if err != nil {
 		t.Fatalf("load local snapshot: %v", err)
@@ -1364,6 +1365,10 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 	t.Run("recovers subscriber buffer overflow", func(t *testing.T) {
 		t.Parallel()
 		runRuntimeManagerSignalsSubscriberOverflowContract(t, suite)
+	})
+	t.Run("stores the cursor of every snapshot write", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeBackendCursorContract(t, suite)
 	})
 	t.Run("keeps errored streams errored when abort terminal follows", func(t *testing.T) {
 		t.Parallel()
@@ -2417,6 +2422,8 @@ func runRuntimeManagerCancelsExecutionAfterOwnershipLossContract(t *testing.T, s
 		t.Fatalf("start run: %v", err)
 	}
 
+	// A successor can only claim the run once the old owner's ref is gone; the
+	// ref is the lease, so its removal is what the old owner's renewal sees.
 	if _, changed, err := backend.Update(context.Background(), Key{BotID: testBotID, SessionID: testSessionID}, func(snapshot Snapshot, ok bool) (Snapshot, bool, error) {
 		if !ok || snapshot.CurrentRunView == nil {
 			return snapshot, false, errors.New("active run is missing")
@@ -2425,6 +2432,11 @@ func runRuntimeManagerCancelsExecutionAfterOwnershipLossContract(t *testing.T, s
 		return snapshot, true, nil
 	}); err != nil || !changed {
 		t.Fatalf("replace runtime owner = changed:%v err:%v", changed, err)
+	}
+	if deleted, err := backend.DeleteRunRef(context.Background(), RunRef{
+		BotID: testBotID, SessionID: testSessionID, RunID: testRunID, OwnerID: "owner-before-takeover", Generation: handle.Generation,
+	}); err != nil || !deleted {
+		t.Fatalf("remove superseded run ref = deleted:%v err:%v", deleted, err)
 	}
 
 	select {
@@ -4118,6 +4130,7 @@ func runRuntimeManagerRetryDiscardsAttemptOutputContract(t *testing.T, suite run
 	}); err != nil {
 		t.Fatalf("handle text event: %v", err)
 	}
+	commitHeldRunOutput(t, manager, handle)
 	if streamed, err := manager.Snapshot(context.Background(), testBotID, testSessionID); err != nil || streamed.CurrentRunView == nil || len(streamed.CurrentRunView.Messages) == 0 {
 		t.Fatalf("run before retry = %#v, %v; want the attempt's partial output", streamed.CurrentRunView, err)
 	}

@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -71,6 +72,38 @@ func TestMemoryBackendRejectsUnserializableSnapshotWithoutCorruptingState(t *tes
 	}
 	if snapshot.Seq != 1 || snapshot.CurrentRunView != nil {
 		t.Fatalf("snapshot corrupted after rejected update: %#v", snapshot)
+	}
+}
+
+func TestCloneJSONValueMatchesAJSONRoundTrip(t *testing.T) {
+	type typedLeaf struct {
+		Count int `json:"count"`
+	}
+	source := map[string]any{
+		"text":    "body",
+		"ok":      true,
+		"ratio":   0.5,
+		"count":   3,
+		"missing": nil,
+		"nil_map": map[string]any(nil),
+		"lines":   []any{map[string]any{"line": float64(1)}, "two", []any{false}},
+		"typed":   typedLeaf{Count: 7},
+	}
+	cloned, err := cloneJSONValue(source)
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	var want any
+	if err := cloneJSON(source, &want); err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if !reflect.DeepEqual(cloned, want) {
+		t.Fatalf("clone = %#v, want the JSON round trip %#v", cloned, want)
+	}
+
+	cloned.(map[string]any)["lines"].([]any)[0].(map[string]any)["line"] = float64(9)
+	if source["lines"].([]any)[0].(map[string]any)["line"] != float64(1) {
+		t.Fatal("mutating the clone changed the source tree")
 	}
 }
 
