@@ -35,7 +35,7 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: '24.22.1'
           registry-url: https://registry.npmjs.org/
 
       - run: pnpm dlx changelogithub
@@ -165,7 +165,7 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: '24.22.1'
           cache: pnpm
           registry-url: https://registry.npmjs.org/
       - name: Install JS dependencies
@@ -230,7 +230,7 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: '24.22.1'
           cache: pnpm
           registry-url: https://registry.npmjs.org/
       - name: Install JS dependencies
