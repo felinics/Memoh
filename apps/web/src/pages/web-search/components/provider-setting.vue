@@ -37,7 +37,7 @@
             </template>
           </ConfirmPopover>
           <Switch
-            :model-value="curProvider?.enable ?? true"
+            :model-value="curProvider?.id ? (curProvider.enable ?? true) : (curProvider?.enable ?? false)"
             :disabled="enableLoading || editLoading"
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
@@ -342,11 +342,14 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
         body: data,
         throwOnError: true,
       })
+      const updated = result ?? { ...created, ...data, id: created.id }
       if (curProvider.value?.id === created.id) {
         markNameClean(submittedName)
         markConfigClean(submittedConfig)
+        curProvider.value = updated
       }
-      return result ?? { ...created, ...data, id: created.id }
+      emit('materialized', updated)
+      return updated
     }
     const { data: result } = await putSearchProvidersById({
       path: { id: targetId },
@@ -356,6 +359,12 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
     if (providerIdentity(curProvider.value) === targetIdentity) {
       markNameClean(submittedName)
       markConfigClean(submittedConfig)
+      if (result) {
+        curProvider.value = result
+      }
+    }
+    if (result) {
+      emit('materialized', result)
     }
     return result
   },
@@ -409,10 +418,33 @@ async function materializeProvider(data: SearchprovidersCreateRequest) {
 
 const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
-    if (!curProviderId.value) return
-    await deleteSearchProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
+    const targetId = curProviderId.value
+    if (!targetId) return null
+    const targetProvider = curProvider.value?.provider
+    await deleteSearchProvidersById({ path: { id: targetId }, throwOnError: true })
+    return { id: targetId, provider: targetProvider }
   },
-  onSuccess: () => {
+  onSuccess: (deleted) => {
+    if (!deleted) return
+    const currentList = queryCache.getQueryData<SearchprovidersGetResponse[]>(['search-providers'])
+    if (Array.isArray(currentList)) {
+      queryCache.setQueryData(
+        ['search-providers'],
+        currentList.filter(item => item.id !== deleted.id),
+      )
+    }
+    const meta = (metaData.value as SearchprovidersProviderMeta[] | undefined)
+      ?.find(item => item.provider === deleted.provider)
+    const resetEntry: SearchprovidersGetResponse = {
+      name: meta?.display_name ?? (deleted.provider ? t(`webSearch.providerNames.${deleted.provider}`, deleted.provider) : ''),
+      provider: deleted.provider,
+      enable: false,
+      config: providerConfigDefaults(meta?.config_schema),
+    }
+    if (curProvider.value?.id === deleted.id) {
+      curProvider.value = resetEntry
+    }
+    emit('materialized', resetEntry)
     toast.success(t('webSearch.deleteSuccess'))
   },
   onError: (error) => {
