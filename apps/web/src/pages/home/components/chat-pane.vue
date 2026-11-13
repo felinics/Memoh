@@ -1519,7 +1519,14 @@ const activeSessionSummaryFailed = computed(() =>
   ),
 )
 const composerReadOnly = computed(() => activeChatReadOnly.value && !activeSessionSummaryUnresolved.value)
-const retryingSessionSummary = ref(false)
+const activeSessionKey = computed(() => {
+  const { botId, sessionId } = paneTarget.value
+  return botId && sessionId ? `${botId}\0${sessionId}` : ''
+})
+const retryingSessionSummaryKeys = reactive(new Set<string>())
+const retryingSessionSummary = computed(() =>
+  Boolean(activeSessionKey.value && retryingSessionSummaryKeys.has(activeSessionKey.value)),
+)
 /** Kept-alive panes behind settings, loading or failed transcripts/summaries, and inactive splits are not readers. */
 const canReadSession = computed(() => isActive.value && isVisible.value
   && !loadingMessages.value && !loadingChats.value
@@ -1529,27 +1536,32 @@ useSessionViewing(computed(() => props.sessionId ?? null), canReadSession)
 
 async function retryActiveSessionSummary() {
   const { botId, sessionId } = paneTarget.value
-  if (!botId || !sessionId || retryingSessionSummary.value) return
-  retryingSessionSummary.value = true
+  const key = activeSessionKey.value
+  if (!botId || !sessionId || !key || retryingSessionSummaryKeys.has(key)) return
+  retryingSessionSummaryKeys.add(key)
   try {
     await chatStore.ensureVisibleSessionSummary(botId, sessionId)
   } finally {
-    retryingSessionSummary.value = false
+    retryingSessionSummaryKeys.delete(key)
   }
 }
-const retryingInitialLoad = ref(false)
+const retryingInitialLoadKeys = reactive(new Set<string>())
+const retryingInitialLoad = computed(() =>
+  Boolean(activeSessionKey.value && retryingInitialLoadKeys.has(activeSessionKey.value)),
+)
 
 async function retryInitialLoad() {
   const { botId, sessionId } = paneTarget.value
-  if (!botId || !sessionId || retryingInitialLoad.value) return
-  retryingInitialLoad.value = true
+  const key = activeSessionKey.value
+  if (!botId || !sessionId || !key || retryingInitialLoadKeys.has(key)) return
+  retryingInitialLoadKeys.add(key)
   try {
-    await paneView.value.transcript.refreshCurrentSession(botId, sessionId)
+    await chatStore.retryInitialSessionLoad(botId, sessionId)
   } catch (error) {
     // The notice stays up: it only clears once history is applied.
     console.error('Failed to load session messages:', error)
   } finally {
-    retryingInitialLoad.value = false
+    retryingInitialLoadKeys.delete(key)
   }
 }
 const activeChatCanFork = computed(() => chatStore.chatCanForkFor(paneTarget.value))

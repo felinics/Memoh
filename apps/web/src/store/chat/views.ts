@@ -183,6 +183,16 @@ export function createChatViews(deps: ChatViewsDeps) {
       view.transcript.applyRuntimeTranscript(runtimeTranscript)
     })
   }
+  async function retryInitialSessionLoad(botId: string, sessionId: string) {
+    const resolvedBotId = botId.trim()
+    const resolvedSessionId = sessionId.trim()
+    if (!resolvedBotId || !resolvedSessionId) return
+    const transcript = sessionTranscript(resolvedBotId, resolvedSessionId)
+    await transcript.refreshCurrentSession(resolvedBotId, resolvedSessionId, () => {
+      const runtimeTranscript = runtimeProjectionProbe(resolvedSessionId)?.transcript
+      if (runtimeTranscript) transcript.applyRuntimeTranscript(runtimeTranscript)
+    })
+  }
   async function loadInitialMessages(
     botId: string,
     sessionId: string,
@@ -518,6 +528,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     markHistoryEmpty,
     refreshCurrentSession,
     resyncRuntimeTranscript,
+    retryInitialSessionLoad,
     loadInitialMessages,
     fetchSessionWindow,
     loadOlderMessages,
