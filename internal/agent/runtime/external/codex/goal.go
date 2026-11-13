@@ -41,12 +41,13 @@ func (d *Driver) Goal(ctx context.Context, input external.PromptInput) (*externa
 	if input.ThreadID == "" {
 		return nil, nil
 	}
-	if external.MetadataString(input.RuntimeMetadata, metadataThreadIDKey) == "" && d.peekServer(input.BotID, input.BotAgentID) == nil {
+	// The chat page polls this every few seconds. Reading it must neither
+	// start Codex nor keep it running: only a running app-server is asked, and
+	// asking it does not count as use. With none running there is no goal
+	// being worked on to show.
+	srv, release := d.observeServer(input.BotID, input.BotAgentID)
+	if srv == nil {
 		return nil, nil
-	}
-	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
-	if err != nil {
-		return nil, err
 	}
 	defer release()
 	id := srv.goalThreadID(input)

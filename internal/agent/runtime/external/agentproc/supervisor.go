@@ -7,7 +7,9 @@
 // The rules:
 //
 //   - Every use leases the key's process and releases it when done. A leased
-//     process is never closed for idleness.
+//     process is never closed for idleness. A read that observes a running
+//     process (Observe) holds it the same way but is not use: it neither
+//     starts a process nor resets its idle time.
 //   - A lease names the fingerprint of the configuration it would start a
 //     process from. A live process started from another one is retired: it
 //     takes no new leases and closes when its last lease is released.
@@ -254,6 +256,30 @@ func (s *Supervisor) Peek(key Key) Process {
 		return sl.current.proc
 	}
 	return nil
+}
+
+// Observe leases the key's current live process for a read without starting
+// one and without counting as use: idle closing waits for the release, but the
+// process's idle time keeps running from its last real use. A page polling a
+// process's state must not keep it alive, and must not start one to ask. It
+// reports false when no live process serves the key.
+func (s *Supervisor) Observe(key Key) (Process, func(), bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sl := s.slots[key]
+	if sl == nil || sl.current == nil || !sl.current.serving() {
+		return nil, nil, false
+	}
+	g := sl.current
+	g.refs++
+	return g.proc, sync.OnceFunc(func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		g.refs--
+		if g.refs == 0 && g.state == genRetired {
+			s.closeLocked(g)
+		}
+	}), true
 }
 
 // MarkBroken retires proc if it is still the key's current process.
