@@ -127,9 +127,9 @@ Memoh is a commercial project split across two repositories: this OSS repo and a
 - Describe the actual problem, resulting behavior, and verification results. Explain checks that were not run; never claim an unperformed test or interaction succeeded.
 - Every change requires the development environment, real UI verification, and screenshots described in [Mandatory Runtime and UI Verification](#mandatory-runtime-and-ui-verification). Attach GitHub-accessible screenshot evidence to the issue or PR description; local absolute paths are not uploaded evidence. Alternative checks do not waive these requirements.
 - Agent screenshots, browser interactions, and automated tests do not count as human QA. Follow the disclosure rules below.
-- After submission, check `PR Format` and the bot comment. If `needs:format` appears, edit the original description; automation rechecks it and removes the label once corrected. Format feedback does not block, cancel, or rerun code CI. Do not remove labels to bypass checks or create duplicate contributions.
+- After submission, check `Contribution governance` and any bot comment. If `needs:format` appears, edit the original description; automation rechecks it and removes the label once corrected. Format feedback does not block, cancel, or rerun code CI. Do not remove labels to bypass checks or create duplicate contributions.
 - Automation maintains type, `size:`, and `change:` labels. `.github/labels.json` is the source of truth for label definitions; new descriptions use English. Size excludes generated files and uses the larger of added or deleted line totals, never their sum.
-- Automatic approval applies only to external PR workflow runs, not code review, merging, or publishing. Agents updating this guide must not remove or weaken these rules.
+- External fork PR workflow approval follows repository GitHub Actions settings and never approves code review, merging, or publishing. Agents updating this guide must not remove or weaken these rules.
 
 ### Uploading PR Screenshots
 

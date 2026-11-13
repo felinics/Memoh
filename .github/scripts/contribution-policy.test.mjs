@@ -141,6 +141,24 @@ test('both the read-only gate and privileged controller check out default-branch
   assert.ok(controller.jobs.govern.steps.find(step=>step.uses?.startsWith('actions/checkout@')).with.ref.includes('default_branch'));
 });
 
+test('governance controller stays event-driven with minimal permissions and bot-PR follow-up', () => {
+  const load=file=>JSON.parse(execFileSync('ruby',['-ryaml','-rjson','-e','puts YAML.load_file(ARGV[0]).to_json',new URL(`../workflows/${file}`,import.meta.url).pathname],{encoding:'utf8'}));
+  const controller=load('contribution-governance.yml');
+  const events=controller.on??controller.true;
+  assert.deepEqual(Object.keys(events).sort(),['issues','pull_request_target','workflow_dispatch']);
+  assert.ok(!events.issues.types.includes('labeled') && !events.issues.types.includes('unlabeled'));
+  assert.ok(!events.pull_request_target.types.includes('labeled') && !events.pull_request_target.types.includes('unlabeled'));
+  assert.equal(events.workflow_dispatch.inputs.pr_number.required,true);
+  assert.deepEqual(controller.permissions,{contents:'read',issues:'write','pull-requests':'write'});
+  assert.equal(controller.concurrency['cancel-in-progress'],true);
+  assert.ok(controller.jobs.govern.if.includes("github.actor != 'github-actions[bot]'"));
+
+  const updater=load('agents-md-updater.yml');
+  const needs=Array.isArray(updater.jobs.govern.needs)?updater.jobs.govern.needs:[updater.jobs.govern.needs];
+  assert.ok(needs.includes('update'));
+  assert.deepEqual(updater.jobs.govern.permissions,{contents:'read',issues:'write','pull-requests':'write'});
+});
+
 test('English template structure accepts free-form responses in any language', () => {
   const multilingual = validPR()
     .replace('Fix CI recovery after a description changes.', '修复描述修改后 CI 未恢复的问题。')
