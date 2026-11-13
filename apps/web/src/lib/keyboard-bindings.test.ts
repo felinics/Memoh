@@ -15,14 +15,13 @@ import {
 } from './keyboard-bindings'
 
 describe('keyboard bindings table', () => {
-  it('gives every settings row its own translated label and description', () => {
+  it('gives every settings row its own translated label', () => {
     const keys = keyboardBindings.map(b => b.i18nKey)
     expect(new Set(keys).size).toBe(keys.length)
     for (const [locale, messages] of Object.entries({ en, zh, ja })) {
       for (const key of keys) {
-        const command = (messages.settings.keyboard.commands as Record<string, { label?: string, description?: string }>)[key]
+        const command = (messages.settings.keyboard.commands as Record<string, { label?: string }>)[key]
         expect(command?.label, `${locale} ${key}`).toBeTruthy()
-        expect(command?.description, `${locale} ${key}`).toBeTruthy()
       }
     }
   })

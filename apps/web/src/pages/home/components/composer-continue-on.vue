@@ -22,6 +22,7 @@
         v-if="trigger === 'text'"
         type="button"
         variant="quiet"
+        tone="muted"
         size="sm"
         :disabled="locked || boundToFolder"
         :title="currentName"

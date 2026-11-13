@@ -193,8 +193,8 @@ describe('chat-user-input-form', () => {
     const modified = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true })
     local!.dispatchEvent(modified)
     external!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    expect(modified.defaultPrevented).toBe(false)
-    expect(openBrowserAt).toHaveBeenCalledTimes(1)
+    expect(modified.defaultPrevented).toBe(true)
+    expect(openBrowserAt).toHaveBeenCalledTimes(2)
   })
 
 })

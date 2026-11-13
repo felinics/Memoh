@@ -79,7 +79,7 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: '24.22.1'
           cache: pnpm
       - name: UI contract guard
         run: node scripts/check-ui-contract.mjs
@@ -104,10 +104,13 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: '24.22.1'
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Build runtime package
+        # apps/desktop tests import @memohai/runtime, whose dist is not committed.
+        run: pnpm --filter @memohai/runtime build
       - name: Test commit hook selection and execution
         run: node --test scripts/hook-checks.test.mjs
       - name: Test release scripts
@@ -116,12 +119,10 @@ jobs:
         run: node --test scripts/display-prepare-lock.test.mjs
       - name: Test settings row guard
         run: node --test scripts/check-settings-rows.test.mjs
-      - name: Test display input and clipboard regressions
-        run: pnpm test --run --testTimeout=15000 apps/web/src/composables/display-text-input.test.ts apps/web/src/composables/useDisplayClipboard.test.ts apps/web/src/composables/display-clipboard.test.ts apps/web/src/composables/useBotDisplayConnection.test.ts apps/web/src/utils/api-error.test.ts apps/web/src/composables/api/sse-error.test.ts
-      - name: Test server entrypoint
-        run: pnpm test --run --project docker
       - name: Run Vitest
-        run: pnpm test --run --testTimeout=15000 apps/web/src/composables/api/useChat.ws.test.ts apps/web/src/store/chat-list.test.ts apps/web/src/components/file-manager/file-viewer.save.test.ts
+        # Runs every project (web, desktop, runtime, docker). The timeout is generous
+        # because a full run cold-loads every module on a small runner.
+        run: pnpm test --run --testTimeout=60000
       - name: Typecheck SDK
         run: pnpm --filter @memohai/sdk typecheck
       - name: Typecheck Web
