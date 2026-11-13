@@ -57,6 +57,13 @@ const defaultTransport: ChatRealtimeTransport = {
   createRetryingStream: useRetryingStream,
 }
 
+// Upper bound on how long fetched history waits for the first runtime
+// snapshot. The wait exists so Vue never paints the database-only state, but
+// a socket that cannot connect or a rejected subscription never sends that
+// snapshot. Past this bound the history is shown on its own and a late
+// snapshot is applied through the prepared path, like one after a reconnect.
+export const INITIAL_SNAPSHOT_WAIT_MS = 8_000
+
 function isRuntimeEvent(event: UIStreamEvent): event is UIRuntimeEvent {
   return event.type === 'runtime_snapshot'
     || event.type === 'runtime_delta'
@@ -220,15 +227,21 @@ export function createChatRealtimeController(
     if (!bid || !sid) return
     const key = sessionRuntimeKey(bid, sid)
     if (sessionRuntimeConnections.has(key)) return
-    let resolveInitialSnapshot!: () => void
+    let resolveReady!: () => void
     const initialSnapshotReady = new Promise<void>((resolve) => {
-      resolveInitialSnapshot = resolve
+      resolveReady = resolve
     })
+    const settleInitialSnapshot = () => {
+      clearTimeout(waitTimer)
+      connection.resolveInitialSnapshot = null
+      resolveReady()
+    }
+    const waitTimer = setTimeout(settleInitialSnapshot, INITIAL_SNAPSHOT_WAIT_MS)
     const connection: SessionRuntimeConnection = {
       prepared: false,
       pending: [],
       initialSnapshotReady,
-      resolveInitialSnapshot,
+      resolveInitialSnapshot: settleInitialSnapshot,
     }
     sessionRuntimeConnections.set(key, connection)
     runtimeClient.subscribe(sid)
@@ -248,9 +261,16 @@ export function createChatRealtimeController(
       applyHistory()
       applyBufferedProjections()
     }
-    void callbacks.prepareSessionRuntime(bid, sid, commitInitialHistory)
+    let preparation: Promise<void>
+    try {
+      preparation = callbacks.prepareSessionRuntime(bid, sid, commitInitialHistory)
+    } catch (error) {
+      preparation = Promise.reject(error)
+    }
+    void preparation
       .catch(error => console.error('Failed to load session messages:', error))
       .finally(() => {
+        settleInitialSnapshot()
         if (sessionRuntimeConnections.get(key) !== connection) return
         connection.prepared = true
         applyBufferedProjections()

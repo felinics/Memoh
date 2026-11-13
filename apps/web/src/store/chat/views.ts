@@ -183,6 +183,16 @@ export function createChatViews(deps: ChatViewsDeps) {
       view.transcript.applyRuntimeTranscript(runtimeTranscript)
     })
   }
+  async function retryInitialSessionLoad(botId: string, sessionId: string) {
+    const resolvedBotId = botId.trim()
+    const resolvedSessionId = sessionId.trim()
+    if (!resolvedBotId || !resolvedSessionId) return
+    const transcript = sessionTranscript(resolvedBotId, resolvedSessionId)
+    await transcript.refreshCurrentSession(resolvedBotId, resolvedSessionId, () => {
+      const runtimeTranscript = runtimeProjectionProbe(resolvedSessionId)?.transcript
+      if (runtimeTranscript) transcript.applyRuntimeTranscript(runtimeTranscript)
+    })
+  }
   async function loadInitialMessages(
     botId: string,
     sessionId: string,
@@ -201,12 +211,25 @@ export function createChatViews(deps: ChatViewsDeps) {
     const clientBorn = view.clientBorn
     view.clientBorn = false
     const mask = !clientBorn && (
-      view.transcript.messages.length === 0
+      !view.initialized
+      || view.transcript.messages.length === 0
       || view.staleWhileHidden
       || !chatViews.isActivityStreamCovered(botId)
     )
-    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, { mask })
-    view.initialized = true
+    view.initialLoadFailed.value = false
+    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, {
+      mask,
+      onError: () => {
+        // Set before loadingMessages clears in loadInitialMessages's finally so
+        // watchers (such as useSessionViewing) never observe an unmasked,
+        // non-failed frame on a failed cold open. Cached (initialized) and
+        // client-born views keep their turns unflagged; an uninitialized server
+        // session still lacks its history even if a live runtime turn arrived.
+        if (!clientBorn && !view.initialized) {
+          view.initialLoadFailed.value = true
+        }
+      },
+    })
   }
   const fetchSessionWindow = (botId: string, sessionId: string) =>
     sessionTranscript(botId, sessionId).fetchSessionWindow(botId, sessionId)
@@ -505,6 +528,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     markHistoryEmpty,
     refreshCurrentSession,
     resyncRuntimeTranscript,
+    retryInitialSessionLoad,
     loadInitialMessages,
     fetchSessionWindow,
     loadOlderMessages,
