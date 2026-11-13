@@ -709,8 +709,8 @@ const onSubmit = form.handleSubmit(async (value) => {
 
   try {
     await props.saveProvider(payload)
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  } catch {
+    // Error toast is emitted by model-setting's saveProvider mutation onError.
     return
   }
   // The saved values are the new server baseline until the refetch lands;

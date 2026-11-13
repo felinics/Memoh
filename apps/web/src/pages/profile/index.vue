@@ -18,6 +18,21 @@
         </SettingsSection>
       </template>
 
+      <SettingsSection v-else-if="!hasLoaded">
+        <SettingsRow
+          :label="$t('settings.loadUserFailed')"
+          :description="loadErrorMessage"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            @click="loadPageData"
+          >
+            {{ $t('common.retry') }}
+          </Button>
+        </SettingsRow>
+      </SettingsSection>
+
       <template v-else>
         <!-- Card 1 · Profile: avatar + display name (hover-to-edit) only -->
         <SettingsSection>
@@ -97,10 +112,7 @@
             </div>
           </SettingsRow>
 
-          <SettingsRow
-            v-if="canSignOut"
-            :label="$t('auth.logout')"
-          >
+          <SettingsRow :label="$t('auth.logout')">
             <ConfirmPopover
               :message="$t('auth.logoutConfirm')"
               :cancel-text="$t('common.cancel')"
@@ -152,10 +164,13 @@ const router = useRouter()
 const userStore = useUserStore()
 const { userInfo, exitLogin, patchUserInfo } = userStore
 
-const canSignOut = true
-
 // ---- User data ----
 const account = ref<UserAccount | null>(null)
+const hasLoaded = ref(false)
+const loadError = ref<unknown>(null)
+const loadErrorMessage = computed(() =>
+  loadError.value ? resolveApiErrorMessage(loadError.value, t('common.loadFailed')) : t('common.loadFailed'),
+)
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -219,10 +234,14 @@ onMounted(() => {
 
 async function loadPageData() {
   loadingInitial.value = true
+  loadError.value = null
   try {
     await loadMyAccount()
-  } catch {
-    toast.error(t('settings.loadUserFailed'))
+    hasLoaded.value = true
+  } catch (error) {
+    hasLoaded.value = false
+    loadError.value = error
+    toast.error(resolveApiErrorMessage(error, t('settings.loadUserFailed')))
   } finally {
     loadingInitial.value = false
   }
@@ -260,11 +279,13 @@ async function loadMyAccount() {
 }
 
 function onTimezoneChange(value: string | number | undefined) {
+  if (!hasLoaded.value) return
   profileForm.timezone = String(value || 'UTC')
   void autoSaveProfile()
 }
 
 function onTitleModelChange(value: string | undefined) {
+  if (!hasLoaded.value) return
   profileForm.title_model_id = value || ''
   void autoSaveProfile()
 }
@@ -277,6 +298,7 @@ let saveToken = 0
 // Silent auto-save: triggered on name confirm, preference changes, and avatar apply.
 // Skips the request when nothing actually changed; only surfaces errors.
 async function autoSaveProfile() {
+  if (!hasLoaded.value) return
   const body: AccountsUpdateProfileRequest = {
     display_name: profileForm.display_name.trim(),
     avatar_url: profileForm.avatar_url.trim(),

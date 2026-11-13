@@ -78,6 +78,7 @@
     "searchTimezone": "搜索时区",
     "noTimezoneFound": "未找到时区",
     "deleteSuccess": "删除成功",
+    "deleteFailed": "删除失败",
     "enterContent": "请输入内容...",
     "noData": "暂无数据",
     "of": " / ",

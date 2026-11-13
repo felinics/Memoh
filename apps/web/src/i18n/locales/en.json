@@ -78,6 +78,7 @@
     "searchTimezone": "Search timezone",
     "noTimezoneFound": "No timezone found",
     "deleteSuccess": "Deleted successfully",
+    "deleteFailed": "Failed to delete",
     "enterContent": "Enter content here...",
     "noData": "No data",
     "of": "of",
