@@ -31,24 +31,53 @@
       </Button>
     </template>
 
-    <div class="space-y-8">
+    <SettingsSection v-if="loadFailed">
+      <SettingsRow
+        :label="$t('bots.hooks.loadFailed')"
+        :description="resolveApiErrorMessage(loadError, $t('common.loadFailed'))"
+      >
+        <LoadingButton
+          variant="outline"
+          size="sm"
+          :loading="loading"
+          @click="void reload()"
+        >
+          {{ $t('common.retry') }}
+        </LoadingButton>
+      </SettingsRow>
+    </SettingsSection>
+
+    <div
+      v-else
+      class="space-y-8"
+    >
       <SettingsSection :title="$t('bots.hooks.statusSection')">
         <SettingsRow
           :label="$t('bots.hooks.filePath')"
           :description="configPath"
         >
+          <Skeleton
+            v-if="!configExists"
+            class="h-5 w-16 rounded-sm"
+          />
           <Badge
+            v-else
             variant="outline"
             class="rounded-[var(--radius-menu-shell)]"
           >
-            {{ configExists ? $t('bots.hooks.present') : $t('bots.hooks.missing') }}
+            {{ $t('bots.hooks.present') }}
           </Badge>
         </SettingsRow>
         <SettingsRow
           :label="$t('common.status')"
-          :description="statusDescription"
+          :description="configExists ? statusDescription : undefined"
         >
+          <Skeleton
+            v-if="!configExists"
+            class="h-5 w-16 rounded-sm"
+          />
           <Badge
+            v-else
             :variant="configEnabled ? 'default' : 'secondary'"
             class="rounded-[var(--radius-menu-shell)]"
           >
@@ -58,7 +87,14 @@
         <SettingsRow
           :label="$t('bots.hooks.rules')"
         >
-          <div class="flex items-center gap-3 text-sm tabular-nums">
+          <Skeleton
+            v-if="!configExists"
+            class="h-4 w-10 rounded-sm"
+          />
+          <div
+            v-else
+            class="flex items-center gap-3 text-sm tabular-nums"
+          >
             <span class="text-foreground">{{ enabledHooksCount }}</span>
             <span class="text-muted-foreground">/</span>
             <span class="text-muted-foreground">{{ hooksCount }}</span>
@@ -67,7 +103,14 @@
         <SettingsRow
           :label="$t('bots.hooks.actions')"
         >
-          <span class="text-sm tabular-nums text-foreground">{{ actionsCount }}</span>
+          <Skeleton
+            v-if="!configExists"
+            class="h-4 w-6 rounded-sm"
+          />
+          <span
+            v-else
+            class="text-sm tabular-nums text-foreground"
+          >{{ actionsCount }}</span>
         </SettingsRow>
       </SettingsSection>
 
@@ -117,6 +160,7 @@
               variant="ghost"
               size="sm"
               class="h-8 gap-1.5"
+              :disabled="!configExists"
               @click="applyTemplate"
             >
               <FileJson class="size-3.5" />
@@ -124,10 +168,12 @@
             </Button>
           </div>
           <Textarea
-            v-model="editor"
+            :model-value="editor"
+            :disabled="!configExists"
             :aria-invalid="!!parseError"
             class="min-h-[24rem] resize-y font-mono text-xs leading-5"
             spellcheck="false"
+            @update:model-value="(value) => { if (configExists) editor = String(value) }"
           />
         </div>
       </SettingsSection>
@@ -197,7 +243,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useMutation, useQuery } from '@pinia/colada'
+import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
   Badge,
   Button,
@@ -219,7 +265,9 @@ import {
 } from '@memohai/sdk'
 import type { HandlersHookEventInfo } from '@memohai/sdk'
 import { SectionGroup, SettingsRow, SettingsSection } from '@felinic/ui'
+import LoadingButton from '@/components/loading-button/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useServerSyncedScalar } from '@/composables/use-server-synced-form'
 
 const props = defineProps<{
   botId: string
@@ -251,8 +299,6 @@ type HooksConfig = {
 }
 
 const editor = ref('')
-const original = ref('')
-const configExists = ref(false)
 const testEvent = ref('PreToolUse')
 const testPayload = ref(formatJSON(defaultTestPayload('PreToolUse')))
 const testResult = ref('')
@@ -269,49 +315,53 @@ const { data: eventsData, isLoading: eventsLoading } = useQuery({
   enabled: () => !!props.botId,
 })
 
-const { isLoading: loading, refetch } = useQuery({
+const queryCache = useQueryCache()
+const { data: serverConfig, error: loadError, isLoading: loading, refetch } = useQuery({
   key: () => ['bot-hooks-config', props.botId],
   query: async () => {
-    if (!props.botId) return ''
+    const botId = props.botId
+    if (!botId) return ''
     try {
       const { data } = await getBotsByBotIdContainerFsRead({
-        path: { bot_id: props.botId },
+        path: { bot_id: botId },
         query: { path: configPath },
         throwOnError: true,
       })
-      const content = data.content ?? ''
-      configExists.value = true
-      editor.value = content
-      original.value = content
-      return content
+      return data.content ?? ''
     } catch (error) {
-      if (!isNotFoundError(error)) {
-        toast.error(resolveApiErrorMessage(error, t('bots.hooks.loadFailed')))
-        const content = formatJSON(defaultHooksConfig())
-        configExists.value = false
-        editor.value = content
-        original.value = content
-        return content
-      }
+      // Only a missing file is safe to initialise. Any other failure must
+      // surface as a load error: seeding the editor here would let a later
+      // save overwrite a config that exists but could not be read.
+      if (!isNotFoundError(error)) throw error
       const content = formatJSON(emptyHooksConfig())
       await postBotsByBotIdContainerFsWrite({
-        path: { bot_id: props.botId },
+        path: { bot_id: botId },
         body: { path: configPath, content },
         throwOnError: true,
       })
-      configExists.value = true
-      editor.value = content
-      original.value = content
       return content
     }
   },
   enabled: () => !!props.botId,
 })
 
+const configExists = computed(() => serverConfig.value !== undefined)
+const loadFailed = computed(() => !!loadError.value && !configExists.value)
+
+// The query only reports what the server has; this is the single place that
+// copies it into the editor, so a background refetch cannot drop a draft.
+// Including pending/ready in the identity forces initial hydration once the
+// first server response settles, without treating background refreshes as resets.
+const { synced: savedConfig, markClean } = useServerSyncedScalar(editor, {
+  source: () => ({ botId: props.botId, content: serverConfig.value }),
+  identity: source => `${source.botId}:${source.content !== undefined ? 'ready' : 'pending'}`,
+  server: source => source.content ?? '',
+})
+
 const { mutateAsync: writeConfig, isLoading: saving } = useMutation({
-  mutation: async (content: string) => {
+  mutation: async ({ botId, content }: { botId: string, content: string }) => {
     await postBotsByBotIdContainerFsWrite({
-      path: { bot_id: props.botId },
+      path: { bot_id: botId },
       body: { path: configPath, content },
       throwOnError: true,
     })
@@ -319,14 +369,18 @@ const { mutateAsync: writeConfig, isLoading: saving } = useMutation({
 })
 
 const { mutateAsync: testHooks, isLoading: testing } = useMutation({
-  mutation: async (body: Record<string, unknown>) => {
+  mutation: async ({ botId, body }: { botId: string, body: Record<string, unknown> }) => {
     const { data } = await postBotsByBotIdHooksTest({
-      path: { bot_id: props.botId },
+      path: { bot_id: botId },
       body,
       throwOnError: true,
     })
     return data
   },
+})
+
+watch(() => props.botId, () => {
+  testResult.value = ''
 })
 
 // The server always fills `name`; the generated type marks every field optional.
@@ -346,6 +400,9 @@ watch(testEvent, (event) => {
 })
 
 const parseState = computed(() => {
+  if (!configExists.value) {
+    return { value: null, error: '' }
+  }
   try {
     return { value: JSON.parse(editor.value) as HooksConfig, error: '' }
   } catch {
@@ -360,8 +417,8 @@ const hooksCount = computed(() => hooks.value.length)
 const enabledHooksCount = computed(() => hooks.value.filter(hook => hook.enabled !== false).length)
 const actionsCount = computed(() => hooks.value.reduce((sum, hook) => sum + (Array.isArray(hook.actions) ? hook.actions.length : 0), 0))
 const configEnabled = computed(() => parsedConfig.value?.enabled !== false && !parseError.value)
-const hasChanges = computed(() => editor.value !== original.value)
-const canSave = computed(() => !!props.botId && !parseError.value && hasChanges.value)
+const hasChanges = computed(() => configExists.value && editor.value !== (savedConfig.value ?? ''))
+const canSave = computed(() => !!props.botId && configExists.value && !parseError.value && hasChanges.value)
 
 const statusDescription = computed(() => {
   if (parseError.value) return t('bots.hooks.invalidDescription')
@@ -387,17 +444,31 @@ const testPayloadError = computed(() => {
 const canRunTest = computed(() => !!props.botId && !!testEvent.value && !testPayloadError.value)
 
 async function reload() {
-  await refetch()
+  const botId = props.botId
+  const state = await refetch()
+  if (props.botId !== botId) return
+  if (state.status === 'error') {
+    // Without loaded data the failure is already shown in place.
+    if (configExists.value) toast.error(resolveApiErrorMessage(state.error, t('bots.hooks.loadFailed')))
+    return
+  }
+  // Reload is the explicit request to drop the draft; a background refetch
+  // never does.
+  editor.value = state.data ?? ''
+  markClean()
 }
 
 async function save() {
   if (!canSave.value) return
+  const botId = props.botId
   try {
     const formatted = formatJSON(JSON.parse(editor.value))
-    await writeConfig(formatted)
-    editor.value = formatted
-    original.value = formatted
-    configExists.value = true
+    await writeConfig({ botId, content: formatted })
+    queryCache.setQueryData(['bot-hooks-config', botId], formatted)
+    if (props.botId === botId) {
+      editor.value = formatted
+      markClean()
+    }
     toast.success(t('bots.hooks.saveSuccess'))
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.hooks.saveFailed')))
@@ -406,11 +477,14 @@ async function save() {
 
 async function runTest() {
   if (!canRunTest.value) return
+  const botId = props.botId
   try {
     const body = JSON.parse(testPayload.value) as Record<string, unknown>
     body.event = testEvent.value
-    const result = await testHooks(body)
-    testResult.value = formatJSON(result)
+    const result = await testHooks({ botId, body })
+    if (props.botId === botId) {
+      testResult.value = formatJSON(result)
+    }
     toast.success(t('bots.hooks.testSuccess'))
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.hooks.testFailed')))
@@ -418,6 +492,7 @@ async function runTest() {
 }
 
 function applyTemplate() {
+  if (!configExists.value) return
   editor.value = formatJSON(defaultHooksConfig())
 }
 
