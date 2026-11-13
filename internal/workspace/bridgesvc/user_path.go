@@ -39,12 +39,14 @@ type shellPathCache struct {
 	entries map[string]shellPathEntry
 }
 
-// withUserShellPath gives env the PATH the workspace user's terminal has:
-// the shell's own result (its rc files' additions first) followed by the
-// command's PATH and then the workspace's own, so a command an image puts on
-// its PATH stays reachable even for a command started on a clean environment.
+// withUserShellPath gives env the PATH the workspace user's terminal has: the
+// shell's own result (its rc files' additions first) over the PATH the
+// terminal starts from (workspacePath), then anything else the command's
+// PATH carries. A command started on a clean environment, such as an agent
+// CLI, therefore resolves names in the same order as the terminal, image
+// directories included.
 func withUserShellPath(env []string) []string {
-	seed := shellprobe.MergePaths(lastEnvValue(env, "PATH"), os.Getenv("PATH"))
+	seed := shellprobe.MergePaths(workspacePath(), lastEnvValue(env, "PATH"))
 	home := lastEnvValue(env, "HOME")
 	probeEnv := setEnvValue(append([]string(nil), env...), "PATH", seed)
 	path := seed

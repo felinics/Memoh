@@ -44,10 +44,10 @@ func TestExecEnvPutsTheUsersBinDirAheadOfTheImagePath(t *testing.T) {
 	if got := envValue(execEnv(&pb.ExecInput{}), "PATH"); got != bin+":/usr/local/go/bin:/usr/bin" {
 		t.Fatalf("PATH = %q", got)
 	}
-	// A PATH that lists it anywhere is left as it is.
-	listed := "/usr/bin:" + bin
-	if got := envValue(execEnv(&pb.ExecInput{CleanEnv: true, Env: []string{"PATH=" + listed}}), "PATH"); got != listed {
-		t.Fatalf("PATH = %q, want %q unchanged", got, listed)
+	// An image that lists it behind its own directories still gets it first,
+	// so every entry resolves names in the same order.
+	if got := envValue(execEnv(&pb.ExecInput{CleanEnv: true, Env: []string{"PATH=/opt/custom/bin:/usr/bin:" + bin}}), "PATH"); got != bin+":/opt/custom/bin:/usr/bin" {
+		t.Fatalf("PATH = %q, want the user's directory moved first", got)
 	}
 	// Not there yet: nothing to add.
 	setUserBinDir(t, filepath.Join(bin, "absent"))
@@ -64,16 +64,16 @@ func TestUserShellPathGoesAheadOfTheCommandAndImagePath(t *testing.T) {
 		if home != "/data" {
 			t.Errorf("probe HOME = %q", home)
 		}
-		if got := lastEnvValue(env, "PATH"); got != "/agent/bin:/usr/local/go/bin:/usr/bin" {
-			t.Errorf("probe seed PATH = %q", got)
+		if got := lastEnvValue(env, "PATH"); got != "/usr/local/go/bin:/usr/bin:/agent/bin" {
+			t.Errorf("probe seed PATH = %q, want the terminal's PATH, then the command's", got)
 		}
 		return "/data/.bun/bin:" + lastEnvValue(env, "PATH"), true
 	})
 
-	// An agent started on a clean environment still sees what the image puts
-	// on PATH, after what the user's shell adds.
+	// An agent started on a clean environment resolves names as the terminal
+	// does: the shell's additions, the image's PATH, then its own extras.
 	env := execEnv(&pb.ExecInput{CleanEnv: true, UserShellPath: true, Env: []string{"HOME=/data", "PATH=/agent/bin"}})
-	if got := envValue(env, "PATH"); got != "/data/.bun/bin:/agent/bin:/usr/local/go/bin:/usr/bin" {
+	if got := envValue(env, "PATH"); got != "/data/.bun/bin:/usr/local/go/bin:/usr/bin:/agent/bin" {
 		t.Fatalf("PATH = %q", got)
 	}
 	if strings.Count(strings.Join(env, "\n"), "PATH=") != 1 {
@@ -159,5 +159,25 @@ func TestUserShellPathReadsARealBashrc(t *testing.T) {
 	}
 	if time.Since(start) > 3*time.Second {
 		t.Fatalf("probe took %s", time.Since(start))
+	}
+}
+
+func TestTerminalAndAgentResolveNamesInTheSameOrder(t *testing.T) {
+	deps, bin := t.TempDir(), t.TempDir()
+	setDepsShimDir(t, deps)
+	setUserBinDir(t, bin)
+	// A custom image that puts its own directory first, ahead of a toolkit
+	// directory it shares a command name with.
+	t.Setenv("PATH", "/opt/custom/bin:/opt/memoh/toolkit/bin:/usr/bin")
+	setShellPathProbe(t, func(env []string, _ string) (string, bool) { return lastEnvValue(env, "PATH"), true })
+
+	terminal := envValue(execPTYEnv(&pb.ExecInput{Pty: true, Env: []string{"HOME=/data"}}), "PATH")
+	agent := envValue(execEnv(&pb.ExecInput{
+		CleanEnv: true, UserShellPath: true,
+		Env: []string{"HOME=/data", "PATH=" + deps + ":" + bin + ":/opt/memoh/toolkit/bin:/usr/bin"},
+	}), "PATH")
+	want := deps + ":" + bin + ":/opt/custom/bin:/opt/memoh/toolkit/bin:/usr/bin"
+	if terminal != want || agent != want {
+		t.Fatalf("terminal PATH = %q\nagent PATH    = %q\nwant both      %q", terminal, agent, want)
 	}
 }

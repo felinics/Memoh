@@ -725,7 +725,7 @@ func execEnv(input *pb.ExecInput) []string {
 		out = filterUnsetEnv(out, unset)
 	}
 	out = append(out, input.GetEnv()...)
-	out = ensurePathDir(out, userBinDir)
+	out = prependPathDir(out, userBinDir)
 	out = prependPathDir(out, depsShimDir)
 	if input.GetUserShellPath() && !input.GetPty() {
 		out = withUserShellPath(out)
@@ -733,32 +733,15 @@ func execEnv(input *pb.ExecInput) []string {
 	return out
 }
 
-// ensurePathDir puts dir first on the PATH entry of env when dir is an
-// existing directory that PATH does not already list anywhere.
-func ensurePathDir(env []string, dir string) []string {
-	if dir == "" {
-		return env
-	}
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return env
-	}
-	for _, entry := range strings.Split(lastEnvValue(env, "PATH"), ":") {
-		if entry == dir {
-			return env
-		}
-	}
-	return prependPathDir(env, dir)
-}
-
 func execPTYEnv(input *pb.ExecInput) []string {
 	return append(execEnv(input), "TERM=xterm-256color")
 }
 
 // prependPathDir puts dir first on the PATH entry of env when dir is an
-// existing directory. The last PATH entry is the one exec honours, so that
-// is the one rewritten; an env without PATH gets one built on
-// defaultExecPath. A PATH that already starts with dir is left alone so
-// repeated application, or a caller that did the same, never stacks copies.
+// existing directory, moving it there if PATH already lists it elsewhere, so
+// the order is the same however the PATH was put together. The last PATH
+// entry is the one exec honours, so that is the one rewritten; an env without
+// PATH gets one built on defaultExecPath.
 func prependPathDir(env []string, dir string) []string {
 	if dir == "" {
 		return env
@@ -771,13 +754,33 @@ func prependPathDir(env []string, dir string) []string {
 		if !ok || key != "PATH" {
 			continue
 		}
-		if value == dir || strings.HasPrefix(value, dir+":") {
-			return env
-		}
-		env[i] = "PATH=" + dir + ":" + value
+		env[i] = "PATH=" + pathWithDirFirst(value, dir)
 		return env
 	}
-	return append(env, "PATH="+dir+":"+defaultExecPath)
+	return append(env, "PATH="+pathWithDirFirst(defaultExecPath, dir))
+}
+
+// workspacePath is the PATH the browser terminal starts from: the
+// workspace's own (the image's), with the user's command directory and then
+// the managed shims put first.
+func workspacePath() string {
+	path := os.Getenv("PATH")
+	for _, dir := range []string{userBinDir, depsShimDir} {
+		if info, err := os.Stat(dir); dir != "" && err == nil && info.IsDir() {
+			path = pathWithDirFirst(path, dir)
+		}
+	}
+	return path
+}
+
+func pathWithDirFirst(path, dir string) string {
+	entries := []string{dir}
+	for _, entry := range strings.Split(path, ":") {
+		if entry != dir {
+			entries = append(entries, entry)
+		}
+	}
+	return strings.Join(entries, ":")
 }
 
 func filterUnsetEnv(env []string, unset []string) []string {
