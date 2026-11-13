@@ -37,7 +37,7 @@
           </ConfirmPopover>
           <Switch
             :model-value="curProvider?.enable ?? false"
-            :disabled="isNative || enableLoading"
+            :disabled="isNative || enableLoading || editLoading"
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
@@ -113,6 +113,7 @@
             form="fetch-provider-form"
             size="sm"
             :loading="editLoading"
+            :disabled="enableLoading"
           >
             {{ $t('provider.saveChanges') }}
           </LoadingButton>
@@ -340,8 +341,27 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
   mutation: async (data: FetchprovidersUpdateRequest) => {
     const targetIdentity = providerIdentity(curProvider.value)
     const targetId = curProviderId.value
+    const submittedName = data.name ?? ''
+    const submittedConfig = cloneConfigRecord({
+      ...providerConfigDefaults(currentMeta.value?.config_schema),
+      ...(data.config ?? {}),
+    })
     if (!targetId) {
-      return materializeProvider(data as FetchprovidersCreateRequest)
+      const joinedInFlight = Boolean(materializePromise)
+      const created = await materializeProvider(data as FetchprovidersCreateRequest)
+      if (!joinedInFlight || !created.id) {
+        return created
+      }
+      const { data: result } = await putFetchProvidersById({
+        path: { id: created.id },
+        body: data,
+        throwOnError: true,
+      })
+      if (curProvider.value?.id === created.id) {
+        markNameClean(submittedName)
+        markConfigClean(submittedConfig)
+      }
+      return result ?? { ...created, ...data, id: created.id }
     }
     const { data: result } = await putFetchProvidersById({
       path: { id: targetId },
@@ -349,8 +369,8 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
       throwOnError: true,
     })
     if (providerIdentity(curProvider.value) === targetIdentity) {
-      markNameClean()
-      markConfigClean()
+      markNameClean(submittedName)
+      markConfigClean(submittedConfig)
     }
     return result
   },
@@ -369,18 +389,26 @@ async function materializeProvider(data: FetchprovidersCreateRequest) {
 
   const targetProvider = data.provider ?? curProvider.value?.provider as FetchprovidersCreateRequest['provider']
   const fallbackName = curProvider.value?.name || ''
+  const submittedName = data.name?.trim() || fallbackName
+  const submittedConfig = cloneConfigRecord(data.config ?? configData)
+  const baselineConfig = cloneConfigRecord({
+    ...providerConfigDefaults(currentMeta.value?.config_schema),
+    ...submittedConfig,
+  })
   materializePromise = (async () => {
     const { data: created } = await postFetchProviders({
       body: {
-        name: data.name?.trim() || fallbackName,
+        name: submittedName,
         provider: targetProvider,
-        config: data.config ?? cloneConfigRecord(configData),
+        config: submittedConfig,
       },
       throwOnError: true,
     })
     if (!created?.id) throw new Error('fetch provider creation returned no id')
 
     if (curProvider.value?.provider === created.provider && !curProvider.value?.id) {
+      markNameClean(submittedName, `id:${created.id}`)
+      markConfigClean(baselineConfig, `id:${created.id}`)
       curProvider.value = created
     }
     emit('materialized', created)

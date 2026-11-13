@@ -331,4 +331,77 @@ describe('cross-provider switching and placeholder hydration', () => {
     expect(inputWithValue(root, 'https://draft.searx.example/search')).toBeTruthy()
     expect(inputWithValue(root, 'Bearer fresh-secret')).toBeTruthy()
   })
+
+  it('preserves edits typed while an update PUT or initial POST is in flight', async () => {
+    vi.mocked(sdk.putSearchProvidersById).mockReset()
+    vi.mocked(sdk.postSearchProviders).mockReset()
+    let resolvePut!: (res: unknown) => void
+    vi.mocked(sdk.putSearchProvidersById).mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePut = resolve
+    }) as never)
+
+    const { root, current } = await mountSetting(ProviderSetting, 'curSearchProvider', {
+      id: 'p1',
+      name: 'Brave',
+      provider: 'brave',
+      enable: true,
+      config: { api_key: 'initial-key' },
+    })
+
+    await type(inputWithValue(root, 'initial-key')!, 'submitted-key')
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(sdk.putSearchProvidersById).toHaveBeenCalledOnce())
+
+    // User keeps typing while PUT is still in flight.
+    await type(inputWithValue(root, 'submitted-key')!, 'typed-during-put')
+    resolvePut({
+      data: {
+        id: 'p1',
+        name: 'Brave',
+        provider: 'brave',
+        enable: true,
+        config: { api_key: 'submitted-key' },
+      },
+    })
+    await flush()
+    // Simulate follow-up query refetch returning the server's saved 'submitted-key'.
+    current.value = {
+      id: 'p1',
+      name: 'Brave',
+      provider: 'brave',
+      enable: true,
+      config: { api_key: 'submitted-key' },
+    }
+    await flush()
+    expect(inputWithValue(root, 'typed-during-put')).toBeTruthy()
+
+    // Also verify initial POST materialization (`draft:brave` -> `id:new-1`) preserves in-flight typing.
+    let resolvePost!: (res: unknown) => void
+    vi.mocked(sdk.postSearchProviders).mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePost = resolve
+    }) as never)
+    current.value = {
+      name: 'Brave',
+      provider: 'brave',
+      enable: false,
+      config: {},
+    }
+    await flush()
+    await type(inputWithValue(root, '')!, 'first-post-key')
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(sdk.postSearchProviders).toHaveBeenCalledOnce())
+
+    await type(inputWithValue(root, 'first-post-key')!, 'typed-during-post')
+    resolvePost({
+      data: {
+        id: 'new-1',
+        name: 'Brave',
+        provider: 'brave',
+        enable: true,
+        config: { api_key: 'first-post-key' },
+      },
+    })
+    await flush()
+    expect(inputWithValue(root, 'typed-during-post')).toBeTruthy()
+  })
 })
