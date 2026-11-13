@@ -86,14 +86,17 @@
               </SettingsRow>
             </FormField>
 
-            <template v-if="form.values.provider === 'jina'">
-              <JinaReaderSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'cloudflare_markdown'">
-              <CloudflareMarkdownSettings v-model="configProxy" />
-            </template>
+            <SchemaField
+              v-for="field in configFields"
+              :key="field.key"
+              :field="field"
+              :field-key="field.key"
+              id-prefix="fetch-provider"
+              :model-value="configData[field.key]"
+              @update:model-value="(val) => setConfigField(field.key, val)"
+            />
             <div
-              v-else-if="form.values.provider"
+              v-if="metaData && !currentMeta && form.values.provider"
               class="py-3 text-xs text-muted-foreground"
             >
               {{ $t('webSearch.unsupportedProvider') }}
@@ -121,6 +124,7 @@
 
 <script setup lang="ts">
 import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
+import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import {
   Input,
   Button,
@@ -129,8 +133,6 @@ import {
   Switch,
 } from '@felinic/ui'
 import LoadingButton from '@/components/loading-button/index.vue'
-import JinaReaderSettings from './jina-reader-settings.vue'
-import CloudflareMarkdownSettings from './cloudflare-markdown-settings.vue'
 import { Trash2 } from 'lucide-vue-next'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { computed, inject, ref, watch } from 'vue'
@@ -147,7 +149,8 @@ import type {
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, FieldStack, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
-import { normalizeProviderConfigFields } from '@/utils/provider-template'
+import { normalizeProviderConfigFields, providerConfigDefaults } from '@/utils/provider-template'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const { t } = useI18n()
 const curProvider = inject('curFetchProvider', ref<FetchprovidersGetResponse>())
@@ -169,11 +172,12 @@ const { data: metaData } = useQuery({
   },
 })
 
-const configFields = computed(() => {
-  const meta = (metaData.value as FetchprovidersProviderMeta[] | undefined)
-    ?.find(item => item.provider === curProvider.value?.provider)
-  return normalizeProviderConfigFields(meta?.config_schema)
-})
+const currentMeta = computed(() =>
+  (metaData.value as FetchprovidersProviderMeta[] | undefined)
+    ?.find(item => item.provider === curProvider.value?.provider) ?? null,
+)
+
+const configFields = computed(() => normalizeProviderConfigFields(currentMeta.value?.config_schema))
 
 const providerSchema = toTypedSchema(z.object({
   name: z.string().min(1, t('webSearch.nameRequired')),
@@ -185,21 +189,40 @@ const form = useForm({
 })
 
 const configData = ref<Record<string, unknown>>({})
+let hydratedIdentity = ''
 
-const configProxy = computed({
-  get: () => configData.value,
-  set: (val: Record<string, unknown>) => {
-    configData.value = val
-  },
-})
+function providerIdentity(provider: FetchprovidersGetResponse | undefined): string {
+  if (!provider) return ''
+  return provider.id ? `id:${provider.id}` : `draft:${provider.provider ?? ''}`
+}
 
-watch(curProvider, (newVal) => {
-  if (newVal) {
+function setConfigField(key: string, value: unknown) {
+  if (value === undefined) {
+    const next = { ...configData.value }
+    delete next[key]
+    configData.value = next
+    return
+  }
+  configData.value = { ...configData.value, [key]: value }
+}
+
+watch([curProvider, currentMeta], ([newVal, meta]) => {
+  if (!newVal) return
+  const nextIdentity = providerIdentity(newVal)
+  const defaults = providerConfigDefaults(meta?.config_schema)
+  if (nextIdentity !== hydratedIdentity) {
+    hydratedIdentity = nextIdentity
     form.setValues({
       name: newVal.name ?? '',
       provider: newVal.provider ?? '',
     })
-    configData.value = { ...(newVal.config ?? {}) }
+    configData.value = { ...defaults, ...(newVal.config ?? {}) }
+    return
+  }
+  for (const [key, fallback] of Object.entries(defaults)) {
+    if (configData.value[key] === undefined && newVal.config?.[key] === undefined) {
+      configData.value = { ...configData.value, [key]: fallback }
+    }
   }
 }, { immediate: true })
 
@@ -217,6 +240,7 @@ async function handleToggleEnable(value: boolean) {
         provider: form.values.provider as FetchprovidersCreateRequest['provider'],
         config: configData.value,
       }, value)
+      toast.success(t('webSearch.saveFetchSuccess'))
       return
     }
     await putFetchProvidersById({
@@ -225,9 +249,10 @@ async function handleToggleEnable(value: boolean) {
       throwOnError: true,
     })
     queryCache.invalidateQueries({ key: ['fetch-providers'] })
-  } catch {
+    toast.success(t('webSearch.saveFetchSuccess'))
+  } catch (error) {
     curProvider.value = { ...curProvider.value, enable: prev }
-    toast.error(t('common.saveFailed'))
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   } finally {
     enableLoading.value = false
   }
@@ -244,6 +269,12 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
       throwOnError: true,
     })
     return result
+  },
+  onSuccess: () => {
+    toast.success(t('webSearch.saveFetchSuccess'))
+  },
+  onError: (error) => {
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['fetch-providers'] }),
 })
@@ -289,6 +320,12 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
     if (!curProviderId.value || isNative.value) return
     await deleteFetchProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
+  },
+  onSuccess: () => {
+    toast.success(t('webSearch.deleteFetchSuccess'))
+  },
+  onError: (error) => {
+    toast.error(resolveApiErrorMessage(error, t('webSearch.deleteFetchFailed')))
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['fetch-providers'] }),
 })

@@ -72,48 +72,18 @@
               </SettingsRow>
             </FormField>
 
-            <!-- Backend-specific fields, each rendered as a row in the same card. -->
-            <template v-if="form.values.provider === 'brave'">
-              <BraveSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'bing'">
-              <BingSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'google'">
-              <GoogleSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'tavily'">
-              <TavilySettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'sogou'">
-              <SogouSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'serper'">
-              <SerperSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'searxng'">
-              <SearxngSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'jina'">
-              <JinaSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'exa'">
-              <ExaSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'bocha'">
-              <BochaSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'duckduckgo'">
-              <DuckduckgoSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'yandex'">
-              <YandexSettings v-model="configProxy" />
-            </template>
-            <template v-else-if="form.values.provider === 'deepseek'">
-              <DeepseekSettings v-model="configProxy" />
-            </template>
+            <!-- Backend-specific fields declared by /search-providers/meta. -->
+            <SchemaField
+              v-for="field in configFields"
+              :key="field.key"
+              :field="field"
+              :field-key="field.key"
+              id-prefix="search-provider"
+              :model-value="configData[field.key]"
+              @update:model-value="(val) => setConfigField(field.key, val)"
+            />
             <div
-              v-else-if="form.values.provider"
+              v-if="metaData && !currentMeta && form.values.provider"
               class="py-3 text-xs text-muted-foreground"
             >
               {{ $t('webSearch.unsupportedProvider') }}
@@ -137,6 +107,7 @@
 
 <script setup lang="ts">
 import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
+import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import {
   Input,
   Button,
@@ -145,19 +116,6 @@ import {
   Switch,
 } from '@felinic/ui'
 import LoadingButton from '@/components/loading-button/index.vue'
-import BraveSettings from './brave-settings.vue'
-import BingSettings from './bing-settings.vue'
-import GoogleSettings from './google-settings.vue'
-import TavilySettings from './tavily-settings.vue'
-import SogouSettings from './sogou-settings.vue'
-import SerperSettings from './serper-settings.vue'
-import SearxngSettings from './searxng-settings.vue'
-import JinaSettings from './jina-settings.vue'
-import ExaSettings from './exa-settings.vue'
-import BochaSettings from './bocha-settings.vue'
-import DuckduckgoSettings from './duckduckgo-settings.vue'
-import YandexSettings from './yandex-settings.vue'
-import DeepseekSettings from './deepseek-settings.vue'
 import { Trash2 } from 'lucide-vue-next'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { computed, inject, ref, watch } from 'vue'
@@ -174,7 +132,8 @@ import type {
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, FieldStack, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
-import { normalizeProviderConfigFields } from '@/utils/provider-template'
+import { normalizeProviderConfigFields, providerConfigDefaults } from '@/utils/provider-template'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const { t } = useI18n()
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())
@@ -195,11 +154,12 @@ const { data: metaData } = useQuery({
   },
 })
 
-const configFields = computed(() => {
-  const meta = (metaData.value as SearchprovidersProviderMeta[] | undefined)
-    ?.find(item => item.provider === curProvider.value?.provider)
-  return normalizeProviderConfigFields(meta?.config_schema)
-})
+const currentMeta = computed(() =>
+  (metaData.value as SearchprovidersProviderMeta[] | undefined)
+    ?.find(item => item.provider === curProvider.value?.provider) ?? null,
+)
+
+const configFields = computed(() => normalizeProviderConfigFields(currentMeta.value?.config_schema))
 
 // ---- form ----
 const providerSchema = toTypedSchema(z.object({
@@ -213,21 +173,42 @@ const form = useForm({
 
 // Store config separately since it varies by provider type
 const configData = ref<Record<string, unknown>>({})
+let hydratedIdentity = ''
 
-const configProxy = computed({
-  get: () => configData.value,
-  set: (val: Record<string, unknown>) => {
-    configData.value = val
-  },
-})
+function providerIdentity(provider: SearchprovidersGetResponse | undefined): string {
+  if (!provider) return ''
+  return provider.id ? `id:${provider.id}` : `draft:${provider.provider ?? ''}`
+}
 
-watch(curProvider, (newVal) => {
-  if (newVal) {
+function setConfigField(key: string, value: unknown) {
+  if (value === undefined) {
+    const next = { ...configData.value }
+    delete next[key]
+    configData.value = next
+    return
+  }
+  configData.value = { ...configData.value, [key]: value }
+}
+
+watch([curProvider, currentMeta], ([newVal, meta]) => {
+  if (!newVal) return
+  const nextIdentity = providerIdentity(newVal)
+  const defaults = providerConfigDefaults(meta?.config_schema)
+  if (nextIdentity !== hydratedIdentity) {
+    hydratedIdentity = nextIdentity
     form.setValues({
       name: newVal.name ?? '',
       provider: newVal.provider ?? '',
     })
-    configData.value = { ...(newVal.config ?? {}) }
+    configData.value = { ...defaults, ...(newVal.config ?? {}) }
+    return
+  }
+  // If schema metadata arrives after initial mount, backfill unset optional defaults
+  // without clobbering any field already present in the draft.
+  for (const [key, fallback] of Object.entries(defaults)) {
+    if (configData.value[key] === undefined && newVal.config?.[key] === undefined) {
+      configData.value = { ...configData.value, [key]: fallback }
+    }
   }
 }, { immediate: true })
 
@@ -245,6 +226,7 @@ async function handleToggleEnable(value: boolean) {
         provider: form.values.provider as SearchprovidersCreateRequest['provider'],
         config: configData.value,
       }, value)
+      toast.success(t('webSearch.saveSuccess'))
       return
     }
     await putSearchProvidersById({
@@ -253,9 +235,10 @@ async function handleToggleEnable(value: boolean) {
       throwOnError: true,
     })
     queryCache.invalidateQueries({ key: ['search-providers'] })
-  } catch {
+    toast.success(t('webSearch.saveSuccess'))
+  } catch (error) {
     curProvider.value = { ...curProvider.value, enable: prev }
-    toast.error(t('common.saveFailed'))
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   } finally {
     enableLoading.value = false
   }
@@ -273,6 +256,12 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
       throwOnError: true,
     })
     return result
+  },
+  onSuccess: () => {
+    toast.success(t('webSearch.saveSuccess'))
+  },
+  onError: (error) => {
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['search-providers'] }),
 })
@@ -318,6 +307,12 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
     if (!curProviderId.value) return
     await deleteSearchProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
+  },
+  onSuccess: () => {
+    toast.success(t('webSearch.deleteSuccess'))
+  },
+  onError: (error) => {
+    toast.error(resolveApiErrorMessage(error, t('webSearch.deleteFailed')))
   },
   onSettled: () => queryCache.invalidateQueries({ key: ['search-providers'] }),
 })
