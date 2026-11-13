@@ -33,7 +33,6 @@
     "icons": "node scripts/build-icons.mjs"
   },
   "dependencies": {
-    "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@memohai/runtime": "workspace:*",
