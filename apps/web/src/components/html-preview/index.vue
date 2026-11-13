@@ -85,7 +85,7 @@ const srcdoc = computed(() => themeStyle.value + (props.content ?? ''))
   <div :class="['flex h-full w-full min-h-0 bg-surface-editor', props.class]">
     <iframe
       :srcdoc="srcdoc"
-      sandbox="allow-same-origin"
+      sandbox=""
       class="h-full w-full border-0"
       title="HTML preview"
       referrerpolicy="no-referrer"

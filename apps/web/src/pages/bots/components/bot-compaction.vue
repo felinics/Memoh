@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onDeactivated, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { InlineLoadingRow, SettingsBleed, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import {
@@ -11,6 +11,7 @@ import {
 } from '@felinic/ui'
 import { getBotsByBotIdCompactionLogs } from '@memohai/sdk'
 import type { CompactionLog } from '@memohai/sdk'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 
@@ -104,29 +105,14 @@ async function fetchLogs(silent = false) {
 }
 
 // Logs stream in on their own cadence, so the panel refreshes itself instead of
-// asking the user to hit a button: poll quietly, pause when the tab is hidden,
-// and catch up the moment it's visible again.
+// asking the user to hit a button: poll quietly while open and visible, pause
+// when hidden/deactivated, and catch up once visible again.
 const POLL_INTERVAL = 15_000
-let pollTimer: ReturnType<typeof setInterval> | undefined
-
-function tickPoll() {
-  if (document.hidden) return
-  void fetchLogs(true)
-}
-
-function onVisibilityChange() {
-  if (logsOpen.value && !document.hidden) void fetchLogs(true)
-}
-
-onMounted(() => {
-  pollTimer = setInterval(tickPoll, POLL_INTERVAL)
-  document.addEventListener('visibilitychange', onVisibilityChange)
-})
-
-onBeforeUnmount(() => {
-  if (pollTimer) clearInterval(pollTimer)
-  document.removeEventListener('visibilitychange', onVisibilityChange)
-})
+useVisiblePoll(
+  () => fetchLogs(true),
+  POLL_INTERVAL,
+  { enabled: () => logsOpen.value && !!props.botId },
+)
 </script>
 
 <template>

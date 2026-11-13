@@ -106,6 +106,21 @@
   </div>
 </template>
 
+<script lang="ts">
+import { onAuthSessionCleared } from '@/lib/auth-session'
+
+// Line counts for sent text attachments, shared at module scope so a reconcile
+// (optimistic → persisted) or a virtual-scroll re-mount doesn't refetch. Keyed
+// by content hash when known (stable), else the source URL. Oversized text
+// attachments record 'skipped' so re-mounts never re-attempt downloading them.
+const MAX_LINE_COUNT_TEXT_BYTES = 256 * 1024
+const lineCountCache = new Map<string, number | 'skipped'>()
+
+onAuthSessionCleared(() => {
+  lineCountCache.clear()
+})
+</script>
+
 <script setup lang="ts">
 import { inject, reactive, watch } from 'vue'
 import type { AttachmentBlock, AttachmentItem } from '@/store/chat-list'
@@ -114,11 +129,6 @@ import { isTextFile } from '@/components/file-manager/utils'
 import { resolveUrl } from '../composables/useMediaGallery'
 import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
 import ChatAttachmentCard from './chat-attachment-card.vue'
-
-// Line counts for sent text attachments, shared across renders so a reconcile
-// (optimistic → persisted) or a re-mount doesn't refetch. Keyed by content hash
-// when known (stable), else the source URL.
-const lineCountCache = new Map<string, number>()
 
 const props = withDefaults(defineProps<{
   block: AttachmentBlock
@@ -152,13 +162,64 @@ function isTextAttachment(att: AttachmentItem): boolean {
   return isTextFile(getDisplayName(att))
 }
 
+function knownAttachmentBytes(att: AttachmentItem): number | null {
+  if (typeof att.size === 'number' && Number.isFinite(att.size) && att.size >= 0) {
+    return att.size
+  }
+  const metaSize = (att.metadata as Record<string, unknown> | undefined)?.size
+  if (typeof metaSize === 'number' && Number.isFinite(metaSize) && metaSize >= 0) {
+    return metaSize
+  }
+  if (typeof att.base64 === 'string' && att.base64.length > 0) {
+    return Math.floor(att.base64.length * 0.75)
+  }
+  return null
+}
+
+async function readBoundedTextLines(res: Response): Promise<number | 'skipped'> {
+  const headerLength = Number(res.headers.get('content-length'))
+  if (Number.isFinite(headerLength) && headerLength > MAX_LINE_COUNT_TEXT_BYTES) {
+    void res.body?.cancel().catch(() => {})
+    return 'skipped'
+  }
+  const reader = res.body?.getReader()
+  if (!reader) {
+    const text = await res.text()
+    if (text.length > MAX_LINE_COUNT_TEXT_BYTES) return 'skipped'
+    return text.split('\n').length
+  }
+  let totalBytes = 0
+  let newlineCount = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      totalBytes += value.byteLength
+      if (totalBytes > MAX_LINE_COUNT_TEXT_BYTES) {
+        await reader.cancel().catch(() => {})
+        return 'skipped'
+      }
+      for (let i = 0; i < value.length; i++) {
+        if (value[i] === 0x0a) newlineCount++
+      }
+    }
+    return newlineCount + 1
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 async function ensureLineCount(att: AttachmentItem) {
   if (!isTextAttachment(att)) return
+  const knownBytes = knownAttachmentBytes(att)
+  if (knownBytes !== null && knownBytes > MAX_LINE_COUNT_TEXT_BYTES) return
   const url = getUrl(att)
   if (!url) return
   const key = attachmentKey(att)
   if (!key || key in lineCounts) return
   const cached = lineCountCache.get(key)
+  if (cached === 'skipped') return
   if (cached != null) {
     lineCounts[key] = cached
     return
@@ -167,8 +228,12 @@ async function ensureLineCount(att: AttachmentItem) {
   try {
     const res = await fetch(url)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const count = (await res.text()).split('\n').length
+    const count = await readBoundedTextLines(res)
     lineCountCache.set(key, count)
+    if (count === 'skipped') {
+      delete lineCounts[key]
+      return
+    }
     lineCounts[key] = count
   } catch {
     // Counting failed — drop the shimmer and show the file without a count.

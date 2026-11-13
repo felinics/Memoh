@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { onActivated, onDeactivated, ref, computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
+import { onDeactivated, ref, computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Dialog, DialogPanel, DialogHeader, DialogTitle, DialogBody, SettingsRow, SettingsSection, Switch, toast } from '@felinic/ui'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
@@ -60,6 +60,7 @@ import {
   type HandlersDisplayInfoResponse,
   type SettingsUpsertRequest,
 } from '@memohai/sdk'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import DisplayPane from '@/pages/home/components/display-pane.vue'
 
@@ -134,56 +135,13 @@ const info = computed<HandlersDisplayInfoResponse>(() => displayInfo.value ?? {}
 // Silent freshness instead of a manual Refresh button: the live screen streams on
 // its own, so we only quietly re-read status while the tab is actually on screen.
 const POLL_INTERVAL_MS = 10_000
-let active = true
-let pollTimer: ReturnType<typeof setInterval> | null = null
+useVisiblePoll(
+  () => refetchDisplay(),
+  POLL_INTERVAL_MS,
+  { enabled: () => !!props.botId },
+)
 
-function pageVisible() {
-  return active && (typeof document === 'undefined' || document.visibilityState === 'visible')
-}
-
-function pollNow() {
-  if (!pageVisible() || !props.botId) return
-  void refetchDisplay()
-}
-
-function startPoll() {
-  stopPoll()
-  pollTimer = setInterval(pollNow, POLL_INTERVAL_MS)
-}
-
-function stopPoll() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-function handleVisibilityChange() {
-  if (pageVisible()) {
-    pollNow()
-    startPoll()
-  } else {
-    stopPoll()
-  }
-}
-
-onActivated(() => {
-  active = true
-  startPoll()
-})
 onDeactivated(() => {
-  active = false
   previewOpen.value = false
-  stopPoll()
-})
-
-onMounted(() => {
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  startPoll()
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  stopPoll()
 })
 </script>

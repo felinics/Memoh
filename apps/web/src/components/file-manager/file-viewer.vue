@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { isFileSaveEligible } from './file-save-command'
 import {
   canApplyExternalReload,
@@ -83,9 +84,7 @@ const compareStale = ref(false)
 let compareController: AbortController | null = null
 const observedExternalRevision = ref('')
 const imageMetadataFingerprint = ref('')
-let externalPollTimer: number | null = null
 let externalPollController: AbortController | null = null
-let externalPollingActive = false
 // Stable ids so the chip buttons can aria-describedby the relevant inline
 // message span, giving keyboard / screen-reader users the "why is this here"
 // context. The compare-toolbar Refresh button uses the staleNotice id by the
@@ -190,10 +189,6 @@ function isHttpStatus(error: unknown, status: number): boolean {
   return maybe?.status === status || maybe?.response?.status === status
 }
 
-function isDocumentVisible(): boolean {
-  return typeof document === 'undefined' || document.visibilityState === 'visible'
-}
-
 // Force the chip back into view on a terminal disk-state transition (delete /
 // stale read). Tears down any active Compare so the user isn't reviewing a diff
 // against bytes that no longer exist.
@@ -276,9 +271,7 @@ async function pollImageFile(signal: AbortSignal) {
 }
 
 async function pollExternalFile() {
-  if (!externalPollingActive) return
   if (!props.botId || !loaded.value || loading.value || saving.value || externalPollController) return
-  if (!isDocumentVisible()) return
   if (!isText.value && !isImage.value) return
 
   const controller = new AbortController()
@@ -304,26 +297,9 @@ async function pollExternalFile() {
   }
 }
 
-function startExternalFilePoll() {
-  if (!externalPollingActive || externalPollTimer !== null) return
-  externalPollTimer = window.setInterval(() => {
-    void pollExternalFile()
-  }, EXTERNAL_FILE_POLL_MS)
-}
-
-function stopExternalFilePoll() {
-  if (externalPollTimer !== null) {
-    window.clearInterval(externalPollTimer)
-    externalPollTimer = null
-  }
-  externalPollController?.abort()
-  externalPollController = null
-}
-
-function handleVisibilityChange() {
-  if (!externalPollingActive) return
-  if (isDocumentVisible()) void pollExternalFile()
-}
+useVisiblePoll(pollExternalFile, EXTERNAL_FILE_POLL_MS, {
+  enabled: () => Boolean(props.botId && (isText.value || isImage.value)),
+})
 
 async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
   activeReadController?.abort()
@@ -735,30 +711,15 @@ useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
 })
 
 onMounted(() => {
-  externalPollingActive = true
   nowTickInterval = setInterval(() => { nowTick.value = Date.now() }, 60_000)
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  startExternalFilePoll()
-})
-
-onActivated(() => {
-  externalPollingActive = true
-  startExternalFilePoll()
-  void pollExternalFile()
-})
-
-onDeactivated(() => {
-  externalPollingActive = false
-  stopExternalFilePoll()
 })
 
 onBeforeUnmount(() => {
   fileGeneration++
-  externalPollingActive = false
   if (nowTickInterval) clearInterval(nowTickInterval)
   nowTickInterval = null
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  stopExternalFilePoll()
+  externalPollController?.abort()
+  externalPollController = null
   activeReadController?.abort()
   compareController?.abort()
   cleanupImageUrl()

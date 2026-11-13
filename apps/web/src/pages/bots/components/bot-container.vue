@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { CalloutBanner, ConfirmPopover, InlineLoadingRow, MetricReadout, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { until } from '@vueuse/core'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { Play, AlertCircle, ChevronRight } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
@@ -886,50 +887,21 @@ watch([containerMissing, rememberedCreateGPU], ([missing, remembered]) => {
   createGPUPrefilled.value = true
 }, { immediate: true })
 
-// Keep usage fresh on its own. We poll the metrics endpoint on a steady cadence,
-// but only when the user can actually see it (Workspace tab + page visible) and
-// when nothing else is mid-flight, so the poll never fights an in-progress action.
+// Keep usage fresh on its own. Poll metrics while the Workspace tab is active,
+// the page is visible, and no container operation is mid-flight.
 const METRICS_POLL_INTERVAL_MS = 10_000
-let metricsPollTimer: ReturnType<typeof setInterval> | null = null
-
-function pageVisible() {
-  return typeof document === 'undefined' || document.visibilityState === 'visible'
-}
-
-function canPollMetrics() {
-  return (
-    activeTab.value === 'container'
-    && !!botId.value
-    && !!containerInfo.value
-    && !containerBusy.value
-    && pageVisible()
-  )
-}
-
-function stopMetricsPoll() {
-  if (metricsPollTimer !== null) {
-    clearInterval(metricsPollTimer)
-    metricsPollTimer = null
-  }
-}
-
-function startMetricsPoll() {
-  stopMetricsPoll()
-  metricsPollTimer = setInterval(() => {
-    if (canPollMetrics()) void refreshContainerMetricsSilently()
-  }, METRICS_POLL_INTERVAL_MS)
-}
-
-// Returning to the tab/window shouldn't wait a full interval for fresh numbers.
-function handleVisibilityChange() {
-  if (pageVisible() && canPollMetrics()) void refreshContainerMetricsSilently()
-}
-
-onMounted(() => document.addEventListener('visibilitychange', handleVisibilityChange))
-onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  stopMetricsPoll()
-})
+useVisiblePoll(
+  () => refreshContainerMetricsSilently(),
+  METRICS_POLL_INTERVAL_MS,
+  {
+    enabled: () => (
+      activeTab.value === 'container'
+      && !!botId.value
+      && !!containerInfo.value
+      && !containerBusy.value
+    ),
+  },
+)
 
 // This page instance is kept alive across bots: without the reset, a removal
 // still shown from the previous bot would be followed and finished on this one.
@@ -942,15 +914,8 @@ watch(botId, () => {
 }, { flush: 'sync' })
 
 watch([activeTab, botId], ([tab]) => {
-  if (!botId.value) {
-    stopMetricsPoll()
-    return
-  }
-  if (tab === 'container') {
+  if (botId.value && tab === 'container') {
     void loadContainerData(true)
-    startMetricsPoll()
-  } else {
-    stopMetricsPoll()
   }
 }, { immediate: true })
 </script>

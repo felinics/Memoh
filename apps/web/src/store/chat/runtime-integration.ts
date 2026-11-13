@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import type { UIStreamEvent } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { createInvocationId, stringRecord } from '../chat-list.normalize'
+import { stringRecord } from '../chat-list.normalize'
 import { provisionalSessionTitle } from '../chat-list.utils'
 import type { createAssistantStreamRegistry } from './assistant-streams'
 import type { createChatDecisions } from './decisions'
@@ -19,7 +19,7 @@ import type {
 } from './types'
 import type { createChatViewRegistry } from './view-registry'
 import type { FirstSendTracker } from './first-send'
-import { awaitStopOutcome } from './stop-outcome'
+import { createRuntimeAbortController } from './runtime-abort'
 
 // The catalog code of a WS failure frame.
 export function wsFrameErrorCode(event: { code?: string }): string {
@@ -97,6 +97,11 @@ export interface RuntimeIntegrationDeps {
   sendFailedMessage: () => string
   sendOutcomeUnknownMessage: () => string
   touchSessionInList: (sessionId: string, updatedAt?: string) => void
+  onRuntimeSnapshotReconnected?: (
+    botId: string,
+    sessionId: string,
+    options: { hasActiveRun: boolean; alreadyRefreshedMessages: boolean },
+  ) => void
 }
 
 // How long a held first send waits for the server to confirm it. Creating the
@@ -105,10 +110,21 @@ export interface RuntimeIntegrationDeps {
 const FIRST_SEND_CONFIRM_TIMEOUT_MS = 30_000
 
 export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
-  const deferredAbortByInvocation = new Map<string, {
-    runId: string
-    botId: string
-  }>()
+  const {
+    replayDeferredAbort,
+    recordAcceptedAbort,
+    abortRun,
+    abort,
+    abortAllAssistantStreams,
+  } = createRuntimeAbortController({
+    assistantStreams: deps.assistantStreams,
+    decisions: deps.decisions,
+    realtime: deps.realtime,
+    chatViews: deps.chatViews,
+    firstSend: deps.firstSend,
+    normalizeTarget: deps.normalizeTarget,
+    hasVisibleAssistantBlocks: deps.hasVisibleAssistantBlocks,
+  })
 
   // A held first send that ended without the server's answer: its run may
   // have been taken, so the send keeps its session (see StreamFailureError).
@@ -182,15 +198,6 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       return
     }
     promoteCreatedSession(event.invocation_id, botId, sessionId, workdirId, originalSessionId)
-  }
-
-  // A stop for a run that was accepted before its session was named waits
-  // for session_created, which supplies the session the abort control needs.
-  function replayDeferredAbort(invocationId: string, sessionId: string) {
-    const deferredAbort = deferredAbortByInvocation.get(invocationId)
-    if (!deferredAbort) return
-    deferredAbortByInvocation.delete(invocationId)
-    sendAbortControl(deferredAbort.runId, deferredAbort.botId, sessionId)
   }
 
   // The server took a held first send once it has both named the session
@@ -317,16 +324,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
           event.turn_position,
         )
       }
-      if (accepted?.abortRequested) {
-        const botId = accepted.botId || sourceBotId
-        if (sessionId) sendAbortControl(accepted.runId, botId, sessionId)
-        else {
-          deferredAbortByInvocation.set(accepted.invocationId, {
-            runId: accepted.runId,
-            botId,
-          })
-        }
-      }
+      recordAcceptedAbort(accepted, sourceBotId, sessionId)
       return
     }
     if (event.type === 'run_rejected') {
@@ -434,6 +432,9 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       deps.decisions.observeRun(sessionId, currentRun)
       return
     }
+    const isReconnectSnapshot = change.event.type === 'runtime_snapshot'
+      && change.reconnected === true
+    let refreshedMessages = false
     const currentInvocationId = currentRun
       // The frame's own echo is authoritative; the run_id registry lookup only
       // covers frames from before the echo existed (pre-ledger runs).
@@ -455,6 +456,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     )
 
     if (needsHistoryResync && currentRun && isRuntimeRunActive(currentRun.status)) {
+      refreshedMessages = true
       void resyncTranscript()
     }
 
@@ -469,11 +471,18 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
           deps.assistantStreams.resolveAssistantStream(invocationId)
         }
         if (view) {
+          refreshedMessages = true
           void deps.refreshCurrentSession(botId, sessionId)
             .finally(() => deps.releaseHiddenSessionView(botId, sessionId))
         } else {
           deps.touchSessionInList(sessionId, previousRun.updated_at)
         }
+      }
+      if (isReconnectSnapshot) {
+        deps.onRuntimeSnapshotReconnected?.(botId, sessionId, {
+          hasActiveRun: false,
+          alreadyRefreshedMessages: refreshedMessages,
+        })
       }
       return
     }
@@ -481,7 +490,15 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     const wasActive = previousRun?.run_id === currentRun.run_id
       && isRuntimeRunActive(previousRun.status)
     const isActive = isRuntimeRunActive(currentRun.status)
-    if (isActive || (previousRun?.run_id === currentRun.run_id && !wasActive)) return
+    if (isActive || (previousRun?.run_id === currentRun.run_id && !wasActive)) {
+      if (isReconnectSnapshot) {
+        deps.onRuntimeSnapshotReconnected?.(botId, sessionId, {
+          hasActiveRun: isActive,
+          alreadyRefreshedMessages: refreshedMessages,
+        })
+      }
+      return
+    }
 
     const invocationId = currentInvocationId
     const pending = currentPending
@@ -513,6 +530,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     }
 
     if (view && (needsHistoryResync || !pending)) {
+      refreshedMessages = true
       const refresh = needsHistoryResync
         ? resyncTranscript()
         : deps.refreshCurrentSession(botId, sessionId)
@@ -520,6 +538,12 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         .finally(() => deps.releaseHiddenSessionView(botId, sessionId))
     } else if (!view) {
       deps.touchSessionInList(sessionId, currentRun.updated_at)
+    }
+    if (isReconnectSnapshot) {
+      deps.onRuntimeSnapshotReconnected?.(botId, sessionId, {
+        hasActiveRun: false,
+        alreadyRefreshedMessages: refreshedMessages,
+      })
     }
   }
 
@@ -555,80 +579,6 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         deps.chatViews.getSession(normalizedBotId, normalizedSessionId)?.transcript.applyRuntimeTranscript(transcript)
       }
     }
-  }
-
-  // Returns whether the stop reached the server or is queued to reach it once
-  // the run or its session is named.
-  function abortRun(invocationId: string): boolean {
-    const runId = deps.assistantStreams.requestAbort(invocationId)
-    if (!runId) return true
-    const stream = deps.assistantStreams.getAssistantStream(invocationId)
-    if (!stream?.sessionId.trim()) {
-      deferredAbortByInvocation.set(invocationId, {
-        runId,
-        botId: stream?.botId ?? '',
-      })
-      return true
-    }
-    return sendAbortControl(
-      runId,
-      stream?.botId,
-      stream?.sessionId,
-    )
-  }
-
-  function sendAbortControl(
-    runId: string,
-    botId?: string,
-    sessionId?: string,
-  ): boolean {
-    const controlId = createInvocationId()
-    const sid = sessionId?.trim() ?? ''
-    const sent = deps.realtime.abortWebSocketRun(
-      runId,
-      botId,
-      sid,
-      controlId,
-    )
-    if (sent) deps.decisions.trackAbort(controlId, sid, runId)
-    return sent
-  }
-
-  // awaitOutcome is the user's stop (see stop-outcome.ts). Every other stop
-  // (deleting a session, switching bots) ends the send at once.
-  function abort(target?: ChatViewTarget, options: { awaitOutcome?: boolean } = {}) {
-    const resolved = deps.normalizeTarget(target)
-    const abortError = new Error('aborted')
-    abortError.name = 'AbortError'
-    const invocationIds = resolved.sessionId
-      ? deps.assistantStreams.assistantStreamsForSession(
-          resolved.botId,
-          resolved.sessionId,
-        ).map(stream => stream.invocationId)
-      : deps.assistantStreams.activeUnboundInvocationIds(
-          resolved.botId,
-          target ? `${resolved.botId}:${resolved.viewId}` : undefined,
-        )
-    let runtimeAborted = false
-    if (resolved.sessionId) {
-      const runtime = deps.realtime.runtimeProjection(
-        resolved.sessionId,
-      )?.currentRunView
-      if (runtime && isRuntimeRunActive(runtime.status)) {
-        runtimeAborted = sendAbortControl(
-          runtime.run_id,
-          resolved.botId,
-          resolved.sessionId,
-        )
-      }
-    }
-    for (const invocationId of invocationIds) {
-      const stopSent = runtimeAborted || abortRun(invocationId)
-      if (options.awaitOutcome && stopSent && awaitStopOutcome(deps, invocationId, abortError)) continue
-      deps.assistantStreams.clearStopping(invocationId)
-      deps.assistantStreams.rejectAssistantStream(invocationId, abortError)
-    }
-    deps.chatViews.prune()
   }
 
   // A socket that closes before a held first send is confirmed loses the
@@ -673,13 +623,6 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       )
     }, FIRST_SEND_CONFIRM_TIMEOUT_MS)
     return () => clearTimeout(timer)
-  }
-
-  function abortAllAssistantStreams() {
-    const abortError = new Error('aborted')
-    abortError.name = 'AbortError'
-    deps.assistantStreams.rejectAllStreams(abortError, abortRun)
-    deferredAbortByInvocation.clear()
   }
 
   return {

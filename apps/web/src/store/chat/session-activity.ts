@@ -31,6 +31,8 @@ export function createSessionActivity(deps: {
   // view of the bot becomes unknowable.
   markSessionViewStale?: (botId: string, sessionId: string) => void
   markAllSessionViewsStale?: (botId: string) => void
+  canRefreshIdleSession?: (botId: string, sessionId: string) => boolean
+  reconcileOnVisibilityResume?: boolean
 }) {
   const visibleSummaryRequests = new Map<string, Promise<SessionSummary | null>>()
   // Keyed by bot and session, and only read while that summary is unknown.
@@ -62,6 +64,7 @@ export function createSessionActivity(deps: {
   const manualCompactions = ref(new Map<string, symbol>())
   let loadMoreRequestVersion = 0
   const persistedSessionRefreshes = new Map<string, { pending: boolean }>()
+  const connectedActivityBots = new Set<string>()
 
   function refreshPersistedSession(botId: string, sessionId: string) {
     const key = `${botId}:${sessionId}`
@@ -74,15 +77,17 @@ export function createSessionActivity(deps: {
     persistedSessionRefreshes.set(key, state)
     const generation = deps.userScopeGeneration()
     void (async () => {
-      do {
-        state.pending = false
-        await deps.refreshSessionMessages(botId, sessionId)
-      } while (state.pending && generation === deps.userScopeGeneration())
-    })().catch((error) => {
-      console.error('Failed to refresh persisted session:', error)
-    }).finally(() => {
-      if (persistedSessionRefreshes.get(key) === state) persistedSessionRefreshes.delete(key)
-    })
+      try {
+        do {
+          state.pending = false
+          await deps.refreshSessionMessages(botId, sessionId)
+        } while (state.pending && generation === deps.userScopeGeneration())
+      } catch (error) {
+        console.error('Failed to refresh persisted session:', error)
+      } finally {
+        if (persistedSessionRefreshes.get(key) === state) persistedSessionRefreshes.delete(key)
+      }
+    })()
   }
 
   function isSessionCompacting(botId: string, sessionId: string): boolean {
@@ -94,6 +99,62 @@ export function createSessionActivity(deps: {
     scheduleActivityRevisions.value = {
       ...scheduleActivityRevisions.value,
       [botId]: (scheduleActivityRevisions.value[botId] ?? 0) + 1,
+    }
+  }
+
+  function reconcileIdleSessionMessages(botId: string, targetSessionId?: string) {
+    const bid = botId.trim()
+    if (!bid || (deps.currentBotId.value ?? '').trim() !== bid) return
+    const activeSid = (deps.sessionId.value ?? '').trim()
+    const sid = (targetSessionId ?? activeSid).trim()
+    if (!sid || sid !== activeSid) return
+    if (!deps.canRefreshIdleSession?.(bid, sid)) return
+    refreshPersistedSession(bid, sid)
+  }
+
+  function reconcileBotState(
+    botId: string,
+    options: { refreshMessages?: boolean; targetSessionId?: string } = {},
+  ) {
+    const bid = botId.trim()
+    if (!bid) return
+    markScheduleSnapshotStale(bid)
+    void deps.refreshSessionsList(bid)
+    if (options.refreshMessages !== false) {
+      reconcileIdleSessionMessages(bid, options.targetSessionId)
+    }
+  }
+
+  function handleRuntimeSnapshotReconnected(
+    botId: string,
+    targetSessionId: string,
+    options: { hasActiveRun: boolean; alreadyRefreshedMessages: boolean },
+  ) {
+    reconcileBotState(botId, {
+      refreshMessages: !options.hasActiveRun && !options.alreadyRefreshedMessages,
+      targetSessionId,
+    })
+  }
+
+  let wasDocumentHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+  function handleVisibilityChange() {
+    if (document.visibilityState !== 'visible') {
+      wasDocumentHidden = true
+      return
+    }
+    if (!wasDocumentHidden) return
+    wasDocumentHidden = false
+    const bid = (deps.currentBotId.value ?? '').trim()
+    if (bid) reconcileBotState(bid)
+  }
+
+  if (deps.reconcileOnVisibilityResume && typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+  }
+
+  function dispose() {
+    if (deps.reconcileOnVisibilityResume && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }
 
@@ -214,7 +275,14 @@ export function createSessionActivity(deps: {
   }
 
   function handleActivity(botId: string, event: BotSessionActivityEvent) {
-    if (event.type === 'activity_ready') return
+    if (event.type === 'activity_ready') {
+      if (connectedActivityBots.has(botId)) {
+        reconcileBotState(botId)
+      } else {
+        connectedActivityBots.add(botId)
+      }
+      return
+    }
     if (event.type === 'session_invalidated') {
       const sessionId = event.session_id.trim()
       if (sessionId) deps.markSessionViewStale?.(botId, sessionId)
@@ -275,9 +343,11 @@ export function createSessionActivity(deps: {
     visibleSessionSummaryFailed,
     loadMoreSessions,
     handleActivity,
+    handleRuntimeSnapshotReconnected,
     scheduleActivityRevisions,
     isSessionCompacting,
     beginSessionCompaction,
+    dispose,
     reset: (options: { userScope?: boolean } = {}) => {
       if (options.userScope) visibleSummaryFailures.value = new Set()
       compactingSessions.value = {}
@@ -285,6 +355,7 @@ export function createSessionActivity(deps: {
       manualCompactions.value.clear()
       visibleSummaryRequests.clear()
       persistedSessionRefreshes.clear()
+      connectedActivityBots.clear()
       loadMoreRequestVersion += 1
       deps.loadingMoreSessions.value = false
     },

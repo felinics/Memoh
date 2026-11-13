@@ -38,6 +38,24 @@ export function createChatViews(deps: ChatViewsDeps) {
     seq: number
   } | null>(null)
   let draftPromotedSeq = 0
+  const userSentInSession = ref<{
+    id: string
+    botId: string
+    viewId: string
+    wasDraft: boolean
+    seq: number
+  } | null>(null)
+  let userSendSeq = 0
+
+  function recordUserSent(botId: string, targetSessionId: string, viewId: string, wasDraft: boolean) {
+    userSentInSession.value = {
+      id: targetSessionId,
+      botId,
+      viewId,
+      wasDraft,
+      seq: ++userSendSeq,
+    }
+  }
   let runtimeProjectionProbe: (sessionId: string) => RuntimeProjectionState | undefined =
     () => undefined
   let refreshAppliedHook: (
@@ -285,6 +303,23 @@ export function createChatViews(deps: ChatViewsDeps) {
     return assistantStreams.isSessionStopping(resolved.botId, resolved.sessionId)
   }
 
+  function canRefreshIdleSession(botId: string, targetSessionId: string): boolean {
+    if (
+      isSessionStreaming(botId, targetSessionId)
+      || assistantStreams.assistantStreamsForSession(botId, targetSessionId).length > 0
+      || firstSend.isSessionTentative(targetSessionId)
+      || Boolean(runtimeProjectionProbe(targetSessionId)?.currentRunView?.configuration_only)
+    ) {
+      return false
+    }
+    const view = chatViews.getSession(botId, targetSessionId)
+    if (!view || view.transcript.messages.some(m => m.role === 'assistant' && m.streaming)) {
+      return false
+    }
+    return view.visiblePanelIds.size > 0
+      || !chatViews.entries().some(entry => entry.botId === botId && entry.visiblePanelIds.size > 0)
+  }
+
   function workspaceTargetSelectionFor(target?: ChatViewTarget) {
     const view = chatView(target)
     return {
@@ -445,6 +480,8 @@ export function createChatViews(deps: ChatViewsDeps) {
   return {
     focusedViewId,
     draftPromoted,
+    userSentInSession,
+    recordUserSent,
     projectionVersion,
     chatViews,
     assistantStreams,
@@ -479,6 +516,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     streaming,
     isChatViewStreaming,
     isChatViewStopping,
+    canRefreshIdleSession,
     workspaceTargetSelectionFor,
     setWorkspaceTargetSelection,
     initializeWorkspaceTargetSelection,
@@ -494,6 +532,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     configure,
     reset: () => {
       draftPromoted.value = null
+      userSentInSession.value = null
       chatViews.resetAll()
       firstSend.reset()
     },

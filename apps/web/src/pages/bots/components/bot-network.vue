@@ -319,7 +319,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
 } from '@felinic/ui'
 import { SquarePen, RefreshCw } from 'lucide-vue-next'
-import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
+import { reactive, computed, watch, nextTick, ref } from 'vue'
 import { ConfirmPopover, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
@@ -332,6 +332,7 @@ import {
   putBotsByBotIdSettings,
 } from '@memohai/sdk'
 import type { NetworkConfigField, NetworkProviderDescriptor, SettingsUpsertRequest } from '@memohai/sdk'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { cloneConfig } from '@/components/config-schema-form/utils'
 import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -718,28 +719,16 @@ watch(settings, (val) => {
   })
 }, { immediate: true })
 
-// Poll network status every 5s while in a transient state (starting, needs_login, etc.)
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-watch(isTransientState, (shouldPoll) => {
-  if (shouldPoll && !pollTimer) {
-    pollTimer = setInterval(() => {
-      if (isTransientState.value && !isNetworkStatusLoading.value) {
-        refetchNetworkStatus()
-      }
-    }, 5000)
-  } else if (!shouldPoll && pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}, { immediate: true })
-
-onBeforeUnmount(() => {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-})
+// Poll network status every 5s while visible and in a transient state (starting, needs_login, etc.)
+useVisiblePoll(
+  () => {
+    if (!isNetworkStatusLoading.value) {
+      void refetchNetworkStatus()
+    }
+  },
+  5_000,
+  { enabled: isTransientState },
+)
 
 async function handleSave() {
   if (form.overlay_enabled && !form.overlay_provider) {
