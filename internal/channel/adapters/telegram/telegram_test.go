@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -294,7 +295,7 @@ func TestBuildTelegramAttachmentIncludesPlatformReference(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewTelegramAdapter(nil)
-	att := adapter.buildTelegramAttachment(nil, channel.AttachmentFile, "file_1", "doc.txt", "text/plain", 10)
+	att := adapter.buildTelegramAttachment(channel.AttachmentFile, "file_1", "doc.txt", "text/plain", 10)
 	if att.PlatformKey != "file_1" {
 		t.Fatalf("unexpected platform key: %s", att.PlatformKey)
 	}
@@ -303,11 +304,243 @@ func TestBuildTelegramAttachmentIncludesPlatformReference(t *testing.T) {
 	}
 }
 
+// An inbound file is recorded by id while updates are polled; its download URL
+// is resolved only when ingest asks for the bytes.
+func TestTelegramAttachmentResolvesFileIDOnlyOnIngest(t *testing.T) {
+	const botToken = "123456:resolve"
+	var getFileCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/bot" + botToken + "/getFile":
+			getFileCalls.Add(1)
+			_, _ = io.WriteString(w, `{"ok":true,"result":{"file_id":"ph1","file_unique_id":"u1","file_size":3,"file_path":"photos/ph1.jpg"}}`)
+		case "/file/bot" + botToken + "/photos/ph1.jpg":
+			_, _ = io.WriteString(w, "jpg")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	bot, err := tele.NewBot(tele.Settings{URL: server.URL, Token: botToken, Offline: true})
+	if err != nil {
+		t.Fatalf("create telegram bot: %v", err)
+	}
+	adapter := NewTelegramAdapter(nil)
+	adapter.fileEndpoints[bot] = server.URL + "/file/bot%s/%s"
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(*TelegramAdapter, string, string) (*tele.Bot, error) { return bot, nil }
+	t.Cleanup(func() { getOrCreateBotForTest = origGetBot })
+
+	atts := adapter.collectTelegramAttachments(&tele.Message{Photo: &tele.Photo{File: tele.File{FileID: "ph1"}}})
+	if len(atts) != 1 {
+		t.Fatalf("collectTelegramAttachments() = %d attachments, want 1", len(atts))
+	}
+	if atts[0].URL != "" || atts[0].PlatformKey != "ph1" {
+		t.Fatalf("attachment = URL %q, platform key %q; want only the file id", atts[0].URL, atts[0].PlatformKey)
+	}
+	if n := getFileCalls.Load(); n != 0 {
+		t.Fatalf("building the attachment made %d getFile calls, want 0", n)
+	}
+
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+	payload, err := adapter.ResolveAttachment(context.Background(), cfg, atts[0])
+	if err != nil {
+		t.Fatalf("ResolveAttachment: %v", err)
+	}
+	defer func() { _ = payload.Reader.Close() }()
+	body, err := io.ReadAll(payload.Reader)
+	if err != nil || string(body) != "jpg" {
+		t.Fatalf("resolved body = %q, %v; want \"jpg\"", body, err)
+	}
+	if n := getFileCalls.Load(); n != 1 {
+		t.Fatalf("ResolveAttachment made %d getFile calls, want 1", n)
+	}
+	if payload.Name != "ph1.jpg" {
+		t.Fatalf("resolved name = %q, want the base of Telegram's file path", payload.Name)
+	}
+}
+
+// newTelegramFileTestAdapter serves getFile and file downloads for botToken
+// through handler, and routes the adapter's bot to it.
+func newTelegramFileTestAdapter(t *testing.T, botToken string, getFile http.HandlerFunc) *TelegramAdapter {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/bot"+botToken+"/getFile":
+			getFile(w, r)
+		case strings.HasPrefix(r.URL.Path, "/file/bot"+botToken+"/"):
+			_, _ = io.WriteString(w, "data")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	bot, err := tele.NewBot(tele.Settings{URL: server.URL, Token: botToken, Offline: true})
+	if err != nil {
+		t.Fatalf("create telegram bot: %v", err)
+	}
+	adapter := NewTelegramAdapter(nil)
+	adapter.fileEndpoints[bot] = server.URL + "/file/bot%s/%s"
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(*TelegramAdapter, string, string) (*tele.Bot, error) { return bot, nil }
+	t.Cleanup(func() { getOrCreateBotForTest = origGetBot })
+	return adapter
+}
+
+const telegramTestFileResult = `{"ok":true,"result":{"file_id":"f","file_unique_id":"u","file_size":4,"file_path":"documents/file_1.txt"}}`
+
+func TestTelegramResolveAttachmentRetriesGetFileOnTooManyRequests(t *testing.T) {
+	const botToken = "123456:flood"
+	var calls atomic.Int32
+	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}`)
+			return
+		}
+		_, _ = io.WriteString(w, telegramTestFileResult)
+	})
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+
+	payload, err := adapter.ResolveAttachment(context.Background(), cfg, channel.Attachment{PlatformKey: "f"})
+	if err != nil {
+		t.Fatalf("ResolveAttachment after a 429: %v", err)
+	}
+	_ = payload.Reader.Close()
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("getFile calls = %d, want 2", n)
+	}
+}
+
+func TestTelegramResolveAttachmentFailsOnLongRetryAfter(t *testing.T) {
+	const botToken = "123456:flood-long"
+	var calls atomic.Int32
+	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 60","parameters":{"retry_after":60}}`)
+	})
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := adapter.ResolveAttachment(ctx, cfg, channel.Attachment{PlatformKey: "f"}); err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ResolveAttachment = %v, want the 429 returned without waiting out retry_after", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("getFile calls = %d, want 1", n)
+	}
+}
+
+func TestTelegramResolveAttachmentSkipsGetFileAfterCancel(t *testing.T) {
+	const botToken = "123456:stopped"
+	var calls atomic.Int32
+	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = io.WriteString(w, telegramTestFileResult)
+	})
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := adapter.ResolveAttachment(ctx, cfg, channel.Attachment{PlatformKey: "f"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ResolveAttachment with a cancelled context = %v, want context.Canceled", err)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("getFile calls = %d, want 0", n)
+	}
+}
+
+func TestTelegramResolveAttachmentHoldsSlotUntilBodyIsDone(t *testing.T) {
+	const botToken = "123456:hold"
+	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, telegramTestFileResult)
+	})
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+	att := channel.Attachment{PlatformKey: "f"}
+
+	var bodies []io.ReadCloser
+	for i := 0; i < telegramFileConcurrency; i++ {
+		payload, err := adapter.ResolveAttachment(context.Background(), cfg, att)
+		if err != nil {
+			t.Fatalf("ResolveAttachment %d: %v", i, err)
+		}
+		bodies = append(bodies, payload.Reader)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := adapter.ResolveAttachment(waitCtx, cfg, att); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("with every slot held by an unread body, ResolveAttachment = %v, want it to wait", err)
+	}
+
+	if _, err := io.ReadAll(bodies[0]); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	payload, err := adapter.ResolveAttachment(context.Background(), cfg, att)
+	if err != nil {
+		t.Fatalf("ResolveAttachment after a body was read to the end: %v", err)
+	}
+	_ = payload.Reader.Close()
+	for _, body := range bodies {
+		_ = body.Close()
+		_ = body.Close() // returning a slot twice must not panic
+	}
+	if !adapter.fileSlots["config"].TryAcquire(telegramFileConcurrency) {
+		t.Fatal("some slots are still held after every body was closed")
+	}
+}
+
+func TestTelegramResolveAttachmentCapsConcurrentFileRequestsPerBot(t *testing.T) {
+	const botToken = "123456:busy"
+	var inFlight, peak atomic.Int32
+	unblock := make(chan struct{})
+	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {
+		n := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		<-unblock
+		_, _ = io.WriteString(w, telegramTestFileResult)
+	})
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+
+	const attachments = 3 * telegramFileConcurrency
+	errs := make(chan error, attachments)
+	for i := 0; i < attachments; i++ {
+		go func() {
+			payload, err := adapter.ResolveAttachment(context.Background(), cfg, channel.Attachment{PlatformKey: "f"})
+			if err == nil {
+				_ = payload.Reader.Close()
+			}
+			errs <- err
+		}()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for inFlight.Load() < telegramFileConcurrency && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond) // let any caller past the cap show up
+	close(unblock)
+	for i := 0; i < attachments; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("ResolveAttachment: %v", err)
+		}
+	}
+	if p := peak.Load(); p != telegramFileConcurrency {
+		t.Fatalf("peak concurrent getFile calls = %d, want %d", p, telegramFileConcurrency)
+	}
+}
+
 func TestBuildTelegramAttachmentInfersTypeFromMime(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewTelegramAdapter(nil)
-	att := adapter.buildTelegramAttachment(nil, channel.AttachmentFile, "file_2", "photo.jpg", "IMAGE/JPEG; charset=utf-8", 10)
+	att := adapter.buildTelegramAttachment(channel.AttachmentFile, "file_2", "photo.jpg", "IMAGE/JPEG; charset=utf-8", 10)
 	if att.Type != channel.AttachmentImage {
 		t.Fatalf("expected image type, got: %s", att.Type)
 	}
@@ -2019,7 +2252,7 @@ func TestCollectTelegramStickerUsesReadableMedia(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			adapter := &TelegramAdapter{}
-			atts := adapter.collectTelegramAttachments(nil, &tele.Message{Sticker: tc.sticker})
+			atts := adapter.collectTelegramAttachments(&tele.Message{Sticker: tc.sticker})
 			if len(atts) != 1 {
 				t.Fatalf("collectTelegramAttachments() = %d attachments, want 1", len(atts))
 			}
@@ -2047,14 +2280,14 @@ func TestCollectTelegramStickerUsesReadableMedia(t *testing.T) {
 
 func TestCollectTelegramStickerCarriesEmojiInName(t *testing.T) {
 	adapter := &TelegramAdapter{}
-	atts := adapter.collectTelegramAttachments(nil, &tele.Message{
+	atts := adapter.collectTelegramAttachments(&tele.Message{
 		Sticker: &tele.Sticker{File: tele.File{FileID: "static-file"}, Width: 512, Height: 512, Emoji: "🎉"},
 	})
 	if len(atts) != 1 || atts[0].Name != "sticker-🎉" {
 		t.Fatalf("attachment = %+v, want the sticker emoji in the name", atts)
 	}
 
-	without := adapter.collectTelegramAttachments(nil, &tele.Message{
+	without := adapter.collectTelegramAttachments(&tele.Message{
 		Sticker: &tele.Sticker{File: tele.File{FileID: "static-file"}, Width: 512, Height: 512},
 	})
 	if len(without) != 1 || without[0].Name != "sticker" {
