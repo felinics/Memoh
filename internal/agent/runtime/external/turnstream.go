@@ -18,7 +18,8 @@ import (
 // confirmation behind it. The agent's events, the decisions that settle after
 // a stop, and the events of Memoh tools served through the gateway arrive on
 // different paths; they queue here in arrival order, so the live stream and
-// the persisted transcript agree.
+// the persisted transcript agree. The transcript files a late tool result
+// with its call, where the live stream already shows it by its call id.
 //
 // While delivery lags, consecutive bare text or reasoning deltas fold into the
 // pending tail, so the backlog grows with changes of event kind rather than

@@ -62,6 +62,13 @@ type turnState struct {
 	// processIDs are the unified-exec processes this turn's commands started.
 	// turn/interrupt only ends the turn; a stop terminates these explicitly.
 	processIDs []string
+	// commands are the commands this turn started, by item id. A command can
+	// outlive the model's wait for it and even the turn: Codex keeps it in the
+	// background and reports its exit only when the process ends, stamped
+	// with the turn that started it. Its events belong to this turn by that
+	// ownership, not by turn id; one that ended takes no further events.
+	commands     map[string]*turnCommand
+	commandOrder []string
 	// inflight tracks decision goroutines by server-request id so a
 	// serverRequest/resolved notification can withdraw them.
 	inflight map[string]context.CancelFunc
@@ -89,6 +96,7 @@ func newTurnState(parent context.Context, input external.PromptInput, threadID s
 		cancel:       cancel,
 		done:         make(chan struct{}),
 		toolNames:    map[string]string{},
+		commands:     map[string]*turnCommand{},
 		inflight:     map[string]context.CancelFunc{},
 		stream:       external.NewTurnStream(input.Sink, input.ToolOutputLimit),
 	}
@@ -179,6 +187,100 @@ func (t *turnState) acceptsTurn(turnID string) bool {
 	return t.turnID == "" || t.turnID == turnID
 }
 
+// turnCommand is a command this turn started.
+type turnCommand struct {
+	processID string
+	ended     bool
+}
+
+// backgroundCommandStatus is the result of a command that was still running
+// when its turn ended normally: Codex had returned it to the model and kept
+// its process in the background. It is what Memoh knows at that point, not a
+// failure.
+const backgroundCommandStatus = "running_in_background"
+
+func (t *turnState) registerCommand(itemID string, processID *string) {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.commands[itemID]; ok {
+		return
+	}
+	cmd := &turnCommand{}
+	if processID != nil {
+		cmd.processID = strings.TrimSpace(*processID)
+	}
+	t.commands[itemID] = cmd
+	t.commandOrder = append(t.commandOrder, itemID)
+}
+
+// ownsCommand reports whether a command event belongs to this turn: the turn
+// started the command, or the event carries this turn's id. A command that
+// ended takes no further events.
+func (t *turnState) ownsCommand(itemID, turnID string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.ownsCommandLocked(strings.TrimSpace(itemID), strings.TrimSpace(turnID))
+}
+
+func (t *turnState) ownsCommandLocked(itemID, turnID string) bool {
+	if cmd, ok := t.commands[itemID]; ok {
+		return !cmd.ended
+	}
+	return turnID != "" && turnID == t.turnID
+}
+
+// claimCommandEnd decides, once, that this command's end is recorded now.
+// The process exit and the turn-end settlement race; only the first records.
+func (t *turnState) claimCommandEnd(itemID, turnID string) bool {
+	itemID, turnID = strings.TrimSpace(itemID), strings.TrimSpace(turnID)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.ownsCommandLocked(itemID, turnID) {
+		return false
+	}
+	if cmd, ok := t.commands[itemID]; ok {
+		cmd.ended = true
+	} else {
+		t.commands[itemID] = &turnCommand{ended: true}
+	}
+	return true
+}
+
+// settleBackgroundCommands records the commands still running when the turn
+// ended normally as running in the background, so the transcript neither
+// leaves them open nor calls them interrupted. Only a normal end may say so:
+// a stop or a failed start ends or loses the processes, and those keep the
+// interrupted closure the transcript repair gives them.
+func (t *turnState) settleBackgroundCommands() {
+	t.mu.Lock()
+	if t.turn == nil || (t.turn.Status != protocol.TurnStatusCompleted && t.turn.Status != protocol.TurnStatusFailed) {
+		t.mu.Unlock()
+		return
+	}
+	type settled struct{ itemID, processID string }
+	var running []settled
+	for _, itemID := range t.commandOrder {
+		cmd := t.commands[itemID]
+		if cmd.ended {
+			continue
+		}
+		cmd.ended = true
+		running = append(running, settled{itemID, cmd.processID})
+	}
+	t.mu.Unlock()
+	for _, cmd := range running {
+		result := map[string]any{"status": backgroundCommandStatus}
+		if cmd.processID != "" {
+			result["process_id"] = cmd.processID
+		}
+		t.emit(event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: cmd.itemID, ToolName: t.toolName(cmd.itemID), Result: result})
+	}
+}
+
 // handleNotification translates app-server notifications into stream events.
 // It runs on the connection read loop and must stay non-blocking.
 func (t *turnState) handleNotification(decoded any) {
@@ -216,12 +318,16 @@ func (t *turnState) handleNotification(decoded any) {
 		}
 		t.handleItemStarted(&params.Item)
 	case *protocol.ItemCompletedNotification:
-		if !t.acceptsTurn(params.TurnID) {
+		if cmd := params.Item.CommandExecution; cmd != nil {
+			if !t.claimCommandEnd(cmd.ID, params.TurnID) {
+				return
+			}
+		} else if !t.acceptsTurn(params.TurnID) {
 			return
 		}
 		t.handleItemCompleted(&params.Item)
 	case *protocol.CommandExecutionOutputDeltaNotification:
-		if !t.acceptsTurn(params.TurnID) {
+		if !t.ownsCommand(params.ItemID, params.TurnID) {
 			return
 		}
 		t.emit(event.StreamEvent{Type: event.ToolCallProgress, ToolCallID: params.ItemID, ToolName: t.toolName(params.ItemID), Progress: params.Delta})
@@ -250,6 +356,11 @@ func (t *turnState) handleNotification(decoded any) {
 		t.threadTotals = &totals
 		t.contextWindow = params.TokenUsage.ModelContextWindow
 		t.mu.Unlock()
+		// Every model request ends with a usage report, whatever the model did
+		// in it: spoke, called a tool, waited on a background command. It is
+		// the one signal that the agent is still working while a command it
+		// left running stays silent, so it keeps the idle watchdog off them.
+		t.emit(event.StreamEvent{Type: event.Progress, ProgressStatus: event.ProgressRuntimeActivity})
 	case *protocol.TurnCompletedNotification:
 		if !t.acceptsTurn(params.Turn.ID) {
 			return
@@ -303,6 +414,7 @@ func (t *turnState) handleItemStarted(item *protocol.ThreadItem) {
 		cmd := item.CommandExecution
 		t.rememberTool(cmd.ID, "exec")
 		t.rememberProcess(cmd.ProcessID)
+		t.registerCommand(cmd.ID, cmd.ProcessID)
 		t.emit(event.StreamEvent{
 			Type: event.ToolCallStart, ToolCallID: cmd.ID, ToolName: "exec",
 			Input: map[string]any{"command": cmd.Command, "cwd": cmd.Cwd},
