@@ -1582,7 +1582,7 @@ async function removeMember(member: MemberRow) {
       await deleteBotsByBotIdChannelManagersByChannelIdentityId({
         path: { bot_id: props.botId, channel_identity_id: key },
         throwOnError: true,
-      }).catch(() => undefined)
+      })
     }
     pendingIds.value.delete(key)
     await Promise.all([invalidateRules(), invalidateManagers()])
@@ -1590,6 +1590,9 @@ async function removeMember(member: MemberRow) {
   }
   catch (e) {
     toast.error(resolveApiErrorMessage(e, t('bots.access.members.removeFailed')))
+    // The first request may have gone through before the second failed, so
+    // show what the server actually holds now.
+    void Promise.all([invalidateRules(), invalidateManagers()])
   }
   finally {
     busyIds.value.delete(key)

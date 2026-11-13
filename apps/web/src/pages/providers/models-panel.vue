@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
   Button,
+  CalloutBanner,
   Empty,
   Pagination,
   PaginationContent,
@@ -22,12 +23,14 @@ import { getModels, getProviders } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { Boxes, Box, ChevronRight, Plus, Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { BackendCard, DetailPane, PageShell, SectionGroup, SwapTransition } from '@felinic/ui'
+import { BackendCard, DetailPane, PageShell, SectionGroup, SettingsShell, SwapTransition } from '@felinic/ui'
 import AddProvider from '@/components/add-provider/index.vue'
 import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
+import LoadingButton from '@/components/loading-button/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   groupModelSources,
   isMonochromeLogo,
@@ -44,7 +47,7 @@ import { pageSections, type GallerySection } from './gallery-sections'
 
 const { t } = useI18n()
 
-const { data: providerData, isLoading: providersLoading } = useQuery({
+const { data: providerData, error: providersError, isLoading: providersLoading, refetch: refetchProviders } = useQuery({
   key: () => ['providers'],
   query: async () => {
     const { data } = await getProviders({ throwOnError: true })
@@ -163,9 +166,16 @@ const modelCountByProvider = computed(() => {
   return counts
 })
 
-// Keep cached cards mounted during background refreshes. Only an unresolved
-// query still fetching needs a skeleton; a failed one must leave loading.
-const listLoading = computed(() => providerData.value === undefined && providersLoading.value)
+// The gallery still renders after a failed request because the addable
+// sources are static. Without this notice the user's own providers would just
+// be missing from it, which reads as "you have none".
+const providersLoadFailed = computed(() => !!providersError.value && providerData.value === undefined)
+const providersLoadFailedDetail = computed(() => resolveApiErrorMessage(providersError.value, ''))
+
+// Keep cached cards mounted during background refreshes, and keep the failure
+// notice mounted while a retry is in flight. Only an unresolved initial query
+// without a prior error needs a skeleton.
+const listLoading = computed(() => !providersLoadFailed.value && providerData.value === undefined && providersLoading.value)
 
 const filteredProviders = computed(() => {
   const keyword = props.searchQuery.trim().toLowerCase()
@@ -279,6 +289,22 @@ function openAddProvider() {
         v-else-if="catalogProviders.length + availableSources.length > 0"
         class="flex flex-col gap-4"
       >
+        <CalloutBanner
+          v-if="providersLoadFailed"
+          tone="destructive"
+          :title="t('provider.loadFailed')"
+          :description="providersLoadFailedDetail || undefined"
+        >
+          <LoadingButton
+            variant="outline"
+            size="sm"
+            :loading="providersLoading"
+            @click="void refetchProviders()"
+          >
+            {{ t('common.retry') }}
+          </LoadingButton>
+        </CalloutBanner>
+
         <Empty
           v-if="cardCount === 0"
           class="flex flex-col items-center justify-center px-4 py-16"
@@ -439,7 +465,7 @@ function openAddProvider() {
       v-else
       width="narrow"
       :back-label="t('models.title')"
-      :loading="isDetailLoading || !curProvider"
+      :loading="!providersLoadFailed && (isDetailLoading || !curProvider)"
       @back="closeProvider"
     >
       <ModelSetting
@@ -447,6 +473,25 @@ function openAddProvider() {
         v-model:provider="curProvider"
         @materialized="handleMaterialized"
       />
+      <SettingsShell
+        v-else-if="providersLoadFailed"
+        width="narrow"
+      >
+        <CalloutBanner
+          tone="destructive"
+          :title="t('provider.loadFailed')"
+          :description="providersLoadFailedDetail || undefined"
+        >
+          <LoadingButton
+            variant="outline"
+            size="sm"
+            :loading="providersLoading"
+            @click="void refetchProviders()"
+          >
+            {{ t('common.retry') }}
+          </LoadingButton>
+        </CalloutBanner>
+      </SettingsShell>
     </DetailPane>
   </SwapTransition>
 </template>
