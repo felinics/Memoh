@@ -3,53 +3,78 @@
     <template #header>
       <PanelBreadcrumb :path="filePath" />
     </template>
-    <!-- Full-area spinner only on the first load. Reloads keep the rendered
-         markdown/html mounted and swap content in place. -->
-    <PanePlaceholder
-      v-if="loading && !loaded"
-      loading
-    >
-      {{ t('common.loading') }}
-    </PanePlaceholder>
 
-    <MarkdownPreview
-      v-else-if="isMd"
-      :content="content"
-      class="h-full"
-    />
-    <HtmlPreview
-      v-else-if="isHtml"
-      :content="content"
-      class="h-full"
-    />
-
-    <PanePlaceholder v-else>
+    <PanePlaceholder v-if="!canPreview">
       <template #icon>
         <FileText class="size-10 opacity-30" />
       </template>
       {{ t('bots.files.previewNotAvailable') }}
     </PanePlaceholder>
+
+    <!-- Full-area spinner only on the first load (`isPending`). Background
+         refetches keep the rendered markdown/html mounted and swap in place. -->
+    <PanePlaceholder
+      v-else-if="isPending"
+      loading
+    >
+      {{ t('common.loading') }}
+    </PanePlaceholder>
+
+    <PanePlaceholder v-else-if="error && (!data || isDeletedError)">
+      <template #icon>
+        <FileX
+          v-if="isDeletedError"
+          class="size-10 text-destructive opacity-40"
+        />
+        <FileText
+          v-else
+          class="size-10 opacity-30"
+        />
+      </template>
+      {{ isDeletedError ? t('bots.files.externalChange.deleted') : resolveApiErrorMessage(error, t('bots.files.readFailed')) }}
+      <template #action>
+        <Button
+          variant="outline"
+          size="sm"
+          @click="() => void refetch()"
+        >
+          <RefreshCw class="mr-1.5 size-3" />
+          {{ t('common.retry') }}
+        </Button>
+      </template>
+    </PanePlaceholder>
+
+    <MarkdownPreview
+      v-else-if="isMd"
+      :content="data?.content ?? ''"
+      class="h-full"
+    />
+    <HtmlPreview
+      v-else-if="isHtml"
+      :content="data?.content ?? ''"
+      class="h-full"
+    />
   </DockPanelFrame>
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { FileText } from 'lucide-vue-next'
-import { PanePlaceholder, toast } from '@felinic/ui'
+import { FileText, FileX, RefreshCw } from 'lucide-vue-next'
+import { Button, PanePlaceholder } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
-import { getBotsByBotIdContainerFsRead } from '@memohai/sdk'
+import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { isContainerFileNotFound, useContainerTextFileQuery } from '@/components/file-manager/use-container-text-file'
 import { isMarkdownFile, isHtmlFile } from '@/components/file-manager/utils'
-import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { useChatStore } from '@/store/chat-list'
 import { usePanelVisible } from './use-panel-visible'
 import PanelBreadcrumb from './panel-breadcrumb.vue'
 import DockPanelFrame from './panel-frame.vue'
 
-const MarkdownPreview = defineAsyncComponent(() => import('@/components/markdown-preview/index.vue'))
-const HtmlPreview = defineAsyncComponent(() => import('@/components/html-preview/index.vue'))
+const MarkdownPreview = defineAsyncComponent(withStylesheetRecovery(() => import('@/components/markdown-preview/index.vue').then(m => m.default)))
+const HtmlPreview = defineAsyncComponent(withStylesheetRecovery(() => import('@/components/html-preview/index.vue').then(m => m.default)))
 
 const props = defineProps<{
   params: {
@@ -62,7 +87,6 @@ const props = defineProps<{
 const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId, fsChangedAt } = storeToRefs(chatStore)
-const PREVIEW_POLL_MS = 2_000
 
 const visible = usePanelVisible(props.params.api)
 const filePath = computed(() => props.params.params.filePath ?? '')
@@ -75,81 +99,17 @@ const isMd = computed(() => isMarkdownFile(filename.value))
 const isHtml = computed(() => isHtmlFile(filename.value))
 const canPreview = computed(() => isMd.value || isHtml.value)
 
-const content = ref('')
-const lastRevision = ref('')
-const loading = ref(false)
-// True once the preview has been rendered at least once for the current path,
-// so subsequent reloads can update content in place without flashing a spinner.
-const loaded = ref(false)
-// One in-flight load at a time; a new load aborts the old one so stale
-// fast-fire responses can't clobber newer content.
-let activeLoadController: AbortController | null = null
-
-async function load(options: { notifyOnError?: boolean } = {}) {
-  const botId = currentBotId.value
-  if (!botId || !filePath.value || !canPreview.value) return
-  activeLoadController?.abort()
-  const controller = new AbortController()
-  activeLoadController = controller
-  loading.value = true
-  try {
-    const { data } = await getBotsByBotIdContainerFsRead({
-      path: { bot_id: botId },
-      query: { path: filePath.value },
-      signal: controller.signal,
-      throwOnError: true,
-    })
-    if (controller.signal.aborted) return
-    const nextRevision = data?.revision ?? ''
-    if (!loaded.value || !nextRevision || nextRevision !== lastRevision.value) {
-      content.value = data?.content ?? ''
-    }
-    lastRevision.value = nextRevision
-    loaded.value = true
-  } catch (error) {
-    if (controller.signal.aborted) return
-    if (options.notifyOnError !== false) {
-      toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
-    }
-  } finally {
-    if (activeLoadController === controller) {
-      activeLoadController = null
-      loading.value = false
-    }
-  }
-}
-
-useVisiblePoll(
-  async () => {
-    if (loading.value) return
-    await load({ notifyOnError: false })
-  },
-  PREVIEW_POLL_MS,
-  {
-    enabled: () => Boolean(currentBotId.value && filePath.value && canPreview.value && visible.value),
-  },
+const { data, error, isPending, refetch } = useContainerTextFileQuery(
+  () => currentBotId.value ?? '',
+  filePath,
+  { visible, enabled: canPreview },
 )
 
-// Load when the panel first becomes visible / its target changes, and refresh
-// when the agent mutates the workspace. Path change starts the "loaded" clock
-// from scratch so the user sees the spinner only for the new target's first
-// fetch.
-watch(filePath, () => {
-  loaded.value = false
-  lastRevision.value = ''
-  content.value = ''
-})
-watch([visible, filePath], ([isVisible]) => {
-  if (isVisible) void load()
-}, { immediate: true })
+const isDeletedError = computed(() => Boolean(error.value && isContainerFileNotFound(error.value)))
 
 watch(fsChangedAt, () => {
-  if (!visible.value) return
+  if (!visible.value || !canPreview.value || !currentBotId.value) return
   if (!chatStore.affectsPath(filePath.value)) return
-  void load()
-})
-
-onBeforeUnmount(() => {
-  activeLoadController?.abort()
+  void refetch()
 })
 </script>

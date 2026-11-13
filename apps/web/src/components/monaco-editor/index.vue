@@ -2,7 +2,6 @@
 import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import type * as Monaco from 'monaco-editor'
 import { useMonaco } from 'stream-monaco'
-import { bundledThemes } from 'shiki/themes'
 import { useSettingsStore } from '@/store/settings'
 // The editor host loads only the minimal `editor.api` entry, which omits every
 // optional editor contribution — including sticky scroll. Without this the
@@ -11,20 +10,26 @@ import { useSettingsStore } from '@/store/settings'
 // registers against the shared editor instance before any editor is created.
 import 'monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollContribution.js'
 import { getLanguageByFilename } from '@/components/file-manager/utils'
+import { applyMonacoMinimapSurface } from './minimap-theme'
 
 const props = withDefaults(defineProps<{
   modelValue: string
   language?: string
   readonly?: boolean
   filename?: string
+  active?: boolean
+  initialViewState?: Monaco.editor.ICodeEditorViewState | null
 }>(), {
   language: undefined,
   readonly: false,
   filename: undefined,
+  active: true,
+  initialViewState: null,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  'update:viewState': [state: Monaco.editor.ICodeEditorViewState | null]
 }>()
 
 const editorRef = ref<HTMLDivElement>()
@@ -34,7 +39,10 @@ const editorFontSize = computed(() => settings.codeFontSizePx)
 // customizes the code font; `undefined` resets to the editor default.
 const editorFontFamily = computed(() => settings.codeFontFamily ? settings.codeFontStack : undefined)
 let heightObserver: MutationObserver | null = null
-let themeObserver: MutationObserver | null = null
+let viewStateDisposables: Monaco.IDisposable[] = []
+let themeFrame = 0
+let themeDirtyWhileInactive = false
+let mounted = false
 
 function resolveLanguage(): string {
   if (props.language) return props.language
@@ -143,6 +151,14 @@ const {
     registerMarkdownHeadingSymbols(monaco as unknown as typeof Monaco)
     return []
   },
+  onThemeChange: async (themeName) => {
+    await applyMonacoMinimapSurface(
+      getEditor() as unknown as Pick<typeof Monaco.editor, 'defineTheme' | 'setTheme'>,
+      String(themeName),
+      settings.resolvedColorMode,
+      settings.colorScheme,
+    )
+  },
   scrollBeyondLastLine: true,
   scrollbar: {
     vertical: 'auto',
@@ -168,113 +184,17 @@ const {
   padding: { top: 8, bottom: 8 },
 })
 
-// ── Minimap fill alignment ────────────────────────────────────────────────────
-// The minimap is a painted <canvas>, so it ignores the CSS that pins the rest of
-// the editor to the recessed --surface-editor plane and instead fills with the
-// theme's own editor background (vitesse pure white / near-black). On a short file
-// that left a bright strip down the right edge against the off-white surface.
-// The fill can only be changed from inside the Monaco theme, so we re-register the
-// active theme with one extra color — `minimap.background` set to the live surface
-// token — while leaving every syntax rule untouched. The surface token is resolved
-// from the DOM (it shifts with both dark mode and the active color scheme) and the
-// theme is rebuilt whenever either changes.
-
-// Minimal textmate→monaco mapping (the same shape stream-monaco produces) so we can
-// rebuild the theme with its syntax rules intact and only add the minimap color.
-function toHex(color?: string | string[]): string | undefined {
-  if (Array.isArray(color)) color = color[0]
-  if (!color) return undefined
-  color = (color.charCodeAt(0) === 35 ? color.slice(1) : color).toLowerCase()
-  if (color.length === 3 || color.length === 4) color = color.split('').map(c => c + c).join('')
-  return color
-}
-
-const FONT_STYLES = ['italic', 'bold', 'underline', 'strikethrough'] as const
-function toFontStyle(fontStyle?: string): string {
-  if (!fontStyle) return ''
-  const set = new Set(fontStyle.split(/[\s,]+/).map(s => s.trim().toLowerCase()))
-  return FONT_STYLES.filter(s => set.has(s)).join(' ')
-}
-
-interface ShikiThemeLike {
-  type?: string
-  colors?: Record<string, string>
-  tokenColors?: { scope?: string | string[]; settings?: { foreground?: string; background?: string; fontStyle?: string } }[]
-}
-
-function toMonacoTheme(theme: ShikiThemeLike) {
-  const rules: { token: string; foreground?: string; background?: string; fontStyle?: string }[] = []
-  for (const entry of theme.tokenColors ?? []) {
-    const { foreground, background, fontStyle } = entry.settings ?? {}
-    if (!foreground && !background && !fontStyle) continue
-    const scopes = Array.isArray(entry.scope) ? entry.scope : entry.scope ? [entry.scope] : []
-    const fg = toHex(foreground)
-    const bg = toHex(background)
-    const fs = toFontStyle(fontStyle)
-    for (const s of scopes) rules.push({ token: s, foreground: fg, background: bg, fontStyle: fs })
+function scheduleThemeSync() {
+  if (!props.active) {
+    themeDirtyWhileInactive = true
+    return
   }
-  const colors: Record<string, string> = {}
-  for (const [k, v] of Object.entries(theme.colors ?? {})) {
-    const n = toHex(v)
-    if (n) colors[k] = `#${n}`
-  }
-  return { base: theme.type === 'light' ? 'vs' : 'vs-dark', inherit: false, colors, rules } as const
-}
-
-const shikiThemeCache = new Map<string, ShikiThemeLike>()
-async function loadShikiTheme(name: string): Promise<ShikiThemeLike | null> {
-  const cached = shikiThemeCache.get(name)
-  if (cached) return cached
-  const loader = (bundledThemes as Record<string, (() => Promise<{ default: ShikiThemeLike }>) | undefined>)[name]
-  if (!loader) return null
-  const theme = (await loader()).default
-  shikiThemeCache.set(name, theme)
-  return theme
-}
-
-// Resolve --surface-editor to a concrete sRGB hex. The token is authored in oklch and
-// varies per scheme, so we read the live computed value off a throwaway probe and round-
-// trip it through a 1px canvas, which yields the actual painted bytes regardless of the
-// CSS color space.
-function resolveSurfaceHex(): string | null {
-  if (typeof document === 'undefined') return null
-  const probe = document.createElement('div')
-  probe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;background-color:var(--surface-editor)'
-  ;(document.body ?? document.documentElement).appendChild(probe)
-  const computed = getComputedStyle(probe).backgroundColor
-  probe.remove()
-  if (!computed) return null
-  const canvas = document.createElement('canvas')
-  canvas.width = 1
-  canvas.height = 1
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-  ctx.fillStyle = '#000000'
-  ctx.fillStyle = computed
-  ctx.fillRect(0, 0, 1, 1)
-  try {
-    const data = ctx.getImageData(0, 0, 1, 1).data
-    const channels = [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0]
-    return `#${channels.map(x => x.toString(16).padStart(2, '0')).join('')}`
-  } catch {
-    return null
-  }
-}
-
-let syncToken = 0
-async function syncEditorTheme(): Promise<void> {
-  if (!getEditorView()) return
-  const name = resolveThemeName()
-  const surface = resolveSurfaceHex()
-  const token = ++syncToken
-  const shikiTheme = await loadShikiTheme(name)
-  if (token !== syncToken || !getEditorView()) return
-  if (shikiTheme && surface) {
-    const monacoTheme = toMonacoTheme(shikiTheme)
-    monacoTheme.colors['minimap.background'] = surface
-    getEditor().defineTheme(name, monacoTheme as Parameters<ReturnType<typeof getEditor>['defineTheme']>[1])
-  }
-  await setTheme(name, true)
+  if (themeFrame) cancelAnimationFrame(themeFrame)
+  themeFrame = requestAnimationFrame(() => {
+    themeFrame = 0
+    if (!getEditorView()) return
+    void setTheme(resolveThemeName(), true)
+  })
 }
 
 function clearInlineHeightStyles(el: HTMLElement) {
@@ -289,9 +209,11 @@ function clearInlineHeightStyles(el: HTMLElement) {
 }
 
 onMounted(async () => {
+  mounted = true
   if (!editorRef.value) return
 
   await createEditor(editorRef.value, props.modelValue, resolveLanguage())
+  if (!mounted || !editorRef.value) return
 
   clearInlineHeightStyles(editorRef.value)
 
@@ -300,36 +222,56 @@ onMounted(async () => {
   })
   heightObserver.observe(editorRef.value, { attributes: true, attributeFilter: ['style'] })
 
-  void syncEditorTheme()
-
-  // Mode (`class`) and color scheme (`data-color-scheme`) both live on <html> and
-  // both move the surface token, so rebuild the minimap fill whenever either flips.
-  themeObserver = new MutationObserver(() => {
-    void syncEditorTheme()
-  })
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-color-scheme'] })
-
   const editor = getEditorView()
   if (editor) {
     editor.updateOptions({
       fontSize: editorFontSize.value,
       fontFamily: editorFontFamily.value,
     })
-    editor.setPosition({ lineNumber: 1, column: 1 })
-    editor.revealLine(1)
+    if (props.initialViewState) {
+      editor.restoreViewState(props.initialViewState)
+    } else {
+      editor.setPosition({ lineNumber: 1, column: 1 })
+      editor.revealLine(1)
+    }
+    const captureLiveViewState = () => {
+      if (!props.active) return
+      const host = editorRef.value
+      if (!host || host.clientWidth <= 0 || host.clientHeight <= 0) return
+      emit('update:viewState', editor.saveViewState())
+    }
+    viewStateDisposables.push(
+      editor.onDidChangeCursorSelection(captureLiveViewState),
+      editor.onDidScrollChange(captureLiveViewState),
+      editor.onDidChangeHiddenAreas(captureLiveViewState),
+    )
+    editor.onDidChangeModelContent(() => {
+      const value = editor.getValue() ?? ''
+      emit('update:modelValue', value)
+    })
   }
-  editor?.onDidChangeModelContent(() => {
-    const value = editor.getValue() ?? ''
-    emit('update:modelValue', value)
-  })
 })
 
 onBeforeUnmount(() => {
+  mounted = false
+  if (themeFrame) {
+    cancelAnimationFrame(themeFrame)
+    themeFrame = 0
+  }
+  for (const d of viewStateDisposables) d.dispose()
+  viewStateDisposables = []
   heightObserver?.disconnect()
   heightObserver = null
-  themeObserver?.disconnect()
-  themeObserver = null
   cleanupEditor()
+})
+
+watch(() => props.active, (active) => {
+  if (!active) return
+  getEditorView()?.layout()
+  if (themeDirtyWhileInactive) {
+    themeDirtyWhileInactive = false
+    scheduleThemeSync()
+  }
 })
 
 watch(() => props.modelValue, (newVal) => {
@@ -357,8 +299,8 @@ watch([() => props.language, () => props.filename], () => {
 })
 
 watch(
-  () => [settings.shikiThemeLight, settings.shikiThemeDark, settings.resolvedColorMode] as const,
-  () => { void syncEditorTheme() },
+  () => [settings.shikiThemeLight, settings.shikiThemeDark, settings.resolvedColorMode, settings.colorScheme] as const,
+  scheduleThemeSync,
 )
 </script>
 
@@ -375,7 +317,7 @@ watch(
  * token colors are untouched — only the background fill is nudged to the surface
  * token. !important beats Monaco's non-important inline fill. The minimap is a
  * canvas and can't be reached here; its fill is matched via the theme instead
- * (see syncEditorTheme). */
+ * (see applyMonacoMinimapSurface). */
 :deep(.monaco-editor),
 :deep(.monaco-editor .overflow-guard),
 :deep(.monaco-editor-background),

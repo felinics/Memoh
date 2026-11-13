@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
+import type * as Monaco from 'monaco-editor'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { isFileSaveEligible } from './file-save-command'
+import { useCleanEditorRetention } from './use-clean-editor-retention'
+import {
+  createContainerFileStatTracker,
+  syncContainerTextFileCache,
+  tryUseQueryCache,
+  utf8ByteLength,
+} from './use-container-text-file'
 import {
   canApplyExternalReload,
   detectSaveConflict,
@@ -34,12 +42,17 @@ import { isTextFile, isImageFile } from './utils'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   botId: string
   file: HandlersFsFileInfo
   readonly?: boolean
+  visible?: boolean
   keyboardActive?: boolean
-}>()
+}>(), {
+  readonly: false,
+  visible: true,
+  keyboardActive: undefined,
+})
 
 const EXTERNAL_FILE_POLL_MS = 2_000
 
@@ -49,6 +62,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const queryCache = tryUseQueryCache()
 
 const content = ref('')
 const originalContent = ref('')
@@ -77,6 +91,7 @@ const diskState = ref<'available' | 'stale' | 'deleted'>('available')
 // "Refresh diff" affordance in the compare toolbar rather than silently
 // updating the right pane underneath the user's review.
 const compareDiskContent = ref('')
+const compareDiskRevision = ref('')
 // Flips to true when a fsChangedAt for this path lands while we're in
 // conflictState='compare'. Reset on every successful openCompare(), on path
 // change, and on exit.
@@ -84,6 +99,9 @@ const compareStale = ref(false)
 let compareController: AbortController | null = null
 const observedExternalRevision = ref('')
 const imageMetadataFingerprint = ref('')
+const textStatTracker = createContainerFileStatTracker()
+const pendingExternalRefresh = ref(false)
+const savedEditorViewState = ref<Monaco.editor.ICodeEditorViewState | null>(null)
 let externalPollController: AbortController | null = null
 // Stable ids so the chip buttons can aria-describedby the relevant inline
 // message span, giving keyboard / screen-reader users the "why is this here"
@@ -107,6 +125,11 @@ const isText = computed(() => isTextFile(filename.value))
 const isImage = computed(() => isImageFile(filename.value))
 const isDirty = computed(() => content.value !== originalContent.value
   || (savingContent.value !== null && content.value !== savingContent.value))
+const editorPinned = computed(() => isDirty.value || conflictState.value !== 'none')
+const editorRetained = useCleanEditorRetention(
+  () => props.visible && isText.value && conflictState.value !== 'compare',
+  editorPinned,
+)
 
 const chatStore = useChatStore()
 const { fsChangedAt, currentBotId, bots } = storeToRefs(chatStore)
@@ -196,6 +219,7 @@ function dropToChipForBadDiskState() {
   compareController?.abort()
   compareController = null
   compareDiskContent.value = ''
+  compareDiskRevision.value = ''
   compareStale.value = false
   conflictState.value = 'chip'
 }
@@ -206,7 +230,7 @@ function notePolledExternalRevision(revision: string) {
   chatStore.markFsChanged(filePath.value)
 }
 
-function applyPolledTextContent(contentValue: string, revision: string) {
+function applyPolledTextContent(contentValue: string, revision: string, size: number) {
   content.value = contentValue
   originalContent.value = contentValue
   baseRevision.value = revision
@@ -215,9 +239,23 @@ function applyPolledTextContent(contentValue: string, revision: string) {
   loaded.value = true
   diskState.value = 'available'
   conflictState.value = 'none'
+  syncContainerTextFileCache(queryCache, props.botId, filePath.value, {
+    content: contentValue,
+    revision,
+    size,
+  })
 }
 
 async function pollTextFile(signal: AbortSignal) {
+  const { data: stat } = await getBotsByBotIdContainerFs({
+    path: { bot_id: props.botId },
+    query: { path: filePath.value },
+    signal,
+    throwOnError: true,
+  })
+  if (signal.aborted) return
+  if (!textStatTracker.shouldRead(stat)) return
+
   const { data } = await getBotsByBotIdContainerFsRead({
     path: { bot_id: props.botId },
     query: { path: filePath.value },
@@ -225,21 +263,33 @@ async function pollTextFile(signal: AbortSignal) {
     throwOnError: true,
   })
   if (signal.aborted) return
+  const nextContent = data.content ?? ''
   const nextRevision = data.revision ?? ''
+  const nextSize = data.size ?? utf8ByteLength(nextContent)
+  textStatTracker.commitRead(stat, nextSize, Date.now())
+
+  const currentComparisonRevision = conflictState.value === 'compare' && compareDiskRevision.value
+    ? compareDiskRevision.value
+    : baseRevision.value
   const action = resolvePolledTextChange({
     loaded: loaded.value,
     loading: loading.value,
     saving: saving.value,
-    currentRevision: baseRevision.value,
+    currentRevision: currentComparisonRevision,
     nextRevision,
     isDirty: isDirty.value,
     conflictState: conflictState.value,
   })
   if (action === 'ignore') return
   if (action === 'apply') {
-    applyPolledTextContent(data.content ?? '', nextRevision)
+    applyPolledTextContent(nextContent, nextRevision, nextSize)
     return
   }
+  syncContainerTextFileCache(queryCache, props.botId, filePath.value, {
+    content: nextContent,
+    revision: nextRevision,
+    size: nextSize,
+  })
   notePolledExternalRevision(nextRevision)
   diskState.value = 'available'
   if (action === 'mark-compare-stale') {
@@ -286,6 +336,7 @@ async function pollExternalFile() {
       loaded.value = true
       observedExternalRevision.value = 'deleted'
       imageMetadataFingerprint.value = ''
+      textStatTracker.reset()
       dropToChipForBadDiskState()
       return
     }
@@ -298,7 +349,7 @@ async function pollExternalFile() {
 }
 
 useVisiblePoll(pollExternalFile, EXTERNAL_FILE_POLL_MS, {
-  enabled: () => Boolean(props.botId && (isText.value || isImage.value)),
+  enabled: () => Boolean(props.visible && props.botId && (isText.value || isImage.value)),
 })
 
 async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
@@ -316,6 +367,14 @@ async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: 
       throwOnError: true,
     })
     if (controller.signal.aborted) return
+    const nextContent = data.content ?? ''
+    const nextRevision = data.revision ?? ''
+    const nextSize = data.size ?? utf8ByteLength(nextContent)
+    syncContainerTextFileCache(queryCache, props.botId, filePath.value, {
+      content: nextContent,
+      revision: nextRevision,
+      size: nextSize,
+    })
     if (!canApplyExternalReload({
       contentAtRequestStart,
       originalContentAtRequestStart,
@@ -329,11 +388,12 @@ async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: 
       if (conflictState.value === 'none') conflictState.value = 'chip'
       return
     }
-    content.value = data.content ?? ''
+    content.value = nextContent
     originalContent.value = content.value
-    baseRevision.value = data.revision ?? ''
+    baseRevision.value = nextRevision
     observedExternalRevision.value = ''
     lastLoadedAt.value = Date.now()
+    textStatTracker.recordSync(nextSize, lastLoadedAt.value)
     loaded.value = true
     diskState.value = 'available'
     // Don't drop the user out of an open Compare; only clear the chip surface.
@@ -343,6 +403,7 @@ async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: 
     if (isHttpStatus(error, 404)) {
       diskState.value = 'deleted'
       loaded.value = true
+      textStatTracker.reset()
       dropToChipForBadDiskState()
       return
     }
@@ -495,11 +556,20 @@ async function handleSave(force = false): Promise<boolean> {
       && chatStore.affectsPath(filePath.value)
     if (interleavedBump) {
       lastLoadedAt.value = fsChangedAtBeforeSave > 0 ? fsChangedAtBeforeSave : 1
+      textStatTracker.reset()
       if (conflictState.value === 'compare') compareStale.value = true
       else conflictState.value = 'chip'
     } else {
-      lastLoadedAt.value = Date.now()
+      const savedAt = Date.now()
+      const savedSize = utf8ByteLength(snapshot.content)
+      lastLoadedAt.value = savedAt
+      textStatTracker.recordSync(savedSize, savedAt)
       conflictState.value = 'none'
+      syncContainerTextFileCache(queryCache, snapshot.botId, snapshot.path, {
+        content: snapshot.content,
+        revision: baseRevision.value,
+        size: savedSize,
+      })
     }
     toast.success(t('bots.files.saveSuccess'))
     emit('saved')
@@ -573,10 +643,14 @@ watch([() => props.botId, () => props.file.path], () => {
   diskState.value = 'available'
   conflictState.value = 'none'
   compareDiskContent.value = ''
+  compareDiskRevision.value = ''
   compareStale.value = false
   lastLoadedAt.value = 0
   observedExternalRevision.value = ''
   imageMetadataFingerprint.value = ''
+  textStatTracker.reset()
+  pendingExternalRefresh.value = false
+  savedEditorViewState.value = null
   loaded.value = false
   if (isText.value) {
     void loadTextContent()
@@ -605,8 +679,30 @@ watch(fsChangedAt, () => {
     if (conflictState.value === 'none') conflictState.value = 'chip'
     return
   }
+  if (!props.visible) {
+    pendingExternalRefresh.value = true
+    return
+  }
+  pendingExternalRefresh.value = false
   if (isText.value) void loadTextContent({ notifyOnError: false })
   else if (isImage.value) void loadImageBlob({ notifyOnError: false })
+})
+
+watch(() => props.visible, (visible) => {
+  if (!visible) {
+    externalPollController?.abort()
+    externalPollController = null
+    return
+  }
+  if (pendingExternalRefresh.value) {
+    pendingExternalRefresh.value = false
+    if (isText.value) void loadTextContent({ notifyOnError: false })
+    else if (isImage.value) void loadImageBlob({ notifyOnError: false })
+    return
+  }
+  if (loaded.value && !loading.value && !saving.value) {
+    void pollExternalFile()
+  }
 })
 
 async function acceptExternalChange() {
@@ -621,6 +717,7 @@ async function acceptExternalChange() {
     compareController?.abort()
     compareController = null
     compareDiskContent.value = ''
+    compareDiskRevision.value = ''
     compareStale.value = false
     conflictState.value = 'none'
   }
@@ -640,6 +737,7 @@ async function openCompare() {
   const event = fsEvent.value
   if (event?.writeContent != null) {
     compareDiskContent.value = event.writeContent
+    compareDiskRevision.value = observedExternalRevision.value
     compareStale.value = false
     conflictState.value = 'compare'
     return
@@ -655,6 +753,7 @@ async function openCompare() {
     })
     if (controller.signal.aborted) return
     compareDiskContent.value = data.content ?? ''
+    compareDiskRevision.value = data.revision ?? ''
     compareStale.value = false
     conflictState.value = 'compare'
   } catch (error) {
@@ -666,6 +765,7 @@ async function openCompare() {
       // into the same 404 repeatedly.
       diskState.value = 'deleted'
       compareDiskContent.value = ''
+      compareDiskRevision.value = ''
       compareStale.value = false
       conflictState.value = 'chip'
       return
@@ -710,9 +810,20 @@ useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
   return true
 })
 
-onMounted(() => {
-  nowTickInterval = setInterval(() => { nowTick.value = Date.now() }, 60_000)
-})
+watch(
+  () => props.visible && conflictState.value === 'chip',
+  (shouldTick) => {
+    if (nowTickInterval) {
+      clearInterval(nowTickInterval)
+      nowTickInterval = null
+    }
+    if (shouldTick) {
+      nowTick.value = Date.now()
+      nowTickInterval = setInterval(() => { nowTick.value = Date.now() }, 60_000)
+    }
+  },
+  { immediate: true },
+)
 
 onBeforeUnmount(() => {
   fileGeneration++
@@ -865,6 +976,7 @@ onBeforeUnmount(() => {
           :filename="filename"
           :original-title="t('bots.files.compare.disk')"
           :modified-title="t('bots.files.compare.yours')"
+          :active="visible"
           class="min-h-0 flex-1"
         />
       </div>
@@ -880,12 +992,20 @@ onBeforeUnmount(() => {
       </PanePlaceholder>
 
       <MonacoEditor
-        v-else-if="isText"
+        v-else-if="isText && editorRetained"
         ref="monacoEditorRef"
         v-model="content"
         :filename="filename"
         :readonly="readonly"
+        :active="visible"
+        :initial-view-state="savedEditorViewState"
         class="h-full"
+        @update:view-state="savedEditorViewState = $event"
+      />
+
+      <div
+        v-else-if="isText"
+        class="h-full w-full bg-surface-editor"
       />
 
       <PanePlaceholder v-else-if="isImage && diskState === 'deleted'">

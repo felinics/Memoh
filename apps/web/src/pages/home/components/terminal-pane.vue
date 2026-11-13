@@ -77,10 +77,6 @@ function resolveTerminalTheme() {
   }
 }
 
-const TERMINAL_OPTIONS = {
-  cursorBlink: true,
-} as const
-
 // All code surfaces follow the shared code font size (default 13). Only the
 // family falls back to xterm's built-in monospace until the user customizes it.
 const DEFAULT_TERMINAL_FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace'
@@ -104,6 +100,7 @@ let serializeAddon: SerializeAddon | null = null
 let ws: WebSocket | null = null
 let resizeObserver: ResizeObserver | null = null
 let fitTimer: ReturnType<typeof setTimeout> | null = null
+let themeFrame = 0
 let disposables: Array<{ dispose(): void }> = []
 let connectionDisposables: Array<{ dispose(): void }> = []
 
@@ -218,7 +215,7 @@ function setupResizeObserver() {
 
 onMounted(() => {
   if (!containerRef.value) return
-  const term = new Terminal({ ...TERMINAL_OPTIONS, ...resolveTerminalFont(), theme: resolveTerminalTheme() })
+  const term = new Terminal({ cursorBlink: props.active, ...resolveTerminalFont(), theme: resolveTerminalTheme() })
   const fa = new FitAddon()
   const sa = new SerializeAddon()
   term.loadAddon(fa)
@@ -294,10 +291,8 @@ onMounted(() => {
 watch(
   () => props.active,
   async (active) => {
-    if (!active) {
-      persistSnapshot()
-      return
-    }
+    if (terminal) terminal.options.cursorBlink = active
+    if (!active) return
     await nextTick()
     fitTerminal()
     if (status.value === 'idle') {
@@ -308,11 +303,13 @@ watch(
 )
 
 watch(
-  [() => settingsStore.theme, () => settingsStore.colorScheme],
+  [() => settingsStore.resolvedColorMode, () => settingsStore.colorScheme],
   () => {
-    if (terminal) {
-      terminal.options.theme = resolveTerminalTheme()
-    }
+    if (themeFrame) cancelAnimationFrame(themeFrame)
+    themeFrame = requestAnimationFrame(() => {
+      themeFrame = 0
+      if (terminal) terminal.options.theme = resolveTerminalTheme()
+    })
   },
 )
 
@@ -329,6 +326,10 @@ watch(
 
 onBeforeUnmount(() => {
   persistSnapshot()
+  if (themeFrame) {
+    cancelAnimationFrame(themeFrame)
+    themeFrame = 0
+  }
   if (fitTimer) {
     clearTimeout(fitTimer)
     fitTimer = null

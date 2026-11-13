@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { useDark } from '@vueuse/core'
+import { useSettingsStore } from '@/store/settings'
 import {
   ChevronRight,
   Download,
@@ -23,7 +24,7 @@ import {
   Spinner,
 } from '@felinic/ui'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
-import { isArchiveFile, sortDirsFirst } from './utils'
+import { directoryEntriesFingerprint, isArchiveFile, sortDirsFirst } from './utils'
 import { resolveFileIcon } from './file-icon'
 import { FileTreeKey } from './file-tree-context'
 import {
@@ -44,10 +45,11 @@ const { t } = useI18n()
 const ctx = inject(FileTreeKey)
 if (!ctx) throw new Error('FileTreeNode must be used within a FileTree provider')
 const tree = ctx
-const isDark = useDark()
+const { isDark } = storeToRefs(useSettingsStore())
 
 const children = ref<HandlersFsFileInfo[]>([])
 const rowEl = ref<HTMLElement | null>(null)
+let lastChildrenFingerprint: string | null = null
 
 const path = computed(() => props.entry.path ?? '')
 const selectionMode = computed(() => tree.selectionMode.value)
@@ -62,7 +64,12 @@ const fileIcon = computed(() => resolveFileIcon(props.entry.name ?? '', isDark.v
 
 const { expanded, loaded, spinnerVisible, expand, toggle, reload } = useTreeDisclosure(async () => {
   if (!props.entry.isDir || !path.value) return false
-  children.value = sortDirsFirst(await tree.listDirectory(path.value))
+  const sorted = sortDirsFirst(await tree.listDirectory(path.value))
+  const nextFingerprint = directoryEntriesFingerprint(sorted)
+  if (nextFingerprint !== lastChildrenFingerprint) {
+    children.value = sorted
+    lastChildrenFingerprint = nextFingerprint
+  }
   return true
 })
 
