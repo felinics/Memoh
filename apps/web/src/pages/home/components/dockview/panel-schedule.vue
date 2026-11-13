@@ -1,7 +1,7 @@
 <template>
   <div class="h-full w-full overflow-y-auto">
     <section
-      v-if="currentBotId"
+      v-if="hasActivated && currentBotId"
       class="mx-auto max-w-2xl px-6 py-8"
     >
       <header class="mb-6 px-2">
@@ -28,7 +28,7 @@
       />
     </section>
     <div
-      v-else
+      v-else-if="hasActivated"
       class="flex h-full items-center justify-center text-sm text-muted-foreground"
     >
       {{ t('chat.noBotSelected') }}
@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { ConfirmDeleteDialog, InlineLoadingRow, toast } from '@felinic/ui'
@@ -58,10 +58,13 @@ import {
 } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
+import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import { useChatStore } from '@/store/chat-list'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { scheduleDeleteConfirmKey } from '@/utils/schedule-delete'
-import ScheduleEditor from '@/pages/bots/components/schedule-editor.vue'
+import { usePanelVisible } from './use-panel-visible'
+
+const ScheduleEditor = defineAsyncComponent(withStylesheetRecovery(() => import('@/pages/bots/components/schedule-editor.vue').then(m => m.default)))
 
 const props = defineProps<{
   params: {
@@ -75,6 +78,12 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 
+const visible = usePanelVisible(props.params.api)
+const hasActivated = ref(visible.value)
+watch(visible, (isVisible) => {
+  if (isVisible) hasActivated.value = true
+})
+
 const scheduleId = ref(typeof props.params.params.scheduleId === 'string' ? props.params.params.scheduleId : undefined)
 const schedule = ref<ScheduleSchedule | null>(null)
 const isLoading = ref(false)
@@ -87,6 +96,7 @@ const parametersSub = props.params.api.onDidParametersChange((parameters) => {
 })
 
 async function fetchSchedule() {
+  if (!hasActivated.value) return
   const botId = currentBotId.value
   const id = scheduleId.value
   if (!botId || !id) {
@@ -140,8 +150,8 @@ async function confirmDelete() {
   }
 }
 
-watch([currentBotId, scheduleId], () => {
-  void fetchSchedule()
+watch([hasActivated, currentBotId, scheduleId], ([activated]) => {
+  if (activated) void fetchSchedule()
 }, { immediate: true })
 
 onBeforeUnmount(() => {

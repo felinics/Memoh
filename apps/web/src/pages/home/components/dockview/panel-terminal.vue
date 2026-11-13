@@ -11,13 +11,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { defineAsyncComponent, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
+import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import { useChatStore } from '@/store/chat-list'
-import TerminalPane from '../terminal-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
 import DockPanelFrame from './panel-frame.vue'
+
+const TerminalPane = defineAsyncComponent(withStylesheetRecovery(() => import('../terminal-pane.vue').then(m => m.default)))
 
 const props = defineProps<{
   params: {

@@ -51,9 +51,11 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   // hydrated copy can silently disagree with the server — always refetch.
   'bot-workspace-targets',
   'computer-access-grants',
-  // Raw workspace file text (hooks.json env map may contain API keys); deepStripSecrets
-  // only walks objects/arrays and cannot redact secrets inside an opaque string.
+  // Raw workspace file text (hooks.json env map, .env, or config files may contain
+  // API keys); deepStripSecrets only walks objects/arrays and cannot redact secrets
+  // inside an opaque string.
   'bot-hooks-config',
+  'container-fs-text',
   // Per-turn context audit: a debug surface with no reload value.
   'context-lifecycle',
   // These endpoints return secrets in clear and replace the stored config with

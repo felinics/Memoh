@@ -11,6 +11,7 @@
       v-else-if="isText"
       v-model="content"
       :filename="name"
+      :active="visible"
       readonly
       class="h-full"
     />
@@ -49,17 +50,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { File, Download } from 'lucide-vue-next'
 import { Button, PanePlaceholder, toast } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
-import MonacoEditor from '@/components/monaco-editor/index.vue'
+import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import DockPanelFrame from './panel-frame.vue'
 import { isTextFile, isImageFile } from '@/components/file-manager/utils'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { usePanelVisible } from './use-panel-visible'
+
+const MonacoEditor = defineAsyncComponent(withStylesheetRecovery(() => import('@/components/monaco-editor/index.vue').then(m => m.default)))
 
 // Renders a message attachment (a stored media asset) inside its own dock tab,
 // instead of handing the source URL to the OS. The source is re-resolved from
@@ -99,20 +102,30 @@ const renderUrl = computed(() => {
 const content = ref('')
 const loading = ref(false)
 let loadedUrl = ''
+let loadController: AbortController | null = null
 
 async function loadText() {
   const url = renderUrl.value
   if (!isText.value || !url || loadedUrl === url) return
+  loadController?.abort()
+  const controller = new AbortController()
+  loadController = controller
   loading.value = true
   try {
-    const res = await fetch(url)
+    const res = await fetch(url, { signal: controller.signal })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    content.value = await res.text()
+    const text = await res.text()
+    if (controller.signal.aborted) return
+    content.value = text
     loadedUrl = url
   } catch (error) {
+    if (controller.signal.aborted) return
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    loading.value = false
+    if (loadController === controller) {
+      loadController = null
+      loading.value = false
+    }
   }
 }
 
@@ -131,4 +144,9 @@ function handleDownload() {
 watch([visible, renderUrl], ([isVisible]) => {
   if (isVisible) void loadText()
 }, { immediate: true })
+
+onBeforeUnmount(() => {
+  loadController?.abort()
+  loadController = null
+})
 </script>

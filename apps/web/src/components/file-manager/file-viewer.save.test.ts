@@ -3,12 +3,12 @@ import { createApp, h, nextTick, reactive, ref, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import FileViewer from './file-viewer.vue'
 
-const sdk = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }))
+const sdk = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), stat: vi.fn() }))
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock('@memohai/sdk', () => ({
   getBotsByBotIdContainerFsRead: sdk.read,
   postBotsByBotIdContainerFsWrite: sdk.write,
-  getBotsByBotIdContainerFs: vi.fn(),
+  getBotsByBotIdContainerFs: sdk.stat,
   getBotsByBotIdContainerFsDownload: vi.fn(),
 }))
 vi.mock('@felinic/ui', () => ({
@@ -43,9 +43,9 @@ function deferred() {
 
 let app: App
 let host: HTMLDivElement
-async function mountViewer() {
+async function mountViewer(initialVisible = true) {
   const viewer = ref<InstanceType<typeof FileViewer>>()
-  const props = reactive({ botId: 'bot-a', file: { path: '/a.txt', name: 'a.txt' } })
+  const props = reactive({ botId: 'bot-a', file: { path: '/a.txt', name: 'a.txt' }, visible: initialVisible })
   const dirty = vi.fn()
   const saved = vi.fn()
   host = document.createElement('div')
@@ -70,7 +70,10 @@ async function mountViewer() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  sdk.read.mockResolvedValue({ data: { content: 'initial', revision: 'r0' } })
+  sdk.read.mockResolvedValue({ data: { content: 'initial', revision: 'r0', size: 7 } })
+  sdk.stat.mockResolvedValue({
+    data: { path: '/a.txt', name: 'a.txt', isDir: false, size: 7, mode: '-rw-r--r--', modTime: '1970-01-01T00:00:01Z' },
+  })
   sdk.write.mockResolvedValue({ data: { revision: 'r1' } })
 })
 afterEach(() => {
@@ -136,9 +139,12 @@ describe('file viewer save snapshot', () => {
   })
 
   it.each(['path', 'bot'] as const)('cancels a pending external poll when changing %s', async (change) => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ now: 20_000 })
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
     const view = await mountViewer()
+    sdk.stat.mockResolvedValueOnce({
+      data: { path: '/a.txt', name: 'a.txt', isDir: false, size: 99, mode: '-rw-r--r--', modTime: '1970-01-01T00:00:15Z' },
+    })
     const pending = deferred()
     sdk.read.mockReturnValueOnce(pending.promise)
     await vi.advanceTimersByTimeAsync(2_000)
@@ -256,5 +262,26 @@ describe('file viewer save snapshot', () => {
       path: { bot_id: view.props.botId },
       body: { path: view.props.file.path, content: 'new draft', expectedRevision: 'other-r0' },
     }))
+  })
+
+  it('polls via lightweight stat without re-reading file bytes when unchanged', async () => {
+    vi.useFakeTimers({ now: 20_000 })
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    await mountViewer()
+    expect(sdk.read).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(6_000)
+    expect(sdk.stat).toHaveBeenCalledTimes(3)
+    expect(sdk.read).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps dirty editor mounted when hidden so undo and background save remain intact', async () => {
+    const view = await mountViewer(true)
+    await view.edit('unsaved draft')
+    view.props.visible = false
+    await nextTick()
+    expect(host.querySelector('textarea')).not.toBeNull()
+    expect(host.querySelector('textarea')!.value).toBe('unsaved draft')
+    expect(await view.save()).toBe(true)
   })
 })

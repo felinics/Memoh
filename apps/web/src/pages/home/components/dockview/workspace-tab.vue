@@ -178,6 +178,7 @@ const activeTabShapeStyle = ref<Record<string, string>>({
   height: '35px',
 })
 let resizeObserver: ResizeObserver | null = null
+let observedTab: HTMLElement | null = null
 let pendingShapeFrame = 0
 // Unsaved-changes flag for file panels — read from the store's reactive map, so
 // the dot, the sidebar badge and the close dialog never drift apart.
@@ -214,6 +215,7 @@ const disposables = [
     // true) on a wrapper the CSS reads as inactive — doubled hover/divider pixels.
     // Layout change covers move/split/reorder and re-resolves the current wrapper.
     syncGroupActiveClass()
+    syncShapeListeners(isVisible.value)
     scheduleActiveTabShapeUpdate()
   }),
 ]
@@ -225,12 +227,11 @@ onMounted(() => {
   isActive.value = props.params.api.isActive
   isVisible.value = props.params.api.isVisible
   nextTick(() => {
-    installShapeObserver()
     // Set the group-active class only after the tab's .dv-tab ancestor exists;
     // closest() returns null before the wrapper is in the DOM.
     syncGroupActiveClass()
-    window.addEventListener('resize', scheduleActiveTabShapeUpdate)
-    scheduleActiveTabShapeUpdate()
+    syncShapeListeners(isVisible.value)
+    if (isVisible.value) scheduleActiveTabShapeUpdate()
   })
 })
 
@@ -242,8 +243,7 @@ function close() {
 
 onBeforeUnmount(() => {
   if (pendingShapeFrame) cancelAnimationFrame(pendingShapeFrame)
-  resizeObserver?.disconnect()
-  window.removeEventListener('resize', scheduleActiveTabShapeUpdate)
+  syncShapeListeners(false)
   // Clear the imperatively-set class so it can't linger on a .dv-tab wrapper that
   // dockview later reuses for a different (e.g. terminal) tab component that never
   // sets it — otherwise a stale active style could survive the swap.
@@ -253,6 +253,7 @@ onBeforeUnmount(() => {
 
 watch(isVisible, (active) => {
   syncGroupActiveClass()
+  syncShapeListeners(active)
   if (active) nextTick(scheduleActiveTabShapeUpdate)
 })
 
@@ -265,15 +266,30 @@ function syncGroupActiveClass() {
   if (tab) tab.classList.toggle('memoh-tab-active', isVisible.value)
 }
 
-function installShapeObserver() {
+function syncShapeListeners(active: boolean) {
+  if (!active) {
+    resizeObserver?.disconnect()
+    resizeObserver = null
+    observedTab = null
+    window.removeEventListener('resize', scheduleActiveTabShapeUpdate)
+    return
+  }
   const root = rootEl.value
-  if (!root || resizeObserver) return
+  if (!root) return
 
-  resizeObserver = new ResizeObserver(() => scheduleActiveTabShapeUpdate())
-  resizeObserver.observe(root)
+  if (!resizeObserver) {
+    resizeObserver = new ResizeObserver(() => scheduleActiveTabShapeUpdate())
+    resizeObserver.observe(root)
+    window.addEventListener('resize', scheduleActiveTabShapeUpdate)
+  }
 
   const tab = root.closest<HTMLElement>('.dv-tab')
-  if (tab && tab !== root) resizeObserver.observe(tab)
+  const nextTab = tab && tab !== root ? tab : null
+  if (nextTab !== observedTab) {
+    if (observedTab) resizeObserver.unobserve(observedTab)
+    observedTab = nextTab
+    if (observedTab) resizeObserver.observe(observedTab)
+  }
 }
 
 function scheduleActiveTabShapeUpdate() {
@@ -313,9 +329,9 @@ function updateActiveTabShape() {
   const alignedBottom = snapToDevicePixel(relativeTop + layoutHeight, pixelRatio)
   const width = alignedRight - alignedLeft
   const height = alignedBottom - alignedTop
-  const strokeWidth = readWorkspaceTabStrokeWidth(tab)
+  const strokeWidth = readWorkspaceTabStrokeWidth(tabStyle)
   const radius = Math.min(
-    snapToDevicePixel(readTabRadius(tab), pixelRatio),
+    snapToDevicePixel(readTabRadius(tabStyle), pixelRatio),
     Math.max(0, width / 2),
     Math.max(0, height),
   )
@@ -339,8 +355,8 @@ function updateActiveTabShape() {
   }
 }
 
-function readWorkspaceTabStrokeWidth(tab: HTMLElement) {
-  const width = Number.parseFloat(getComputedStyle(tab).getPropertyValue('--workspace-tab-stroke-width'))
+function readWorkspaceTabStrokeWidth(tabStyle: CSSStyleDeclaration) {
+  const width = Number.parseFloat(tabStyle.getPropertyValue('--workspace-tab-stroke-width'))
   return Number.isFinite(width) && width > 0 ? width : DEFAULT_WORKSPACE_TAB_STROKE_WIDTH
 }
 
@@ -389,8 +405,8 @@ function buildActiveTabShape({
   }
 }
 
-function readTabRadius(tab: HTMLElement) {
-  const radius = Number.parseFloat(getComputedStyle(tab).borderTopLeftRadius)
+function readTabRadius(tabStyle: CSSStyleDeclaration) {
+  const radius = Number.parseFloat(tabStyle.borderTopLeftRadius)
   return Number.isFinite(radius) && radius > 0 ? radius : 8
 }
 

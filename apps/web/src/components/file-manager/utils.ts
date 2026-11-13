@@ -98,6 +98,28 @@ export function sortDirsFirst<T extends { isDir?: boolean, name?: string }>(entr
   return [...dirs, ...files]
 }
 
+export function directoryEntriesFingerprint(
+  entries: ReadonlyArray<{
+    path?: string
+    name?: string
+    isDir?: boolean
+    size?: number
+    modTime?: string
+    mode?: string
+  }>,
+): string {
+  return entries
+    .map(entry => [
+      entry.path ?? '',
+      entry.name ?? '',
+      entry.isDir ? '1' : '0',
+      entry.size ?? -1,
+      entry.modTime ?? '',
+      entry.mode ?? '',
+    ].join('\u0000'))
+    .join('\n')
+}
+
 export function getExtension(filename: string): string {
   const dotIndex = filename.lastIndexOf('.')
   if (dotIndex === -1 || dotIndex === filename.length - 1) return ''
