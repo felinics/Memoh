@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, provide } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import {
@@ -11,7 +12,14 @@ import {
   type DesktopUpdateBridge,
   type DesktopWindowBridge,
 } from '@memohai/web/lib/desktop-shell'
-import MainSection from '@memohai/web/pages/main-section/index.vue'
+import { isChunkLoadError, reloadForChunkLoadError } from '@memohai/web/lib/chunk-load-error'
+import { holdPrefetchUntil, whenNetworkQuiet } from '@memohai/web/lib/idle-prefetch'
+import { loadMainSection, prefetchAppPages, showsChatWorkspace } from '@memohai/web/routes'
+import { useSettingsStore } from '@memohai/web/store/settings'
+
+useSettingsStore()
+
+const { t } = useI18n()
 
 provide(DesktopShellKey, true)
 provide(DesktopWindowKey, {
@@ -34,17 +42,45 @@ provide(DesktopUpdatesKey, {
   onStateChanged: window.api.desktop.updates.onStateChanged,
 } satisfies DesktopUpdateBridge)
 
+let markMainSectionSettled!: () => void
+const mainSectionSettled = new Promise<void>((resolve) => {
+  markMainSectionSettled = resolve
+})
+const MainSection = defineAsyncComponent({
+  loader: () => loadMainSection().finally(markMainSectionSettled),
+  onError(error, _retry, fail) {
+    if (isChunkLoadError(error) && reloadForChunkLoadError()) {
+      console.warn('[App] Chat workspace chunk failed to load, reloading...', error.message)
+      return
+    }
+    fail()
+  },
+})
+
 // Mirror apps/web App.vue: keep chat dockview/scroll alive (DOM attached,
 // full-size) while in settings, so returning has no black flash / re-scroll /
 // relayout.
 const route = useRoute()
-const isChatRoute = computed(() => route.name === 'home' || route.name === 'bot')
+const router = useRouter()
 const isSettingsRoute = computed(() => route.path.startsWith('/settings'))
-const isAppArea = computed(() => isChatRoute.value || isSettingsRoute.value)
+const isAppArea = computed(() => showsChatWorkspace(route))
+
+const firstScreenSettled = router.isReady()
+  .then(() => (isAppArea.value ? mainSectionSettled : undefined))
+  .catch(() => {})
+holdPrefetchUntil(firstScreenSettled.then(() => (isAppArea.value ? whenNetworkQuiet() : undefined)))
+prefetchAppPages()
+
+const toastHeadings = computed(() => ({
+  message: t('common.toast.notice'),
+  success: t('common.toast.success'),
+  error: t('common.toast.error'),
+  warning: t('common.toast.warning'),
+  info: t('common.toast.info'),
+}))
 
 // Dev-only: toggle the component wall / design-token reference with
 // Cmd/Ctrl+Shift+D. No-op (and not registered) in production builds.
-const router = useRouter()
 function onDevKey(e: KeyboardEvent) {
   if (!import.meta.env.DEV) return
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
@@ -68,7 +104,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onDevKey))
          compositor layer teardown flash), no opacity transition. -->
     <RouterView v-slot="{ Component }">
       <div
-        class="fixed inset-0 z-40"
+        class="fixed inset-0 z-(--z-overlay)"
         :class="isSettingsRoute ? 'visible' : 'pointer-events-none invisible'"
       >
         <component
@@ -81,6 +117,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onDevKey))
         v-if="!isAppArea"
       />
     </RouterView>
-    <Toaster position="top-right" />
+    <Toaster
+      position="top-right"
+      :headings="toastHeadings"
+    />
   </section>
 </template>

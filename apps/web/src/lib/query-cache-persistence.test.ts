@@ -3,6 +3,7 @@ import type { QueryCache, UseQueryEntry } from '@pinia/colada'
 import {
   QUERY_CACHE_STORAGE_KEY,
   cancelPendingQueryCacheSave,
+  clearQueryCacheAndPersistence,
   createQueryCachePersistencePlugin,
   persistableQueryFilter,
   removeQueryCacheFromDisk,
@@ -255,5 +256,50 @@ describe('createQueryCachePersistencePlugin', () => {
     harness.fire()
     vi.advanceTimersByTime(1000)
     expect(setItem).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels debounced save timers both before and after remove() so cleared cache never resurrects after 2s', async () => {
+    // Failure mode: `createQueryCachePersistencePlugin` subscribes to `$onAction`
+    // including `'remove'` and schedules a 1000ms debounced disk write. If
+    // `clearQueryCacheAndPersistence` only cancelled timers BEFORE `remove()`,
+    // removing entries would re-arm the 1s timer and resurrect `memoh:query-cache`
+    // (or overwrite storage) after logout/server-switch.
+    vi.useFakeTimers()
+    const entries = [entryWith(['models'], 'success', [{ id: 'gpt-5' }]), entryWith(['bot', 'kitty-3'], 'success', { id: 'b1' })]
+    const storage = memoryStorage({ [QUERY_CACHE_STORAGE_KEY]: '{"stale":true}' })
+    const setItemSpy = vi.spyOn(storage, 'setItem')
+    let onAction: ((ctx: { name: string, after: (cb: () => void) => void }) => void) | undefined
+
+    const queryCache = {
+      getEntries: vi.fn(() => [...entries]),
+      cancelQueries: vi.fn(),
+      remove: vi.fn((target: UseQueryEntry) => {
+        let afterHook: (() => void) | undefined
+        onAction?.({ name: 'remove', after: (cb) => { afterHook = cb } })
+        const idx = entries.indexOf(target)
+        if (idx >= 0) entries.splice(idx, 1)
+        afterHook?.()
+      }),
+      $onAction: vi.fn((cb: typeof onAction) => { onAction = cb }),
+    } as unknown as QueryCache
+
+    createQueryCachePersistencePlugin({ storage })({ queryCache } as never)
+    await Promise.resolve()
+
+    // Arm a pre-existing 1s save timer from a recent query update right before logout.
+    onAction?.({ name: 'setEntryState', after: cb => cb() })
+    setItemSpy.mockClear()
+
+    // Leave one surviving phantom entry in `getEntries()` if `setItem` ever ran again,
+    // proving the timer itself never fires rather than merely writing an empty snapshot.
+    clearQueryCacheAndPersistence(queryCache, storage)
+    entries.push(entryWith(['models'], 'success', [{ id: 'resurrected' }]))
+
+    expect(queryCache.cancelQueries).toHaveBeenCalledTimes(1)
+    expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
+
+    vi.advanceTimersByTime(2000)
+    expect(setItemSpy).not.toHaveBeenCalled()
+    expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
   })
 })

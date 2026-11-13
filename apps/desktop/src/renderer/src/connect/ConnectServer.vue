@@ -73,14 +73,19 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import LoadingButton from '@memohai/web/components/loading-button/index.vue'
 import DotMatrixBg from '@memohai/web/pages/login/components/dot-matrix-bg.vue'
-import { notifyAuthSessionCleared } from '@memohai/web/lib/auth-session'
 import { setupApiClient } from '@memohai/web/api-client'
+import { useUserStore } from '@memohai/web/store/user'
 import { LOGIN_ENTRY_ANIMATION_KEY } from '@memohai/web/pages/login/transition'
-import { decidePostConnectNavigation } from './connection-navigation'
+import {
+  applyPostConnectSessionCleanup,
+  decidePostConnectNavigation,
+  shouldRedirectOnUnauthorized,
+} from './connection-navigation'
 
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
+const userStore = useUserStore()
 const exiting = ref(false)
 const exitDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 175
 
@@ -116,15 +121,18 @@ const onSubmit = handleSubmit(async ({ baseUrl }) => {
       hasToken: Boolean(localStorage.getItem('token')),
       returnTo: route.query.returnTo,
     })
-    if (navigation.clearAuth) {
-      notifyAuthSessionCleared('logout')
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      sessionStorage.clear()
-    }
+    applyPostConnectSessionCleanup(navigation.clearAuth, {
+      exitLogin: () => userStore.exitLogin(),
+      localStorage,
+      sessionStorage,
+    })
     setupApiClient({
       baseUrl: result.baseUrl,
-      onUnauthorized: () => router.replace({ name: 'Login' }),
+      onUnauthorized: () => {
+        if (shouldRedirectOnUnauthorized(router.currentRoute?.value?.path)) {
+          void router.replace({ name: 'Login' })
+        }
+      },
     })
     if (navigation.animateLogin) {
       sessionStorage.setItem(LOGIN_ENTRY_ANIMATION_KEY, '1')

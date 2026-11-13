@@ -6,7 +6,11 @@ import { useQueryCache } from '@pinia/colada'
 import { getUsersMe, putUsersMe } from '@memohai/sdk'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { notifyAuthSessionCleared, onAuthSessionCleared, type AuthSessionClearReason } from '@/lib/auth-session'
-import { cancelPendingQueryCacheSave, removeQueryCacheFromDisk } from '@/lib/query-cache-persistence'
+import {
+  cancelPendingQueryCacheSave,
+  clearQueryCacheAndPersistence,
+  removeQueryCacheFromDisk,
+} from '@/lib/query-cache-persistence'
 import { resetOnboardingState } from '@/composables/useOnboarding'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { resetOnboardingSession } from '@/pages/onboarding/session'
@@ -175,22 +179,27 @@ export const useUserStore = defineStore(
       }
     }
 
-    const clearQueryCache = () => {
+    let storeQueryCache: ReturnType<typeof useQueryCache> | undefined
+    try {
+      storeQueryCache = useQueryCache()
+    } catch {
+      // Optional in isolated unit tests that instantiate Pinia without PiniaColada.
+    }
+
+    const resolveQueryCache = () => {
+      if (storeQueryCache) return storeQueryCache
       try {
-        const queryCache = useQueryCache()
-        queryCache.cancelQueries({}, new Error('auth session changed'))
-        for (const entry of queryCache.getEntries()) {
-          queryCache.remove(entry)
-        }
-      } catch (error) {
-        console.warn('Failed to clear query cache after auth session change:', error)
+        storeQueryCache = useQueryCache()
+      } catch {
+        // Fall back to the persistence plugin's active cache when unavailable.
       }
+      return storeQueryCache
     }
 
     const clearFrontendSessionState = (reason: AuthSessionClearReason) => {
-      cancelPendingQueryCacheSave()
-      clearQueryCache()
+      clearQueryCacheAndPersistence(resolveQueryCache())
       notifyAuthSessionCleared(reason)
+      cancelPendingQueryCacheSave()
       removeQueryCacheFromDisk()
     }
 
@@ -234,36 +243,63 @@ export const useUserStore = defineStore(
       resetOnboardingState()
     }
 
-    const exitLogin = () => {
-      clearFrontendSessionState('logout')
-      localToken.value = ''
-      resetOnboarding()
-      resetUserInfo()
+    const router = useRouter()
+    const shouldRedirectToLogin = () => {
+      const current = router?.currentRoute?.value
+      if (!router || !current) return false
+      const path = typeof current.path === 'string' ? current.path : ''
+      return current.name !== 'Login'
+        && path !== '/connect'
+        && !path.startsWith('/oauth/')
     }
 
-    const router = useRouter()
+    let clearingExplicitly = false
+    const exitLogin = () => {
+      clearingExplicitly = true
+      try {
+        clearFrontendSessionState('logout')
+        localToken.value = ''
+        resetOnboarding()
+        resetUserInfo()
+      } finally {
+        clearingExplicitly = false
+      }
+      if (shouldRedirectToLogin()) {
+        void router?.replace({ name: 'Login' })
+      }
+    }
+
     watch(
       localToken,
       () => {
-        if (!localToken.value) {
+        if (!localToken.value && !clearingExplicitly) {
           clearFrontendSessionState('token-cleared')
           resetOnboarding()
           resetUserInfo()
-          if (router.currentRoute.value.name !== 'Login') {
-            void router.replace({ name: 'Login' })
+          if (shouldRedirectToLogin()) {
+            void router?.replace({ name: 'Login' })
           }
         }
       },
       {
         immediate: true,
+        flush: 'sync',
       },
     )
     onAuthSessionCleared(({ reason }) => {
       if (reason !== 'unauthorized') return
-      clearQueryCache()
-      localToken.value = ''
-      resetOnboarding()
-      resetUserInfo()
+      clearingExplicitly = true
+      try {
+        clearQueryCacheAndPersistence(resolveQueryCache())
+        localToken.value = ''
+        resetOnboarding()
+        resetUserInfo()
+      } finally {
+        clearingExplicitly = false
+      }
+      if (shouldRedirectToLogin()) {
+        void router?.replace({ name: 'Login' })
+      }
     })
 
     // A returning account whose completion this browser has already seen opens
@@ -279,7 +315,7 @@ export const useUserStore = defineStore(
       void loadMe().then((fetched) => {
         if (!fetched || onboardingCompleted.value) return
         if (tokenUserId(localToken.value) !== signedInUserId) return
-        if (router.currentRoute.value.path !== '/onboarding') {
+        if (router && router.currentRoute?.value?.path !== '/onboarding') {
           void router.replace({ path: '/onboarding' })
         }
       })

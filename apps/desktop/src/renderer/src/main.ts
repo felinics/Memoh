@@ -4,7 +4,7 @@
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { PiniaColada, useQueryCache } from '@pinia/colada'
+import { PiniaColada } from '@pinia/colada'
 import { createQueryCachePersistencePlugin, whenQueryCacheRestored } from '@memohai/web/lib/query-cache-persistence'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
@@ -31,9 +31,8 @@ import 'katex/dist/katex.min.css'
 
 import App from './chat/App.vue'
 import router from './chat/router'
-import { setupRendererCacheSync } from './renderer-cache-sync'
 import { handleRendererNavigate } from './renderer-navigation'
-import { isCurrentServerProbe } from './connect/connection-navigation'
+import { isCurrentServerProbe, shouldRedirectOnUnauthorized } from './connect/connection-navigation'
 
 // Window-management fallback, intentionally kept separate from the close-tab app
 // command. Cmd/Ctrl+W closes the active workspace tab; when the registry reports
@@ -64,7 +63,11 @@ async function bootstrap() {
   const status = await window.api.desktop.getServerStatus()
   setupApiClient({
     baseUrl: status.baseUrl || 'http://127.0.0.1:0',
-    onUnauthorized: () => router.replace({ name: 'Login' }),
+    onUnauthorized: () => {
+      if (shouldRedirectOnUnauthorized(router.currentRoute?.value?.path)) {
+        void router.replace({ name: 'Login' })
+      }
+    },
   })
   const serverProbe = window.api.desktop.probeServer()
 
@@ -128,35 +131,11 @@ async function bootstrap() {
     .use(i18n)
     .provide(KEYBOARD_REGISTRY, keyboardCommands)
 
-  // Bridge query-cache invalidations to other renderer hosts.
-  // Must run after `PiniaColada` is installed so the store is registered.
-  setupRendererCacheSync(useQueryCache())
-
-  // The composer reads its agent list from the chat store's one-shot bot
-  // snapshot, not the Colada cache, so the sync above can't refresh it. When the
-  // settings window mutates bot config — enabling an ACP agent, renaming,
-  // switching model — it invalidates the bots list / ['bot', <id>]; mirror that
-  // into a store re-pull so the chat window's agent menu updates without a
-  // manual reload. (Web does this via its route watcher when leaving the
-  // settings overlay; desktop's chat window route never enters settings.)
-  const chatStore = useChatStore(pinia)
-  window.api.desktop.onInvalidate((payload) => {
-    const key = payload?.filters?.key
-    const head: unknown = Array.isArray(key) ? key[0] : undefined
-    // The bots list entry lives under the SDK-generated object key
-    // ([{ _id: 'getBots', … }]); accept the legacy string head 'bots' too so
-    // an older settings window's broadcast still lands.
-    const isBotsList = typeof head === 'object' && head !== null
-      && (head as { _id?: unknown })._id === 'getBots'
-    if (head === 'bots' || head === 'bot' || isBotsList) {
-      void chatStore.refreshBots()
-    }
-  })
-
   // Mirror the chat store's bot list into the native tray menu. The main
   // process holds no credentials, so the renderer — owner of the
   // authenticated SDK session — pushes the list whenever it changes
   // (initial fetch, invalidation-driven refreshes, sign-out clearing it).
+  const chatStore = useChatStore(pinia)
   watchEffect(() => {
     const trayBots = chatStore.bots
       .map(bot => ({

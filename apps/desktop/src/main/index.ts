@@ -8,6 +8,7 @@ import {
   ipcMain,
   nativeImage,
   safeStorage,
+  session,
   Tray,
   screen,
   type BrowserWindowConstructorOptions,
@@ -27,11 +28,21 @@ import { dispatchRendererNavigate } from './window-navigation'
 import { createAttentionNotifications } from './attention-notifications'
 import { attachDevelopmentWindowShortcuts } from './window-shortcuts'
 import { macWindowChromeOptions } from './window-chrome'
-import { maybeSelfInstallMacOS } from './self-install'
+import {
+  maybeSelfInstallMacOS,
+  shouldPromptRunningInstall,
+  showQuitRunningInstancePromptDetached,
+} from './self-install'
 import { maybePromptAppleSiliconBuild } from './arch-check'
 import { installMainProcessErrorHandlers } from './main-process-errors'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
-import { isTrustedRendererUrl } from './renderer-trust'
+import {
+  assertTrustedIpcSender,
+  isAllowedMainFramePermissionCheck,
+  isAllowedMainFramePermissionRequest,
+  isTrustedRendererUrl,
+  type RendererTrustOptions,
+} from './renderer-trust'
 import { normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
 import { registerDesktopUpdates, installDesktopUpdate, installDesktopUpdateOnQuit, recoverDesktopUpdate } from './updates'
 import {
@@ -54,8 +65,14 @@ app.setName(DESKTOP_PRODUCT_NAME)
 // and before anything that can throw asynchronously.
 installMainProcessErrorHandlers()
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+const pendingInstallConflictPrompt = !hasSingleInstanceLock && shouldPromptRunningInstall()
+if (!hasSingleInstanceLock) {
+  if (pendingInstallConflictPrompt) showQuitRunningInstancePromptDetached()
+  app.quit()
+}
+
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
-type WindowKind = 'chat'
 type WindowDefaults = {
   width: number
   height: number
@@ -67,7 +84,9 @@ type StoredWindowState = {
   height?: number
   maximized?: boolean
 }
-type StoredWindowStates = Partial<Record<WindowKind, StoredWindowState>>
+type StoredWindowStates = {
+  chat?: StoredWindowState
+}
 type TrayBot = {
   id: string
   displayName: string
@@ -125,10 +144,10 @@ function readWindowStates(): StoredWindowStates {
   return windowStatesCache
 }
 
-function writeWindowState(kind: WindowKind, state: StoredWindowState): void {
+function writeWindowState(state: StoredWindowState): void {
   const states = {
     ...readWindowStates(),
-    [kind]: state,
+    chat: state,
   }
   windowStatesCache = states
   mkdirSync(app.getPath('userData'), { recursive: true })
@@ -140,8 +159,8 @@ function clampWindowDimension(raw: unknown, fallback: number, minimum: number, m
   return Math.min(Math.max(value, minimum), maximum)
 }
 
-function rememberedWindowOptions(kind: WindowKind, defaults: WindowDefaults): BrowserWindowConstructorOptions {
-  const state = readWindowStates()[kind] ?? {}
+function rememberedWindowOptions(defaults: WindowDefaults): BrowserWindowConstructorOptions {
+  const state = readWindowStates().chat ?? {}
   const area = screen.getPrimaryDisplay().workAreaSize
   const maxWidth = Math.max(defaults.minWidth, area.width)
   const maxHeight = Math.max(defaults.minHeight, area.height)
@@ -152,7 +171,7 @@ function rememberedWindowOptions(kind: WindowKind, defaults: WindowDefaults): Br
   }
 }
 
-function attachWindowStatePersistence(window: BrowserWindow, kind: WindowKind, defaults: WindowDefaults): void {
+function attachWindowStatePersistence(window: BrowserWindow, defaults: WindowDefaults): void {
   let timer: ReturnType<typeof setTimeout> | null = null
   const save = (): void => {
     if (window.isDestroyed()) return
@@ -160,7 +179,7 @@ function attachWindowStatePersistence(window: BrowserWindow, kind: WindowKind, d
     const area = screen.getDisplayMatching(window.getBounds()).workAreaSize
     const maxWidth = Math.max(defaults.minWidth, area.width)
     const maxHeight = Math.max(defaults.minHeight, area.height)
-    writeWindowState(kind, {
+    writeWindowState({
       width: clampWindowDimension(bounds.width, defaults.width, defaults.minWidth, maxWidth),
       height: clampWindowDimension(bounds.height, defaults.height, defaults.minHeight, maxHeight),
       maximized: window.isMaximized(),
@@ -180,8 +199,8 @@ function attachWindowStatePersistence(window: BrowserWindow, kind: WindowKind, d
   })
 }
 
-function restoreWindowMaximized(window: BrowserWindow, kind: WindowKind): void {
-  if (readWindowStates()[kind]?.maximized) {
+function restoreWindowMaximized(window: BrowserWindow): void {
+  if (readWindowStates().chat?.maximized) {
     window.maximize()
   }
 }
@@ -284,19 +303,30 @@ function productionRendererEntry(): string {
   return join(__dirname, '../renderer/index.html')
 }
 
-function isTrustedRendererNavigation(url: string): boolean {
-  return isTrustedRendererUrl(url, {
+function rendererTrustOptions(): RendererTrustOptions {
+  return {
     devBaseUrl: is.dev ? process.env.ELECTRON_RENDERER_URL : undefined,
     productionEntry: productionRendererEntry(),
-  })
+  }
+}
+
+function isTrustedRendererNavigation(url: string): boolean {
+  return isTrustedRendererUrl(url, rendererTrustOptions())
 }
 
 function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  const senderUrl = event.senderFrame?.url || event.sender.getURL()
-  if (!chatWindow || senderWindow !== chatWindow || !isTrustedRendererNavigation(senderUrl)) {
-    throw new Error('IPC request rejected from an untrusted renderer')
-  }
+  const senderFrame = event.senderFrame
+  assertTrustedIpcSender(
+    {
+      hasChatWindow: Boolean(chatWindow),
+      isChatWindowSender: Boolean(chatWindow && senderWindow === chatWindow),
+      hasSenderFrame: Boolean(senderFrame),
+      isMainFrame: Boolean(senderFrame && senderFrame === event.sender.mainFrame),
+      senderUrl: senderFrame?.url ?? '',
+    },
+    rendererTrustOptions(),
+  )
 }
 
 function attachExternalLinkGuards(webContents: Electron.WebContents): void {
@@ -372,14 +402,14 @@ function createTrayIcon(): Electron.NativeImage {
 }
 
 function revealChatWindow(): void {
-  const window = ensureWindow('chat')
+  const window = ensureChatWindow()
   focusWindow(window)
 }
 
 function openBotWorkspace(botId: string): void {
   const id = botId.trim()
   if (!id) return
-  const window = ensureWindow('chat')
+  const window = ensureChatWindow()
   focusWindow(window)
   const target = `/bot/${encodeURIComponent(id)}`
   dispatchRendererNavigate(window, target)
@@ -408,7 +438,7 @@ const SETTINGS_TRAY_GROUPS: TraySettingsItem[][] = [
 ]
 
 function openSettingsRoute(target?: string): void {
-  const window = ensureWindow('chat')
+  const window = ensureChatWindow()
   focusWindow(window)
   if (target?.startsWith('/settings')) {
     dispatchRendererNavigate(window, target)
@@ -542,7 +572,7 @@ const PRELOAD_FILE = '../preload/index.mjs'
 
 function createChatWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    ...rememberedWindowOptions('chat', CHAT_DEFAULTS),
+    ...rememberedWindowOptions(CHAT_DEFAULTS),
     ...macWindowChromeOptions(process.platform, 'memoh-chat'),
     show: false,
     // Electron's auto-hide mode lets a single Alt press reveal the menu.
@@ -562,7 +592,7 @@ function createChatWindow(): BrowserWindow {
     () => effectiveMenuAccelerator(appKeyboardCommands.closeCurrentWorkspaceTab),
     process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux',
   )
-  attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
+  attachWindowStatePersistence(window, CHAT_DEFAULTS)
 
   // macOS hides the traffic lights in fullscreen — the renderer drops its
   // traffic-light reserve (sidebar gutter / drag strips) on these events.
@@ -575,7 +605,7 @@ function createChatWindow(): BrowserWindow {
   window.on('leave-full-screen', notifyFullScreenChanged)
 
   window.once('ready-to-show', () => {
-    restoreWindowMaximized(window, 'chat')
+    restoreWindowMaximized(window)
     window.show()
   })
   window.on('close', (event) => {
@@ -592,7 +622,7 @@ function createChatWindow(): BrowserWindow {
   return window
 }
 
-function ensureWindow(_kind: WindowKind): BrowserWindow {
+function ensureChatWindow(): BrowserWindow {
   if (!chatWindow || chatWindow.isDestroyed()) chatWindow = createChatWindow()
   return chatWindow
 }
@@ -602,6 +632,11 @@ function focusWindow(window: BrowserWindow): void {
   window.show()
   window.focus()
 }
+
+app.on('second-instance', () => {
+  if (!app.isReady()) return
+  revealChatWindow()
+})
 
 const menuAcceleratorOverrides = new Map<string, string>()
 
@@ -700,10 +735,40 @@ async function rebuildAppMenu(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return
   if (await maybePromptAppleSiliconBuild()) return
   if (maybeSelfInstallMacOS()) return
 
   electronApp.setAppUserModelId(process.env.MEMOH_DESKTOP_APP_ID?.trim() || 'ai.memoh.desktop')
+
+  // Default-deny permissions across the shared session (especially workspace
+  // preview / browser iframes); only grant narrow main-frame capabilities
+  // (clipboard write, fullscreen, microphone dictation) to the trusted chat shell.
+  const ses = session.defaultSession
+  ses.setPermissionRequestHandler((contents, permission, callback, details) => {
+    callback(isAllowedMainFramePermissionRequest(
+      {
+        isChatWindowContents: contents === chatWindow?.webContents,
+        isMainFrame: details.isMainFrame,
+        permission,
+        mediaTypes: 'mediaTypes' in details ? details.mediaTypes : undefined,
+        requestingUrl: details.requestingUrl,
+      },
+      rendererTrustOptions(),
+    ))
+  })
+  ses.setPermissionCheckHandler((contents, permission, _requestingOrigin, details) => {
+    return isAllowedMainFramePermissionCheck(
+      {
+        isChatWindowContents: Boolean(contents && contents === chatWindow?.webContents),
+        isMainFrame: details.isMainFrame,
+        permission,
+        mediaType: details.mediaType,
+        requestingUrl: details.requestingUrl ?? contents?.mainFrame.url ?? '',
+      },
+      rendererTrustOptions(),
+    )
+  })
 
   if (process.platform === 'darwin' && app.dock && is.dev) {
     app.dock.setIcon(iconPng)
@@ -827,15 +892,6 @@ app.whenReady().then(async () => {
     trayBots = normalizeTrayBots(payload)
     setTrayMenu()
   })
-  ipcMain.handle('desktop:broadcast-invalidate', (event, payload: unknown) => {
-    assertTrustedRenderer(event)
-    const senderId = event.sender.id
-    for (const target of BrowserWindow.getAllWindows()) {
-      if (target.isDestroyed()) continue
-      if (target.webContents.id === senderId) continue
-      target.webContents.send('desktop:invalidate', payload)
-    }
-  })
   registerDesktopUpdates({
     assertTrustedRenderer,
     onStateChanged: (state) => {
@@ -860,7 +916,7 @@ app.whenReady().then(async () => {
     },
   })
 
-  if (!await recoverDesktopUpdate()) ensureWindow('chat')
+  if (!await recoverDesktopUpdate()) ensureChatWindow()
 
   app.on('activate', () => {
     revealChatWindow()

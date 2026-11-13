@@ -195,6 +195,30 @@ export function cancelPendingQueryCacheSave() {
 }
 
 /**
+ * Clear in-memory query cache entries, cancel any pending debounced disk write
+ * (including one scheduled by `queryCache.remove`), and remove the persisted
+ * snapshot from storage.
+ */
+export function clearQueryCacheAndPersistence(
+  queryCache: QueryCache | undefined = activeQueryCache,
+  storage: Storage | undefined = activeStorage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined),
+) {
+  cancelPendingQueryCacheSave()
+  if (queryCache) {
+    try {
+      queryCache.cancelQueries({}, new Error('auth session changed'))
+      for (const entry of queryCache.getEntries()) {
+        queryCache.remove(entry)
+      }
+    } catch (error) {
+      console.warn('Failed to clear query cache after auth session change:', error)
+    }
+  }
+  cancelPendingQueryCacheSave()
+  removeQueryCacheFromDisk(storage)
+}
+
+/**
  * Pinia Colada plugin: restore from localStorage on boot, debounce-save on change.
  * Inlined from @pinia/colada-plugin-cache-persister so we can flush/cancel on demand.
  */

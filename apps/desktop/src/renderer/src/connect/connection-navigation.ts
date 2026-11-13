@@ -4,8 +4,35 @@ export interface PostConnectNavigationInput {
   returnTo: unknown
 }
 
+export interface SessionCleanupStorage {
+  removeItem(key: string): void
+}
+
+export interface SessionCleanupClearableStorage {
+  clear(): void
+}
+
 export function isCurrentServerProbe(probedBaseUrl: string, currentBaseUrl: string): boolean {
   return probedBaseUrl === currentBaseUrl
+}
+
+export function shouldRedirectOnUnauthorized(currentPath: unknown): boolean {
+  const path = typeof currentPath === 'string' ? currentPath : ''
+  return path !== '/connect' && !path.startsWith('/oauth/')
+}
+
+export function applyPostConnectSessionCleanup(
+  clearAuth: boolean,
+  deps: {
+    exitLogin: () => void
+    localStorage: SessionCleanupStorage
+    sessionStorage: SessionCleanupClearableStorage
+  },
+): void {
+  if (!clearAuth) return
+  deps.exitLogin()
+  deps.localStorage.removeItem('user')
+  deps.sessionStorage.clear()
 }
 
 export type PostConnectNavigation =

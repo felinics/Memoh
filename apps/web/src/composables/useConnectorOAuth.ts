@@ -63,16 +63,36 @@ export function prepareConnectorOAuthPopup(loadingMessage: string): Window | nul
   return popup
 }
 
+function parseSafeOAuthURL(rawUrl: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    throw new Error('oauth_failed')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('oauth_failed')
+  }
+  return parsed.toString()
+}
+
 export async function openConnectorOAuthURL(url: string, popup: Window | null): Promise<void> {
+  let safeUrl: string
+  try {
+    safeUrl = parseSafeOAuthURL(url)
+  } catch (error) {
+    popup?.close()
+    throw error
+  }
   const desktopOpenExternal = window.api?.desktop?.openExternalUrl
   if (desktopOpenExternal) {
-    await desktopOpenExternal(url)
+    await desktopOpenExternal(safeUrl)
     return
   }
   if (!popup || popup.closed) {
     throw new Error('oauth_popup_blocked')
   }
-  popup.location.href = url
+  popup.location.href = safeUrl
 }
 
 export function waitForConnectorOAuth(
@@ -147,7 +167,10 @@ export async function reauthorizeConnector(botId: string, connectionId: string, 
     path: { bot_id: botId, connection_id: connectionId },
     throwOnError: true,
   })
-  if (!data.authorization_url) throw new Error('oauth_failed')
+  if (!data.authorization_url) {
+    popup?.close()
+    throw new Error('oauth_failed')
+  }
   await openConnectorOAuthURL(data.authorization_url, popup)
   await waitForConnectorOAuth(botId, connectionId, popup)
 }
