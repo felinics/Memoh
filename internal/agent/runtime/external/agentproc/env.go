@@ -7,18 +7,15 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/workspace/vpath"
+	"github.com/felinics/memoh/internal/workspace/userenv"
 )
 
-// ContainerPath is the PATH an agent CLI and every command it spawns see. The
-// managed dependency shims come first, so a managed overlay of an image
-// runtime (node, python, uv) wins over the toolkit copy.
-const ContainerPath = vpath.DataMount + "/.memoh/deps/bin:/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
-
-// BaseEnv is the environment every agent CLI starts from: the container PATH
-// and the bot's data volume as HOME. Drivers append their own variables.
+// BaseEnv is the environment every agent CLI starts from: the workspace user
+// environment (userenv), so the CLI and every command it spawns see the same
+// home, installed commands and search path as the user's terminal. Drivers
+// append their own variables, which take precedence.
 func BaseEnv(extra ...string) []string {
-	return append([]string{"PATH=" + ContainerPath, "HOME=" + vpath.DataMount}, extra...)
+	return userenv.With(extra...)
 }
 
 // ShellQuote single-quotes value for a POSIX shell. Launcher paths live under

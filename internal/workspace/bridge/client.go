@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +35,43 @@ type Client struct {
 	target    string
 	createdAt time.Time
 	ownsConn  bool
+	// commandEnv is the environment every command run through this client
+	// starts from, ahead of the caller's ExecOptions.Env (see
+	// Pool.SetCommandEnv). Empty for a client of a connected computer.
+	commandEnv []string
+}
+
+// commandEnvFor puts the client's command environment ahead of opts.Env, so
+// an entry the caller passes still wins (the bridge keeps the last value of a
+// repeated name). The command environment stands in for what the workspace
+// provides, so opts.UnsetEnv removes from it as it does from the inherited
+// environment: an exact name, or a prefix ending in "*".
+func (c *Client) commandEnvFor(opts ExecOptions) []string {
+	if len(c.commandEnv) == 0 {
+		return opts.Env
+	}
+	env := make([]string, 0, len(c.commandEnv)+len(opts.Env))
+	for _, entry := range c.commandEnv {
+		name, _, _ := strings.Cut(entry, "=")
+		if !envNameUnset(name, opts.UnsetEnv) {
+			env = append(env, entry)
+		}
+	}
+	return append(env, opts.Env...)
+}
+
+func envNameUnset(name string, unset []string) bool {
+	for _, pattern := range unset {
+		pattern = strings.TrimSpace(pattern)
+		if prefix, wildcard := strings.CutSuffix(pattern, "*"); wildcard {
+			if prefix != "" && strings.HasPrefix(name, prefix) {
+				return true
+			}
+		} else if pattern != "" && pattern == name {
+			return true
+		}
+	}
+	return false
 }
 
 // NewClientFromConn wraps an existing gRPC connection into a Client.
@@ -293,7 +332,7 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 	err = stream.Send(&pb.ExecInput{
 		Command:        command,
 		WorkDir:        workDir,
-		Env:            opts.Env,
+		Env:            c.commandEnvFor(opts),
 		TimeoutSeconds: timeout,
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
@@ -364,7 +403,7 @@ func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir str
 	err = stream.Send(&pb.ExecInput{
 		Command:        command,
 		WorkDir:        workDir,
-		Env:            opts.Env,
+		Env:            c.commandEnvFor(opts),
 		TimeoutSeconds: timeout,
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
@@ -444,7 +483,7 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 	err = stream.Send(&pb.ExecInput{
 		Command:  command,
 		WorkDir:  workDir,
-		Env:      opts.Env,
+		Env:      c.commandEnvFor(opts),
 		Pty:      true,
 		Resize:   &pb.TerminalResize{Cols: cols, Rows: rows},
 		CleanEnv: opts.CleanEnv,
@@ -768,6 +807,7 @@ type Pool struct {
 	clients        map[string]*Client
 	dialTargetFunc func(botID string) string
 	tlsOpts        *TLSOptions
+	commandEnv     []string
 }
 
 // NewPool creates a client pool. dialTargetFunc maps bot ID to a gRPC target
@@ -784,6 +824,15 @@ func NewPool(dialTargetFunc func(string) string) *Pool {
 func (p *Pool) SetTLSOptions(opts *TLSOptions) {
 	p.mu.Lock()
 	p.tlsOpts = opts
+	p.mu.Unlock()
+}
+
+// SetCommandEnv sets the environment every command run through the pool's
+// clients starts from: the workspace user environment of a bot's own
+// workspace. Call once during startup, before the pool serves traffic.
+func (p *Pool) SetCommandEnv(env []string) {
+	p.mu.Lock()
+	p.commandEnv = slices.Clone(env)
 	p.mu.Unlock()
 }
 
@@ -827,6 +876,7 @@ func (p *Pool) Get(ctx context.Context, botID string) (*Client, error) {
 	}
 
 	p.mu.Lock()
+	c.commandEnv = p.commandEnv
 	if existing, ok := p.clients[botID]; ok {
 		p.mu.Unlock()
 		_ = c.Close()

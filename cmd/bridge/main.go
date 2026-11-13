@@ -40,6 +40,10 @@ func runBridge(log *slog.Logger) int {
 	// Container-native tools take priority since toolkit is appended at the end.
 	_ = os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
 
+	// Before anything reads the home: the display session writes its desktop
+	// settings there and the first command may be the user's terminal.
+	adoptLegacyHome(ctx, log)
+
 	reverseHTTP := bridgesvc.NewReverseHTTPBroker()
 	startDisplaySupervisor(ctx, log)
 	startToolsProxy(ctx, log, reverseHTTP)

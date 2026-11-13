@@ -643,18 +643,11 @@ func TestListDiscoversFlatUserSkillsFirst(t *testing.T) {
 	}
 }
 
-func TestContainerEnvUsesDataHomeAndXDGDirs(t *testing.T) {
+func TestContainerEnvSetsOnlySkillDiscoveryRoots(t *testing.T) {
 	env := ContainerEnv(nil)
-	for _, want := range []string{
-		"HOME=/data",
-		"XDG_CONFIG_HOME=/data/.config",
-		"XDG_DATA_HOME=/data/.local/share",
-		"XDG_CACHE_HOME=/data/.cache",
-		"MEMOH_SKILL_DISCOVERY_ROOTS=/data/.agents/skills:/root/.agents/skills",
-	} {
-		if !slices.Contains(env, want) {
-			t.Fatalf("env %+v does not contain %q", env, want)
-		}
+	want := []string{"MEMOH_SKILL_DISCOVERY_ROOTS=/data/.agents/skills:/root/.agents/skills"}
+	if !slices.Equal(env, want) {
+		t.Fatalf("env = %+v, want %+v", env, want)
 	}
 }
 

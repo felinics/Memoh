@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
-	"github.com/felinics/memoh/internal/workspace/vpath"
+	"github.com/felinics/memoh/internal/workspace/userenv"
 )
 
 var errListDirEntryLimit = errors.New("directory listing exceeds the requested entry bound")
@@ -696,11 +696,11 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 // overlay of an image runtime (node, python, uv) wins over the toolkit copy
 // in the agent's terminal as well as in Memoh's own execs. A variable so
 // tests can point it at a directory of their own.
-var depsShimDir = vpath.DataMount + "/.memoh/deps/bin"
+var depsShimDir = userenv.DepsBinDir
 
 // defaultExecPath is the PATH given to a command whose environment has none,
 // which only happens with CleanEnv and no explicit PATH entry.
-const defaultExecPath = "/opt/memoh/toolkit/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+const defaultExecPath = userenv.Path
 
 // execEnv builds the environment of a workspace command. CleanEnv drops the
 // bridge's own environment, UnsetEnv removes the named (or prefixed) keys
