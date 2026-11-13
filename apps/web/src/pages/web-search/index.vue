@@ -254,20 +254,36 @@ function openFetchProvider(provider: FetchprovidersGetResponse) {
 
 function handleSearchMaterialized(provider: SearchprovidersGetResponse) {
   if (!provider.provider) return
-  optimisticSearchProviders.value = {
-    ...optimisticSearchProviders.value,
-    [provider.provider]: provider,
+  if (!provider.id) {
+    const next = { ...optimisticSearchProviders.value }
+    delete next[provider.provider]
+    optimisticSearchProviders.value = next
+  } else {
+    optimisticSearchProviders.value = {
+      ...optimisticSearchProviders.value,
+      [provider.provider]: provider,
+    }
   }
-  curProvider.value = provider
+  if (detailKind.value === 'search' && curProvider.value?.provider === provider.provider) {
+    curProvider.value = provider
+  }
 }
 
 function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
   if (!provider.provider) return
-  optimisticFetchProviders.value = {
-    ...optimisticFetchProviders.value,
-    [provider.provider]: provider,
+  if (!provider.id) {
+    const next = { ...optimisticFetchProviders.value }
+    delete next[provider.provider]
+    optimisticFetchProviders.value = next
+  } else {
+    optimisticFetchProviders.value = {
+      ...optimisticFetchProviders.value,
+      [provider.provider]: provider,
+    }
   }
-  curFetchProvider.value = provider
+  if (detailKind.value === 'fetch' && curFetchProvider.value?.provider === provider.provider) {
+    curFetchProvider.value = provider
+  }
 }
 </script>
 

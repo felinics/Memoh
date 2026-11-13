@@ -357,11 +357,14 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
         body: data,
         throwOnError: true,
       })
+      const updated = result ?? { ...created, ...data, id: created.id }
       if (curProvider.value?.id === created.id) {
         markNameClean(submittedName)
         markConfigClean(submittedConfig)
+        curProvider.value = updated
       }
-      return result ?? { ...created, ...data, id: created.id }
+      emit('materialized', updated)
+      return updated
     }
     const { data: result } = await putFetchProvidersById({
       path: { id: targetId },
@@ -371,6 +374,12 @@ const { mutate: submitUpdate, isLoading: editLoading } = useMutation({
     if (providerIdentity(curProvider.value) === targetIdentity) {
       markNameClean(submittedName)
       markConfigClean(submittedConfig)
+      if (result) {
+        curProvider.value = result
+      }
+    }
+    if (result) {
+      emit('materialized', result)
     }
     return result
   },
@@ -424,10 +433,33 @@ async function materializeProvider(data: FetchprovidersCreateRequest) {
 
 const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
-    if (!curProviderId.value || isNative.value) return
-    await deleteFetchProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
+    const targetId = curProviderId.value
+    if (!targetId || isNative.value) return null
+    const targetProvider = curProvider.value?.provider
+    await deleteFetchProvidersById({ path: { id: targetId }, throwOnError: true })
+    return { id: targetId, provider: targetProvider }
   },
-  onSuccess: () => {
+  onSuccess: (deleted) => {
+    if (!deleted) return
+    const currentList = queryCache.getQueryData<FetchprovidersGetResponse[]>(['fetch-providers'])
+    if (Array.isArray(currentList)) {
+      queryCache.setQueryData(
+        ['fetch-providers'],
+        currentList.filter(item => item.id !== deleted.id),
+      )
+    }
+    const meta = (metaData.value as FetchprovidersProviderMeta[] | undefined)
+      ?.find(item => item.provider === deleted.provider)
+    const resetEntry: FetchprovidersGetResponse = {
+      name: meta?.display_name ?? (deleted.provider ? t(`webSearch.fetchProviderNames.${deleted.provider}`, deleted.provider) : ''),
+      provider: deleted.provider,
+      enable: false,
+      config: providerConfigDefaults(meta?.config_schema),
+    }
+    if (curProvider.value?.id === deleted.id) {
+      curProvider.value = resetEntry
+    }
+    emit('materialized', resetEntry)
     toast.success(t('webSearch.deleteFetchSuccess'))
   },
   onError: (error) => {
