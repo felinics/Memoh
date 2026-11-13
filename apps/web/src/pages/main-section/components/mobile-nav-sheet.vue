@@ -35,7 +35,6 @@
           >
             <component
               :is="view.icon"
-              :stroke-width="1.75"
               class="size-[18px]"
             />
             {{ view.label }}
@@ -68,7 +67,6 @@
             @click="goSettings"
           >
             <Settings
-              :stroke-width="1.75"
               class="size-[18px]"
             />
             {{ t('sidebar.settings') }}

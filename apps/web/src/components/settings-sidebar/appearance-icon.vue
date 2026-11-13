@@ -45,9 +45,11 @@
 </template>
 
 <script setup lang="ts">
+import { uiIconStrokeWidth } from '@memohai/icon/ui'
+
 withDefaults(defineProps<{
   strokeWidth?: number | string
 }>(), {
-  strokeWidth: 2,
+  strokeWidth: uiIconStrokeWidth,
 })
 </script>

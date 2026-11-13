@@ -12,10 +12,7 @@
     :aria-label="label"
     @click="emit('click')"
   >
-    <component
-      :is="icon"
-      :stroke-width="1.75"
-    />
+    <component :is="icon" />
   </Button>
 </template>
 

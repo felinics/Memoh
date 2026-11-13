@@ -74,7 +74,6 @@
                     >
                       <component
                         :is="item.icon"
-                        :stroke-width="1.75"
                         class="size-4 shrink-0"
                         :class="item.flipX && '-scale-x-100'"
                       />

@@ -62,7 +62,6 @@
               @click="handleManage"
             >
               <Plus
-                :stroke-width="1.75"
                 class="size-[15px]"
               />
             </Button>

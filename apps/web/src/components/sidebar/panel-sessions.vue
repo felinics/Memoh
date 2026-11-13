@@ -14,7 +14,6 @@
         @click="handleNewSession"
       >
         <SquarePen
-          :stroke-width="1.75"
           class="size-[18px]"
         />
         {{ t('chat.newSession') }}
@@ -24,7 +23,6 @@
         @click="handleBotSettings"
       >
         <Settings2
-          :stroke-width="1.75"
           class="size-[18px]"
         />
         {{ t('chat.botSettings') }}
@@ -57,7 +55,7 @@
       <Button variant="ghost" block
         class="h-9 justify-start gap-3 px-[11px] text-control font-normal text-foreground/92 dark:text-[color:oklch(0.86_0_0)]"
         :disabled="!currentBotId" @click="handleBotSettings">
-        <Settings2 :stroke-width="1.75" class="size-[17px]" />
+        <Settings2 class="size-[17px]" />
         {{ t('chat.botSettings') }}
       </Button>
     </div>

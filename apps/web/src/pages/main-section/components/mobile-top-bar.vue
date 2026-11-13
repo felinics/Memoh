@@ -34,7 +34,7 @@
             :title="menuLabel"
             :aria-label="menuLabel"
           >
-            <Plus :stroke-width="1.75" />
+            <Plus />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
