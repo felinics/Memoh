@@ -890,7 +890,7 @@ var catalog = map[Code]Definition{
 	CodeRuntimeControlCancelled:               {HTTPStatus: http.StatusConflict, Detail: "The runtime operation was cancelled."},
 	CodeRuntimeControlSteerFailed:             {HTTPStatus: http.StatusConflict, Detail: "The additional instruction could not be delivered. Send it again after this turn finishes."},
 	CodeRuntimeControlForkLatestOnly:          {HTTPStatus: http.StatusConflict, Detail: "Only the latest reply can be forked. Select the latest reply and try again."},
-	CodeExternalRuntimeBusy:                   {HTTPStatus: http.StatusConflict, Detail: "This Agent is finishing an earlier operation. Try again when it has finished."},
+	CodeExternalRuntimeBusy:                   {HTTPStatus: http.StatusConflict, Detail: "This conversation is still in use by an earlier run of the Agent. Your context is intact; try again shortly."},
 	CodeRuntimeControlFailed:                  {HTTPStatus: http.StatusInternalServerError, Detail: "The runtime control could not be completed. Try again."},
 	CodeRuntimeControlForbidden:               {HTTPStatus: http.StatusForbidden, Detail: "You do not have access to this conversation."},
 	CodeRuntimeControlRequestInvalid:          {HTTPStatus: http.StatusBadRequest, Detail: "The runtime control request is invalid."},
