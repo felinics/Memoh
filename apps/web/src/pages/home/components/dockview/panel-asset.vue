@@ -11,6 +11,7 @@
       v-else-if="isText && oversizedMaxBytes === null && !loadFailed"
       v-model="content"
       :filename="name"
+      :active="visible"
       readonly
       class="h-full"
     />
@@ -71,19 +72,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { File, Download } from 'lucide-vue-next'
 import { Button, PanePlaceholder, toast } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
-import MonacoEditor from '@/components/monaco-editor/index.vue'
 import DocumentPreview from '@/components/file-manager/document-preview.vue'
+import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import DockPanelFrame from './panel-frame.vue'
 import { TEXT_PREVIEW_MAX_BYTES, formatFileSize, getDocumentMimeType, getDocumentPreviewKind, getDocumentPreviewMaxBytes, isImageFile, isTextFile } from '@/components/file-manager/utils'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { fetchBoundedBlob, fetchBoundedText, type BoundedFetchTarget } from '@/lib/bounded-fetch'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { usePanelVisible } from './use-panel-visible'
+
+const MonacoEditor = defineAsyncComponent(withStylesheetRecovery(() => import('@/components/monaco-editor/index.vue').then(m => m.default)))
 
 // Renders a message attachment (a stored media asset) inside its own dock tab,
 // instead of handing the source URL to the OS. The source is re-resolved from

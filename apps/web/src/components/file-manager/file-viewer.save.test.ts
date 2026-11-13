@@ -69,9 +69,9 @@ function deferred() {
 
 let app: App
 let host: HTMLDivElement
-async function mountViewer() {
+async function mountViewer(initialVisible = true) {
   const viewer = ref<InstanceType<typeof FileViewer>>()
-  const props = reactive({ botId: 'bot-a', file: { path: '/a.txt', name: 'a.txt' } })
+  const props = reactive({ botId: 'bot-a', file: { path: '/a.txt', name: 'a.txt' }, visible: initialVisible })
   const dirty = vi.fn()
   const saved = vi.fn()
   host = document.createElement('div')
@@ -98,7 +98,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   chatState.fsChangedAt = ref(0)
   chatState.affectsPath = () => false
-  sdk.read.mockResolvedValue({ data: { content: 'initial', revision: 'r0' } })
+  sdk.read.mockResolvedValue({ data: { content: 'initial', revision: 'r0', size: 7 } })
+  sdk.fs.mockResolvedValue({
+    data: { path: '/a.txt', name: 'a.txt', isDir: false, size: 7, mode: '-rw-r--r--', modTime: '1970-01-01T00:00:01Z' },
+  })
   sdk.write.mockResolvedValue({ data: { revision: 'r1' } })
   sdk.fs.mockResolvedValue({ data: { path: '/a.pdf', isDir: false, size: 100, modTime: '2026-01-01T00:00:00Z' } })
   bounded.fetchBoundedBlob.mockResolvedValue({ ok: true, blob: new Blob(['%PDF-1.4']) })
@@ -166,9 +169,12 @@ describe('file viewer save snapshot', () => {
   })
 
   it.each(['path', 'bot'] as const)('cancels a pending external poll when changing %s', async (change) => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ now: 20_000 })
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
     const view = await mountViewer()
+    sdk.fs.mockResolvedValueOnce({
+      data: { path: '/a.txt', name: 'a.txt', isDir: false, size: 99, mode: '-rw-r--r--', modTime: '1970-01-01T00:00:15Z' },
+    })
     const pending = deferred()
     sdk.read.mockReturnValueOnce(pending.promise)
     await vi.advanceTimersByTimeAsync(2_000)
@@ -286,6 +292,27 @@ describe('file viewer save snapshot', () => {
       path: { bot_id: view.props.botId },
       body: { path: view.props.file.path, content: 'new draft', expectedRevision: 'other-r0' },
     }))
+  })
+
+  it('polls via lightweight stat without re-reading file bytes when unchanged', async () => {
+    vi.useFakeTimers({ now: 20_000 })
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    await mountViewer()
+    expect(sdk.read).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(6_000)
+    expect(sdk.fs).toHaveBeenCalledTimes(3)
+    expect(sdk.read).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps dirty editor mounted when hidden so undo and background save remain intact', async () => {
+    const view = await mountViewer(true)
+    await view.edit('unsaved draft')
+    view.props.visible = false
+    await nextTick()
+    expect(host.querySelector('textarea')).not.toBeNull()
+    expect(host.querySelector('textarea')!.value).toBe('unsaved draft')
+    expect(await view.save()).toBe(true)
   })
 })
 

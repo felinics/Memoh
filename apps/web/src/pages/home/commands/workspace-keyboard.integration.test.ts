@@ -128,9 +128,8 @@ async function mountSplit() {
   }))) }).provide(KEYBOARD_REGISTRY, registry)
   app.mount(host)
   disconnect = connectBrowserKeyboardShortcutsLive(registry, () => selectWebBindings(keyboardBindings))
-  for (let i = 0; i < 4; i++) await nextTick()
+  await vi.waitFor(() => expect(host!.querySelectorAll('textarea')).toHaveLength(2))
   const editors = [...host.querySelectorAll('textarea')]
-  expect(editors).toHaveLength(2)
   async function edit(index: number, text: string) {
     const editor = editors[index]!
     editor.value = text

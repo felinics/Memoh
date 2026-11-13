@@ -6,6 +6,7 @@
       :bot-id="botId"
       :file="fileInfo"
       :readonly="!canWrite"
+      :visible="visible"
       :keyboard-active="workspaceTabs.activeId === tabId"
       @update:dirty="handleDirty"
     />
@@ -21,10 +22,13 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   filePath: string
   tabId: string
-}>()
+  visible?: boolean
+}>(), {
+  visible: true,
+})
 
 const viewerRef = ref<InstanceType<typeof FileViewer> | null>(null)
 
