@@ -11,6 +11,7 @@ import {
   dependencyStatusBadge,
   validDependencyVersion,
   dependencyUpdateOperation,
+  dependencyUpdateAvailable,
   formatDependencyVersion,
   missingPrerequisites,
   prerequisiteOrder,
@@ -67,18 +68,18 @@ describe('dependencyStatusBadge', () => {
     expect(dependencyStatusBadge(item({ status: 'missing' }))).toMatchObject({ variant: 'warning', key: 'bots.dependencies.status.missing' })
   })
 
-  it('offers an update from installed_version to a different latest_version, whatever the category', () => {
+  it('offers an update only when the server reports one', () => {
     const tool = item({ id: 'uv', category: 'tool', status: 'installed', installed_version: '0.5.0' })
-    expect(dependencyStatusBadge({ ...tool, latest_version: '0.6.0' })).toMatchObject({
+    expect(dependencyStatusBadge({ ...tool, latest_version: '0.6.0', update_available: true })).toMatchObject({
       variant: 'info',
       key: 'bots.dependencies.status.updateAvailable',
       args: { version: '0.6.0' },
     })
     expect(dependencyStatusBadge({ ...tool, latest_version: '0.5.0' })).toMatchObject({ variant: 'success' })
     expect(dependencyStatusBadge({ ...tool, update_available: true })).toMatchObject({ key: 'bots.dependencies.status.updateAvailable' })
-    expect(dependencyStatusBadge(item({ status: 'installed', installed_version: '0.150.0', latest_version: 'v0.151.0' })))
+    expect(dependencyStatusBadge(item({ status: 'installed', installed_version: '0.150.0', latest_version: 'v0.151.0', update_available: true })))
       .toMatchObject({ key: 'bots.dependencies.status.updateAvailable', args: { version: '0.151.0' } })
-    expect(dependencyStatusBadge(imageCopy({ latest_version: '24.15.0' }))).toMatchObject({ key: 'bots.dependencies.status.updateAvailable' })
+    expect(dependencyStatusBadge(imageCopy({ latest_version: '24.15.0', update_available: true }))).toMatchObject({ key: 'bots.dependencies.status.updateAvailable' })
   })
 
   it('reads installed as installed whatever the copy comes from', () => {
@@ -137,7 +138,7 @@ describe('dependencyPrimaryAction', () => {
     const updatable: Partial<DependencyItem> = {
       status: 'installed',
       installed_version: '1',
-      latest_version: '2',
+      latest_version: '2', update_available: true,
       actions: ['update', 'reinstall', 'remove'],
     }
     expect(dependencyPrimaryAction(item(updatable), running)).toMatchObject({
@@ -149,7 +150,7 @@ describe('dependencyPrimaryAction', () => {
   })
 
   it('updates an image copy through an overlay install when the Server offers only install', () => {
-    expect(dependencyPrimaryAction(imageCopy({ latest_version: '24.15.0' }), running)).toMatchObject({
+    expect(dependencyPrimaryAction(imageCopy({ latest_version: '24.15.0', update_available: true }), running)).toMatchObject({
       kind: 'update',
       labelKey: 'bots.dependencies.action.update',
       operation: 'install',
@@ -163,7 +164,7 @@ describe('dependencyPrimaryAction', () => {
     // No install listed → no button, even without a record.
     expect(dependencyPrimaryAction(item({ actions: [] }), running)).toBeNull()
     expect(dependencyPrimaryAction(item({ status: 'missing', actions: ['remove'] }), running)).toBeNull()
-    expect(dependencyPrimaryAction(item({ status: 'installed', installed_version: '1', latest_version: '2', actions: ['reinstall'] }), running))
+    expect(dependencyPrimaryAction(item({ status: 'installed', installed_version: '1', latest_version: '2', update_available: true, actions: ['reinstall'] }), running))
       .toBeNull()
   })
 
@@ -205,11 +206,11 @@ describe('dependencyMenuActions', () => {
     const actions = dependencyMenuActions(imageCopy(), 'running')
     expect(actions.map(action => action.kind)).toEqual(['reinstall', 'viewScript'])
     expect(actions[0]).toMatchObject({ labelKey: 'bots.dependencies.action.reinstall', operation: 'install', disabled: false })
-    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running')).toEqual(actions)
+    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0', update_available: true }), 'running')).toEqual(actions)
   })
 
   it('keeps reinstall beside Update for a managed dependency', () => {
-    const updatable = item({ status: 'installed', latest_version: '2', installed_version: '1', actions: ['update', 'reinstall', 'remove'] })
+    const updatable = item({ status: 'installed', latest_version: '2', update_available: true, installed_version: '1', actions: ['update', 'reinstall', 'remove'] })
     expect(dependencyPrimaryAction(updatable, 'running')).toMatchObject({ kind: 'update', operation: 'update' })
     expect(dependencyMenuActions(updatable, 'running')).toEqual([
       expect.objectContaining({ kind: 'reinstall', operation: 'reinstall' }),
@@ -220,7 +221,7 @@ describe('dependencyMenuActions', () => {
   it('never offers removal per dependency: the App that references it removes it', () => {
     const overlay = imageCopy({ source: 'managed', overlay: true, actions: ['update', 'reinstall', 'remove'] })
     expect(dependencyMenuActions(overlay, 'running').map(action => String(action.kind))).not.toContain('remove')
-    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running').map(action => String(action.kind))).not.toContain('remove')
+    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0', update_available: true }), 'running').map(action => String(action.kind))).not.toContain('remove')
     // After removal no copy or record remains, so the installed list drops it.
     expect(dependencyIsInstalled(item({ actions: ['install'] }))).toBe(false)
   })
@@ -290,7 +291,7 @@ describe('sortDependencies', () => {
     const sorted = sortDependencies([
       imageCopy({ id: 'uv', name: 'uv' }),
       item({ id: 'codex', name: 'Codex', status: 'installed' }),
-      imageCopy({ id: 'python', name: 'Python', latest_version: '3.15.0' }),
+      imageCopy({ id: 'python', name: 'Python', latest_version: '3.15.0', update_available: true }),
       item({ id: 'claude-code', name: 'Claude Code', status: 'failed' }),
       imageCopy(),
     ])
@@ -378,5 +379,14 @@ describe('dependencyLastError', () => {
   it('shows the text of an earlier server when the record has no code', () => {
     expect(dependencyLastError(item({ last_error: ' download failed ' }), translate)).toBe('download failed')
     expect(dependencyLastError(item(), translate)).toBe('')
+  })
+})
+
+
+describe('dependencyUpdateAvailable', () => {
+  it.each([false, undefined])('respects a false or unknown verdict (%s)', (verdict) => {
+    for (const [installed, latest] of [['2.9.0', '2.9.0-0'], ['2.10.0', '2.9.0'], ['1.0.0', '2.0.0']]) {
+      expect(dependencyUpdateAvailable(item({ status: 'installed', installed_version: installed, latest_version: latest, update_available: verdict }))).toBe(false)
+    }
   })
 })

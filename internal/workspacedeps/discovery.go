@@ -69,9 +69,8 @@ type Observed struct {
 	// Source is the provider of the copy that wins precedence:
 	// managed, then toolkit, then PATH.
 	Source Source
-	// Version is the probed version of the winning copy. For managed copies
-	// it falls back to state.json when the probe yields nothing. It may be
-	// empty.
+	// Version is the recipe version from state.json for managed copies,
+	// otherwise the probed version of the winning copy. It may be empty.
 	Version string
 	// Command is the absolute path of the winning copy of the primary command
 	// (provides[0]).
@@ -120,7 +119,7 @@ const (
 // versionPattern extracts the first semantic-version-looking token from a
 // `--version` output. An optional pre-release suffix is kept so
 // a release candidate never passes for the release it precedes.
-var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?`)
+var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`)
 
 // discoveryPreamble defines the helpers the generated script relies on. It
 // runs without `set -e`: a failing probe must not abort discovery of the
@@ -435,9 +434,9 @@ func resolveObserved(dep catalog.Dependency, probe *rawProbe) Observed {
 			case !managedUsable(probe, primary, entrypoint):
 				problems = append(problems, fmt.Sprintf("state.json entrypoint %s is not executable", entrypoint))
 			default:
-				version := extractVersion(probe.versions[entrypoint])
+				version := strings.TrimSpace(state.Version)
 				if version == "" {
-					version = strings.TrimSpace(state.Version)
+					version = extractVersion(probe.versions[entrypoint])
 				}
 				obs.Candidates = append(obs.Candidates, Candidate{Source: SourceManaged, Path: entrypoint, Version: version})
 			}
@@ -536,6 +535,11 @@ func probeCandidateVersions(ctx context.Context, obs *Observed, cache map[string
 	}
 	for i := range obs.Candidates {
 		candidate := &obs.Candidates[i]
+		// A recipe version can identify a bundle, toolchain, or distribution
+		// package. Its primary executable may have an unrelated version.
+		if candidate.Source == SourceManaged && candidate.Version != "" {
+			continue
+		}
 		result, known := cache[candidate.Path]
 		if !known {
 			output, err := probe(ctx, candidate.Path)
