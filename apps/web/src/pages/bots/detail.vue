@@ -275,6 +275,7 @@
                 <KeepAlive v-else>
                   <component
                     :is="activeComponent?.component"
+                    :key="`${botId}:${activeSection}`"
                     v-bind="activeComponent?.params"
                   />
                 </KeepAlive>
@@ -311,14 +312,11 @@ import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import {
   putBotsById,
-  getBotsByIdChecks,
   getBotsByBotIdContainer,
-  getBotsByBotIdContainerSnapshots,
 } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import type {
-  BotsBotCheck, HandlersGetContainerResponse,
-  HandlersListSnapshotsResponse,
+  HandlersGetContainerResponse,
 } from '@memohai/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useBotQuery } from '@/composables/api/useBot'
@@ -347,9 +345,7 @@ import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
 import { appNeedsAttention, useBotAppsQuery } from '@/composables/api/useApps'
-type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
-type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
 
 const route = useRoute()
 const router = useRouter()
@@ -597,11 +593,6 @@ const { mutateAsync: updateBot, isLoading: updateBotLoading } = useMutation({
   },
 })
 
-async function fetchChecks(id: string): Promise<BotCheck[]> {
-  const { data } = await getBotsByIdChecks({ path: { id }, throwOnError: true })
-  return data?.items ?? []
-}
-
 const isEditingBotName = ref(false)
 const botNameDraft = ref('')
 const editNameInputRef = ref<InstanceType<typeof Input> | null>(null)
@@ -622,6 +613,7 @@ watch(bot, (val) => {
 }, { immediate: true })
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
+const activeSection = computed(() => activeTab.value)
 watch([tabList, activeTab], ([tabs, tab]) => {
   if (['tool-approval', 'hooks', 'desktop', 'network', 'compaction'].includes(tab)) {
     void router.replace({ query: { ...route.query, tab: 'advanced', section: tab } })
@@ -674,14 +666,6 @@ const {
   statusVariant,
 } = useBotStatusMeta(bot, t)
 
-const checks = ref<BotCheck[]>([])
-const checksLoading = ref(false)
-
-const containerMissing = ref(false)
-const containerLoading = ref(false)
-const snapshotsLoading = ref(false)
-const snapshots = ref<BotContainerSnapshot[]>([])
-
 watch(botId, () => {
   isEditingBotName.value = false
   botNameDraft.value = ''
@@ -696,23 +680,6 @@ watch([botId, canManageBot], async ([id, manage]) => {
   const result = await getBotsByBotIdContainer({ path: { bot_id: id } })
   if (result.error === undefined && botId.value === id) {
     containerInfo.value = result.data ?? null
-  }
-}, { immediate: true })
-
-watch([activeTab, botId, canManageBot], ([tab]) => {
-  if (!botId.value) {
-    return
-  }
-  if (tab === 'container') {
-    // Container data is management-only; chat-only members never see this tab.
-    if (!canManageBot.value) {
-      return
-    }
-    void loadContainerData(true)
-    return
-  }
-  if (tab === 'overview') {
-    void loadChecks(true)
   }
 }, { immediate: true })
 
@@ -760,65 +727,6 @@ async function handleConfirmBotName() {
     toast.success(t('bots.renameSuccess'))
   } catch (error) {
     toast.error(resolveErrorMessage(error, t('bots.renameFailed')))
-  }
-}
-
-async function loadChecks(showToast: boolean) {
-  checksLoading.value = true
-  checks.value = []
-  try {
-    checks.value = await fetchChecks(botId.value)
-  } catch (error) {
-    if (showToast) {
-      toast.error(resolveErrorMessage(error, t('bots.checks.loadFailed')))
-    }
-  } finally {
-    checksLoading.value = false
-  }
-}
-
-async function loadContainerData(showLoadingToast: boolean) {
-  await capabilitiesStore.load()
-  containerLoading.value = true
-  try {
-    const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
-    if (result.error !== undefined) {
-      if (result.response?.status === 404) {
-        containerInfo.value = null
-        containerMissing.value = true
-        snapshots.value = []
-        return
-      }
-      throw result.error
-    }
-    containerInfo.value = result.data
-    containerMissing.value = false
-    if (capabilitiesStore.snapshotSupported) {
-      await loadSnapshots()
-    }
-  } catch (error) {
-    if (showLoadingToast) {
-      toast.error(resolveErrorMessage(error, t('bots.container.loadFailed')))
-    }
-  } finally {
-    containerLoading.value = false
-  }
-}
-
-async function loadSnapshots() {
-  if (!containerInfo.value || !capabilitiesStore.snapshotSupported) {
-    snapshots.value = []
-    return
-  }
-  snapshotsLoading.value = true
-  try {
-    const { data } = await getBotsByBotIdContainerSnapshots({ path: { bot_id: botId.value }, throwOnError: true })
-    snapshots.value = data.snapshots ?? []
-  } catch (error) {
-    snapshots.value = []
-    toast.error(resolveErrorMessage(error, t('bots.container.snapshotLoadFailed')))
-  } finally {
-    snapshotsLoading.value = false
   }
 }
 </script>

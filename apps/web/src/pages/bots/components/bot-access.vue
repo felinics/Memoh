@@ -27,258 +27,283 @@
         value="channel"
         class="space-y-8"
       >
-        <SettingsSection>
-          <SettingsRow
-            :label="$t('bots.access.modeTitle')"
-            :description="modeDescription"
-          >
-            <SegmentedControl
-              :model-value="defaultEffectDraft"
-              :items="accessModeItems"
-              :aria-label="$t('bots.access.modeTitle')"
-              class="shrink-0"
-              @update:model-value="(value) => handleSetDefaultEffect(String(value))"
-            />
-          </SettingsRow>
-          <!-- What the mode plus every rule add up to, per conversation type. The
-               New Bot policy presets are expressed only through conversation-type
-               rules, which the member list below never shows; without this line
-               "Private Only" and "Deny All" render identically. -->
-          <SettingsRow
-            v-if="!isPendingRules"
-            :label="$t('bots.access.effective.title')"
-            :description="effectiveSummary"
-          />
-        </SettingsSection>
-
-        <SettingsSection>
-          <SettingsRow
-            :label="$t('bots.access.members.title')"
-            :description="$t('bots.access.members.subtitle')"
-          >
-            <!-- Inline add-member select, same shape as the model picker in
-                 settings: a w-56 select-trigger that opens a search menu. Picking
-                 an option adds it immediately; the card layout never swaps. -->
-            <div class="w-56 shrink-0">
-              <SearchableSelectPopover
-                v-model="memberFormIdentityId"
-                :options="memberCandidateOptions"
-                :placeholder="memberAddLabel"
-                :aria-label="memberAddLabel"
-                :search-placeholder="$t('bots.access.members.searchIdentity')"
-                :empty-text="$t('bots.access.members.noIdentityCandidates')"
-                :show-group-headers="true"
-              >
-                <template #option-label="{ option }">
-                  <div class="flex min-w-0 items-center gap-2 py-0.5 text-left">
-                    <Avatar class="size-6 shrink-0">
-                      <AvatarImage
-                        :src="optionMeta(option.meta).avatarUrl || ''"
-                        :alt="option.label"
-                      />
-                      <AvatarFallback class="text-caption">
-                        {{ option.label.slice(0, 2).toUpperCase() }}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div class="min-w-0">
-                      <div class="truncate text-xs">
-                        {{ option.label }}
-                      </div>
-                      <div
-                        v-if="optionMeta(option.meta).channelLabel"
-                        class="truncate text-xs text-muted-foreground"
-                      >
-                        {{ optionMeta(option.meta).channelLabel }}
-                      </div>
-                    </div>
-                  </div>
-                </template>
-              </SearchableSelectPopover>
-            </div>
-          </SettingsRow>
-
+        <SettingsSection v-if="isInitialAccessLoading">
           <InlineLoadingRow
-            v-if="isPendingRules || isPendingManagers"
             size="md"
             surface="card-row"
           >
             {{ $t('common.loading') }}
           </InlineLoadingRow>
+        </SettingsSection>
 
-          <Empty
-            v-else-if="members.length === 0"
-            class="py-12"
+        <SettingsSection v-else-if="accessLoadError">
+          <SettingsRow
+            :label="$t('common.loadFailed')"
+            :description="accessLoadErrorMessage"
           >
-            <EmptyHeader>
-              <EmptyTitle>{{ $t('bots.access.members.title') }}</EmptyTitle>
-              <EmptyDescription>{{ memberEmptyDescription }}</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-
-          <template v-else>
-            <SettingsRow
-              v-for="member in members"
-              :key="member.channelIdentityId"
+            <Button
+              variant="outline"
+              size="sm"
+              @click="retryAccessLoad"
             >
-              <template #leading>
-                <Avatar class="size-7 shrink-0">
-                  <AvatarImage
-                    :src="member.avatarUrl || ''"
-                    :alt="member.label"
-                  />
-                  <AvatarFallback class="text-caption">
-                    {{ member.label.slice(0, 2).toUpperCase() }}
-                  </AvatarFallback>
-                </Avatar>
-              </template>
-              <template #content>
-                <div class="flex items-center gap-1.5">
-                  <span class="truncate text-sm font-medium text-foreground">
-                    {{ member.label }}
-                  </span>
-                </div>
-                <div
-                  v-if="member.channelType"
-                  class="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground"
-                >
-                  <ChannelIcon
-                    :channel="member.channelType"
-                    size="1em"
-                  />
-                  <span>{{ formatPlatformName(member.channelType) }}</span>
-                  <span v-if="member.kind === 'group'"> · {{ $t('bots.access.members.groupBadge') }}</span>
-                </div>
-              </template>
+              {{ $t('common.retry') }}
+            </Button>
+          </SettingsRow>
+        </SettingsSection>
 
-              <div class="flex items-center gap-3">
-                <label class="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
-                  <Checkbox
-                    :model-value="member.chat"
-                    :disabled="isRowBusy(member)"
-                    @update:model-value="(v) => toggleChat(member, v === true)"
-                  />
-                  {{ $t('bots.access.members.chat') }}
-                </label>
-                <!-- Groups can't be channel managers (bot_channel_admins is keyed by
+        <template v-else>
+          <SettingsSection>
+            <SettingsRow
+              :label="$t('bots.access.modeTitle')"
+              :description="modeDescription"
+            >
+              <SegmentedControl
+                :model-value="defaultEffectDraft"
+                :items="accessModeItems"
+                :aria-label="$t('bots.access.modeTitle')"
+                class="shrink-0"
+                @update:model-value="(value) => handleSetDefaultEffect(String(value))"
+              />
+            </SettingsRow>
+            <!-- What the mode plus every rule add up to, per conversation type. The
+               New Bot policy presets are expressed only through conversation-type
+               rules, which the member list below never shows; without this line
+               "Private Only" and "Deny All" render identically. -->
+            <SettingsRow
+              v-if="!isPendingRules"
+              :label="$t('bots.access.effective.title')"
+              :description="effectiveSummary"
+            />
+          </SettingsSection>
+
+          <SettingsSection>
+            <SettingsRow
+              :label="$t('bots.access.members.title')"
+              :description="$t('bots.access.members.subtitle')"
+            >
+              <!-- Inline add-member select, same shape as the model picker in
+                 settings: a w-56 select-trigger that opens a search menu. Picking
+                 an option adds it immediately; the card layout never swaps. -->
+              <div class="w-56 shrink-0">
+                <SearchableSelectPopover
+                  v-model="memberFormIdentityId"
+                  :options="memberCandidateOptions"
+                  :placeholder="memberAddLabel"
+                  :aria-label="memberAddLabel"
+                  :search-placeholder="$t('bots.access.members.searchIdentity')"
+                  :empty-text="$t('bots.access.members.noIdentityCandidates')"
+                  :show-group-headers="true"
+                >
+                  <template #option-label="{ option }">
+                    <div class="flex min-w-0 items-center gap-2 py-0.5 text-left">
+                      <Avatar class="size-6 shrink-0">
+                        <AvatarImage
+                          :src="optionMeta(option.meta).avatarUrl || ''"
+                          :alt="option.label"
+                        />
+                        <AvatarFallback class="text-caption">
+                          {{ option.label.slice(0, 2).toUpperCase() }}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div class="min-w-0">
+                        <div class="truncate text-xs">
+                          {{ option.label }}
+                        </div>
+                        <div
+                          v-if="optionMeta(option.meta).channelLabel"
+                          class="truncate text-xs text-muted-foreground"
+                        >
+                          {{ optionMeta(option.meta).channelLabel }}
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </SearchableSelectPopover>
+              </div>
+            </SettingsRow>
+
+            <InlineLoadingRow
+              v-if="isPendingRules || isPendingManagers"
+              size="md"
+              surface="card-row"
+            >
+              {{ $t('common.loading') }}
+            </InlineLoadingRow>
+
+            <Empty
+              v-else-if="members.length === 0"
+              class="py-12"
+            >
+              <EmptyHeader>
+                <EmptyTitle>{{ $t('bots.access.members.title') }}</EmptyTitle>
+                <EmptyDescription>{{ memberEmptyDescription }}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+
+            <template v-else>
+              <SettingsRow
+                v-for="member in members"
+                :key="member.channelIdentityId"
+              >
+                <template #leading>
+                  <Avatar class="size-7 shrink-0">
+                    <AvatarImage
+                      :src="member.avatarUrl || ''"
+                      :alt="member.label"
+                    />
+                    <AvatarFallback class="text-caption">
+                      {{ member.label.slice(0, 2).toUpperCase() }}
+                    </AvatarFallback>
+                  </Avatar>
+                </template>
+                <template #content>
+                  <div class="flex items-center gap-1.5">
+                    <span class="truncate text-sm font-medium text-foreground">
+                      {{ member.label }}
+                    </span>
+                  </div>
+                  <div
+                    v-if="member.channelType"
+                    class="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground"
+                  >
+                    <ChannelIcon
+                      :channel="member.channelType"
+                      size="1em"
+                    />
+                    <span>{{ formatPlatformName(member.channelType) }}</span>
+                    <span v-if="member.kind === 'group'"> · {{ $t('bots.access.members.groupBadge') }}</span>
+                  </div>
+                </template>
+
+                <div class="flex items-center gap-3">
+                  <label class="flex cursor-pointer items-center gap-1.5 text-xs text-foreground">
+                    <Checkbox
+                      :model-value="member.chat"
+                      :disabled="isRowBusy(member)"
+                      @update:model-value="(v) => toggleChat(member, v === true)"
+                    />
+                    {{ $t('bots.access.members.chat') }}
+                  </label>
+                  <!-- Groups can't be channel managers (bot_channel_admins is keyed by
                      channel_identity, which groups don't have), so Manage is shown disabled
                      rather than hidden — keeping the Chat/Manage columns aligned across
                      row kinds. -->
-                <label
-                  class="flex items-center gap-1.5 text-xs"
-                  :class="member.kind === 'group'
-                    ? 'cursor-not-allowed text-muted-foreground'
-                    : 'cursor-pointer text-foreground'"
-                >
-                  <Checkbox
-                    :model-value="member.manage"
-                    :disabled="isRowBusy(member) || member.kind === 'group'"
-                    @update:model-value="(v) => toggleManage(member, v === true)"
-                  />
-                  {{ $t('bots.access.members.manage') }}
-                </label>
+                  <label
+                    class="flex items-center gap-1.5 text-xs"
+                    :class="member.kind === 'group'
+                      ? 'cursor-not-allowed text-muted-foreground'
+                      : 'cursor-pointer text-foreground'"
+                  >
+                    <Checkbox
+                      :model-value="member.manage"
+                      :disabled="isRowBusy(member) || member.kind === 'group'"
+                      @update:model-value="(v) => toggleManage(member, v === true)"
+                    />
+                    {{ $t('bots.access.members.manage') }}
+                  </label>
 
-                <!-- Info icon next to Manage: its presence marks a platform member
+                  <!-- Info icon next to Manage: its presence marks a platform member
                  (linked to a workspace account). The popover explains where the
                  Manage permission comes from and, when locally overridden, offers
                  a "reset to inherited" action. Reka Popover is click-triggered so
                  the inner button stays reachable. -->
-                <Popover v-if="member.bound || member.manageInherited">
-                  <PopoverTrigger as-child>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      class="text-muted-foreground"
-                      :title="$t('bots.access.members.platformMember')"
-                      :aria-label="$t('bots.access.members.platformMember')"
+                  <Popover v-if="member.bound || member.manageInherited">
+                    <PopoverTrigger as-child>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        class="text-muted-foreground"
+                        :title="$t('bots.access.members.platformMember')"
+                        :aria-label="$t('bots.access.members.platformMember')"
+                      >
+                        <Info class="size-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="end"
+                      class="w-72 space-y-2 text-left"
                     >
-                      <Info class="size-3.5" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="end"
-                    class="w-72 space-y-2 text-left"
-                  >
-                    <div class="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                      <Info class="size-3.5 text-muted-foreground" />
-                      {{ $t('bots.access.members.platformMember') }}
-                    </div>
-                    <p class="text-xs leading-relaxed text-muted-foreground">
-                      {{ member.manageInherited
-                        ? (member.manageHasOverride
-                          ? $t('bots.access.members.overrideActive')
-                          : $t('bots.access.members.inheritedFollowing'))
-                        : $t('bots.access.members.platformMemberHint') }}
-                    </p>
-                    <Button
-                      v-if="member.manageInherited && member.manageHasOverride"
-                      variant="outline"
-                      size="sm"
-                      class="w-full gap-1.5"
-                      :disabled="isRowBusy(member)"
-                      @click="recoverInherit(member)"
-                    >
-                      <RotateCcw class="size-3.5" />
-                      {{ $t('bots.access.members.recoverInherit') }}
-                    </Button>
-                  </PopoverContent>
-                </Popover>
+                      <div class="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                        <Info class="size-3.5 text-muted-foreground" />
+                        {{ $t('bots.access.members.platformMember') }}
+                      </div>
+                      <p class="text-xs leading-relaxed text-muted-foreground">
+                        {{ member.manageInherited
+                          ? (member.manageHasOverride
+                            ? $t('bots.access.members.overrideActive')
+                            : $t('bots.access.members.inheritedFollowing'))
+                          : $t('bots.access.members.platformMemberHint') }}
+                      </p>
+                      <Button
+                        v-if="member.manageInherited && member.manageHasOverride"
+                        variant="outline"
+                        size="sm"
+                        class="w-full gap-1.5"
+                        :disabled="isRowBusy(member)"
+                        @click="recoverInherit(member)"
+                      >
+                        <RotateCcw class="size-3.5" />
+                        {{ $t('bots.access.members.recoverInherit') }}
+                      </Button>
+                    </PopoverContent>
+                  </Popover>
 
-                <!-- Only local-only visitors can be removed here. Platform members (bound)
+                  <!-- Only local-only visitors can be removed here. Platform members (bound)
                  come from Workspace Members, so they are managed via the checkboxes
                  (untick Manage to suppress) rather than deleted from this list. -->
-                <ConfirmPopover
-                  v-if="!member.bound && !member.manageInherited"
-                  :message="member.kind === 'group'
-                    ? $t('bots.access.members.removeGroupConfirm')
-                    : $t('bots.access.members.removeConfirm')"
-                  :cancel-text="$t('common.cancel')"
-                  :confirm-text="$t('common.delete')"
-                  @confirm="() => removeMember(member)"
-                >
-                  <template #trigger>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      class="text-muted-foreground"
-                      :disabled="isRowBusy(member)"
-                    >
-                      <Trash2 class="size-3.5" />
-                    </Button>
-                  </template>
-                </ConfirmPopover>
-              </div>
-            </SettingsRow>
-          </template>
-        </SettingsSection>
+                  <ConfirmPopover
+                    v-if="!member.bound && !member.manageInherited"
+                    :message="member.kind === 'group'
+                      ? $t('bots.access.members.removeGroupConfirm')
+                      : $t('bots.access.members.removeConfirm')"
+                    :cancel-text="$t('common.cancel')"
+                    :confirm-text="$t('common.delete')"
+                    @confirm="() => removeMember(member)"
+                  >
+                    <template #trigger>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        class="text-muted-foreground"
+                        :disabled="isRowBusy(member)"
+                      >
+                        <Trash2 class="size-3.5" />
+                      </Button>
+                    </template>
+                  </ConfirmPopover>
+                </div>
+              </SettingsRow>
+            </template>
+          </SettingsSection>
 
-        <!-- Named entry into advanced rules: an ActionCard opening a focused
+          <!-- Named entry into advanced rules: an ActionCard opening a focused
              DIALOG — not a push-in sub-page and not an in-card disclosure.
              The structural rule from the design pass: a facet of the current
              page never grows a sub-level (sub-pages are reserved for entities
              like a Provider); a dialog keeps this page visibly underneath, so
              "where am I" never arises and no back-button chrome is needed. -->
-        <SectionGroup
-          :title="$t('bots.access.rulesTitle')"
-          tone="muted"
-        >
-          <ActionCard
-            :title="$t('bots.access.advanced.entryTitle')"
-            :description="advancedRules.length ? $t('bots.access.advanced.activeCount', { count: advancedRules.length }, advancedRules.length) : ''"
-            @click="rulesOpen = true"
+          <SectionGroup
+            :title="$t('bots.access.rulesTitle')"
+            tone="muted"
           >
-            <template #icon>
-              <ShieldCheck />
-            </template>
-          </ActionCard>
-        </SectionGroup>
+            <ActionCard
+              :title="$t('bots.access.advanced.entryTitle')"
+              :description="advancedRules.length ? $t('bots.access.advanced.activeCount', { count: advancedRules.length }, advancedRules.length) : ''"
+              @click="rulesOpen = true"
+            >
+              <template #icon>
+                <ShieldCheck />
+              </template>
+            </ActionCard>
+          </SectionGroup>
 
-        <!-- Advanced rules dialog: the full list + add/edit form. Behavior is
+          <!-- Advanced rules dialog: the full list + add/edit form. Behavior is
              unchanged from the old sub-surface — only the container. view-swap
              panel: DialogViewHeader renders the close inline, so DialogPanel
              disables the built-in corner close. -->
-        <Dialog v-model:open="rulesOpen">
-          <DialogPanel view-swap>
-            <!-- Header follows the "centered title needs both flanks
+          <Dialog v-model:open="rulesOpen">
+            <DialogPanel view-swap>
+              <!-- Header follows the "centered title needs both flanks
                  balanced" rule (UI Web guidance § dialog header fork), via the
                  shared DialogViewHeader: centered over a populated LIST (the
                  body weight below anchors it); the form view and the bare
@@ -288,20 +313,20 @@
                  built-in corner close is disabled (DialogPanel view-swap) so
                  DialogViewHeader keeps title / close on ONE centerline. The
                  form is a VIEW SWAP, never its own titled card (card-in-card). -->
-            <DialogViewHeader :centered="centerDialogTitle">
-              {{ formVisible ? (editingRule ? $t('bots.access.editRule') : addListEntryLabel) : $t('bots.access.advanced.entryTitle') }}
-            </DialogViewHeader>
+              <DialogViewHeader :centered="centerDialogTitle">
+                {{ formVisible ? (editingRule ? $t('bots.access.editRule') : addListEntryLabel) : $t('bots.access.advanced.entryTitle') }}
+              </DialogViewHeader>
 
-            <!-- DialogBody (scroll + scroll-edge fade) stays separate from
+              <!-- DialogBody (scroll + scroll-edge fade) stays separate from
                  AutoHeight: AutoHeight's root is overflow-hidden to clip the
                  height tween, so it can't also be the scroller — a form taller
                  than the dialog cap would be clipped with no way to scroll.
                  The grid row caps DialogBody at the dialog's max height and it
                  scrolls; AutoHeight animates the list<->form height change
                  within it. -->
-            <DialogBody>
-              <AutoHeight>
-                <!-- Toolbar only rides ABOVE a populated list: search (left) +
+              <DialogBody>
+                <AutoHeight>
+                  <!-- Toolbar only rides ABOVE a populated list: search (left) +
                    add (right), balanced like the models toolbar — spacing alone
                    separates it from the first row, no divider. When the list is
                    empty the guiding action lives INSIDE the Empty block
@@ -309,39 +334,39 @@
                    rules" message is the orphaned-action anti-pattern the skill
                    bans; the empty state's own button is the single call to
                    action. Same shape as the other list empty states. -->
-                <div
-                  v-if="!formVisible && advancedRules.length"
-                  class="flex items-center gap-3 pt-1 pb-3"
-                >
-                  <!-- Search fills the row up to the add button: a capped
+                  <div
+                    v-if="!formVisible && advancedRules.length"
+                    class="flex items-center gap-3 pt-1 pb-3"
+                  >
+                    <!-- Search fills the row up to the add button: a capped
                        search left a dead void between the two anchors that
                        read as a layout mistake, not balance. Full-bleed
                        search + trailing action is the arrangement that holds
                        at panel width. -->
-                  <InputGroup
-                    size="sm"
-                    class="min-w-0 flex-1"
-                  >
-                    <InputGroupAddon align="inline-start">
-                      <Search class="size-4 text-muted-foreground" />
-                    </InputGroupAddon>
-                    <InputGroupInput
-                      v-model="ruleSearchQuery"
-                      :placeholder="$t('bots.access.searchRules')"
-                    />
-                  </InputGroup>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    class="shrink-0"
-                    @click="openAddDialog"
-                  >
-                    <Plus class="size-4" />
-                    {{ addListEntryLabel }}
-                  </Button>
-                </div>
+                    <InputGroup
+                      size="sm"
+                      class="min-w-0 flex-1"
+                    >
+                      <InputGroupAddon align="inline-start">
+                        <Search class="size-4 text-muted-foreground" />
+                      </InputGroupAddon>
+                      <InputGroupInput
+                        v-model="ruleSearchQuery"
+                        :placeholder="$t('bots.access.searchRules')"
+                      />
+                    </InputGroup>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      class="shrink-0"
+                      @click="openAddDialog"
+                    >
+                      <Plus class="size-4" />
+                      {{ addListEntryLabel }}
+                    </Button>
+                  </div>
 
-                <!-- !formVisible matters: without it the existing rows (and
+                  <!-- !formVisible matters: without it the existing rows (and
                      their border-b) leak in above the form — the form view must
                      be the dialog's ONLY body.
                      ui-allow-shape: a list-management dialog row (avatar/channel
@@ -349,269 +374,270 @@
                      not the label↔control SettingsRow — composing that owner here
                      would force a phantom leading column and drop the trailing
                      action group. Borrows the 3.75rem rung for list rhythm. -->
-                <template v-if="!formVisible && filteredAdvancedRules.length">
-                  <div
-                    v-for="rule in filteredAdvancedRules"
-                    :key="rule.id"
-                    class="flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
-                  >
+                  <template v-if="!formVisible && filteredAdvancedRules.length">
                     <div
-                      v-if="rule.subject_channel_type"
-                      class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
+                      v-for="rule in filteredAdvancedRules"
+                      :key="rule.id"
+                      class="flex min-h-[3.75rem] items-center gap-3 border-b border-border py-3 last:border-b-0"
                     >
-                      <ChannelIcon
-                        :channel="rule.subject_channel_type"
-                        size="1em"
-                      />
-                    </div>
-                    <Avatar
-                      v-else-if="rule.channel_identity_id"
-                      class="size-8 shrink-0"
-                    >
-                      <AvatarImage
-                        :src="rule.channel_identity_avatar_url || ''"
-                        :alt="describeRuleTarget(rule)"
-                      />
-                      <AvatarFallback class="text-caption">
-                        {{ ruleTargetFallback(rule) }}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div
-                      v-else
-                      class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
-                    >
-                      <Users class="size-4" />
-                    </div>
-
-                    <div class="min-w-0 flex-1">
-                      <div class="flex min-w-0 items-center gap-2">
-                        <p class="truncate text-sm font-medium text-foreground">
-                          {{ describeRuleTarget(rule) }}
-                        </p>
-                        <Badge
-                          :variant="rule.enabled ? 'secondary' : 'outline'"
-                          size="sm"
-                        >
-                          {{ rule.enabled ? $t('bots.access.ruleEnabled') : $t('bots.access.ruleDisabled') }}
-                        </Badge>
+                      <div
+                        v-if="rule.subject_channel_type"
+                        class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
+                      >
+                        <ChannelIcon
+                          :channel="rule.subject_channel_type"
+                          size="1em"
+                        />
                       </div>
-                      <div class="mt-0.5 flex min-w-0 items-center text-xs text-muted-foreground">
-                        <span class="shrink-0">{{ ruleScopePrefix(rule) }}</span>
-                        <template v-if="ruleScopeDetail(rule)">
-                          <span class="mx-1 shrink-0">: </span>
-                          <span class="truncate">{{ ruleScopeDetail(rule) }}</span>
-                        </template>
+                      <Avatar
+                        v-else-if="rule.channel_identity_id"
+                        class="size-8 shrink-0"
+                      >
+                        <AvatarImage
+                          :src="rule.channel_identity_avatar_url || ''"
+                          :alt="describeRuleTarget(rule)"
+                        />
+                        <AvatarFallback class="text-caption">
+                          {{ ruleTargetFallback(rule) }}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div
+                        v-else
+                        class="flex size-8 shrink-0 items-center justify-center text-muted-foreground"
+                      >
+                        <Users class="size-4" />
                       </div>
-                    </div>
 
-                    <div class="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        class="text-muted-foreground"
-                        :aria-label="rule.enabled ? $t('bots.access.disableRule') : $t('bots.access.enableRule')"
-                        @click="handleToggleEnabled(rule, !(rule.enabled ?? false))"
-                      >
-                        <Power class="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        class="text-muted-foreground"
-                        :aria-label="$t('common.edit')"
-                        @click="openEditDialog(rule)"
-                      >
-                        <SquarePen class="size-3.5" />
-                      </Button>
-                      <ConfirmPopover
-                        :message="$t('bots.access.deleteConfirmDescription')"
-                        :cancel-text="$t('common.cancel')"
-                        :confirm-text="$t('common.delete')"
-                        @confirm="handleDeleteRule(rule.id!)"
-                      >
-                        <template #trigger>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            class="text-muted-foreground"
-                            :aria-label="$t('common.delete')"
+                      <div class="min-w-0 flex-1">
+                        <div class="flex min-w-0 items-center gap-2">
+                          <p class="truncate text-sm font-medium text-foreground">
+                            {{ describeRuleTarget(rule) }}
+                          </p>
+                          <Badge
+                            :variant="rule.enabled ? 'secondary' : 'outline'"
+                            size="sm"
                           >
-                            <Trash2 class="size-3.5" />
-                          </Button>
-                        </template>
-                      </ConfirmPopover>
-                    </div>
-                  </div>
-                </template>
+                            {{ rule.enabled ? $t('bots.access.ruleEnabled') : $t('bots.access.ruleDisabled') }}
+                          </Badge>
+                        </div>
+                        <div class="mt-0.5 flex min-w-0 items-center text-xs text-muted-foreground">
+                          <span class="shrink-0">{{ ruleScopePrefix(rule) }}</span>
+                          <template v-if="ruleScopeDetail(rule)">
+                            <span class="mx-1 shrink-0">: </span>
+                            <span class="truncate">{{ ruleScopeDetail(rule) }}</span>
+                          </template>
+                        </div>
+                      </div>
 
-                <!-- Search active but nothing matches: a quiet line, NOT the
+                      <div class="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          class="text-muted-foreground"
+                          :aria-label="rule.enabled ? $t('bots.access.disableRule') : $t('bots.access.enableRule')"
+                          @click="handleToggleEnabled(rule, !(rule.enabled ?? false))"
+                        >
+                          <Power class="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          class="text-muted-foreground"
+                          :aria-label="$t('common.edit')"
+                          @click="openEditDialog(rule)"
+                        >
+                          <SquarePen class="size-3.5" />
+                        </Button>
+                        <ConfirmPopover
+                          :message="$t('bots.access.deleteConfirmDescription')"
+                          :cancel-text="$t('common.cancel')"
+                          :confirm-text="$t('common.delete')"
+                          @confirm="handleDeleteRule(rule.id!)"
+                        >
+                          <template #trigger>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              class="text-muted-foreground"
+                              :aria-label="$t('common.delete')"
+                            >
+                              <Trash2 class="size-3.5" />
+                            </Button>
+                          </template>
+                        </ConfirmPopover>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- Search active but nothing matches: a quiet line, NOT the
                      "No Rules" empty (rules exist — inviting the user to add
                      one because their search missed would be misleading). -->
-                <p
-                  v-else-if="!formVisible && advancedRules.length"
-                  class="py-12 text-center text-sm text-muted-foreground"
-                >
-                  {{ $t('bots.access.searchNoMatch') }}
-                </p>
+                  <p
+                    v-else-if="!formVisible && advancedRules.length"
+                    class="py-12 text-center text-sm text-muted-foreground"
+                  >
+                    {{ $t('bots.access.searchNoMatch') }}
+                  </p>
 
-                <Empty
-                  v-else-if="!formVisible"
-                  class="py-12"
-                >
-                  <EmptyHeader>
-                    <EmptyTitle>{{ $t('bots.access.rulesEmpty') }}</EmptyTitle>
-                    <EmptyDescription>{{ $t('bots.access.rulesEmptyDescription') }}</EmptyDescription>
-                  </EmptyHeader>
-                  <EmptyContent>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      @click="openAddDialog"
-                    >
-                      <Plus class="size-4" />
-                      {{ addListEntryLabel }}
-                    </Button>
-                  </EmptyContent>
-                </Empty>
+                  <Empty
+                    v-else-if="!formVisible"
+                    class="py-12"
+                  >
+                    <EmptyHeader>
+                      <EmptyTitle>{{ $t('bots.access.rulesEmpty') }}</EmptyTitle>
+                      <EmptyDescription>{{ $t('bots.access.rulesEmptyDescription') }}</EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        @click="openAddDialog"
+                      >
+                        <Plus class="size-4" />
+                        {{ addListEntryLabel }}
+                      </Button>
+                    </EmptyContent>
+                  </Empty>
 
-                <!-- Form view: the title lives in the DialogViewHeader and the
+                  <!-- Form view: the title lives in the DialogViewHeader and the
                    way back is the footer Cancel, so this
                    section carries NO title bar and NO border of its own — it is
                    the dialog's single view while open, not a bordered sub-card. -->
-                <section
-                  v-if="formVisible"
-                  class="py-1"
-                >
-                  <form
-                    class="space-y-4"
-                    @submit.prevent="handleSaveRule(false)"
+                  <section
+                    v-if="formVisible"
+                    class="py-1"
                   >
-                    <div class="grid gap-4 sm:grid-cols-2">
-                      <div class="space-y-1.5">
-                        <div class="flex items-center justify-between gap-2">
-                          <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.platformQuestion') }}</Label>
-                          <Button
-                            v-if="ruleForm.subjectChannelType"
-                            type="button"
-                            variant="ghost"
-                            size="text"
-                            @click="setPlatformScope('')"
-                          >
-                            {{ $t('bots.access.allPlatforms') }}
-                          </Button>
-                        </div>
-                        <SearchableSelectPopover
-                          v-model="ruleForm.subjectChannelType"
-                          :options="platformOptions"
-                          :placeholder="$t('bots.access.allPlatforms')"
-                          :search-placeholder="$t('bots.access.searchPlatform')"
-                          :empty-text="$t('bots.access.noPlatformCandidates')"
-                          :show-group-headers="false"
-                          @update:model-value="setPlatformScope"
-                        />
-                      </div>
-
-                      <div class="space-y-1.5">
-                        <div class="flex items-center justify-between gap-2">
-                          <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.userQuestion') }}</Label>
-                          <Button
-                            v-if="ruleForm.channelIdentityId"
-                            type="button"
-                            variant="ghost"
-                            size="text"
-                            @click="setChannelIdentity('')"
-                          >
-                            {{ $t('bots.access.allUsers') }}
-                          </Button>
-                        </div>
-                        <SearchableSelectPopover
-                          v-model="ruleForm.channelIdentityId"
-                          :options="filteredIdentityOptions"
-                          :placeholder="$t('bots.access.selectIdentity')"
-                          :search-placeholder="$t('bots.access.searchIdentity')"
-                          :empty-text="$t('bots.access.noIdentityCandidates')"
-                          @update:model-value="setChannelIdentity"
-                        />
-                      </div>
-                    </div>
-
-                    <div class="space-y-2">
-                      <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.scopeQuestion') }}</Label>
-                      <SegmentedControl
-                        :model-value="ruleForm.sourceConversationType"
-                        :items="chatScopeOptions"
-                        :aria-label="$t('bots.access.scopeQuestion')"
-                        class="w-full sm:w-fit"
-                        @update:model-value="(value) => setChatScope(String(value))"
-                      />
-                    </div>
-
-                    <div
-                      v-if="showSpecificConversationSection"
-                      class="space-y-3"
+                    <form
+                      class="space-y-4"
+                      @submit.prevent="handleSaveRule(false)"
                     >
-                      <div class="grid gap-3 sm:grid-cols-2">
+                      <div class="grid gap-4 sm:grid-cols-2">
                         <div class="space-y-1.5">
-                          <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.conversationId') }}</Label>
-                          <Input
-                            v-model="ruleForm.sourceConversationId"
-                            class="h-8"
-                            :placeholder="$t('bots.access.conversationIdPlaceholder')"
+                          <div class="flex items-center justify-between gap-2">
+                            <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.platformQuestion') }}</Label>
+                            <Button
+                              v-if="ruleForm.subjectChannelType"
+                              type="button"
+                              variant="ghost"
+                              size="text"
+                              @click="setPlatformScope('')"
+                            >
+                              {{ $t('bots.access.allPlatforms') }}
+                            </Button>
+                          </div>
+                          <SearchableSelectPopover
+                            v-model="ruleForm.subjectChannelType"
+                            :options="platformOptions"
+                            :placeholder="$t('bots.access.allPlatforms')"
+                            :search-placeholder="$t('bots.access.searchPlatform')"
+                            :empty-text="$t('bots.access.noPlatformCandidates')"
+                            :show-group-headers="false"
+                            @update:model-value="setPlatformScope"
                           />
                         </div>
-                        <div
-                          v-if="ruleForm.sourceConversationType === 'thread'"
-                          class="space-y-1.5"
-                        >
-                          <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.threadId') }}</Label>
-                          <Input
-                            v-model="ruleForm.sourceThreadId"
-                            class="h-8"
-                            :placeholder="$t('bots.access.threadIdPlaceholder')"
+
+                        <div class="space-y-1.5">
+                          <div class="flex items-center justify-between gap-2">
+                            <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.userQuestion') }}</Label>
+                            <Button
+                              v-if="ruleForm.channelIdentityId"
+                              type="button"
+                              variant="ghost"
+                              size="text"
+                              @click="setChannelIdentity('')"
+                            >
+                              {{ $t('bots.access.allUsers') }}
+                            </Button>
+                          </div>
+                          <SearchableSelectPopover
+                            v-model="ruleForm.channelIdentityId"
+                            :options="filteredIdentityOptions"
+                            :placeholder="$t('bots.access.selectIdentity')"
+                            :search-placeholder="$t('bots.access.searchIdentity')"
+                            :empty-text="$t('bots.access.noIdentityCandidates')"
+                            @update:model-value="setChannelIdentity"
                           />
                         </div>
                       </div>
-                    </div>
 
-                    <div class="space-y-1.5">
-                      <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.description') }}</Label>
-                      <Input
-                        v-model="ruleForm.description"
-                        class="h-8"
-                        :placeholder="$t('bots.access.descriptionPlaceholder')"
-                      />
-                    </div>
+                      <div class="space-y-2">
+                        <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.scopeQuestion') }}</Label>
+                        <SegmentedControl
+                          :model-value="ruleForm.sourceConversationType"
+                          :items="chatScopeOptions"
+                          :aria-label="$t('bots.access.scopeQuestion')"
+                          class="w-full sm:w-fit"
+                          @update:model-value="(value) => setChatScope(String(value))"
+                        />
+                      </div>
 
-                    <p
-                      v-if="formError"
-                      class="text-xs text-destructive"
-                    >
-                      {{ formError }}
-                    </p>
-
-                    <div class="flex justify-end gap-2 pt-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        @click="formVisible = false"
+                      <div
+                        v-if="showSpecificConversationSection"
+                        class="space-y-3"
                       >
-                        {{ $t('common.cancel') }}
-                      </Button>
-                      <Button
-                        type="submit"
-                        size="sm"
-                        :loading="isSavingRule"
+                        <div class="grid gap-3 sm:grid-cols-2">
+                          <div class="space-y-1.5">
+                            <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.conversationId') }}</Label>
+                            <Input
+                              v-model="ruleForm.sourceConversationId"
+                              class="h-8"
+                              :placeholder="$t('bots.access.conversationIdPlaceholder')"
+                            />
+                          </div>
+                          <div
+                            v-if="ruleForm.sourceConversationType === 'thread'"
+                            class="space-y-1.5"
+                          >
+                            <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.threadId') }}</Label>
+                            <Input
+                              v-model="ruleForm.sourceThreadId"
+                              class="h-8"
+                              :placeholder="$t('bots.access.threadIdPlaceholder')"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="space-y-1.5">
+                        <Label class="text-xs font-medium text-muted-foreground">{{ $t('bots.access.description') }}</Label>
+                        <Input
+                          v-model="ruleForm.description"
+                          class="h-8"
+                          :placeholder="$t('bots.access.descriptionPlaceholder')"
+                        />
+                      </div>
+
+                      <p
+                        v-if="formError"
+                        class="text-xs text-destructive"
                       >
-                        {{ $t('bots.access.saveAndEnable') }}
-                      </Button>
-                    </div>
-                  </form>
-                </section>
-              </AutoHeight>
-            </DialogBody>
-          </DialogPanel>
-        </Dialog>
+                        {{ formError }}
+                      </p>
+
+                      <div class="flex justify-end gap-2 pt-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          @click="formVisible = false"
+                        >
+                          {{ $t('common.cancel') }}
+                        </Button>
+                        <Button
+                          type="submit"
+                          size="sm"
+                          :loading="isSavingRule"
+                        >
+                          {{ $t('bots.access.saveAndEnable') }}
+                        </Button>
+                      </div>
+                    </form>
+                  </section>
+                </AutoHeight>
+              </DialogBody>
+            </DialogPanel>
+          </Dialog>
+        </template>
       </TabsContent>
 
       <TabsContent
@@ -753,7 +779,12 @@ function groupRowKey(channelType: string, conversationId: string): string {
 
 // ---- queries ----
 
-const { data: rulesData, isPending: isPendingRules } = useQuery({
+const {
+  data: rulesData,
+  isPending: isPendingRules,
+  error: rulesError,
+  refetch: refetchRules,
+} = useQuery({
   key: () => ['bot-acl-rules', props.botId],
   query: async () => {
     const { data } = await getBotsByBotIdAclRules({ path: { bot_id: props.botId }, throwOnError: true })
@@ -762,7 +793,12 @@ const { data: rulesData, isPending: isPendingRules } = useQuery({
   enabled: () => !!props.botId,
 })
 
-const { data: managersData, isPending: isPendingManagers } = useQuery({
+const {
+  data: managersData,
+  isPending: isPendingManagers,
+  error: managersError,
+  refetch: refetchManagers,
+} = useQuery({
   key: () => ['bot-channel-managers', props.botId],
   query: async () => {
     const { data } = await getBotsByBotIdChannelManagers({ path: { bot_id: props.botId }, throwOnError: true })
@@ -779,7 +815,12 @@ const { data: channelMetas } = useQuery({
   },
 })
 
-const { data: defaultEffectData } = useQuery({
+const {
+  data: defaultEffectData,
+  isPending: isPendingDefaultEffect,
+  error: defaultEffectError,
+  refetch: refetchDefaultEffect,
+} = useQuery({
   key: () => ['bot-acl-default-effect', props.botId],
   query: async () => {
     const { data } = await getBotsByBotIdAclDefaultEffect({ path: { bot_id: props.botId }, throwOnError: true })
@@ -787,6 +828,34 @@ const { data: defaultEffectData } = useQuery({
   },
   enabled: () => !!props.botId,
 })
+
+const isInitialAccessLoading = computed(() =>
+  (isPendingDefaultEffect.value && defaultEffectData.value === undefined)
+  || (isPendingRules.value && rulesData.value === undefined)
+  || (isPendingManagers.value && managersData.value === undefined),
+)
+
+const accessLoadError = computed(() =>
+  (defaultEffectData.value === undefined ? defaultEffectError.value : null)
+  ?? (rulesData.value === undefined ? rulesError.value : null)
+  ?? (managersData.value === undefined ? managersError.value : null),
+)
+
+const accessLoadErrorMessage = computed(() =>
+  accessLoadError.value ? resolveApiErrorMessage(accessLoadError.value, t('common.loadFailed')) : t('common.loadFailed'),
+)
+
+const isAccessReady = computed(() =>
+  defaultEffectData.value !== undefined
+  && rulesData.value !== undefined
+  && managersData.value !== undefined,
+)
+
+function retryAccessLoad() {
+  void refetchDefaultEffect()
+  void refetchRules()
+  void refetchManagers()
+}
 
 const { data: identityCandidates } = useQuery({
   key: () => ['bot-acl-identities', props.botId],
@@ -1255,6 +1324,10 @@ const memberCandidateOptions = computed<MemberCandidateOption[]>(() => {
 // deny chat. Manage is only written by the Manage checkbox so list membership
 // cannot accidentally suppress inherited workspace permissions.
 async function confirmAddMember() {
+  if (!isAccessReady.value) {
+    memberFormIdentityId.value = ''
+    return
+  }
   const value = memberFormIdentityId.value.trim()
   if (!value) return
   const isGroup = value.startsWith('group:')
@@ -1363,6 +1436,7 @@ function invalidateManagers() {
 }
 
 async function toggleChat(member: MemberRow, next: boolean) {
+  if (!isAccessReady.value) return
   const key = member.channelIdentityId
   setLocalOverride(key, { chat: next })
   busyIds.value.add(key)
@@ -1450,6 +1524,7 @@ async function applyChatToggle(member: MemberRow, next: boolean) {
 }
 
 async function toggleManage(member: MemberRow, next: boolean) {
+  if (!isAccessReady.value) return
   // Groups can't be channel managers (bot_channel_admins is keyed by
   // channel_identity). The checkbox is disabled for group rows, so this is a
   // defensive guard — never expected to fire.
@@ -1525,6 +1600,7 @@ async function removeMember(member: MemberRow) {
 // ---- default effect ----
 
 async function handleSetDefaultEffect(effect: string) {
+  if (!isAccessReady.value) return
   const previousEffect = defaultEffectDraft.value
   if (effect === previousEffect || isSavingDefaultEffect.value) return
   defaultEffectDraft.value = effect
@@ -1685,6 +1761,7 @@ function buildSourceScope(): AclSourceScope | undefined {
 }
 
 async function handleSaveRule(_enable: boolean) {
+  if (!isAccessReady.value) return
   formError.value = ''
   savingRuleAction.value = true
   try {

@@ -73,6 +73,7 @@
     "searchTimezone": "タイムゾーンを検索する",
     "noTimezoneFound": "タイムゾーンが見つかりません",
     "deleteSuccess": "削除しました",
+    "deleteFailed": "削除に失敗しました",
     "enterContent": "ここにコンテンツを入力してください...",
     "noData": "データなし",
     "of": "の",

@@ -132,7 +132,7 @@ import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
 import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
+import { getBots, putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
 import { useBotQuery } from '@/composables/api/useBot'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
@@ -350,7 +350,7 @@ type SettingsForm = SettingsSettings & {
   name: string
 }
 
-const form = reactive<SettingsForm>({
+const DEFAULT_SETTINGS_FORM: SettingsForm = {
   chat_model_id: '',
   chat_runtime: 'model',
   chat_acp_agent_id: '',
@@ -368,7 +368,9 @@ const form = reactive<SettingsForm>({
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
   name: '',
-})
+}
+
+const form = reactive<SettingsForm>({ ...DEFAULT_SETTINGS_FORM })
 
 // Fields that persist through PUT /bots/{bot_id}/settings.
 const SETTINGS_FIELD_KEYS = [
@@ -429,6 +431,7 @@ watch(settings, (val) => {
 // inline status IS the save state (no separate indicator).
 type NameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'reserved'
 const nameStatus = ref<NameStatus>('idle')
+let currentBotId = props.botId
 
 watch(bot, (val) => {
   // Same per-field guard as the settings hydration above: a refetch landing
@@ -451,19 +454,21 @@ const hasNameChange = computed(() => form.name.trim() !== synced.name)
 
 const checkNameAvailability = useDebounceFn(async (candidate: string) => {
   const normalized = candidate.trim()
-  if (!normalized || !hasNameChange.value) {
+  const requestBotId = currentBotId
+  if (!requestBotId || !normalized || !hasNameChange.value) {
     nameStatus.value = 'idle'
     return
   }
   try {
     const { data } = await getBotsNameAvailability({
-      query: { name: normalized, exclude_bot_id: botIdRef.value },
+      query: { name: normalized, exclude_bot_id: requestBotId },
       throwOnError: true,
     })
+    if (currentBotId !== requestBotId || form.name.trim() !== normalized) return
     nameStatus.value = data?.available ? 'available' : ((data?.reason as NameStatus) || 'taken')
     if (nameStatus.value === 'available') scheduleSync()
   } catch {
-    nameStatus.value = 'idle'
+    if (currentBotId === requestBotId) nameStatus.value = 'idle'
   }
 }, 400)
 
@@ -499,7 +504,22 @@ const nameStatusMessage = computed(() => {
 // lives in use-autosave-queue.ts (serialized snapshot-diff engine, unit-tested
 // there); this file owns the page-specific partition of changed fields into
 // per-endpoint jobs and the tiered invalidation on drain.
+const drainedFieldsByBot = new Map<string, Set<keyof SettingsForm>>()
+
+function recordSavedKeys(botId: string, keys: Iterable<keyof SettingsForm>) {
+  let set = drainedFieldsByBot.get(botId)
+  if (!set) {
+    set = new Set()
+    drainedFieldsByBot.set(botId, set)
+  }
+  for (const key of keys) set.add(key)
+}
+
 function buildJobs(changed: (keyof SettingsForm)[]): AutosaveJob<SettingsForm>[] {
+  const targetBotId = currentBotId
+  if (!targetBotId) return []
+  const isCurrent = () => currentBotId === targetBotId
+
   const keys = new Set(changed)
   const jobs: AutosaveJob<SettingsForm>[] = []
 
@@ -512,29 +532,35 @@ function buildJobs(changed: (keyof SettingsForm)[]): AutosaveJob<SettingsForm>[]
     }
   }
   if (Object.keys(settingsPayload).length > 0) {
+    const savedSettingKeys = Object.keys(sentSettings) as (keyof SettingsForm)[]
     jobs.push({
       payload: sentSettings,
+      isCurrent,
       save: async () => {
         await putBotsByBotIdSettings({
-          path: { bot_id: botIdRef.value },
+          path: { bot_id: targetBotId },
           body: settingsPayload,
           throwOnError: true,
         })
       },
+      onSaved: () => recordSavedKeys(targetBotId, savedSettingKeys),
       onError: (error) => toast.error(resolveApiErrorMessage(error, t('common.saveFailed'))),
     })
   }
 
   if (keys.has('timezone')) {
+    const targetTimezone = form.timezone
     jobs.push({
-      payload: { timezone: form.timezone },
+      payload: { timezone: targetTimezone },
+      isCurrent,
       save: async () => {
         await putBotsById({
-          path: { id: botIdRef.value },
-          body: { timezone: form.timezone },
+          path: { id: targetBotId },
+          body: { timezone: targetTimezone },
           throwOnError: true,
         })
       },
+      onSaved: () => recordSavedKeys(targetBotId, ['timezone']),
       onError: (error) => toast.error(resolveApiErrorMessage(error, t('common.saveFailed'))),
     })
   }
@@ -543,20 +569,29 @@ function buildJobs(changed: (keyof SettingsForm)[]): AutosaveJob<SettingsForm>[]
   // draft must survive a failure so the user can fix it — the inline status
   // carries the error instead.
   if (keys.has('name') && hasNameChange.value && nameStatus.value === 'available') {
+    const targetName = form.name.trim()
     jobs.push({
-      payload: { name: form.name.trim() },
+      payload: { name: targetName },
       rollback: false,
+      isCurrent,
       save: async () => {
         await putBotsById({
-          path: { id: botIdRef.value },
-          body: { name: form.name.trim() },
+          path: { id: targetBotId },
+          body: { name: targetName },
           throwOnError: true,
         })
       },
       onSaved: () => {
-        if (form.name.trim() === synced.name) nameStatus.value = 'idle'
+        recordSavedKeys(targetBotId, ['name'])
+        if (isCurrent() && form.name.trim() === synced.name) {
+          nameStatus.value = 'idle'
+        }
       },
       onError: (error) => {
+        if (!isCurrent()) {
+          toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+          return
+        }
         if (isNameConflict(error)) {
           nameStatus.value = 'taken'
           toast.error(t('bots.nameStatus.taken'))
@@ -582,31 +617,37 @@ function patchFromAutosavedFields(savedKeys: Set<keyof SettingsForm>): SettingsS
   return patch
 }
 
-function onDrained(savedKeys: Set<keyof SettingsForm>) {
-  const saved = [...savedKeys]
-  if (saved.some((key) => key !== 'name' && key !== 'timezone')) {
-    const patch = patchFromAutosavedFields(savedKeys)
-    if (Object.keys(patch).length > 0) {
-      queryCache.setQueryData(['bot-settings', botIdRef.value], (current) => ({
-        ...(current ?? {}),
-        ...patch,
-      }))
-      saveQueryCacheToDiskNow(queryCache)
+function onDrained() {
+  const batches = [...drainedFieldsByBot.entries()]
+  drainedFieldsByBot.clear()
+  for (const [targetBotId, savedKeys] of batches) {
+    const saved = [...savedKeys]
+    if (saved.some((key) => key !== 'name' && key !== 'timezone')) {
+      if (currentBotId === targetBotId) {
+        const patch = patchFromAutosavedFields(savedKeys)
+        if (Object.keys(patch).length > 0) {
+          queryCache.setQueryData(['bot-settings', targetBotId], (current) => ({
+            ...(current ?? {}),
+            ...patch,
+          }))
+          saveQueryCacheToDiskNow(queryCache)
+        }
+      }
+      void queryCache.invalidateQueries({ key: ['bot-settings', targetBotId] })
     }
-    void queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
-  }
-  if (savedKeys.has('name') || savedKeys.has('timezone')) {
-    queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
-  }
-  // Schedule views read the bot's effective timezone from its settings.
-  if (savedKeys.has('timezone')) {
-    void queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
-  }
-  // The sidebar lists bots by name; nothing else on this page is visible
-  // there, so the expensive full-list refetch only fires for renames.
-  if (savedKeys.has('name')) {
-    queryCache.invalidateQueries({ key: getBotsQueryKey() })
-    void chatStore.refreshBots().catch(() => {})
+    if (savedKeys.has('name') || savedKeys.has('timezone')) {
+      queryCache.invalidateQueries({ key: ['bot', targetBotId] })
+    }
+    // Schedule views read the bot's effective timezone from its settings.
+    if (savedKeys.has('timezone')) {
+      void queryCache.invalidateQueries({ key: ['bot-settings', targetBotId] })
+    }
+    // The sidebar lists bots by name; nothing else on this page is visible
+    // there, so the expensive full-list refetch only fires for renames.
+    if (savedKeys.has('name')) {
+      queryCache.invalidateQueries({ key: getBotsQueryKey() })
+      void chatStore.refreshBots().catch(() => {})
+    }
   }
 }
 
@@ -617,6 +658,16 @@ const { scheduleSync } = useAutosaveQueue<SettingsForm>({
   onDrained,
 })
 
+watch(botIdRef, (nextBotId) => {
+  // Flush any pending diff against the previous bot before rebinding `form` and
+  // `synced` to clean defaults for `nextBotId`.
+  scheduleSync()
+  currentBotId = nextBotId
+  Object.assign(form, DEFAULT_SETTINGS_FORM)
+  Object.assign(synced, DEFAULT_SETTINGS_FORM)
+  nameStatus.value = 'idle'
+}, { flush: 'sync' })
+
 function isNameConflict(error: unknown): boolean {
   const code = parseMemohError(error)?.code
   if (code) return code === 'bot.name_taken'
@@ -626,10 +677,26 @@ function isNameConflict(error: unknown): boolean {
   return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
 }
 
-function handleBackupImported(botId: string) {
+async function handleBackupImported(botId: string) {
   queryCache.invalidateQueries({ key: getBotsQueryKey() })
-  if (botId && botId !== props.botId) {
-    router.push({ name: 'bot-detail', params: { botId } })
+  if (!botId) {
+    await router.push({ name: 'bots' })
+    return
+  }
+  if (botId !== props.botId) {
+    let resolvedBotName = ''
+    try {
+      const { data } = await getBots({ throwOnError: true })
+      const imported = data?.items?.find(item => item.id === botId)
+      resolvedBotName = imported?.name?.trim() || ''
+    } catch {
+      resolvedBotName = ''
+    }
+    if (resolvedBotName) {
+      await router.push({ name: 'bot-detail', params: { botName: resolvedBotName } })
+    } else {
+      await router.push({ name: 'bots' })
+    }
     return
   }
   queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })

@@ -105,6 +105,7 @@ import { isManagedModelCatalogClientType } from '@/constants/client-types'
 import { isMonochromeLogo, providerLogo, providerSource } from '@/constants/model-sources'
 import { useModelsDevCatalog } from '@/composables/useModelsDevCatalog'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
@@ -155,6 +156,12 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
     if (!curProviderId.value) return
     await deleteProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
   },
+  onSuccess: () => {
+    toast.success(t('common.deleteSuccess'))
+  },
+  onError: (error) => {
+    toast.error(resolveApiErrorMessage(error, t('common.deleteFailed')))
+  },
   onSettled: invalidateProviderQueries,
 })
 
@@ -172,6 +179,9 @@ const { mutateAsync: saveProvider, isLoading: editLoading } = useMutation({
       throwOnError: true,
     })
     return result
+  },
+  onError: (error) => {
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   },
   onSettled: invalidateProviderQueries,
 })
@@ -219,16 +229,16 @@ async function materializeProvider(
         })
         result = response.data ?? { ...created, enable: false }
         curProvider.value = result
-      } catch {
-        toast.error(t('common.saveFailed'))
+      } catch (error) {
+        toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
       }
     }
 
     if (importModels) {
       try {
         await importProviderModels(result)
-      } catch {
-        toast.error(t('models.importFailed'))
+      } catch (error) {
+        toast.error(resolveApiErrorMessage(error, t('models.importFailed')))
       }
     }
 
@@ -302,8 +312,8 @@ async function importCatalogAfterAdd() {
   if (!pending || !provider?.id) return
   try {
     await importProviderModels(provider, { skipModelIds: pending.added })
-  } catch {
-    toast.error(t('models.importFailed'))
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('models.importFailed')))
   }
 }
 
@@ -341,12 +351,12 @@ async function handleToggleEnable(value: boolean) {
       throwOnError: true,
     })
     invalidateProviderQueries()
-  } catch {
+  } catch (error) {
     curProvider.value = {
       ...curProvider.value,
       enable: prev,
     }
-    toast.error(t('common.saveFailed'))
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   } finally {
     enableLoading.value = false
   }
@@ -356,6 +366,12 @@ const { mutate: deleteModel, isLoading: deleteModelLoading } = useMutation({
   mutation: async (modelID: string) => {
     if (!modelID) return
     await deleteModelsById({ path: { id: modelID }, throwOnError: true })
+  },
+  onSuccess: () => {
+    toast.success(t('common.deleteSuccess'))
+  },
+  onError: (error) => {
+    toast.error(resolveApiErrorMessage(error, t('common.deleteFailed')))
   },
   onSettled: invalidateModelQueries,
 })
