@@ -122,9 +122,10 @@ func StartProcess(ctx context.Context, client *bridge.Client, command string, ar
 	}
 	// The process outlives the request that happened to start it.
 	child, err := agentproc.SpawnWith(context.WithoutCancel(ctx), client, buildShellCommand(resolved, args), workDir, bridge.ExecOptions{
-		Env:      env,
-		UnsetEnv: unset,
-		CleanEnv: opts.CleanEnv,
+		Env:           env,
+		UnsetEnv:      unset,
+		CleanEnv:      opts.CleanEnv,
+		UserShellPath: true,
 	})
 	if err != nil {
 		return nil, errs.WrapDependency(err, "start "+buildShellCommand(command, args))
@@ -223,8 +224,9 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 
 func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string, opts ProcessOptions) (*bridge.ExecResult, error) {
 	result, err := client.ExecWithOptions(ctx, check, workDir, 10, nil, bridge.ExecOptions{
-		Env:      env,
-		UnsetEnv: opts.UnsetEnv,
+		Env:           env,
+		UnsetEnv:      opts.UnsetEnv,
+		UserShellPath: true,
 	})
 	if err != nil {
 		return nil, errs.WrapDependency(err, "")

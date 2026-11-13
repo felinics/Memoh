@@ -1182,7 +1182,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 
 	// Fallback: no background manager, plain synchronous exec.
 	wrapped, err := p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
-		result, err := client.Exec(ctx, command, workDir, timeout)
+		result, err := client.ExecWithOptions(ctx, command, workDir, timeout, nil, bridge.ExecOptions{UserShellPath: true})
 		if err != nil {
 			return nil, err
 		}
@@ -1393,7 +1393,7 @@ func (p *ContainerProvider) execExecWithFlip(
 	// Use a fully independent context (not derived from the agent request ctx)
 	// so the gRPC stream is never cancelled when the foreground session ends.
 	streamCtx, streamCancel := execBudgetContext(ctx, budgets)
-	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true})
+	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true, UserShellPath: true})
 	if err != nil {
 		streamCancel()
 		return nil, err
@@ -1500,7 +1500,7 @@ func (p *ContainerProvider) execExecBackground(
 	command, workDir, description, outputDir string, budgets ...time.Duration,
 ) (any, error) {
 	streamCtx, streamCancel := execBudgetContext(ctx, budgets)
-	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true})
+	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true, UserShellPath: true})
 	if err != nil {
 		streamCancel()
 		return nil, err

@@ -296,6 +296,11 @@ type ExecOptions struct {
 	Env            []string
 	CleanEnv       bool
 	UnsetEnv       []string
+	// UserShellPath runs the command with the PATH the workspace user's
+	// interactive shell ends up with, as the browser terminal has it: for
+	// commands run on the user's behalf (the exec tool, MCP servers, agent
+	// CLIs), not Memoh's own maintenance. Ignored for terminals.
+	UserShellPath bool
 }
 
 // Exec runs a command and collects all output. For streaming, use ExecStream.
@@ -337,6 +342,7 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
 		ReportLiveness: opts.ReportLiveness,
+		UserShellPath:  opts.UserShellPath,
 	})
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, mapError(ctx, err)
@@ -408,6 +414,7 @@ func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir str
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
 		ReportLiveness: opts.ReportLiveness,
+		UserShellPath:  opts.UserShellPath,
 	})
 	if err != nil {
 		cancel()

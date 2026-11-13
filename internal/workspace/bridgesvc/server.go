@@ -702,11 +702,20 @@ var depsShimDir = userenv.DepsBinDir
 // which only happens with CleanEnv and no explicit PATH entry.
 const defaultExecPath = userenv.Path
 
+// userBinDir is the workspace user's own command directory (userenv.BinDir).
+// When it exists it is put on PATH ahead of the image's directories, so a
+// command the user installed there is found without replacing the PATH the
+// image set up. A variable so tests can point it at a directory of their own.
+var userBinDir = userenv.BinDir
+
 // execEnv builds the environment of a workspace command. CleanEnv drops the
 // bridge's own environment, UnsetEnv removes the named (or prefixed) keys
-// from it, and Env is appended last so explicit entries win. The shim
-// directory is then put ahead of PATH when it exists; both the pipe and the
-// PTY exec paths go through here.
+// from it, and Env is appended last so explicit entries win. The user's
+// command directory and then the shim directory are put ahead of PATH when
+// they exist; both the pipe and the PTY exec paths go through here. A
+// non-PTY command that asks for it then gets the PATH the user's interactive
+// shell ends up with (a PTY command is that shell and reads the rc files
+// itself).
 func execEnv(input *pb.ExecInput) []string {
 	out := []string{}
 	if !input.GetCleanEnv() {
@@ -716,7 +725,29 @@ func execEnv(input *pb.ExecInput) []string {
 		out = filterUnsetEnv(out, unset)
 	}
 	out = append(out, input.GetEnv()...)
-	return prependPathDir(out, depsShimDir)
+	out = ensurePathDir(out, userBinDir)
+	out = prependPathDir(out, depsShimDir)
+	if input.GetUserShellPath() && !input.GetPty() {
+		out = withUserShellPath(out)
+	}
+	return out
+}
+
+// ensurePathDir puts dir first on the PATH entry of env when dir is an
+// existing directory that PATH does not already list anywhere.
+func ensurePathDir(env []string, dir string) []string {
+	if dir == "" {
+		return env
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return env
+	}
+	for _, entry := range strings.Split(lastEnvValue(env, "PATH"), ":") {
+		if entry == dir {
+			return env
+		}
+	}
+	return prependPathDir(env, dir)
 }
 
 func execPTYEnv(input *pb.ExecInput) []string {

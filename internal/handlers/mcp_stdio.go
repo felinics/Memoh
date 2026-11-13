@@ -25,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/httpx"
 	mcptools "github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
@@ -667,7 +668,9 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 	// timeout -1 disables the bridge-side timer: 0 falls back to its 30s default
 	// and SIGKILLs the process, which murdered every long-lived MCP server. These
 	// processes are session-scoped daemons; their lifetime is owned by Close().
-	execStream, err := client.ExecStream(ctx, command, strings.TrimSpace(req.Cwd), -1)
+	// A server the user configured runs with their shell's PATH, so a command
+	// they installed (npx, uvx, their own tool) is found as in their terminal.
+	execStream, err := client.ExecStreamWithOptions(ctx, command, strings.TrimSpace(req.Cwd), -1, bridge.ExecOptions{UserShellPath: true})
 	if err != nil {
 		return nil, err
 	}

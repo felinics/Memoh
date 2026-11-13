@@ -10,6 +10,12 @@
 // rebuild. Programs keep their state under HOME, so a home anywhere else
 // loses it and splits it from what Memoh's own processes see.
 //
+// PATH is not replaced: a workspace image keeps the search path it set up.
+// The bridge puts DepsBinDir and BinDir ahead of it for every command, and a
+// command run on the user's behalf also gets what the user's rc files add
+// (bridge.ExecOptions.UserShellPath), as the browser terminal does. Path is
+// only the starting point of an environment built from nothing.
+//
 // This applies to the bot's own workspace only. A connected computer keeps
 // its owner's environment and never receives these values.
 package userenv
@@ -44,10 +50,12 @@ const ToolkitBinDir = "/opt/memoh/toolkit/bin"
 // systemPath is the conventional system command search path.
 const systemPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-// Path is the command search path every workspace process starts from:
-// managed dependency shims, then the user's own commands, then the image
-// toolkit and the system directories. A user-installed command therefore
-// shadows an image copy of the same name, but not a Memoh-managed one.
+// Path is the command search path of an environment built from nothing (an
+// agent CLI started on a clean environment): managed dependency shims, then
+// the user's own commands, then the image toolkit and the system
+// directories. A user-installed command therefore shadows an image copy of
+// the same name, but not a Memoh-managed one. The default workspace image
+// declares the same PATH.
 const Path = DepsBinDir + ":" + BinDir + ":" + ToolkitBinDir + ":" + systemPath
 
 // Names lists the variables Env sets. A launcher that composes its own
@@ -55,14 +63,15 @@ const Path = DepsBinDir + ":" + BinDir + ":" + ToolkitBinDir + ":" + systemPath
 // contract's value is the one in effect.
 var Names = []string{"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "NPM_CONFIG_PREFIX", "PATH"}
 
-// Env returns the workspace user environment as KEY=value entries. Callers
-// append their own entries after it, so an explicit entry still wins.
+// Env returns the workspace user environment for an environment built from
+// nothing, PATH included, as KEY=value entries. Callers append their own
+// entries after it, so an explicit entry still wins.
 func Env() []string {
 	return append(HomeEnv(), "PATH="+Path)
 }
 
-// HomeEnv is Env without PATH, for a launcher that derives its own search
-// path from Path (for example by asking the user's shell).
+// HomeEnv is Env without PATH: what every command in the workspace gets on
+// top of the PATH it already has.
 func HomeEnv() []string {
 	return []string{
 		"HOME=" + Home,
@@ -73,7 +82,8 @@ func HomeEnv() []string {
 	}
 }
 
-// With returns Env followed by extra, so entries in extra take precedence.
+// With returns Env followed by extra, so entries in extra take precedence:
+// the starting environment of an agent CLI.
 func With(extra ...string) []string {
 	return append(Env(), extra...)
 }

@@ -78,6 +78,11 @@ message ExecInput {
   repeated string unset_env = 9;
   // Opt-in process liveness frames; older bridges safely ignore this field.
   bool report_liveness = 10;
+  // Run the command with the PATH the workspace user's interactive shell
+  // ends up with (their rc files' additions), as the browser terminal has it.
+  // For commands run on the user's behalf; ignored for PTY commands, which
+  // are that shell. Older bridges ignore this field.
+  bool user_shell_path = 11;
 }
 
 message TerminalResize {
