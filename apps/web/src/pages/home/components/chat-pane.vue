@@ -47,14 +47,14 @@
                 tone="warning"
                 :title="$t('common.loadFailed')"
               >
-                <Button
+                <LoadingButton
                   variant="outline"
                   size="sm"
                   :loading="retryingSessionSummary"
                   @click="retryActiveSessionSummary"
                 >
                   {{ $t('common.retry') }}
-                </Button>
+                </LoadingButton>
               </CalloutBanner>
 
               <CalloutBanner
@@ -62,14 +62,14 @@
                 tone="warning"
                 :title="$t('common.loadFailed')"
               >
-                <Button
+                <LoadingButton
                   variant="outline"
                   size="sm"
                   :loading="retryingInitialLoad"
                   @click="retryInitialLoad"
                 >
                   {{ $t('common.retry') }}
-                </Button>
+                </LoadingButton>
               </CalloutBanner>
 
               <!-- A session with a live run but no messages yet (a subagent
@@ -1339,6 +1339,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { CHAT_ROUTE_NAMES } from '@/constants/chat-routes'
 import { useSessionViewing } from '@/composables/useSessionViewing'
+import LoadingButton from '@/components/loading-button/index.vue'
 import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
 import { useFileDropZone } from '@/composables/useFileDropZone'
 import { registerChatFileDropTarget } from '../composables/chat-file-drop-target'
