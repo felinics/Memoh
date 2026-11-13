@@ -59,14 +59,15 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   // These endpoints return secrets in clear and replace the stored config with
   // whatever the edit form sends back. A copy with its secrets stripped would
   // fill that form, and saving it would erase the stored keys and headers.
-  // Their *-meta companions and bot-channels also key config_schema.fields by
-  // secret field names (api_key, secret_key, api_token, appSecret, botToken),
-  // which deepStripSecrets would strip out of the schema before refetch completes.
+  // Their *-meta companions, bot-channels, and provider-templates also key
+  // config_schema.fields by secret field names (api_key, secret_key, api_token,
+  // appSecret, botToken), which must never be hydrated with missing schema keys.
   'search-providers',
   'fetch-providers',
   'search-providers-meta',
   'fetch-providers-meta',
   'bot-channels',
+  'provider-templates',
 ])
 
 /**
@@ -76,6 +77,9 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
  * `token_count`, `total_tokens`, `public_key` survive untouched.
  */
 const SECRET_FIELD_PATTERN = /(^|_)(api_?key|apikey|token|password|passwd|private_?key|credentials?|authorization|auth_?token|bearer)$|^secret(_|$)|_secret(_|$)/
+// Field schema maps describe form inputs (`{ api_key: { type: 'secret', required: true } }`),
+// never credential values; stripping keys inside them hides required secret inputs.
+const SCHEMA_SUBTREE_KEYS: ReadonlySet<string> = new Set(['config_schema', 'user_config_schema'])
 
 function isSecretField(key: string): boolean {
   const normalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
@@ -88,7 +92,7 @@ function deepStripSecrets(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([key]) => !isSecretField(key))
-        .map(([key, val]) => [key, deepStripSecrets(val)]),
+        .map(([key, val]) => [key, SCHEMA_SUBTREE_KEYS.has(key) ? val : deepStripSecrets(val)]),
     )
   }
   return value
