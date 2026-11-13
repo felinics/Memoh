@@ -190,6 +190,7 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 		splice.from[i] = i
 	}
 	tokens := usage
+	applied := false
 	sw := ContextSwitch{
 		Request:         *params,
 		Provenance:      provenance,
@@ -201,6 +202,7 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 		Summarize:       forkSummarizer(cfg.Model, cfg.ModelIdleWindow),
 		Fold: func(fold ContextFold) ContextSplice {
 			splice.apply(fold)
+			applied = true
 			tokens = contextfrag.ProviderEnvelopeTokens(params.System, splice.messages, params.Tools)
 			request := *params
 			request.Messages = splice.messages
@@ -227,6 +229,9 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 			return false, err
 		}
 		return false, fmt.Errorf("%w: context switch: %w", contextfrag.ErrBudgetUnsatisfied, err)
+	}
+	if !applied {
+		return false, nil
 	}
 	recordFoldedInputImages(cfg.ContextMutations, params.Messages, provenance, splice.from)
 	params.Messages = splice.messages
@@ -318,7 +323,7 @@ func (s *contextSwitchState) remap(refs []dynamicSourceRef) []dynamicSourceRef {
 // removed. It reports false when no splice happened since the last dispatch.
 //
 //nolint:gocritic // hugeParam: the run configuration and request are copied into the next dispatch.
-func (s *contextSwitchState) redispatch(cfg RunConfig, dispatch generateDispatch, params sdk.Request) (RunConfig, bool) {
+func (s *contextSwitchState) redispatch(cfg RunConfig, dispatch generateDispatch, params sdk.Request, admitted []dynamicSourceRef) (RunConfig, bool) {
 	if s == nil || s.moved == nil {
 		return cfg, false
 	}
@@ -331,7 +336,7 @@ func (s *contextSwitchState) redispatch(cfg RunConfig, dispatch generateDispatch
 	plan := &cfg.ContextCachePlan
 	stableBefore := messagesTokens(cfg.Messages[:min(plan.StableMessageCount, len(cfg.Messages))])
 	cfg.Messages = messages
-	cfg.retryDynamicRefs = shiftDynamicSourceRefs(dispatch.handoff.admitted(), -offset)
+	cfg.retryDynamicRefs = shiftDynamicSourceRefs(admitted, -offset)
 	cfg.initialProviderPrefixSet = true
 	cfg.initialProviderMessageCount = s.movedCount(dispatch.initialMessageCount) - offset
 	for _, count := range []*int{&plan.StableMessageCount, &plan.MidStableMessageCount} {

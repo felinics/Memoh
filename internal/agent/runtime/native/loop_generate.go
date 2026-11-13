@@ -199,13 +199,16 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	// retries counts the model calls made again across the whole run, the
 	// same budget the streaming loop keeps.
 	retries := 0
-	for sdkStep := 0; ; sdkStep++ {
+	recoveries := 0
+	recoveredDispatch := false
+	for sdkStep := 0; ; {
 		stepParams := thread.advance(cfg, dynamic, stepBoundary{
-			first:     sdkStep == 0,
+			first:     sdkStep == 0 || recoveredDispatch,
 			committed: len(allSteps),
 			readMedia: readMediaState,
 		})
-		if next, ok := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams); ok {
+		recoveredDispatch = false
+		if next, ok := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams, thread.dispatch.handoff.admitted()); ok {
 			cfg.ContextCachePlan = next.ContextCachePlan
 			dispatch, err := a.buildGenerateDispatch(genCtx, next, sdkTools, approvalTools, prepareStep)
 			if err != nil {
@@ -230,9 +233,26 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 			return nil, fmt.Errorf("generate: %w", err)
 		}
 		result, err := a.generateStep(genCtx, cfg, stepParams, sdkStep, &retries)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			err = exhaustedContextResult(cfg, result)
 		}
+		if err != nil {
+			recovered, recoveryErr := a.recoverContextOverflow(genCtx, cfg, &stepParams, err, &recoveries)
+			if recovered {
+				refs := cfg.contextSwitch.remap(cfg.providerAttemptState.publishedRefs())
+				next, _ := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams, refs)
+				cfg.ContextCachePlan = next.ContextCachePlan
+				dispatch, buildErr := a.buildGenerateDispatch(genCtx, next, sdkTools, approvalTools, prepareStep)
+				if buildErr != nil {
+					return nil, buildErr
+				}
+				thread.reset(dispatch)
+				recoveredDispatch = true
+				continue
+			}
+			return nil, recoveryErr
+		}
+		recoveries = 0
 		lastResult = result
 
 		sr, kind, err := settleStep(genCtx, thread.dispatch, result, result.TextProviderMetadata, nil)
@@ -271,6 +291,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 			return nil, ErrToolLoopDetected
 		}
 		thread.extend(sr.Messages)
+		sdkStep++
 	}
 
 	// Drain collected tool-emitted side effects into the result.

@@ -155,7 +155,7 @@ func TestArmedRunFoldsItsOwnRequestInPlace(t *testing.T) {
 	}
 
 	cfg.Messages = messages
-	next, ok := cfg.contextSwitch.redispatch(cfg, generateDispatch{initialMessageCount: len(messages)}, *params)
+	next, ok := cfg.contextSwitch.redispatch(cfg, generateDispatch{initialMessageCount: len(messages)}, *params, nil)
 	if !ok || len(next.Messages) != len(want) || next.initialProviderMessageCount != len(want) || next.ContextCachePlan.StableMessageCount != 2 {
 		t.Fatalf("redispatch ok=%v messages=%d prefix=%d stable=%d, want the spliced request with its prefix and breakpoint moved", ok, len(next.Messages), next.initialProviderMessageCount, next.ContextCachePlan.StableMessageCount)
 	}
@@ -163,7 +163,7 @@ func TestArmedRunFoldsItsOwnRequestInPlace(t *testing.T) {
 	if plan := next.ContextCachePlan; plan.StablePrefixTokenEstimate != estimate || plan.StablePrefixHash != "" {
 		t.Fatalf("cache plan = %+v, want the estimate %d of the spliced prefix and no compiled hash", plan, estimate)
 	}
-	if _, again := cfg.contextSwitch.redispatch(cfg, generateDispatch{}, *params); again {
+	if _, again := cfg.contextSwitch.redispatch(cfg, generateDispatch{}, *params, nil); again {
 		t.Fatal("a second redispatch without a splice")
 	}
 }
