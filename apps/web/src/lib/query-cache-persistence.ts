@@ -62,6 +62,7 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   // Their *-meta companions, bot-channels, and provider-templates also key
   // config_schema.fields by secret field names (api_key, secret_key, api_token,
   // appSecret, botToken), which must never be hydrated with missing schema keys.
+  'bot-settings',
   'search-providers',
   'fetch-providers',
   'search-providers-meta',
@@ -73,10 +74,11 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
 /**
  * Suffix/segment match on the normalized (snake_case, lowercase) key, so
  * real-world variants — bot_token, app_secret, secret_key, OPENAI_API_KEY,
- * appSecret — all strip, while display fields like `author`, `oauth_provider`,
- * `token_count`, `total_tokens`, `public_key` survive untouched.
+ * auth_key, setup_key, access_key, app_key, appSecret — all strip, while
+ * display fields like `author`, `oauth_provider`, `token_count`,
+ * `total_tokens`, `public_key` survive untouched.
  */
-const SECRET_FIELD_PATTERN = /(^|_)(api_?key|apikey|token|password|passwd|private_?key|credentials?|authorization|auth_?token|bearer)$|^secret(_|$)|_secret(_|$)/
+const SECRET_FIELD_PATTERN = /(^|_)(api_?key|apikey|access_?key|app_?key|auth_?key|setup_?key|signing_?key|encryption_?key|token|password|passwd|private_?key|credentials?|authorization|auth_?token|bearer)$|^secret(_|$)|_secret(_|$)/
 // Field schema maps describe form inputs (`{ api_key: { type: 'secret', required: true } }`),
 // never credential values; stripping keys inside them hides required secret inputs.
 const SCHEMA_SUBTREE_KEYS: ReadonlySet<string> = new Set(['config_schema', 'user_config_schema'])

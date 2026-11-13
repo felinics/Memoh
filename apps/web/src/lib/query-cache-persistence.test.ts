@@ -43,7 +43,6 @@ describe('persistableQueryFilter', () => {
     const persisted = [
       ['models'],
       ['providers'],
-      ['bot-settings', 'bot-1'],
       ['bot', 'qf-2'],
       ['memory-providers'],
       ['speech-providers'],
@@ -63,7 +62,7 @@ describe('persistableQueryFilter', () => {
   })
 
   it('keeps lists whose edit form overwrites the whole stored config and their field-schema meta off disk', () => {
-    for (const key of [['search-providers'], ['fetch-providers'], ['search-providers-meta'], ['fetch-providers-meta']]) {
+    for (const key of [['bot-settings', 'bot-1'], ['search-providers'], ['fetch-providers'], ['search-providers-meta'], ['fetch-providers-meta'], ['bot-channels', 'bot-1'], ['provider-templates']]) {
       expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
     }
   })
@@ -134,24 +133,37 @@ describe('saveQueryCacheToDiskNow', () => {
     expect(raw).toContain('oauth_provider')
   })
 
-  it('strips real-world secret variants (bot_token, appSecret, secret_key, OPENAI_API_KEY)', () => {
+  it('strips real-world secret variants (bot_token, appSecret, secret_key, OPENAI_API_KEY, auth_key, setup_key, access_key, app_key)', () => {
     const storage = memoryStorage()
     const entry = entryWith(['channels'], 'success', {
-      credentials: { bot_token: 'tg-1', appSecret: 'wx-1', secret_key: 'tx-1' },
+      credentials: {
+        bot_token: 'tg-1',
+        appSecret: 'wx-1',
+        secret_key: 'tx-1',
+        auth_key: 'tskey-auth-1',
+        setup_key: 'nb-setup-1',
+        access_key: 'ak-1',
+        app_key: 'appk-1',
+      },
       env: { OPENAI_API_KEY: 'sk-1' },
       usage: { token_count: 12, total_tokens: 30 },
       client_id: 'public-id',
+      public_key: 'ssh-ed25519-pub',
     })
 
     saveQueryCacheToDiskNow(cacheWith([entry]), storage)
     const raw = storage.getItem(QUERY_CACHE_STORAGE_KEY)
-    for (const leaked of ['tg-1', 'wx-1', 'tx-1', 'sk-1', 'bot_token', 'appSecret', 'secret_key', 'OPENAI_API_KEY']) {
+    for (const leaked of [
+      'tg-1', 'wx-1', 'tx-1', 'sk-1', 'tskey-auth-1', 'nb-setup-1', 'ak-1', 'appk-1',
+      'bot_token', 'appSecret', 'secret_key', 'OPENAI_API_KEY', 'auth_key', 'setup_key', 'access_key', 'app_key',
+    ]) {
       expect(raw).not.toContain(leaked)
     }
     // Token *statistics* and public identifiers are display data, not secrets.
     expect(raw).toContain('token_count')
     expect(raw).toContain('total_tokens')
     expect(raw).toContain('client_id')
+    expect(raw).toContain('public_key')
   })
 
   it('does not persist excluded keys', () => {
@@ -159,6 +171,7 @@ describe('saveQueryCacheToDiskNow', () => {
     const entries = [
       entryWith(['remote-runtimes'], 'success', { key: 'runtime-key' }),
       entryWith(['session-status', 'b', 's']),
+      entryWith(['bot-settings', 'bot-1'], 'success', { overlay_config: { auth_key: 'tskey-1', setup_key: 'nb-1' } }),
       entryWith(['bot-hooks-config', 'bot-1'], 'success', '{"env":{"OPENAI_API_KEY":"sk-1"}}'),
       entryWith(['search-providers-meta'], 'success', [
         { provider: 'brave', config_schema: { fields: { api_key: { required: true, secret: true } } } },

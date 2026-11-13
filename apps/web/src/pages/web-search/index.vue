@@ -9,8 +9,9 @@ import type {
   SearchprovidersProviderMeta,
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { BackendCard, Button, CalloutBanner, DetailPane, PageShell, SectionGroup, SettingsShell, SwapTransition } from '@felinic/ui'
+import { BackendCard, CalloutBanner, DetailPane, PageShell, SectionGroup, SettingsShell, SwapTransition } from '@felinic/ui'
 import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
+import LoadingButton from '@/components/loading-button/index.vue'
 import FetchProviderSetting from './components/fetch-provider-setting.vue'
 import ProviderSetting from './components/provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
@@ -107,8 +108,8 @@ const fetchReady = computed(() => fetchProviderData.value !== undefined && fetch
 
 // Gate synthesized placeholders until both the server list and its schema meta
 // resolve: rendering placeholders before `providerData` and `*-meta` settle
-// flashes disabled cards, breaks meta-driven provider catalogs (Cloud fetch),
-// and lets deep-linked detail routes mount without credentials or field schemas.
+// flashes disabled cards, breaks meta-driven provider catalogs, and lets
+// deep-linked detail routes mount without credentials or field schemas.
 const searchItems = computed<SearchprovidersGetResponse[]>(() => {
   if (!searchReady.value) return []
   return SEARCH_PROVIDER_TYPES.map((provider) => {
@@ -292,7 +293,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
             :title="t('common.loadFailed')"
             :description="loadErrorDescription(searchError)"
           >
-            <Button
+            <LoadingButton
               type="button"
               variant="outline"
               size="sm"
@@ -300,7 +301,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
               @click="retrySearchLoad()"
             >
               {{ t('common.retry') }}
-            </Button>
+            </LoadingButton>
           </CalloutBanner>
           <div
             v-else-if="filteredSearchItems.length > 0"
@@ -346,7 +347,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
             :title="t('common.loadFailed')"
             :description="loadErrorDescription(fetchError)"
           >
-            <Button
+            <LoadingButton
               type="button"
               variant="outline"
               size="sm"
@@ -354,7 +355,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
               @click="retryFetchLoad()"
             >
               {{ t('common.retry') }}
-            </Button>
+            </LoadingButton>
           </CalloutBanner>
           <div
             v-else-if="filteredFetchItems.length > 0"
@@ -404,7 +405,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
           :title="t('common.loadFailed')"
           :description="loadErrorDescription(detailLoadError)"
         >
-          <Button
+          <LoadingButton
             type="button"
             variant="outline"
             size="sm"
@@ -412,7 +413,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
             @click="retryDetailLoad"
           >
             {{ t('common.retry') }}
-          </Button>
+          </LoadingButton>
         </CalloutBanner>
       </SettingsShell>
       <ProviderSetting
