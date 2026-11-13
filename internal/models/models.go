@@ -634,6 +634,8 @@ func IsValidClientType(clientType ClientType) bool {
 		ClientTypeOpenRouterTranscription,
 		ClientTypeElevenLabsSpeech,
 		ClientTypeElevenLabsTranscription,
+		ClientTypeFishAudioSpeech,
+		ClientTypeFishAudioTranscription,
 		ClientTypeDeepgramSpeech,
 		ClientTypeDeepgramTranscription,
 		ClientTypeMiniMaxSpeech,

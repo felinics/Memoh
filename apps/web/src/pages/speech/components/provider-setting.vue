@@ -233,7 +233,6 @@ import type { AudioSpeechModelResponse, AudioSpeechProviderResponse, ProvidersGe
 import LoadingButton from '@/components/loading-button/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
 
 interface SpeechFieldSchema {
@@ -554,17 +553,13 @@ async function handleImportModels() {
 }
 
 async function handleTestModel(modelId: string, text: string, config: Record<string, unknown>) {
-  try {
-    const { data } = await postSpeechModelsByIdTest({
-      path: { id: modelId },
-      body: { text, config },
-      parseAs: 'blob',
-      throwOnError: true,
-    })
-    return data as Blob
-  } catch (error) {
-    throw new Error(resolveApiErrorMessage(error, t('speech.test.failed')))
-  }
+  const { data } = await postSpeechModelsByIdTest({
+    path: { id: modelId },
+    body: { text, config },
+    parseAs: 'blob',
+    throwOnError: true,
+  })
+  return data as Blob
 }
 
 function sanitizeConfig(input: Record<string, unknown>) {
