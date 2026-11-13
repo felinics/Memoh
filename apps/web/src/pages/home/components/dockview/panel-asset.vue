@@ -8,7 +8,7 @@
     </PanePlaceholder>
 
     <MonacoEditor
-      v-else-if="isText"
+      v-else-if="isText && oversizedMaxBytes === null && !loadFailed"
       v-model="content"
       :filename="name"
       readonly
@@ -26,11 +26,33 @@
       >
     </div>
 
+    <DocumentPreview
+      v-else-if="documentKind && documentBlob"
+      :key="assetIdentityKey"
+      :blob="documentBlob"
+      :kind="documentKind"
+      :filename="name"
+    >
+      <template
+        v-if="renderUrl"
+        #action
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          @click="handleDownload"
+        >
+          <Download class="mr-1.5 size-3" />
+          {{ t('bots.files.download') }}
+        </Button>
+      </template>
+    </DocumentPreview>
+
     <PanePlaceholder v-else>
       <template #icon>
         <File class="size-12 opacity-30" />
       </template>
-      {{ t('bots.files.previewNotAvailable') }}
+      {{ oversizedMaxBytes !== null ? t('bots.files.previewTooLarge', { size: formatFileSize(oversizedMaxBytes) }) : loadFailed ? t('bots.files.previewFailed') : t('bots.files.previewNotAvailable') }}
       <template
         v-if="renderUrl"
         #action
@@ -49,15 +71,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { File, Download } from 'lucide-vue-next'
 import { Button, PanePlaceholder, toast } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
+import DocumentPreview from '@/components/file-manager/document-preview.vue'
 import DockPanelFrame from './panel-frame.vue'
-import { isTextFile, isImageFile } from '@/components/file-manager/utils'
+import { TEXT_PREVIEW_MAX_BYTES, formatFileSize, getDocumentMimeType, getDocumentPreviewKind, getDocumentPreviewMaxBytes, isImageFile, isTextFile } from '@/components/file-manager/utils'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
+import { fetchBoundedBlob, fetchBoundedText, type BoundedFetchTarget } from '@/lib/bounded-fetch'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { usePanelVisible } from './use-panel-visible'
 
@@ -81,6 +105,7 @@ const visible = usePanelVisible(props.params.api)
 const name = computed(() => props.params.params.name ?? '')
 const isText = computed(() => isTextFile(name.value))
 const isImage = computed(() => isImageFile(name.value))
+const documentKind = computed(() => getDocumentPreviewKind(name.value))
 
 const renderUrl = computed(() => {
   const { botId, contentHash, src } = props.params.params
@@ -96,23 +121,51 @@ const renderUrl = computed(() => {
   return (src ?? '').trim()
 })
 
-const content = ref('')
-const loading = ref(false)
-let loadedUrl = ''
+const assetSource = computed<{ key: string, target: BoundedFetchTarget } | null>(() => {
+  const hash = (props.params.params.contentHash ?? '').trim()
+  const owner = (props.params.params.botId ?? '').trim()
+  if (hash && owner) return { key: `media:${owner}:${hash}:${name.value}`, target: { url: '/bots/{bot_id}/media/{content_hash}', path: { bot_id: owner, content_hash: hash } } }
+  const directSrc = (props.params.params.src ?? '').trim()
+  return directSrc ? { key: `src:${directSrc}:${name.value}`, target: { src: directSrc } } : null
+})
+const assetIdentityKey = computed(() => assetSource.value?.key ?? '')
 
-async function loadText() {
-  const url = renderUrl.value
-  if (!isText.value || !url || loadedUrl === url) return
+const content = ref('')
+const documentBlob = ref<Blob | null>(null)
+const oversizedMaxBytes = ref<number | null>(null)
+const loadFailed = ref(false)
+const loading = ref(false)
+let loadedIdentityKey = ''
+let activeLoadController: AbortController | null = null
+
+async function loadAsset() {
+  const src = assetSource.value
+  const docKind = documentKind.value
+  if (!src || (!isText.value && !docKind) || loadedIdentityKey === src.key) return
+  activeLoadController?.abort()
+  const controller = new AbortController()
+  activeLoadController = controller
   loading.value = true
+  loadFailed.value = false
+  oversizedMaxBytes.value = null
   try {
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    content.value = await res.text()
-    loadedUrl = url
+    const res = isText.value
+      ? await fetchBoundedText({ target: src.target, maxBytes: TEXT_PREVIEW_MAX_BYTES, signal: controller.signal })
+      : await fetchBoundedBlob({ target: src.target, maxBytes: getDocumentPreviewMaxBytes(docKind!), mimeType: getDocumentMimeType(docKind!), signal: controller.signal })
+    if (controller.signal.aborted) return
+    content.value = res.ok && 'text' in res ? res.text : ''
+    documentBlob.value = res.ok && 'blob' in res ? res.blob : null
+    oversizedMaxBytes.value = res.ok ? null : res.maxBytes
+    loadedIdentityKey = src.key
   } catch (error) {
+    if (controller.signal.aborted) return
+    loadedIdentityKey = ''
+    content.value = ''
+    documentBlob.value = null
+    loadFailed.value = true
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    loading.value = false
+    if (activeLoadController === controller) { activeLoadController = null; loading.value = false }
   }
 }
 
@@ -125,10 +178,17 @@ function handleDownload() {
   a.click()
 }
 
-// Text is fetched lazily the first time the tab is shown (an image renders
-// straight from the URL, so it needs no fetch). Content is immutable per asset,
-// so it is fetched once and kept.
-watch([visible, renderUrl], ([isVisible]) => {
-  if (isVisible) void loadText()
+watch(assetIdentityKey, () => {
+  activeLoadController?.abort()
+  activeLoadController = null
+  loadedIdentityKey = ''
+  content.value = ''
+  documentBlob.value = null
+  oversizedMaxBytes.value = null
+  loadFailed.value = false
+  loading.value = false
+  if (visible.value) void loadAsset()
 }, { immediate: true })
+watch(visible, (isVisible) => { if (isVisible) void loadAsset() })
+onBeforeUnmount(() => { activeLoadController?.abort(); documentBlob.value = null })
 </script>
