@@ -141,7 +141,8 @@ test('budgeted client forbids unbounded paginate and enforces hard per-run API c
   assert.equal(client.getCallCount(), 3);
   await assert.rejects(client.rest.pulls.get({ pull_number: 4 }), /API call budget exceeded/i);
   assert.equal(m.calls.length, 3);
-  assert.equal(MAX_API_CALLS, 25);
+  assert.equal(MAX_API_CALLS, 50);
+  assert.equal(MAX_FILE_PAGES, 30);
 });
 
 test('quota guard scales dynamically with token limit and allows manual dispatch above minimal floor', async () => {
@@ -278,7 +279,7 @@ test('synchronization removes obsolete managed labels, survives heavy 5-page lab
   assert.ok(heavy.calls.length <= MAX_API_CALLS);
 });
 
-test('file classification handles 100-file boundary, multi-page diffs, oversized PRs, and truncated responses', async () => {
+test('file classification excludes generated files past 500 files up to 3,000 and preserves labels above 3,000', async () => {
   const makeFiles = count => Array.from({ length: count }, (_, i) => ({ filename: `apps/web/f${i}.ts`, additions: 1, deletions: 0 }));
 
   const exact100 = mock({ fresh: { ...pr, changed_files: 100 }, files: makeFiles(100) });
@@ -286,12 +287,22 @@ test('file classification handles 100-file boundary, multi-page diffs, oversized
   assert.equal(exact100.calls.filter(c => c.name === 'pulls.listFiles').length, 1);
   assert.ok(exact100.calls.find(c => c.name === 'issues.addLabels').args.labels.includes('size:S'));
 
-  const multiPage = mock({ fresh: { ...pr, changed_files: 120 }, files: makeFiles(120) });
-  await inspectPR(multiPage, 1);
-  assert.equal(multiPage.calls.filter(c => c.name === 'pulls.listFiles').length, 2);
-  assert.ok(multiPage.calls.find(c => c.name === 'issues.addLabels').args.labels.includes('size:S'));
+  // 501 generated icon files (+5,010 raw lines) still exclude generated outputs and classify as size:XS, never size:XL.
+  const generatedIcons = Array.from({ length: 501 }, (_, i) => ({
+    filename: `packages/icons/src/icons/GeneratedIcon${i}.vue`,
+    additions: 10,
+    deletions: 0,
+  }));
+  const iconPR = mock({
+    fresh: { ...pr, changed_files: 501, additions: 5010, deletions: 0, labels: [{ name: 'size:XS' }] },
+    files: generatedIcons,
+  });
+  await inspectPR(iconPR, 1);
+  assert.equal(iconPR.calls.filter(c => c.name === 'pulls.listFiles').length, 6);
+  assert.ok(!iconPR.calls.some(c => c.name === 'issues.removeLabel' && c.args.name === 'size:XS'));
+  assert.deepEqual(iconPR.calls.find(c => c.name === 'issues.addLabels').args.labels, ['bug', 'change:web']);
 
-  // Oversized PR (> 500 files) skips listFiles but updates size:* from PR totals so stale size:XS is replaced.
+  // Beyond GitHub REST API's 3,000-file ceiling, preserve existing size/change labels rather than using unfiltered totals.
   const hugeCount = MAX_FILE_PAGES * 100 + 1;
   const oversized = mock({
     fresh: {
@@ -301,12 +312,12 @@ test('file classification handles 100-file boundary, multi-page diffs, oversized
       deletions: 100,
       labels: [{ name: 'size:XS' }, { name: 'change:server' }],
     },
-    files: makeFiles(hugeCount),
+    files: [],
   });
   await inspectPR(oversized, 1);
   assert.equal(oversized.calls.filter(c => c.name === 'pulls.listFiles').length, 0);
-  assert.deepEqual(oversized.calls.find(c => c.name === 'issues.addLabels').args.labels, ['bug', 'size:XL']);
-  assert.deepEqual(oversized.calls.filter(c => c.name === 'issues.removeLabel').map(c => c.args.name), ['size:XS']);
+  assert.deepEqual(oversized.calls.find(c => c.name === 'issues.addLabels').args.labels, ['bug']);
+  assert.ok(!oversized.calls.some(c => c.name === 'issues.removeLabel'));
 
   const truncated = mock({ files: [], fresh: { ...pr, changed_files: 2, labels: [{ name: 'size:L' }] } });
   await assert.rejects(inspectPR(truncated, 1), /Incomplete PR file list/);

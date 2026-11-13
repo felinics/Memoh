@@ -1,11 +1,11 @@
-import { classify, sizeLabel, typeLabels, validate } from './contribution-policy.mjs';
+import { classify, typeLabels, validate } from './contribution-policy.mjs';
 
 const marker = '<!-- memoh-contribution-format:v1 -->';
 
 // Reserve 20% of the token's hourly core REST pool (up to 1,000 requests) so non-blocking governance never starves code CI.
 export const MIN_REMAINING_QUOTA = 1000;
-export const MAX_API_CALLS = 25;
-export const MAX_FILE_PAGES = 5;
+export const MAX_API_CALLS = 50;
+export const MAX_FILE_PAGES = 30;
 export const MAX_COMMENT_PAGES = 5;
 
 export function createBudgetedGithub(github, { maxCalls = MAX_API_CALLS } = {}) {
@@ -121,11 +121,7 @@ export async function inspectPR({ github, context, core }, number) {
   let classificationError;
   const maxFiles = MAX_FILE_PAGES * 100;
   const skippedLargeDiff = pr.changed_files > maxFiles;
-  let fallbackSize;
-  if (skippedLargeDiff) {
-    fallbackSize = sizeLabel(pr.additions, pr.deletions);
-    wanted.push(fallbackSize);
-  } else {
+  if (!skippedLargeDiff) {
     try {
       const files = await listPRFilesBounded(client, repo, number, pr.changed_files);
       if (files.length !== pr.changed_files) throw new Error(`Incomplete PR file list: ${files.length}/${pr.changed_files}`);
@@ -142,15 +138,14 @@ export async function inspectPR({ github, context, core }, number) {
     pr,
     wanted,
     name => typeLabels.includes(name) || name === 'needs:format'
-      || Boolean((classification || skippedLargeDiff) && name.startsWith('size:'))
-      || Boolean(classification && name.startsWith('change:')),
+      || Boolean(classification && (name.startsWith('size:') || name.startsWith('change:'))),
   );
   await publishComment(client, repo, pr, errors);
 
   const scopeNote = classification
     ? `Filtered additions/deletions: ${classification.additions}/${classification.deletions}; Excluded ${classification.ignored} files; ${classification.size}; ${classification.changes.join(', ')}`
     : skippedLargeDiff
-      ? `Skipped per-file classification: PR changes ${pr.changed_files} files (cap ${maxFiles}); applied ${fallbackSize} from PR totals and preserved existing change labels.`
+      ? `Skipped file classification: PR changes ${pr.changed_files} files (exceeds GitHub REST ${maxFiles}-file ceiling); existing size/change labels were preserved.`
       : 'Classification failed; existing size/change labels were preserved.';
   await core.summary
     .addHeading(`PR #${number}`)
