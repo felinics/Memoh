@@ -9,6 +9,11 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
+// prepareStepFunc prepares the request of one model call after a dispatch's
+// first. It returns the request to send (nil keeps the one it was given), or
+// the failure that refuses the call and ends the run.
+type prepareStepFunc func(*sdk.Request) (*sdk.Request, error)
+
 // stepThread is the request state one dispatch advances call by call: the
 // request template, the conversation the next call sends, and what a
 // committed step left for the next call (a refreshed tool set, directive
@@ -55,8 +60,9 @@ func (t *stepThread) reset(dispatch generateDispatch) {
 // first call the loop-owned dynamic inputs (read-media carriers, live
 // injections, directive inputs) join the conversation, then the prepare chain
 // (before-model-call hook, background summary, in-run compaction and the
-// provider envelope check) runs.
-func (t *stepThread) advance(cfg RunConfig, dynamic *loopDynamicInputs, boundary stepBoundary) sdk.Request {
+// provider envelope check) runs. A prepare-chain failure refuses the call; the
+// loop ends the run at its dispatch boundary.
+func (t *stepThread) advance(cfg RunConfig, dynamic *loopDynamicInputs, boundary stepBoundary) (sdk.Request, error) {
 	if t.pendingRefresh != nil {
 		t.messages = t.pendingRefresh.apply(&t.dispatch, &t.params, t.messages)
 		t.pendingRefresh = nil
@@ -76,14 +82,18 @@ func (t *stepThread) advance(cfg RunConfig, dynamic *loopDynamicInputs, boundary
 			t.messages = appendDirectiveInputs(cfg, dynamic, t.messages, inputs)
 		}
 		t.params.Messages = t.messages
-		if override := t.dispatch.prepareStep(&t.params); override != nil {
+		override, err := t.dispatch.prepareStep(&t.params)
+		if err != nil {
+			return sdk.Request{}, err
+		}
+		if override != nil {
 			t.params = *override
 		}
 		t.messages = t.params.Messages
 	}
 	request := t.params
 	request.Messages = t.messages
-	return request
+	return request, nil
 }
 
 // extend appends a committed step's messages to the conversation.
