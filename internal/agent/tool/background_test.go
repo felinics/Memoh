@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -294,7 +296,7 @@ func TestWaitUntilReturnsIdleWithTailForQuietService(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	res, err := p.execWaitUntil(ctx, session, waitUntilArgs{TaskID: taskID, IdleTimeout: secondsPtr(1), Timeout: secondsPtr(30)}, nil)
+	res, err := p.execWaitUntil(ctx, session, waitUntilArgs{TaskID: taskID, Mode: "idle", IdleTimeout: secondsPtr(1), Timeout: secondsPtr(30)}, nil)
 	if err != nil {
 		t.Fatalf("wait_until failed: %v", err)
 	}
@@ -341,3 +343,93 @@ func mustTools(t *testing.T, p *BackgroundProvider, session SessionContext) []to
 }
 
 func secondsPtr(v float64) *float64 { return &v }
+
+func TestWaitUntilCompletionIgnoresSilenceAndCanResumeWaiting(t *testing.T) {
+	for _, mode := range []string{"", "completion"} {
+		for _, progress := range []bool{false, true} {
+			t.Run(fmt.Sprintf("mode=%s/progress=%t", mode, progress), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					mgr := background.New(nil)
+					p := NewBackgroundProvider(nil, mgr)
+					session := SessionContext{BotID: "bot1", SessionID: "sess1"}
+					started := time.Now()
+					deadline := started.Add(1200 * time.Second)
+					resultCh := make(chan background.AdoptResult, 1)
+					execCtx, cancelExec := context.WithCancel(context.Background())
+					defer cancelExec()
+					taskID, _ := mgr.SpawnAdopt(t.Context(), "bot1", "sess1", "sleep 900", "/data", "quiet finite task", "", resultCh, nil,
+						background.AdoptOptions{Deadline: deadline, Cancel: cancelExec})
+					defer func() { _ = mgr.Kill(taskID) }()
+					go func() {
+						select {
+						case <-time.After(900 * time.Second):
+							resultCh <- background.AdoptResult{ExitCode: 0, ExitReceived: true}
+						case <-execCtx.Done():
+							resultCh <- background.AdoptResult{Err: execCtx.Err()}
+						}
+					}()
+					var sendProgress func(sdk.ToolOutput)
+					if progress {
+						sendProgress = func(sdk.ToolOutput) {}
+					}
+					// Preserve the failing call's idle_timeout: only mode=idle may enable it.
+					args := waitUntilArgs{TaskID: taskID, Mode: mode, Timeout: secondsPtr(600), IdleTimeout: secondsPtr(300)}
+					res, err := p.execWaitUntil(t.Context(), session, args, sendProgress)
+					if err != nil {
+						t.Fatal(err)
+					}
+					rm := res.(map[string]any)
+					if rm["task_id"] != taskID || rm["reason"] != "timeout" || rm["status"] != "running" || time.Since(started) != 600*time.Second {
+						t.Fatalf("first wait = %v after %s, want running/timeout at 600s", rm, time.Since(started))
+					}
+					if execCtx.Err() != nil || !mgr.Get(taskID).Snapshot().DeadlineAt.Equal(deadline) {
+						t.Fatal("wait timeout cancelled execution or changed its deadline")
+					}
+					res, err = p.execWaitUntil(t.Context(), session, args, sendProgress)
+					if err != nil {
+						t.Fatal(err)
+					}
+					rm = res.(map[string]any)
+					if rm["reason"] != "completed" || rm["status"] != "completed" || time.Since(started) != 900*time.Second {
+						t.Fatalf("second wait = %v after %s, want completed at 900s", rm, time.Since(started))
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestWaitUntilDefaultCompletionDoesNotUseDefaultIdleThreshold(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := background.New(nil)
+		p := NewBackgroundProvider(nil, mgr)
+		resultCh := make(chan background.AdoptResult, 1)
+		execCtx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		taskID, _ := mgr.SpawnAdopt(t.Context(), "bot1", "sess1", "sleep 60", "/data", "quiet task", "", resultCh, nil)
+		defer func() { _ = mgr.Kill(taskID) }()
+		go func() {
+			select {
+			case <-time.After(time.Minute):
+				resultCh <- background.AdoptResult{ExitCode: 0, ExitReceived: true}
+			case <-execCtx.Done():
+				resultCh <- background.AdoptResult{Err: execCtx.Err()}
+			}
+		}()
+		res, err := p.execWaitUntil(t.Context(), SessionContext{BotID: "bot1", SessionID: "sess1"}, waitUntilArgs{TaskID: taskID}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.(map[string]any)["reason"] != "completed" {
+			t.Fatalf("default wait = %v, want completed despite >20s silence", res)
+		}
+	})
+}
+
+func TestWaitUntilRejectsUnknownMode(t *testing.T) {
+	p := NewBackgroundProvider(nil, background.New(nil))
+	_, err := p.execWaitUntil(t.Context(), SessionContext{}, waitUntilArgs{TaskID: "task", Mode: "invalid"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "mode must be") {
+		t.Fatalf("invalid mode error = %v", err)
+	}
+}
