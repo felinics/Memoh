@@ -1,6 +1,7 @@
 package models
 
 import (
+	"reflect"
 	"testing"
 
 	anthropicmessages "github.com/felinics/twilight/provider/anthropic/messages"
@@ -78,70 +79,50 @@ func TestApplyPromptCachePlanOutOfRangeIgnored(t *testing.T) {
 	}
 }
 
-// TestApplyPromptCachePlanSkipsUnsupportedLastPartAndFindsEarlierBreakpoint is
-// the P1 RED test: history whose last stable message ends in a
-// ToolResultPart (a real, common shape — a tool-result-ending turn) must not
-// silently drop the breakpoint just because ToolResultPart carries no
-// CacheControl field. The fix scans backward for the nearest earlier message
-// that can carry the breakpoint and shrinks the reported stable count to
-// match, so the plan never claims more was cached than actually was.
-func TestApplyPromptCachePlanSkipsUnsupportedLastPartAndFindsEarlierBreakpoint(t *testing.T) {
+// A stable span that ends in a tool result, the common shape of a turn that
+// called tools, takes the breakpoint on that result.
+func TestApplyPromptCachePlanMarksToolResultEndingSpan(t *testing.T) {
 	t.Parallel()
 
-	model := anthropicTestModel()
 	messages := []sdk.Message{
 		sdk.UserMessage("stable text message"),
 		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "search", Result: toolexec.OutputFromValue("ok")}),
 		sdk.UserMessage("volatile question"),
 	}
-	// StableMessageCount=2 marks messages[0:2] stable; messages[1] ends in a
-	// ToolResultPart, which cannot carry cache_control.
 	plan := contextfrag.CachePlan{StableMessageCount: 2}
 
-	_, got, _, _, actualStableCount := ApplyPromptCacheWithPlan(model, "5m", plan, "", messages, nil)
+	_, got, _, _, actualStableCount := ApplyPromptCacheWithPlan(anthropicTestModel(), "5m", plan, "", messages, nil)
 
-	if actualStableCount != 1 {
-		t.Fatalf("actual stable message count = %d, want 1 (breakpoint fell back to the earlier text message)", actualStableCount)
+	if actualStableCount != 2 {
+		t.Fatalf("actual stable message count = %d, want 2", actualStableCount)
 	}
-	stable, ok := got[0].Content[len(got[0].Content)-1].(sdk.TextPart)
-	if !ok || stable.CacheControl == nil {
-		t.Fatalf("earlier eligible message should carry the cache breakpoint: %#v", got[0].Content)
-	}
-	if _, ok := got[1].Content[len(got[1].Content)-1].(sdk.ToolResultPart); !ok {
-		t.Fatalf("tool-result message should be left otherwise untouched: %#v", got[1].Content)
+	if result, ok := got[1].Content[0].(sdk.ToolResultPart); !ok || result.CacheControl == nil {
+		t.Fatalf("tool result should carry the breakpoint: %#v", got[1].Content)
 	}
 }
 
-// TestApplyPromptCachePlanNoEligibleMessageReportsZero covers the case where
-// every message in [0, StableMessageCount-1] ends in an unsupported part
-// (tool call, tool result): no breakpoint can be placed at all, so the
-// honest reported stable count is 0, not the unmet claim.
-func TestApplyPromptCachePlanNoEligibleMessageReportsZero(t *testing.T) {
+// A thinking block cannot be marked, so a stable span ending in one falls
+// back to the nearest earlier message that can, and reports only what that
+// breakpoint covers; with none, it reports zero rather than an unmet claim.
+func TestApplyPromptCachePlanFallsBackPastUnmarkableParts(t *testing.T) {
 	t.Parallel()
 
-	model := anthropicTestModel()
-	messages := []sdk.Message{
-		{
-			Role: sdk.MessageRoleAssistant,
-			Content: []sdk.MessagePart{
-				sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "search", Input: toolexec.ArgumentsFromValue(map[string]any{})},
-			},
-		},
-		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "search", Result: toolexec.OutputFromValue("ok")}),
-	}
+	thinking := sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "thinking"}}}
 	plan := contextfrag.CachePlan{StableMessageCount: 2}
 
-	_, got, _, _, actualStableCount := ApplyPromptCacheWithPlan(model, "5m", plan, "", messages, nil)
-
-	if actualStableCount != 0 {
-		t.Fatalf("actual stable message count = %d, want 0 (no message in range supports cache_control)", actualStableCount)
+	_, got, _, _, actualStableCount := ApplyPromptCacheWithPlan(anthropicTestModel(), "5m", plan, "",
+		[]sdk.Message{sdk.UserMessage("stable text message"), thinking, sdk.UserMessage("volatile")}, nil)
+	if actualStableCount != 1 {
+		t.Fatalf("actual stable message count = %d, want 1", actualStableCount)
 	}
-	for i, msg := range got {
-		for _, part := range msg.Content {
-			if tp, ok := part.(sdk.TextPart); ok && tp.CacheControl != nil {
-				t.Fatalf("message %d unexpectedly carries a text cache breakpoint", i)
-			}
-		}
+	if text, ok := got[0].Content[0].(sdk.TextPart); !ok || text.CacheControl == nil {
+		t.Fatalf("earlier text message should carry the breakpoint: %#v", got[0].Content)
+	}
+
+	_, _, _, _, actualStableCount = ApplyPromptCacheWithPlan(anthropicTestModel(), "5m", plan, "",
+		[]sdk.Message{thinking, thinking}, nil)
+	if actualStableCount != 0 {
+		t.Fatalf("actual stable message count = %d, want 0", actualStableCount)
 	}
 }
 
@@ -261,5 +242,48 @@ func TestApplyPromptCachePlanPlacesMidSpanBreakpoint(t *testing.T) {
 	}
 	if actualStableCount != 4 {
 		t.Fatalf("actual stable message count = %d, want 4", actualStableCount)
+	}
+}
+
+// Each call marks the last message the next call sends again, never the
+// background summary each call moves; with four breakpoints in place the
+// mid-span one yields; the caller's request stays unmarked.
+func TestWithRollingCacheBreakpoint(t *testing.T) {
+	t.Parallel()
+
+	cc := &sdk.CacheControl{Type: "ephemeral"}
+	markedText := func(text string) sdk.Message {
+		return sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: text, CacheControl: cc}}}
+	}
+	system := markedText("system")
+	system.Role = sdk.MessageRoleSystem
+	req := sdk.Request{
+		Messages: []sdk.Message{
+			system,
+			markedText("mid"),
+			markedText("stable"),
+			sdk.UserMessage("question"),
+			sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "search", Result: toolexec.OutputFromValue("ok")}),
+			sdk.UserMessage(contextfrag.BackgroundSummaryMessagePrefix + "- build (running)"),
+		},
+		Tools: []sdk.ToolDefinition{{Name: "search", CacheControl: cc}},
+	}
+
+	got := WithRollingCacheBreakpoint(req, cc)
+	marked := make([]bool, len(got.Messages))
+	for i, msg := range got.Messages {
+		marked[i] = messageHasCacheControl(msg)
+	}
+	if want := []bool{true, false, true, false, true, false}; !reflect.DeepEqual(marked, want) {
+		t.Fatalf("marked messages = %v, want %v", marked, want)
+	}
+	if messageHasCacheControl(req.Messages[4]) || !messageHasCacheControl(req.Messages[1]) {
+		t.Fatal("the caller's request was modified")
+	}
+	if again := WithRollingCacheBreakpoint(got, cc); !reflect.DeepEqual(again, got) {
+		t.Fatal("a request whose end is marked was marked again")
+	}
+	if same := WithRollingCacheBreakpoint(req, nil); !reflect.DeepEqual(same, req) {
+		t.Fatal("a vendor without breakpoints got one")
 	}
 }
