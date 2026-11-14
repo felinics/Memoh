@@ -46,6 +46,7 @@ export interface ModelSource {
 export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: '302ai', source: '302ai', name: '302.AI', client_type: 'openai-completions', base_url: 'https://api.302.ai/v1', colored_logo: true },
   { id: 'abacus', source: 'abacus', name: 'Abacus', client_type: 'openai-completions', base_url: 'https://routellm.abacus.ai/v1' },
+  { id: 'abliteratedllm', name: 'AbliteratedLLM', client_type: 'openai-completions', base_url: 'https://api.abliteratedllm.dev/v1' },
   { id: 'abliteration-ai', source: 'abliteration-ai', name: 'abliteration.ai', client_type: 'openai-completions', base_url: 'https://api.abliteration.ai/v1' },
   { id: 'above', source: 'above', name: 'above.dev', client_type: 'openai-completions', base_url: 'https://api.above.dev/v1' },
   { id: 'agnes', source: 'agnes', name: 'Agnes AI', client_type: 'openai-completions', base_url: 'https://apihub.agnes-ai.com/v1' },
