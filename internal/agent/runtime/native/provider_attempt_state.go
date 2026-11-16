@@ -6,6 +6,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/step"
+	"github.com/felinics/memoh/internal/models"
 )
 
 type providerAttemptState struct {
@@ -99,19 +100,7 @@ func cloneProviderMessages(messages []sdk.Message) []sdk.Message {
 
 func clearProviderCacheControls(messages []sdk.Message) {
 	for i := range messages {
-		for j, part := range messages[i].Content {
-			switch value := part.(type) {
-			case sdk.TextPart:
-				value.CacheControl = nil
-				messages[i].Content[j] = value
-			case sdk.ImagePart:
-				value.CacheControl = nil
-				messages[i].Content[j] = value
-			case sdk.FilePart:
-				value.CacheControl = nil
-				messages[i].Content[j] = value
-			}
-		}
+		messages[i].Content = models.WithoutCacheControl(messages[i].Content)
 	}
 }
 

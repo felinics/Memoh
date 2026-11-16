@@ -365,6 +365,10 @@ type generateDispatch struct {
 	// prompt into the message prefix, where a capability refresh cannot
 	// replace it.
 	systemPrepended bool
+	// rollingCache is the breakpoint each call places at the end of its
+	// request (models.WithRollingCacheBreakpoint), nil for a vendor that
+	// caches without explicit breakpoints.
+	rollingCache *sdk.CacheControl
 }
 
 // buildGenerateDispatch assembles the single-call input for the Memoh-owned
@@ -482,6 +486,7 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 		approve:             approvalHandler,
 		initialMessageCount: initialProviderMessageCount,
 		systemPrepended:     systemPrepended,
+		rollingCache:        models.RollingCacheControl(cfg.Model, cfg.PromptCacheTTL),
 	}, nil
 }
 

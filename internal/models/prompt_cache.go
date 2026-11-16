@@ -197,13 +197,12 @@ func applyAnthropicPromptCache(
 // withMessageCacheBreakpoint sets a cache_control breakpoint on the last
 // content part of messages[index], or — if that part's type does not carry a
 // CacheControl field — scans backward for the nearest earlier message whose
-// last part does. Not every SDK part type supports cache_control (TextPart,
-// ImagePart and FilePart do; ReasoningPart, ToolCallPart and ToolResultPart
-// do not), so a stable history message that happens to end in a tool
-// call/result must not silently drop the breakpoint: that would leave the
-// caller believing the declared prefix is cached when Anthropic never
-// actually cached anything. Returns the updated messages and the index that
-// received the breakpoint, or -1 if no message in [0, index] qualifies.
+// last part does. Reasoning parts carry none (Anthropic does not let a
+// thinking block be marked), so a stable history message that ends in one
+// must not silently drop the breakpoint: that would leave the caller
+// believing the declared prefix is cached when Anthropic never actually
+// cached anything. Returns the updated messages and the index that received
+// the breakpoint, or -1 if no message in [0, index] qualifies.
 func withMessageCacheBreakpoint(messages []sdk.Message, index int, cc *sdk.CacheControl) ([]sdk.Message, int) {
 	out := make([]sdk.Message, len(messages))
 	copy(out, messages)
@@ -221,24 +220,161 @@ func setLastPartCacheControl(msg *sdk.Message, cc *sdk.CacheControl) bool {
 	if len(msg.Content) == 0 {
 		return false
 	}
-	parts := make([]sdk.MessagePart, len(msg.Content))
-	copy(parts, msg.Content)
-	last := len(parts) - 1
-	switch p := parts[last].(type) {
-	case sdk.TextPart:
-		p.CacheControl = cc
-		parts[last] = p
-	case sdk.ImagePart:
-		p.CacheControl = cc
-		parts[last] = p
-	case sdk.FilePart:
-		p.CacheControl = cc
-		parts[last] = p
-	default:
+	last := len(msg.Content) - 1
+	marked, ok := withPartCacheControl(msg.Content[last], cc)
+	if !ok {
 		return false
 	}
+	parts := make([]sdk.MessagePart, len(msg.Content))
+	copy(parts, msg.Content)
+	parts[last] = marked
 	msg.Content = parts
 	return true
+}
+
+// withPartCacheControl returns part with its cache mark set to cc (nil
+// clears it), reporting whether the part's type carries one. These are the
+// parts Anthropic lets a breakpoint sit on; a thinking block is not one.
+func withPartCacheControl(part sdk.MessagePart, cc *sdk.CacheControl) (sdk.MessagePart, bool) {
+	switch p := part.(type) {
+	case sdk.TextPart:
+		p.CacheControl = cc
+		return p, true
+	case sdk.ImagePart:
+		p.CacheControl = cc
+		return p, true
+	case sdk.FilePart:
+		p.CacheControl = cc
+		return p, true
+	case sdk.ToolCallPart:
+		p.CacheControl = cc
+		return p, true
+	case sdk.ToolResultPart:
+		p.CacheControl = cc
+		return p, true
+	default:
+		return part, false
+	}
+}
+
+// partCacheControl returns the cache mark part carries, if any.
+func partCacheControl(part sdk.MessagePart) *sdk.CacheControl {
+	switch p := part.(type) {
+	case sdk.TextPart:
+		return p.CacheControl
+	case sdk.ImagePart:
+		return p.CacheControl
+	case sdk.FilePart:
+		return p.CacheControl
+	case sdk.ToolCallPart:
+		return p.CacheControl
+	case sdk.ToolResultPart:
+		return p.CacheControl
+	default:
+		return nil
+	}
+}
+
+// maxAnthropicCacheBreakpoints is how many cache_control blocks Anthropic
+// accepts in one request, across tools, system, and messages.
+const maxAnthropicCacheBreakpoints = 4
+
+// RollingCacheControl is the breakpoint WithRollingCacheBreakpoint places for
+// model, or nil when its vendor caches without explicit breakpoints or the
+// policy is off.
+func RollingCacheControl(model *sdk.Model, ttl string) *sdk.CacheControl {
+	if model == nil || ResolveClientType(model) != string(ClientTypeAnthropicMessages) {
+		return nil
+	}
+	return anthropicCacheControl(NormalizePromptCacheTTL(ttl))
+}
+
+// WithRollingCacheBreakpoint marks the end of what the next call of the same
+// run sends again. A step loop resends every message of the request and adds
+// the step it produced, so a breakpoint on the request's last message lets
+// the next call read the whole request from cache and write only its own new
+// tail; breakpoints fixed where the dispatch placed them would leave every
+// tool result after them to be processed again on each call. The background
+// summary is skipped: each call moves it to the end, so nothing would match
+// a breakpoint on it. When the request already holds Anthropic's four
+// breakpoints, the earliest message breakpoint after the system prompt (the
+// mid-span one) gives up its place: the rolling one covers everything it
+// does. Only the returned request carries the marks; req's messages are not
+// modified.
+//
+//nolint:gocritic // hugeParam: the request is decorated by value for the one call that sends it.
+func WithRollingCacheBreakpoint(req sdk.Request, cc *sdk.CacheControl) sdk.Request {
+	if cc == nil {
+		return req
+	}
+	target := -1
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		msg := req.Messages[i]
+		if contextfrag.IsBackgroundSummaryCarrier(msg) {
+			continue
+		}
+		if messageHasCacheControl(msg) {
+			// The prefix up to here is already marked.
+			return req
+		}
+		probe := msg
+		if setLastPartCacheControl(&probe, cc) {
+			target = i
+			break
+		}
+	}
+	if target < 0 {
+		return req
+	}
+	used := 0
+	for _, tool := range req.Tools {
+		if tool.CacheControl != nil {
+			used++
+		}
+	}
+	for _, msg := range req.Messages {
+		if messageHasCacheControl(msg) {
+			used++
+		}
+	}
+	messages := make([]sdk.Message, len(req.Messages))
+	copy(messages, req.Messages)
+	if used >= maxAnthropicCacheBreakpoints {
+		yielded := false
+		for i := range messages {
+			if messages[i].Role != sdk.MessageRoleSystem && messageHasCacheControl(messages[i]) {
+				messages[i].Content = WithoutCacheControl(messages[i].Content)
+				yielded = true
+				break
+			}
+		}
+		if !yielded {
+			return req
+		}
+	}
+	setLastPartCacheControl(&messages[target], cc)
+	req.Messages = messages
+	return req
+}
+
+// messageHasCacheControl reports whether any part of msg is marked.
+func messageHasCacheControl(msg sdk.Message) bool {
+	for _, part := range msg.Content {
+		if partCacheControl(part) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// WithoutCacheControl returns a copy of parts with every cache mark cleared,
+// for comparing messages whatever breakpoints a request placed on them.
+func WithoutCacheControl(parts []sdk.MessagePart) []sdk.MessagePart {
+	out := make([]sdk.MessagePart, len(parts))
+	for i, part := range parts {
+		out[i], _ = withPartCacheControl(part, nil)
+	}
+	return out
 }
 
 // anthropicCacheControl returns the SDK cache_control payload for Anthropic
