@@ -50,7 +50,7 @@
   - `settings-section/`：设置全屏层（带 `SettingsSidebar` 与 `<KeepAlive>`）。
   - `bots/`：Bot 列表、创建向导与创建进度流（`new-progress.vue`）、多 Tab 详情页（概览、设置、桌面、渠道、记忆、
     MCP、定时任务、容器、网络、工具审批、技能、访问控制、依赖与 App）。
-  - 其他设置页：`providers/`（服务商总页，通过 `?tab=` 切换 `models-panel.vue`、`web-search/`、`voice/`、`video/` 四个子范围面板；旧路径 `/settings/web-search`、`/settings/voice`、`/settings/video`、`/settings/speech`、`/settings/transcription` 均为重定向）、`runtimes/`（远程运行时与计算节点 Computers）、`supermarket/`、`usage/`、`people/`、`appearance/`、`keyboard-shortcuts/`、`profile/`（Account）、`about/`。独立 `/settings/memory` 已移除并入 Bot 详情的记忆 Tab（旧路径重定向至 `/settings/bots`）。
+  - 其他设置页：`providers/`（服务商总页，通过 `?tab=` 切换 `models-panel.vue`、`web-search/`、`voice/`、`video/` 四个子范围面板；旧路径 `/settings/web-search`、`/settings/voice`、`/settings/video`、`/settings/speech`、`/settings/transcription` 均为重定向；注意 `pages/voice/` 当前仍跨目录复用 `pages/speech/components/` 与 `pages/transcription/` 下的遗留设置组件，属于待收编的历史遗留目录，新代码不要模仿其中的旧表单与豁免写法）、`runtimes/`（远程运行时与计算节点 Computers）、`supermarket/`、`usage/`、`people/`、`appearance/`、`keyboard-shortcuts/`、`profile/`（Account）、`about/`。独立 `/settings/memory` 已移除并入 Bot 详情的记忆 Tab（旧路径重定向至 `/settings/bots`）。
   - 独立全屏页：`login/`、`onboarding/`、`oauth/`、`providers/connect.vue`（通用 Provider 深度链接导入确认页）、
     `dev/components/`（开发组件墙）。
 - **业务共享组件（`components/`）**：跨两个以上页面复用的业务 owner（如 `sidebar/`、`master-detail-sidebar-layout/`、
