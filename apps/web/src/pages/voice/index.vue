@@ -198,7 +198,7 @@ const {
   },
 })
 
-defineExpose({ openAdd: () => openAddSpeech(), view, scopeTab: 'voice' as const })
+defineExpose({ openAdd: () => openAddSpeech(), view })
 
 const addProviderNames = computed(() => [
   ...catalogSpeechProviders.value.map((p) => ({ name: p.name })),

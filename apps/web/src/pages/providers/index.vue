@@ -22,7 +22,7 @@
 // the list pane keeps [data-view-swap]'s coordinate origin stationary across
 // both directions, and reading the panel's synchronous `view` avoids a one-frame
 // wait on async router.replace.
-import { computed, onActivated, onBeforeUnmount, onMounted, ref, type Component, type ComponentPublicInstance } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, shallowReactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -40,18 +40,17 @@ import WebSearchPanel from '@/pages/web-search/index.vue'
 import VoicePanel from '@/pages/voice/index.vue'
 import VideoPanel from '@/pages/video/index.vue'
 
-interface ProviderScopePanelExpose {
+interface ProviderScopePanelInstance {
   openAdd?: () => void
-  view?: 'list' | 'detail'
-  scopeTab?: ProviderScopeTab
+  readonly view: 'list' | 'detail'
 }
 
-const PANELS: Record<ProviderScopeTab, Component> = {
+const PANELS = {
   models: ModelsPanel,
   'web-search': WebSearchPanel,
   voice: VoicePanel,
   video: VideoPanel,
-}
+} satisfies Record<ProviderScopeTab, abstract new (...args: never[]) => ProviderScopePanelInstance>
 
 // Web Search has no add dialog — its list IS the catalog (clicking a template
 // card starts configuring it), so the header Add button steps aside there.
@@ -66,7 +65,18 @@ const { t } = useI18n()
 const searchQuery = ref('')
 const shellEl = ref<HTMLElement | null>(null)
 const headerMeasureEl = ref<HTMLElement | null>(null)
-const panelRef = ref<(ComponentPublicInstance & ProviderScopePanelExpose) | null>(null)
+const panelRefs = shallowReactive<Partial<Record<ProviderScopeTab, ProviderScopePanelInstance | null>>>({})
+const panelRefSetters = Object.fromEntries(
+  PROVIDER_SCOPES.map(({ tab }) => [
+    tab,
+    (inst: unknown) => {
+      const next = (inst as ProviderScopePanelInstance | null) ?? null
+      if (panelRefs[tab] !== next) {
+        panelRefs[tab] = next
+      }
+    },
+  ]),
+) as Record<ProviderScopeTab, (inst: unknown) => void>
 
 const activeTab = computed<ProviderScopeTab>(() =>
   isProviderScopeTab(route.query.tab) ? route.query.tab : 'models',
@@ -86,33 +96,43 @@ function setTab(tab: ProviderScopeTab): void {
 }
 
 // Detail open = current scope's detail query key is set (e.g. ?provider=…).
-// Prefer the mounted panel's reactive `view` when it belongs to activeTab so
-// the header transitions in the exact same flush as SwapTransition.
+// Prefer the mounted panel's reactive `view` keyed per tab so the header
+// transitions in the exact same flush as SwapTransition without waiting on
+// async router.replace or reading a stale KeepAlive panel across tabs.
 const routeIsDetail = computed(() => {
   const value = route.query[activeScope.value.detailQueryKey]
   return typeof value === 'string' && value !== ''
 })
 
 const isDetail = computed(() => {
-  const panel = panelRef.value
-  if (panel?.view && panel.scopeTab === activeTab.value) {
+  const panel = panelRefs[activeTab.value]
+  if (panel) {
     return panel.view === 'detail'
   }
   return routeIsDetail.value
 })
 
-function syncHeaderHeight(): void {
-  const height = headerMeasureEl.value?.offsetHeight ?? 0
+function applyHeaderHeight(height: number): void {
   if (height > 0 && shellEl.value) {
     shellEl.value.style.setProperty('--providers-header-offset', `${height}px`)
   }
+}
+
+function syncHeaderHeight(): void {
+  applyHeaderHeight(headerMeasureEl.value?.getBoundingClientRect().height ?? 0)
 }
 
 let headerResizeObserver: ResizeObserver | null = null
 onMounted(() => {
   syncHeaderHeight()
   if (typeof ResizeObserver !== 'undefined' && headerMeasureEl.value) {
-    headerResizeObserver = new ResizeObserver(syncHeaderHeight)
+    headerResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      const height = entry?.borderBoxSize?.[0]?.blockSize
+        ?? headerMeasureEl.value?.getBoundingClientRect().height
+        ?? 0
+      applyHeaderHeight(height)
+    })
     headerResizeObserver.observe(headerMeasureEl.value)
   }
 })
@@ -180,7 +200,7 @@ onBeforeUnmount(() => {
                   <Button
                     class="whitespace-nowrap transition-opacity duration-200"
                     :class="showAdd ? 'opacity-100' : 'opacity-0'"
-                    @click="panelRef?.openAdd?.()"
+                    @click="panelRefs[activeTab]?.openAdd?.()"
                   >
                     <Plus class="size-4" />
                     {{ t('provider.addBtn') }}
@@ -201,7 +221,7 @@ onBeforeUnmount(() => {
       <component
         :is="PANELS[activeTab]"
         :key="activeTab"
-        ref="panelRef"
+        :ref="panelRefSetters[activeTab]"
         :search-query="searchQuery"
       />
     </KeepAlive>
@@ -220,10 +240,10 @@ onBeforeUnmount(() => {
   bottom: auto;
   pointer-events: none;
 }
-[data-providers-shell] [data-view-swap] {
+[data-providers-shell] > [data-view-swap] {
   display: flow-root;
 }
-[data-providers-shell] [data-view-swap] > :not(:has([data-settings-detail-back])) {
+[data-providers-shell] > [data-view-swap] > :not(:has([data-settings-detail-back])) {
   margin-top: var(--providers-header-offset, 0px);
 }
 </style>

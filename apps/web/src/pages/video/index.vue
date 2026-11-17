@@ -97,7 +97,7 @@ const {
     : providersData.value !== undefined,
 })
 
-defineExpose({ openAdd: () => openAddProvider(), view, scopeTab: 'video' as const })
+defineExpose({ openAdd: () => openAddProvider(), view })
 
 const addProviderNames = computed(() => catalogProviders.value.map((p) => ({ name: p.name })))
 

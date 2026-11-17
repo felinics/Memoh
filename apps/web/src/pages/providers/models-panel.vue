@@ -155,7 +155,7 @@ const {
   isReady: () => providerData.value !== undefined,
 })
 
-defineExpose({ openAdd: () => openAddProvider(), view, scopeTab: 'models' as const })
+defineExpose({ openAdd: () => openAddProvider(), view })
 
 const modelCountByProvider = computed(() => {
   const counts: Record<string, number> = {}
