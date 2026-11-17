@@ -47,12 +47,14 @@ type Installation struct {
 	ID                 string
 	BotID              string
 
-	DependencyID     string
-	Source           string
-	Status           Status
-	InstalledVersion string
-	LatestVersion    string
-	LastCheckedAt    *time.Time
+	DependencyID         string
+	Source               string
+	Status               Status
+	InstalledVersion     string
+	LatestVersion        string
+	UpdateAvailable      bool
+	UpdateCheckedVersion string
+	LastCheckedAt        *time.Time
 	// LastError is text written by earlier servers, and upstream output the
 	// scripts used to be recorded with. A failure recorded now carries
 	// LastErrorCode, the catalog code clients render as errors.<code>.
@@ -85,16 +87,18 @@ type UpsertInstallation struct {
 // ObservedUpdate carries the fact-derived columns discovery and update
 // checks may correct. A nil field leaves that column untouched.
 type ObservedUpdate struct {
-	SourceURL          *string
-	RegistryID         *string
-	DefinitionRevision *string
-	Source             *string
-	InstalledVersion   *string
-	LatestVersion      *string
-	LastCheckedAt      *time.Time
-	LastError          *string
-	LastErrorCode      *string
-	ManifestDigest     *string
+	SourceURL            *string
+	RegistryID           *string
+	DefinitionRevision   *string
+	Source               *string
+	InstalledVersion     *string
+	LatestVersion        *string
+	UpdateAvailable      *bool
+	UpdateCheckedVersion *string
+	LastCheckedAt        *time.Time
+	LastError            *string
+	LastErrorCode        *string
+	ManifestDigest       *string
 }
 
 // ErrInstallationNotFound is returned by Store lookups for unknown keys.

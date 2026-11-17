@@ -1,6 +1,6 @@
 -- name: GetBotDependencyInstallation :one
 SELECT id, team_id, bot_id, dependency_id, source, status,
-       installed_version, latest_version, last_checked_at, last_error, last_error_code,
+       installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
        manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -10,7 +10,7 @@ LIMIT 1;
 
 -- name: ListBotDependencyInstallations :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
-       installed_version, latest_version, last_checked_at, last_error, last_error_code,
+       installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
        manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -19,7 +19,7 @@ ORDER BY dependency_id;
 
 -- name: ListBotDependencyInstallationsByStatus :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
-       installed_version, latest_version, last_checked_at, last_error, last_error_code,
+       installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
        manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -28,7 +28,7 @@ ORDER BY bot_id, dependency_id;
 
 -- name: ListStaleBotDependencyOperations :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
-       installed_version, latest_version, last_checked_at, last_error, last_error_code,
+       installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
        manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -54,7 +54,7 @@ DO UPDATE SET source = EXCLUDED.source,
               updated_at = now()
 WHERE bot_dependency_installations.operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;
 
 -- name: UpdateBotDependencyInstallationStatus :one
@@ -68,7 +68,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND dependency_id = sqlc.arg(dependency_id)
   AND operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;
 
 -- name: UpdateBotDependencyInstallationObserved :one
@@ -76,6 +76,8 @@ UPDATE bot_dependency_installations
 SET source = COALESCE(sqlc.narg(source)::text, source),
     installed_version = COALESCE(sqlc.narg(installed_version)::text, installed_version),
     latest_version = COALESCE(sqlc.narg(latest_version)::text, latest_version),
+    update_available = COALESCE(sqlc.narg(update_available)::boolean, update_available),
+    update_checked_version = COALESCE(sqlc.narg(update_checked_version)::text, update_checked_version),
     last_checked_at = COALESCE(sqlc.narg(last_checked_at)::timestamptz, last_checked_at),
     last_error = COALESCE(sqlc.narg(last_error)::text, last_error),
     last_error_code = COALESCE(sqlc.narg(last_error_code)::text, last_error_code),
@@ -89,7 +91,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND dependency_id = sqlc.arg(dependency_id)
   AND operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;
 
 -- name: DeleteBotDependencyInstallation :execrows
@@ -113,7 +115,7 @@ DO UPDATE SET status = EXCLUDED.status,
               updated_at = now()
 WHERE bot_dependency_installations.status NOT IN ('installing', 'updating', 'removing')
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;
 
 -- name: FinishBotDependencyOperation :one
@@ -122,6 +124,8 @@ SET source = sqlc.arg(source),
     status = sqlc.arg(status),
     installed_version = sqlc.arg(installed_version),
     latest_version = sqlc.arg(latest_version),
+    update_available = sqlc.arg(update_available),
+    update_checked_version = sqlc.arg(update_checked_version),
     last_checked_at = sqlc.narg(last_checked_at)::timestamptz,
     last_error = '',
     last_error_code = sqlc.arg(last_error_code),
@@ -136,7 +140,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND dependency_id = sqlc.arg(dependency_id)
   AND operation_id = sqlc.arg(operation_id) AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;
 
 -- name: DeleteBotDependencyOperation :one
@@ -146,5 +150,5 @@ WHERE team_id = public.memoh_current_team_id()
   AND dependency_id = sqlc.arg(dependency_id)
   AND operation_id = sqlc.arg(operation_id) AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;

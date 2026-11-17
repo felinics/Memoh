@@ -25,7 +25,7 @@ DO UPDATE SET status = EXCLUDED.status,
               updated_at = now()
 WHERE bot_dependency_installations.status NOT IN ('installing', 'updating', 'removing')
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 `
 
@@ -65,6 +65,8 @@ func (q *Queries) ClaimBotDependencyOperation(ctx context.Context, arg ClaimBotD
 		&i.Status,
 		&i.InstalledVersion,
 		&i.LatestVersion,
+		&i.UpdateAvailable,
+		&i.UpdateCheckedVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
 		&i.LastErrorCode,
@@ -107,7 +109,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND dependency_id = $2
   AND operation_id = $3 AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 `
 
@@ -129,6 +131,8 @@ func (q *Queries) DeleteBotDependencyOperation(ctx context.Context, arg DeleteBo
 		&i.Status,
 		&i.InstalledVersion,
 		&i.LatestVersion,
+		&i.UpdateAvailable,
+		&i.UpdateCheckedVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
 		&i.LastErrorCode,
@@ -149,38 +153,42 @@ SET source = $1,
     status = $2,
     installed_version = $3,
     latest_version = $4,
-    last_checked_at = $5::timestamptz,
+    update_available = $5,
+    update_checked_version = $6,
+    last_checked_at = $7::timestamptz,
     last_error = '',
-    last_error_code = $6,
-    manifest_digest = $7,
-    source_url = $8,
-    registry_id = $9,
-    definition_revision = $10,
+    last_error_code = $8,
+    manifest_digest = $9,
+    source_url = $10,
+    registry_id = $11,
+    definition_revision = $12,
     operation_id = '',
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $11
-  AND dependency_id = $12
-  AND operation_id = $13 AND operation_id <> ''
+  AND bot_id = $13
+  AND dependency_id = $14
+  AND operation_id = $15 AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 `
 
 type FinishBotDependencyOperationParams struct {
-	Source             string             `json:"source"`
-	Status             string             `json:"status"`
-	InstalledVersion   string             `json:"installed_version"`
-	LatestVersion      string             `json:"latest_version"`
-	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
-	LastErrorCode      string             `json:"last_error_code"`
-	ManifestDigest     string             `json:"manifest_digest"`
-	SourceUrl          string             `json:"source_url"`
-	RegistryID         string             `json:"registry_id"`
-	DefinitionRevision string             `json:"definition_revision"`
-	BotID              pgtype.UUID        `json:"bot_id"`
-	DependencyID       string             `json:"dependency_id"`
-	OperationID        string             `json:"operation_id"`
+	Source               string             `json:"source"`
+	Status               string             `json:"status"`
+	InstalledVersion     string             `json:"installed_version"`
+	LatestVersion        string             `json:"latest_version"`
+	UpdateAvailable      bool               `json:"update_available"`
+	UpdateCheckedVersion string             `json:"update_checked_version"`
+	LastCheckedAt        pgtype.Timestamptz `json:"last_checked_at"`
+	LastErrorCode        string             `json:"last_error_code"`
+	ManifestDigest       string             `json:"manifest_digest"`
+	SourceUrl            string             `json:"source_url"`
+	RegistryID           string             `json:"registry_id"`
+	DefinitionRevision   string             `json:"definition_revision"`
+	BotID                pgtype.UUID        `json:"bot_id"`
+	DependencyID         string             `json:"dependency_id"`
+	OperationID          string             `json:"operation_id"`
 }
 
 func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBotDependencyOperationParams) (BotDependencyInstallation, error) {
@@ -189,6 +197,8 @@ func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBo
 		arg.Status,
 		arg.InstalledVersion,
 		arg.LatestVersion,
+		arg.UpdateAvailable,
+		arg.UpdateCheckedVersion,
 		arg.LastCheckedAt,
 		arg.LastErrorCode,
 		arg.ManifestDigest,
@@ -209,6 +219,8 @@ func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBo
 		&i.Status,
 		&i.InstalledVersion,
 		&i.LatestVersion,
+		&i.UpdateAvailable,
+		&i.UpdateCheckedVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
 		&i.LastErrorCode,
@@ -225,7 +237,7 @@ func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBo
 
 const getBotDependencyInstallation = `-- name: GetBotDependencyInstallation :one
 SELECT id, team_id, bot_id, dependency_id, source, status,
-       installed_version, latest_version, last_checked_at, last_error, last_error_code,
+       installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
        manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -251,6 +263,8 @@ func (q *Queries) GetBotDependencyInstallation(ctx context.Context, arg GetBotDe
 		&i.Status,
 		&i.InstalledVersion,
 		&i.LatestVersion,
+		&i.UpdateAvailable,
+		&i.UpdateCheckedVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
 		&i.LastErrorCode,
@@ -267,7 +281,7 @@ func (q *Queries) GetBotDependencyInstallation(ctx context.Context, arg GetBotDe
 
 const listBotDependencyInstallations = `-- name: ListBotDependencyInstallations :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
-       installed_version, latest_version, last_checked_at, last_error, last_error_code,
+       installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
        manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -293,6 +307,8 @@ func (q *Queries) ListBotDependencyInstallations(ctx context.Context, botID pgty
 			&i.Status,
 			&i.InstalledVersion,
 			&i.LatestVersion,
+			&i.UpdateAvailable,
+			&i.UpdateCheckedVersion,
 			&i.LastCheckedAt,
 			&i.LastError,
 			&i.LastErrorCode,
@@ -316,7 +332,7 @@ func (q *Queries) ListBotDependencyInstallations(ctx context.Context, botID pgty
 
 const listBotDependencyInstallationsByStatus = `-- name: ListBotDependencyInstallationsByStatus :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
-       installed_version, latest_version, last_checked_at, last_error, last_error_code,
+       installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
        manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -342,6 +358,8 @@ func (q *Queries) ListBotDependencyInstallationsByStatus(ctx context.Context, st
 			&i.Status,
 			&i.InstalledVersion,
 			&i.LatestVersion,
+			&i.UpdateAvailable,
+			&i.UpdateCheckedVersion,
 			&i.LastCheckedAt,
 			&i.LastError,
 			&i.LastErrorCode,
@@ -365,7 +383,7 @@ func (q *Queries) ListBotDependencyInstallationsByStatus(ctx context.Context, st
 
 const listStaleBotDependencyOperations = `-- name: ListStaleBotDependencyOperations :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
-       installed_version, latest_version, last_checked_at, last_error, last_error_code,
+       installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
        manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -392,6 +410,8 @@ func (q *Queries) ListStaleBotDependencyOperations(ctx context.Context, olderTha
 			&i.Status,
 			&i.InstalledVersion,
 			&i.LatestVersion,
+			&i.UpdateAvailable,
+			&i.UpdateCheckedVersion,
 			&i.LastCheckedAt,
 			&i.LastError,
 			&i.LastErrorCode,
@@ -418,36 +438,40 @@ UPDATE bot_dependency_installations
 SET source = COALESCE($1::text, source),
     installed_version = COALESCE($2::text, installed_version),
     latest_version = COALESCE($3::text, latest_version),
-    last_checked_at = COALESCE($4::timestamptz, last_checked_at),
-    last_error = COALESCE($5::text, last_error),
-    last_error_code = COALESCE($6::text, last_error_code),
-    manifest_digest = COALESCE($7::text, manifest_digest),
-    source_url = COALESCE($8::text, source_url),
-    registry_id = COALESCE($9::text, registry_id),
-    definition_revision = COALESCE($10::text, definition_revision),
+    update_available = COALESCE($4::boolean, update_available),
+    update_checked_version = COALESCE($5::text, update_checked_version),
+    last_checked_at = COALESCE($6::timestamptz, last_checked_at),
+    last_error = COALESCE($7::text, last_error),
+    last_error_code = COALESCE($8::text, last_error_code),
+    manifest_digest = COALESCE($9::text, manifest_digest),
+    source_url = COALESCE($10::text, source_url),
+    registry_id = COALESCE($11::text, registry_id),
+    definition_revision = COALESCE($12::text, definition_revision),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $11
-  AND dependency_id = $12
+  AND bot_id = $13
+  AND dependency_id = $14
   AND operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 `
 
 type UpdateBotDependencyInstallationObservedParams struct {
-	Source             pgtype.Text        `json:"source"`
-	InstalledVersion   pgtype.Text        `json:"installed_version"`
-	LatestVersion      pgtype.Text        `json:"latest_version"`
-	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
-	LastError          pgtype.Text        `json:"last_error"`
-	LastErrorCode      pgtype.Text        `json:"last_error_code"`
-	ManifestDigest     pgtype.Text        `json:"manifest_digest"`
-	SourceUrl          pgtype.Text        `json:"source_url"`
-	RegistryID         pgtype.Text        `json:"registry_id"`
-	DefinitionRevision pgtype.Text        `json:"definition_revision"`
-	BotID              pgtype.UUID        `json:"bot_id"`
-	DependencyID       string             `json:"dependency_id"`
+	Source               pgtype.Text        `json:"source"`
+	InstalledVersion     pgtype.Text        `json:"installed_version"`
+	LatestVersion        pgtype.Text        `json:"latest_version"`
+	UpdateAvailable      pgtype.Bool        `json:"update_available"`
+	UpdateCheckedVersion pgtype.Text        `json:"update_checked_version"`
+	LastCheckedAt        pgtype.Timestamptz `json:"last_checked_at"`
+	LastError            pgtype.Text        `json:"last_error"`
+	LastErrorCode        pgtype.Text        `json:"last_error_code"`
+	ManifestDigest       pgtype.Text        `json:"manifest_digest"`
+	SourceUrl            pgtype.Text        `json:"source_url"`
+	RegistryID           pgtype.Text        `json:"registry_id"`
+	DefinitionRevision   pgtype.Text        `json:"definition_revision"`
+	BotID                pgtype.UUID        `json:"bot_id"`
+	DependencyID         string             `json:"dependency_id"`
 }
 
 func (q *Queries) UpdateBotDependencyInstallationObserved(ctx context.Context, arg UpdateBotDependencyInstallationObservedParams) (BotDependencyInstallation, error) {
@@ -455,6 +479,8 @@ func (q *Queries) UpdateBotDependencyInstallationObserved(ctx context.Context, a
 		arg.Source,
 		arg.InstalledVersion,
 		arg.LatestVersion,
+		arg.UpdateAvailable,
+		arg.UpdateCheckedVersion,
 		arg.LastCheckedAt,
 		arg.LastError,
 		arg.LastErrorCode,
@@ -475,6 +501,8 @@ func (q *Queries) UpdateBotDependencyInstallationObserved(ctx context.Context, a
 		&i.Status,
 		&i.InstalledVersion,
 		&i.LatestVersion,
+		&i.UpdateAvailable,
+		&i.UpdateCheckedVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
 		&i.LastErrorCode,
@@ -500,7 +528,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND dependency_id = $4
   AND operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 `
 
@@ -528,6 +556,8 @@ func (q *Queries) UpdateBotDependencyInstallationStatus(ctx context.Context, arg
 		&i.Status,
 		&i.InstalledVersion,
 		&i.LatestVersion,
+		&i.UpdateAvailable,
+		&i.UpdateCheckedVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
 		&i.LastErrorCode,
@@ -560,7 +590,7 @@ DO UPDATE SET source = EXCLUDED.source,
               updated_at = now()
 WHERE bot_dependency_installations.operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
-          installed_version, latest_version, last_checked_at, last_error, last_error_code,
+          installed_version, latest_version, update_available, update_checked_version, last_checked_at, last_error, last_error_code,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
 `
 
@@ -598,6 +628,8 @@ func (q *Queries) UpsertBotDependencyInstallationIntent(ctx context.Context, arg
 		&i.Status,
 		&i.InstalledVersion,
 		&i.LatestVersion,
+		&i.UpdateAvailable,
+		&i.UpdateCheckedVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
 		&i.LastErrorCode,

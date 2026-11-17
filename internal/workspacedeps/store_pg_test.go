@@ -77,12 +77,13 @@ func TestInstallationFromRow(t *testing.T) {
 		Status:           string(StatusInstalled),
 		InstalledVersion: "0.151.0",
 		LatestVersion:    "0.152.0",
-		LastCheckedAt:    pgtype.Timestamptz{Time: checked, Valid: true},
-		LastError:        "legacy sentence",
-		LastErrorCode:    "workspace_dependency.busy",
-		ManifestDigest:   "sha256:abc",
-		CreatedAt:        pgtype.Timestamptz{Time: created, Valid: true},
-		UpdatedAt:        pgtype.Timestamptz{Time: updated, Valid: true},
+		UpdateAvailable:  true, UpdateCheckedVersion: "0.151.0",
+		LastCheckedAt:  pgtype.Timestamptz{Time: checked, Valid: true},
+		LastError:      "legacy sentence",
+		LastErrorCode:  "workspace_dependency.busy",
+		ManifestDigest: "sha256:abc",
+		CreatedAt:      pgtype.Timestamptz{Time: created, Valid: true},
+		UpdatedAt:      pgtype.Timestamptz{Time: updated, Valid: true},
 	}
 
 	got := installationFromRow(row)
@@ -96,7 +97,7 @@ func TestInstallationFromRow(t *testing.T) {
 	if got.Source != InstallationSourceManaged || got.Status != StatusInstalled {
 		t.Fatalf("source/status = %q/%q", got.Source, got.Status)
 	}
-	if got.InstalledVersion != "0.151.0" || got.LatestVersion != "0.152.0" || got.LastError != "legacy sentence" || got.LastErrorCode != "workspace_dependency.busy" || got.ManifestDigest != "sha256:abc" {
+	if !got.UpdateAvailable || got.UpdateCheckedVersion != "0.151.0" || got.InstalledVersion != "0.151.0" || got.LatestVersion != "0.152.0" || got.LastError != "legacy sentence" || got.LastErrorCode != "workspace_dependency.busy" || got.ManifestDigest != "sha256:abc" {
 		t.Fatalf("scalar columns mismatch: %+v", got)
 	}
 	if got.LastCheckedAt == nil || !got.LastCheckedAt.Equal(checked) {
@@ -116,7 +117,7 @@ func TestObservedParamsNilLeavesColumnsUntouched(t *testing.T) {
 	botID := mustUUID(t, testBotID)
 	params := observedParams(botID, testKey(), ObservedUpdate{})
 
-	if params.Source.Valid || params.InstalledVersion.Valid || params.LatestVersion.Valid ||
+	if params.UpdateAvailable.Valid || params.UpdateCheckedVersion.Valid || params.Source.Valid || params.InstalledVersion.Valid || params.LatestVersion.Valid ||
 		params.LastCheckedAt.Valid || params.LastError.Valid || params.LastErrorCode.Valid || params.ManifestDigest.Valid {
 		t.Fatalf("nil fields must become NULL parameters: %+v", params)
 	}
@@ -256,5 +257,13 @@ func TestPostgresStoreStaleSecondsArgument(t *testing.T) {
 		if seen[i] != want[i] {
 			t.Fatalf("seen[%d] = %v, want %v", i, seen[i], want[i])
 		}
+	}
+}
+
+func TestObservedParamsWritesFalseUpdateVerdict(t *testing.T) {
+	available, version := false, "2.9.0"
+	params := observedParams(mustUUID(t, testBotID), testKey(), ObservedUpdate{UpdateAvailable: &available, UpdateCheckedVersion: &version})
+	if !params.UpdateAvailable.Valid || params.UpdateAvailable.Bool || !params.UpdateCheckedVersion.Valid || params.UpdateCheckedVersion.String != version {
+		t.Fatalf("false verdict became NULL: %+v", params)
 	}
 }

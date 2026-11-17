@@ -124,17 +124,14 @@ export function sortDependencies<T extends DependencyItem>(items: T[], nameOf: (
 }
 
 /**
- * Installed row whose last upstream check reported a version other than the
- * copy in effect. The Server pins nothing, so the rule is the same for every
+ * Installed row whose last upstream check explicitly reported an update for
+ * the copy in effect. The Server pins nothing, so the rule is the same for every
  * dependency: the check-update result is the only source of "newer".
  */
 export function dependencyUpdateAvailable(
   item: Pick<DependencyItem, 'status' | 'update_available' | 'latest_version' | 'installed_version'>,
 ): boolean {
-  if (item.status !== 'installed') return false
-  if (item.update_available === true) return true
-  const latest = formatDependencyVersion(item.latest_version)
-  return !!latest && latest !== formatDependencyVersion(item.installed_version)
+  return item.status === 'installed' && item.update_available === true
 }
 
 /**

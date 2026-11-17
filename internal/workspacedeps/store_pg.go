@@ -131,6 +131,7 @@ func (s *postgresStore) FinishOperation(ctx context.Context, key InstallationKey
 	row, err := s.q.FinishBotDependencyOperation(ctx, dbsqlc.FinishBotDependencyOperationParams{
 		BotID: botID, DependencyID: key.DependencyID, OperationID: operationID,
 		Source: terminal.Source, Status: string(terminal.Status), InstalledVersion: terminal.InstalledVersion,
+		UpdateAvailable: terminal.UpdateAvailable, UpdateCheckedVersion: terminal.UpdateCheckedVersion,
 		LatestVersion: terminal.LatestVersion, LastCheckedAt: nullableTimestamptz(terminal.LastCheckedAt), LastErrorCode: terminal.LastErrorCode,
 		ManifestDigest: terminal.ManifestDigest, SourceUrl: terminal.SourceURL, RegistryID: terminal.RegistryID,
 		DefinitionRevision: terminal.DefinitionRevision,
@@ -193,14 +194,16 @@ func (s *postgresStore) Delete(ctx context.Context, key InstallationKey) error {
 // it is; a non-nil pointer — including a pointer to "" — writes the value.
 func observedParams(botID pgtype.UUID, key InstallationKey, upd ObservedUpdate) dbsqlc.UpdateBotDependencyInstallationObservedParams {
 	return dbsqlc.UpdateBotDependencyInstallationObservedParams{
-		Source:           nullableText(upd.Source),
-		InstalledVersion: nullableText(upd.InstalledVersion),
-		LatestVersion:    nullableText(upd.LatestVersion),
-		LastCheckedAt:    nullableTimestamptz(upd.LastCheckedAt),
-		LastError:        nullableText(upd.LastError),
-		LastErrorCode:    nullableText(upd.LastErrorCode),
-		ManifestDigest:   nullableText(upd.ManifestDigest),
-		SourceUrl:        nullableText(upd.SourceURL), RegistryID: nullableText(upd.RegistryID), DefinitionRevision: nullableText(upd.DefinitionRevision),
+		Source:               nullableText(upd.Source),
+		InstalledVersion:     nullableText(upd.InstalledVersion),
+		LatestVersion:        nullableText(upd.LatestVersion),
+		UpdateAvailable:      nullableBool(upd.UpdateAvailable),
+		UpdateCheckedVersion: nullableText(upd.UpdateCheckedVersion),
+		LastCheckedAt:        nullableTimestamptz(upd.LastCheckedAt),
+		LastError:            nullableText(upd.LastError),
+		LastErrorCode:        nullableText(upd.LastErrorCode),
+		ManifestDigest:       nullableText(upd.ManifestDigest),
+		SourceUrl:            nullableText(upd.SourceURL), RegistryID: nullableText(upd.RegistryID), DefinitionRevision: nullableText(upd.DefinitionRevision),
 		BotID: botID,
 
 		DependencyID: key.DependencyID,
@@ -251,15 +254,17 @@ func installationFromRow(row dbsqlc.BotDependencyInstallation) Installation {
 		OperationID: row.OperationID,
 		BotID:       uuidString(row.BotID),
 
-		DependencyID:     row.DependencyID,
-		Source:           row.Source,
-		Status:           Status(row.Status),
-		InstalledVersion: row.InstalledVersion,
-		LatestVersion:    row.LatestVersion,
-		LastError:        row.LastError,
-		LastErrorCode:    row.LastErrorCode,
-		ManifestDigest:   row.ManifestDigest,
-		SourceURL:        row.SourceUrl, RegistryID: row.RegistryID, DefinitionRevision: row.DefinitionRevision,
+		DependencyID:         row.DependencyID,
+		Source:               row.Source,
+		Status:               Status(row.Status),
+		InstalledVersion:     row.InstalledVersion,
+		LatestVersion:        row.LatestVersion,
+		UpdateAvailable:      row.UpdateAvailable,
+		UpdateCheckedVersion: row.UpdateCheckedVersion,
+		LastError:            row.LastError,
+		LastErrorCode:        row.LastErrorCode,
+		ManifestDigest:       row.ManifestDigest,
+		SourceURL:            row.SourceUrl, RegistryID: row.RegistryID, DefinitionRevision: row.DefinitionRevision,
 		CreatedAt: db.TimeFromPg(row.CreatedAt),
 		UpdatedAt: db.TimeFromPg(row.UpdatedAt),
 	}
@@ -275,6 +280,13 @@ func uuidString(id pgtype.UUID) string {
 		return ""
 	}
 	return id.String()
+}
+
+func nullableBool(value *bool) pgtype.Bool {
+	if value == nil {
+		return pgtype.Bool{}
+	}
+	return pgtype.Bool{Bool: *value, Valid: true}
 }
 
 func nullableText(value *string) pgtype.Text {
