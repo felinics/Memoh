@@ -85,8 +85,8 @@ export function installMinimapSurface(monaco: MonacoApi, colorMode: string, colo
 }
 
 // Call after the root color mode / scheme attributes have settled and before
-// switching the editor theme. Registering the active theme again makes Monaco
-// repaint with it, so no separate `setTheme` is needed.
+// switching the editor theme: every theme is registered again with the new
+// surface, so the `setTheme` that follows applies a theme that already has it.
 export function syncMinimapSurface(colorMode: string, colorScheme: string): void {
   if (!defineThemeOnMonaco) return
   const surface = resolveEditorSurfaceHex(colorMode, colorScheme)

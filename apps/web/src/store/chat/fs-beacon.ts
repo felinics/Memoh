@@ -19,8 +19,7 @@ export type FsToolKind = 'write' | 'edit' | 'apply_patch' | 'exec'
 
 // Rich metadata for fs-mutating tool calls that landed on a known absolute
 // path. Stored per-path so the file viewer can show context (which agent, when,
-// what was written) and so the Compare flow can diff against the agent's
-// content without an extra round-trip.
+// what was written).
 export interface FsChangeEvent {
   at: number
   path: string
@@ -47,9 +46,9 @@ export function createFsChangeBeacon({ currentBotId, sessionId }: FsChangeBeacon
   const fsChangedAt = ref(0)
   const lastFsChange = ref<FsChangeBatch | null>(null)
   // Most recent rich event per absolute path. Powers the file-viewer chip's
-  // "who did what" context and the Compare view's diff baseline. Wildcard
-  // events (exec / apply_patch / relative paths) are intentionally absent —
-  // those still fire fsChangedAt but contribute no per-path metadata.
+  // "who did what" context. Wildcard events (exec / apply_patch / relative
+  // paths) are intentionally absent — those still fire fsChangedAt but
+  // contribute no per-path metadata.
   const lastFsEvents = ref<Map<string, FsChangeEvent>>(new Map())
   const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'exec'])
   const FS_CHANGED_DEBOUNCE_MS = 150

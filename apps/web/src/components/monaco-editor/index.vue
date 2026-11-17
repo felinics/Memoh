@@ -260,6 +260,8 @@ onBeforeUnmount(() => {
   cleanupEditor()
 })
 
+// After the DOM update, so the host is displayed again and has its real size
+// by the time the editor measures it.
 watch(() => props.active, (active) => {
   if (!active) return
   getEditorView()?.layout()
@@ -267,7 +269,7 @@ watch(() => props.active, (active) => {
     themeDirtyWhileInactive = false
     scheduleThemeSync()
   }
-})
+}, { flush: 'post' })
 
 watch(() => props.modelValue, (newVal) => {
   const editor = getEditorView()

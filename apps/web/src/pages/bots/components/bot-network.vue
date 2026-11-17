@@ -319,7 +319,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
 } from '@felinic/ui'
 import { SquarePen, RefreshCw } from 'lucide-vue-next'
-import { reactive, computed, watch, nextTick, ref } from 'vue'
+import { reactive, computed, defineAsyncComponent, watch, nextTick, ref } from 'vue'
 import { ConfirmPopover, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
@@ -338,7 +338,11 @@ import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
-import MonacoEditor from '@/components/monaco-editor/index.vue'
+import { withStylesheetRecovery } from '@/lib/chunk-load-error'
+
+// The editor only appears inside a dialog. Loading it on demand keeps its
+// ~700 KB out of this page, which the chat page prefetches while idle.
+const MonacoEditor = defineAsyncComponent(withStylesheetRecovery(() => import('@/components/monaco-editor/index.vue').then(m => m.default)))
 
 const props = defineProps<{
   botId: string

@@ -1,7 +1,8 @@
 <template>
   <DockPanelFrame editor-surface>
+    <!-- A restored background tab loads nothing until it is first shown. -->
     <PanePlaceholder
-      v-if="loading"
+      v-if="loading || !hasActivated"
       loading
     >
       {{ t('common.loading') }}
@@ -33,6 +34,7 @@
       :blob="documentBlob"
       :kind="documentKind"
       :filename="name"
+      :active="visible"
     >
       <template
         v-if="renderUrl"
@@ -104,6 +106,7 @@ const props = defineProps<{
 const { t } = useI18n()
 
 const visible = usePanelVisible(props.params.api)
+const hasActivated = ref(visible.value)
 
 const name = computed(() => props.params.params.name ?? '')
 const isText = computed(() => isTextFile(name.value))
@@ -192,6 +195,10 @@ watch(assetIdentityKey, () => {
   loading.value = false
   if (visible.value) void loadAsset()
 }, { immediate: true })
-watch(visible, (isVisible) => { if (isVisible) void loadAsset() })
+watch(visible, (isVisible) => {
+  if (!isVisible) return
+  hasActivated.value = true
+  void loadAsset()
+})
 onBeforeUnmount(() => { activeLoadController?.abort(); documentBlob.value = null })
 </script>

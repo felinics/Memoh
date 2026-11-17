@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { File } from 'lucide-vue-next'
 import { PanePlaceholder } from '@felinic/ui'
 import { DOCX_PREVIEW_MAX_BYTES, formatFileSize, type DocumentPreviewKind } from './utils'
 import { DOCX_EXTERNAL_LINK_MESSAGE_TYPE, normalizeSafeExternalHref, renderDocxBlobToSrcdoc } from './docx-sandbox'
 
-const props = defineProps<{ blob: Blob, kind: DocumentPreviewKind, filename: string }>()
+const props = withDefaults(defineProps<{
+  blob: Blob
+  kind: DocumentPreviewKind
+  filename: string
+  // False while the panel showing this preview is hidden. Converting a DOCX is
+  // expensive, so a document that changes meanwhile is converted once the
+  // preview is shown again, not for every change in the background.
+  active?: boolean
+}>(), { active: true })
 const { t } = useI18n()
 const channelToken = typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
 
@@ -16,8 +24,7 @@ const docxLoading = ref(false)
 const docxError = ref<'too-large' | 'invalid' | null>(null)
 const docxIframeRef = ref<HTMLIFrameElement | null>(null)
 let renderGeneration = 0
-let isDeactivated = false
-let pendingRenderWhileDeactivated = false
+let renderPendingWhileInactive = false
 
 function revokePdfUrl() {
   if (!pdfUrl.value) return
@@ -38,7 +45,7 @@ function handleFrameMessage(event: MessageEvent) {
 }
 
 async function syncPreview() {
-  if (isDeactivated && props.kind === 'docx') { pendingRenderWhileDeactivated = true; return }
+  if (!props.active && props.kind === 'docx') { renderPendingWhileInactive = true; return }
   const generation = ++renderGeneration
   if (props.kind === 'pdf') {
     docxSrcdoc.value = ''
@@ -61,11 +68,9 @@ async function syncPreview() {
 
 watch([() => props.blob, () => props.kind], () => { void syncPreview() }, { immediate: true })
 onMounted(() => window.addEventListener('message', handleFrameMessage))
-onActivated(() => {
-  isDeactivated = false
-  if (pendingRenderWhileDeactivated) { pendingRenderWhileDeactivated = false; void syncPreview() }
+watch(() => props.active, (active) => {
+  if (active && renderPendingWhileInactive) { renderPendingWhileInactive = false; void syncPreview() }
 })
-onDeactivated(() => { isDeactivated = true })
 onBeforeUnmount(() => { renderGeneration++; window.removeEventListener('message', handleFrameMessage); revokePdfUrl() })
 </script>
 

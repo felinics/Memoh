@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, defineComponent, h, nextTick, ref } from 'vue'
+import { createApp, h, nextTick, ref } from 'vue'
 import { createPinia } from 'pinia'
 import { PiniaColada, useQueryCache } from '@pinia/colada'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -74,7 +74,7 @@ describe('createContainerFileStatTracker', () => {
   it('keeps asking for a read until one is locked, and always for a directory', () => {
     const tracker = createContainerFileStatTracker()
     tracker.recordSync(10, 20_000)
-    expect(tracker.observe({ isDir: true, size: 10, mode: 'drwxr-xr-x', modTime: '1970-01-01T00:00:01Z' }, 0)).toBe('read')
+    expect(tracker.observe({ isDir: true, size: 10, modTime: '1970-01-01T00:00:01Z' }, 0)).toBe('read')
 
     const updated = file(25, '1970-01-01T00:00:15Z')
     expect(tracker.observe(updated, 0)).toBe('skip')
@@ -90,6 +90,21 @@ describe('createContainerFileStatTracker', () => {
     expect(tracker.observe(file(10, '1970-01-01T00:00:15Z'), 0)).toBe('read')
   })
 })
+
+// Two panels showing the same file: each renders the content its own query holds.
+function mountTwoConsumers(useQueryInPanel: () => ReturnType<typeof useContainerTextFileQuery>) {
+  const Consumer = {
+    setup() {
+      const query = useQueryInPanel()
+      return () => h('p', query.data.value?.content ?? '')
+    },
+  }
+  const host = document.createElement('div')
+  const app = createApp({ setup: () => () => h('div', [h(Consumer), h(Consumer)]) })
+  app.use(createPinia()).use(PiniaColada)
+  app.mount(host)
+  return { app, host }
+}
 
 describe('useContainerTextFileQuery', () => {
   beforeEach(() => {
@@ -111,20 +126,10 @@ describe('useContainerTextFileQuery', () => {
 
     const visible = ref(true)
     let cache!: ReturnType<typeof useQueryCache>
-    const Consumer = defineComponent({
-      setup() {
-        cache = useQueryCache()
-        const query = useContainerTextFileQuery('bot-1', '/data/doc.md', { visible })
-        return () => h('p', query.data.value?.content ?? '')
-      },
+    const { app, host } = mountTwoConsumers(() => {
+      cache = useQueryCache()
+      return useContainerTextFileQuery('bot-1', '/data/doc.md', { visible })
     })
-
-    const host = document.createElement('div')
-    const app = createApp({
-      setup: () => () => h('div', [h(Consumer), h(Consumer)]),
-    })
-    app.use(createPinia()).use(PiniaColada)
-    app.mount(host)
 
     await vi.waitFor(() => {
       expect(host.querySelectorAll('p')[0]?.textContent).toBe('# v1')
@@ -157,16 +162,7 @@ describe('useContainerTextFileQuery', () => {
     })
     sdk.stat.mockResolvedValue(stat(4, '1970-01-01T00:00:01Z'))
 
-    const Consumer = defineComponent({
-      setup() {
-        const query = useContainerTextFileQuery('bot-1', '/data/doc.md')
-        return () => h('p', query.data.value?.content ?? '')
-      },
-    })
-    const host = document.createElement('div')
-    const app = createApp({ setup: () => () => h('div', [h(Consumer), h(Consumer)]) })
-    app.use(createPinia()).use(PiniaColada)
-    app.mount(host)
+    const { app, host } = mountTwoConsumers(() => useContainerTextFileQuery('bot-1', '/data/doc.md'))
     await vi.advanceTimersByTimeAsync(0)
     expect(sdk.read).toHaveBeenCalledTimes(1)
 

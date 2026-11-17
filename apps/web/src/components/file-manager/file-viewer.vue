@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import type * as Monaco from 'monaco-editor'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
@@ -14,7 +14,6 @@ import {
   type ContainerTextFileSnapshot,
 } from './use-container-text-file'
 import {
-  canApplyExternalReload,
   detectSaveConflict,
   deriveChipContext,
   fileMetadataFingerprint,
@@ -30,12 +29,11 @@ import { File, FileX, Download, RefreshCw, GitCompare, X } from 'lucide-vue-next
 import { Button } from '@felinic/ui'
 import {
   getBotsByBotIdContainerFs,
-  getBotsByBotIdContainerFsRead,
   postBotsByBotIdContainerFsWrite,
   getBotsByBotIdContainerFsDownload,
 } from '@memohai/sdk'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { apiErrorStatus, resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import MonacoDiff from '@/components/monaco-editor/diff.vue'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
@@ -102,18 +100,31 @@ const compareDiskRevision = ref('')
 // conflictState='compare'. Reset on every successful openCompare(), on path
 // change, and on exit.
 const compareStale = ref(false)
-let compareController: AbortController | null = null
+// Bumped to drop the result of a Compare read that is no longer wanted.
+let compareRequest = 0
+// The disk revision last seen to differ from `baseRevision` without being
+// applied (unsaved edits, or Compare open). Non-empty means a normal save would
+// overwrite a change the user has not accepted.
 const observedExternalRevision = ref('')
 const binaryMetadataFingerprint = ref('')
-const pendingExternalRefresh = ref(false)
+// A reload that was skipped or cut short because the panel was hidden; it runs
+// when the panel is shown again.
+let pendingExternalRefresh = false
+// Set when a read or stat of the text file failed. The next successful read
+// then also clears the "deleted" / "couldn't reload" notice, even when it
+// returns the revision the editor already holds.
+let diskUnreadable = false
+// Identifies the latest read this viewer started, so an overtaken one neither
+// ends the loading state nor applies its result.
+let textReadToken = 0
+// The next disk content applied replaces the editor content unconditionally.
+let forceApplyNextRead = false
 // Scroll / cursor / folding of the editor, handed back when it is created again
 // after being unmounted in the background. Deliberately not reactive: it changes
 // on every scroll event and is only read at that moment, so tracking it would
 // re-render this component for each one.
 const savedEditorViewState: { current: Monaco.editor.ICodeEditorViewState | null } = { current: null }
 let externalPollController: AbortController | null = null
-let isKeepAliveDeactivated = false
-let deferredDocumentReloadOnActivate = false
 // Stable ids so the chip buttons can aria-describedby the relevant inline
 // message span, giving keyboard / screen-reader users the "why is this here"
 // context. The compare-toolbar Refresh button uses the staleNotice id by the
@@ -138,10 +149,11 @@ const documentKind = computed(() => getDocumentPreviewKind(filename.value))
 const isDocument = computed(() => documentKind.value !== null)
 const isDirty = computed(() => content.value !== originalContent.value
   || (savingContent.value !== null && content.value !== savingContent.value))
-const editorPinned = computed(() => isDirty.value || conflictState.value !== 'none')
+// Only unsaved edits keep a hidden editor out of the capped pool: their undo
+// history cannot be rebuilt. A clean editor showing a notice can.
 const editorRetained = useCleanEditorRetention(
   () => props.visible && isText.value,
-  editorPinned,
+  isDirty,
 )
 // The first load shows a full-area spinner instead; afterwards the editor stays
 // mounted through reloads so content swaps in place.
@@ -218,58 +230,57 @@ watch(isDirty, (dirty) => {
   emit('update:dirty', dirty)
 }, { immediate: true })
 
-// One in-flight read at a time per viewer; a new load aborts the old one so a
-// slower stale response can't overwrite newer content when fsChangedAt fires
-// in bursts.
+// One in-flight image / document download at a time per viewer; a new load
+// aborts the old one so a slower stale response can't overwrite newer content
+// when fsChangedAt fires in bursts.
 let activeReadController: AbortController | null = null
-
-function isHttpStatus(error: unknown, status: number): boolean {
-  const maybe = error as { status?: unknown; response?: { status?: unknown } } | null | undefined
-  return maybe?.status === status || maybe?.response?.status === status
-}
 
 // Force the chip back into view on a terminal disk-state transition (delete /
 // stale read). Tears down any active Compare so the user isn't reviewing a diff
 // against bytes that no longer exist.
 function dropToChipForBadDiskState() {
-  compareController?.abort()
-  compareController = null
+  compareRequest++
   compareDiskContent.value = ''
   compareDiskRevision.value = ''
   compareStale.value = false
   conflictState.value = 'chip'
 }
 
-function notePolledExternalRevision(revision: string) {
-  if (observedExternalRevision.value === revision) return
-  observedExternalRevision.value = revision
-  chatStore.markFsChanged(filePath.value)
-}
-
-// Text files are watched through the shared per-file query: one stat poll and
-// one read per external change, no matter how many panels show the file. This
-// viewer only reacts to what lands in the cache; its own loads and saves are
-// published there too (syncContainerTextFileCache), and arrive back here with
-// the revision it already holds.
+// A text file's content reaches this viewer through one channel: the shared
+// per-file query. Its poll (one stat per interval, one read per external
+// change, shared by every panel showing the file), this viewer's own reads
+// (first load, agent-tool notifications, Reload, Compare) and its saves all end
+// up as the query's state, and `reconcileText` is the only place that decides
+// what that state means for the editor.
 const textQuery = useContainerTextFileQuery(() => props.botId, filePath, {
   visible: () => props.visible,
-  enabled: () => isText.value && loaded.value,
+  enabled: isText,
 })
 
-function applyDiskSnapshot(snapshot: ContainerTextFileSnapshot) {
-  const currentComparisonRevision = conflictState.value === 'compare' && compareDiskRevision.value
-    ? compareDiskRevision.value
-    : baseRevision.value
-  const action = resolvePolledTextChange({
-    loaded: loaded.value,
-    loading: loading.value,
-    saving: saving.value,
-    currentRevision: currentComparisonRevision,
-    nextRevision: snapshot.revision,
-    isDirty: isDirty.value,
-    conflictState: conflictState.value,
-  })
-  if (action === 'ignore') return
+function applyDiskSnapshot(snapshot: ContainerTextFileSnapshot, force: boolean) {
+  const recovered = diskUnreadable
+  diskUnreadable = false
+  const action = force
+    ? 'apply'
+    : resolvePolledTextChange({
+        loaded: true,
+        loading: false,
+        saving: false,
+        currentRevision: conflictState.value === 'compare' ? compareDiskRevision.value : baseRevision.value,
+        nextRevision: snapshot.revision,
+        isDirty: isDirty.value,
+        conflictState: conflictState.value,
+      })
+  if (action === 'ignore') {
+    // The disk holds the revision the editor is based on again: a failed read
+    // or stat recovered, or a deleted file was recreated with the same content.
+    if (recovered) {
+      diskState.value = 'available'
+      observedExternalRevision.value = ''
+      if (conflictState.value === 'chip') conflictState.value = 'none'
+    }
+    return
+  }
   if (action === 'apply') {
     content.value = snapshot.content
     originalContent.value = snapshot.content
@@ -280,7 +291,7 @@ function applyDiskSnapshot(snapshot: ContainerTextFileSnapshot) {
     conflictState.value = 'none'
     return
   }
-  notePolledExternalRevision(snapshot.revision)
+  observedExternalRevision.value = snapshot.revision
   diskState.value = 'available'
   if (action === 'mark-compare-stale') {
     compareStale.value = true
@@ -290,6 +301,7 @@ function applyDiskSnapshot(snapshot: ContainerTextFileSnapshot) {
 }
 
 function markDiskUnreadable(error: unknown) {
+  diskUnreadable = true
   if (isContainerFileNotFound(error)) {
     diskState.value = 'deleted'
     observedExternalRevision.value = 'deleted'
@@ -299,21 +311,64 @@ function markDiskUnreadable(error: unknown) {
   dropToChipForBadDiskState()
 }
 
+// Brings the editor in line with the query's current state. Safe to call at any
+// time: it does nothing until the first load has finished, and while a read
+// this viewer started or a save of this file is in flight; both call it again
+// when they end. (`saving` itself can still belong to the previously shown
+// file; `savingContent` is cleared on a switch.)
+function reconcileText() {
+  if (!isText.value || !loaded.value || loading.value || savingContent.value !== null) return
+  const force = forceApplyNextRead
+  forceApplyNextRead = false
+  const error = textQuery.error.value ?? textQuery.pollError.value
+  if (error) {
+    markDiskUnreadable(error)
+    return
+  }
+  const snapshot = textQuery.data.value
+  if (snapshot) applyDiskSnapshot(snapshot, force)
+}
+
 watch(
-  [() => textQuery.data.value, () => props.botId, filePath] as const,
-  ([snapshot, botId, path], [, previousBotId, previousPath]) => {
+  [() => textQuery.data.value, () => textQuery.error.value, textQuery.pollError, () => props.botId, filePath] as const,
+  ([, , , botId, path], [, , , previousBotId, previousPath]) => {
     // Switching files swaps in the new file's cache entry; that is handled by
-    // the load below, not as an external change to the previous file.
+    // the load the switch starts, not as an external change to the previous file.
     if (botId !== previousBotId || path !== previousPath) return
-    if (snapshot && isText.value) applyDiskSnapshot(snapshot)
+    reconcileText()
   },
 )
 
-watch([() => textQuery.error.value, textQuery.pollError], ([readError, statError]) => {
-  const error = readError ?? statError
-  if (!error || !isText.value || !loaded.value || loading.value || saving.value) return
-  markDiskUnreadable(error)
-})
+// Reads the text file through the shared query and reports whether this is
+// still the read the viewer is waiting for. A newer read, or a switch to
+// another file, takes over from it.
+async function readTextFromDisk(): Promise<boolean> {
+  const generation = fileGeneration
+  const token = ++textReadToken
+  loading.value = true
+  // On first open the query may have just started reading the file itself;
+  // join that read. Otherwise always read again, so the editor never opens on
+  // a copy that was cached while no panel was watching the file.
+  await (!loaded.value && textQuery.isLoading.value ? textQuery.refresh() : textQuery.refetch())
+  if (generation !== fileGeneration || token !== textReadToken) return false
+  loading.value = false
+  return true
+}
+
+// `forceApply` replaces the editor content with the disk content even over
+// unsaved edits (the user chose Reload); the first load always does. The
+// request stays pending until a read is actually applied, so it survives being
+// overtaken by another read or held back by a save.
+async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
+  if (options.forceApply || !loaded.value) forceApplyNextRead = true
+  if (!(await readTextFromDisk())) return
+  loaded.value = true
+  reconcileText()
+  const error = textQuery.error.value
+  if (error && options.notifyOnError !== false && !isContainerFileNotFound(error)) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
+  }
+}
 
 async function pollBinaryFile(signal: AbortSignal) {
   const { data } = await getBotsByBotIdContainerFs({
@@ -342,8 +397,7 @@ async function pollBinaryFile(signal: AbortSignal) {
 }
 
 async function pollExternalBinary() {
-  if (isKeepAliveDeactivated) return
-  if (!props.botId || (!isImage.value && !isDocument.value) || !loaded.value || loading.value || externalPollController) return
+  if (!props.visible || !props.botId || (!isImage.value && !isDocument.value) || !loaded.value || loading.value || externalPollController) return
 
   const controller = new AbortController()
   externalPollController = controller
@@ -351,7 +405,7 @@ async function pollExternalBinary() {
     await pollBinaryFile(controller.signal)
   } catch (error) {
     if (controller.signal.aborted) return
-    if (isHttpStatus(error, 404)) {
+    if (isContainerFileNotFound(error)) {
       cleanupImageUrl()
       documentBlob.value = null
       documentOversizedBytes.value = null
@@ -376,7 +430,7 @@ useVisiblePoll(pollExternalBinary, EXTERNAL_FILE_POLL_MS, {
 
 function applyReadError(error: unknown, notifyOnError?: boolean) {
   loaded.value = true
-  if (isHttpStatus(error, 404)) {
+  if (isContainerFileNotFound(error)) {
     diskState.value = 'deleted'
     dropToChipForBadDiskState()
     return
@@ -394,62 +448,6 @@ function markBinaryLoaded(size?: number) {
   loaded.value = true
   diskState.value = 'available'
   if (conflictState.value !== 'compare') conflictState.value = 'none'
-}
-
-async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
-  activeReadController?.abort()
-  const controller = new AbortController()
-  activeReadController = controller
-  const contentAtRequestStart = content.value
-  const originalContentAtRequestStart = originalContent.value
-  loading.value = true
-  try {
-    const { data } = await getBotsByBotIdContainerFsRead({
-      path: { bot_id: props.botId },
-      query: { path: filePath.value },
-      signal: controller.signal,
-      throwOnError: true,
-    })
-    if (controller.signal.aborted) return
-    const nextContent = data.content ?? ''
-    const nextRevision = data.revision ?? ''
-    const nextSize = data.size ?? utf8ByteLength(nextContent)
-    syncContainerTextFileCache(queryCache, props.botId, filePath.value, {
-      content: nextContent,
-      revision: nextRevision,
-      size: nextSize,
-    })
-    if (!canApplyExternalReload({
-      contentAtRequestStart,
-      originalContentAtRequestStart,
-      currentContent: content.value,
-      currentOriginalContent: originalContent.value,
-      force: options.forceApply,
-    })) {
-      // The GET succeeded — disk is reachable. Clear any prior 'stale' so the
-      // chip stops claiming reloadFailed; the dirty buffer is left untouched.
-      diskState.value = 'available'
-      if (conflictState.value === 'none') conflictState.value = 'chip'
-      return
-    }
-    content.value = nextContent
-    originalContent.value = content.value
-    baseRevision.value = nextRevision
-    observedExternalRevision.value = ''
-    lastLoadedAt.value = Date.now()
-    loaded.value = true
-    diskState.value = 'available'
-    // Don't drop the user out of an open Compare; only clear the chip surface.
-    if (conflictState.value !== 'compare') conflictState.value = 'none'
-  } catch (error) {
-    if (controller.signal.aborted) return
-    applyReadError(error, options.notifyOnError)
-  } finally {
-    if (activeReadController === controller) {
-      activeReadController = null
-      loading.value = false
-    }
-  }
 }
 
 async function loadImageBlob(options: { notifyOnError?: boolean } = {}) {
@@ -537,7 +535,7 @@ async function handleSave(force = false): Promise<boolean> {
   // explicitly chose (or the ORPHAN-recreate path where there's no concurrent
   // disk version).
   if (!behavior.bypassConflictGuard) {
-    const hasConflict = detectSaveConflict({
+    const hasConflict = observedExternalRevision.value !== '' || detectSaveConflict({
       lastFsChangeAt: fsChangedAt.value,
       lastLoadedAt: lastLoadedAt.value,
       affects: chatStore.affectsPath(filePath.value),
@@ -599,22 +597,22 @@ async function handleSave(force = false): Promise<boolean> {
       if (conflictState.value === 'compare') compareStale.value = true
       else conflictState.value = 'chip'
     } else {
-      const savedAt = Date.now()
-      const savedSize = utf8ByteLength(snapshot.content)
-      lastLoadedAt.value = savedAt
+      lastLoadedAt.value = Date.now()
       conflictState.value = 'none'
-      syncContainerTextFileCache(queryCache, snapshot.botId, snapshot.path, {
-        content: snapshot.content,
-        revision: baseRevision.value,
-        size: savedSize,
-      })
     }
+    // Other panels showing this file get the saved content at once, and a read
+    // that was already in flight can no longer bring back the pre-save bytes.
+    syncContainerTextFileCache(queryCache, snapshot.botId, snapshot.path, {
+      content: snapshot.content,
+      revision: baseRevision.value,
+      size: utf8ByteLength(snapshot.content),
+    })
     toast.success(t('bots.files.saveSuccess'))
     emit('saved')
     return !isDirty.value
   } catch (error) {
     if (snapshot.generation !== fileGeneration) return false
-    if (isHttpStatus(error, 409)) {
+    if (apiErrorStatus(error) === 409) {
       // A 409 means our baseline is stale; bumping the disk state surfaces
       // "Try again" (Reload) as the chip's primary affordance and prevents a
       // Cmd+S loop from re-POSTing with the same stale expectedRevision.
@@ -633,6 +631,8 @@ async function handleSave(force = false): Promise<boolean> {
   } finally {
     if (snapshot.generation === fileGeneration) savingContent.value = null
     saving.value = false
+    // Disk state that arrived during the save was held back; apply it now.
+    reconcileText()
   }
 }
 
@@ -672,8 +672,8 @@ watch([() => props.botId, () => props.file.path], () => {
   // file that's never even been loaded.
   activeReadController?.abort()
   activeReadController = null
-  compareController?.abort()
-  compareController = null
+  compareRequest++
+  loading.value = false
   cleanupImageUrl()
   documentBlob.value = null
   documentOversizedBytes.value = null
@@ -688,8 +688,9 @@ watch([() => props.botId, () => props.file.path], () => {
   lastLoadedAt.value = 0
   observedExternalRevision.value = ''
   binaryMetadataFingerprint.value = ''
-  deferredDocumentReloadOnActivate = false
-  pendingExternalRefresh.value = false
+  pendingExternalRefresh = false
+  diskUnreadable = false
+  forceApplyNextRead = false
   savedEditorViewState.current = null
   loaded.value = false
   if (isText.value) {
@@ -697,10 +698,18 @@ watch([() => props.botId, () => props.file.path], () => {
   } else if (isImage.value) {
     void loadImageBlob()
   } else if (isDocument.value) {
-    if (isKeepAliveDeactivated) deferredDocumentReloadOnActivate = true
-    else void loadDocumentBlob()
+    // A document is only downloaded for a panel that is showing it.
+    if (props.visible) void loadDocumentBlob()
+    else pendingExternalRefresh = true
   }
 }, { immediate: true })
+
+function reloadFromDisk(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
+  if (isText.value) return loadTextContent(options)
+  if (isImage.value) return loadImageBlob(options)
+  if (isDocument.value) return loadDocumentBlob(options)
+  return Promise.resolve()
+}
 
 // Reload the file when the chat agent runs a fs-mutating tool (write/edit/apply_patch/exec)
 // against the same bot AND the change targets this path. Skip if the user is
@@ -723,32 +732,31 @@ watch(fsChangedAt, () => {
     return
   }
   if (!props.visible) {
-    pendingExternalRefresh.value = true
+    // A hidden text file needs no reminder: its stat poll resumes with the
+    // panel and picks the change up.
+    if (!isText.value) pendingExternalRefresh = true
     return
   }
-  pendingExternalRefresh.value = false
-  if (isText.value) void loadTextContent({ notifyOnError: false })
-  else if (isImage.value) void loadImageBlob({ notifyOnError: false })
-  else if (isDocument.value) {
-    if (isKeepAliveDeactivated) {
-      deferredDocumentReloadOnActivate = true
-      return
-    }
-    void loadDocumentBlob({ notifyOnError: false })
-  }
+  void reloadFromDisk({ notifyOnError: false })
 })
 
 watch(() => props.visible, (visible) => {
   if (!visible) {
     externalPollController?.abort()
     externalPollController = null
+    // A hidden panel does not keep downloading a document (up to tens of MB);
+    // the download starts over when the panel is shown again.
+    if (isDocument.value && activeReadController) {
+      activeReadController.abort()
+      activeReadController = null
+      loading.value = false
+      pendingExternalRefresh = true
+    }
     return
   }
-  if (pendingExternalRefresh.value) {
-    pendingExternalRefresh.value = false
-    if (isText.value) void loadTextContent({ notifyOnError: false })
-    else if (isImage.value) void loadImageBlob({ notifyOnError: false })
-    else if (isDocument.value) void loadDocumentBlob({ notifyOnError: false })
+  if (pendingExternalRefresh) {
+    pendingExternalRefresh = false
+    void reloadFromDisk({ notifyOnError: false })
     return
   }
   void pollExternalBinary()
@@ -760,12 +768,9 @@ async function acceptExternalChange() {
   // pointing at the previous snapshot and the new content from this load
   // would render a meaningless diff against itself.
   const wasInCompare = conflictState.value === 'compare'
-  if (isText.value) await loadTextContent({ forceApply: true })
-  else if (isImage.value) await loadImageBlob()
-  else if (isDocument.value) await loadDocumentBlob()
+  await reloadFromDisk({ forceApply: true })
   if (wasInCompare && diskState.value === 'available') {
-    compareController?.abort()
-    compareController = null
+    compareRequest++
     compareDiskContent.value = ''
     compareDiskRevision.value = ''
     compareStale.value = false
@@ -773,72 +778,40 @@ async function acceptExternalChange() {
   }
 }
 
+// The disk side of Compare is always what the disk holds now, read through the
+// shared query, so the diff and the staleness check that follows refer to the
+// same revision.
 async function openCompare() {
   if (!isText.value) return
-  // Abort any in-flight Compare read first so a previously dispatched
-  // fresh-read can't resolve later and clobber the writeContent we're about
-  // to set on the fast path (or this call's own fresh read).
-  compareController?.abort()
-  compareController = null
-  // Prefer the agent's tool-message content — same bytes the server saw, no
-  // extra round trip and immune to "what if disk changed again" races. Fall
-  // back to a fresh read for edit / apply_patch / exec where we don't have the
-  // whole file.
-  const event = fsEvent.value
-  if (event?.writeContent != null) {
-    compareDiskContent.value = event.writeContent
-    compareDiskRevision.value = observedExternalRevision.value
-    compareStale.value = false
-    conflictState.value = 'compare'
+  const request = ++compareRequest
+  const current = await readTextFromDisk()
+  if (request !== compareRequest) return
+  if (!current) return
+  const error = textQuery.error.value
+  const snapshot = textQuery.data.value
+  if (error || !snapshot) {
+    // A missing file falls back to the deleted notice, where "Save to restore"
+    // is reachable; any other failure to the "couldn't reload" notice.
+    reconcileText()
+    if (error && !isContainerFileNotFound(error)) {
+      toast.error(resolveApiErrorMessage(error, t('bots.files.compareLoadFailed')))
+    }
     return
   }
-  const controller = new AbortController()
-  compareController = controller
-  try {
-    const { data } = await getBotsByBotIdContainerFsRead({
-      path: { bot_id: props.botId },
-      query: { path: filePath.value },
-      signal: controller.signal,
-      throwOnError: true,
-    })
-    if (controller.signal.aborted) return
-    compareDiskContent.value = data.content ?? ''
-    compareDiskRevision.value = data.revision ?? ''
-    compareStale.value = false
-    conflictState.value = 'compare'
-  } catch (error) {
-    if (controller.signal.aborted) return
-    if (isHttpStatus(error, 404)) {
-      // The disk version we wanted to diff against is gone. Fall back to the
-      // deleted-chip surface so the "Save to restore" affordance is reachable
-      // instead of leaving the user on the available chip clicking Compare
-      // into the same 404 repeatedly.
-      diskState.value = 'deleted'
-      compareDiskContent.value = ''
-      compareDiskRevision.value = ''
-      compareStale.value = false
-      conflictState.value = 'chip'
-      return
-    }
-    toast.error(resolveApiErrorMessage(error, t('bots.files.compareLoadFailed')))
-  } finally {
-    if (compareController === controller) compareController = null
-  }
+  // Without unsaved edits there is nothing to compare: the disk content has
+  // just been applied and the notice is gone.
+  reconcileText()
+  if (conflictState.value === 'none') return
+  compareDiskContent.value = snapshot.content
+  compareDiskRevision.value = snapshot.revision
+  compareStale.value = false
+  conflictState.value = 'compare'
 }
 
 function exitCompare() {
-  compareController?.abort()
-  compareController = null
+  compareRequest++
   compareStale.value = false
   conflictState.value = 'chip'
-}
-
-async function refreshCompare() {
-  // Re-runs openCompare to re-snapshot the right pane against the latest
-  // tool-message content (or a fresh disk read when no event content is on
-  // hand). Used by the inline "Refresh diff" affordance the toolbar surfaces
-  // when compareStale is true.
-  await openCompare()
 }
 
 // Save on Cmd/Ctrl+S via the shared keyboard layer. Even if a conflict is
@@ -875,28 +848,6 @@ watch(
   { immediate: true },
 )
 
-onActivated(() => {
-  isKeepAliveDeactivated = false
-  if (isDocument.value && (deferredDocumentReloadOnActivate || (!loaded.value && !loading.value))) {
-    deferredDocumentReloadOnActivate = false
-    void loadDocumentBlob({ notifyOnError: false })
-  } else {
-    void pollExternalBinary()
-  }
-})
-
-onDeactivated(() => {
-  isKeepAliveDeactivated = true
-  externalPollController?.abort()
-  externalPollController = null
-  if (isDocument.value && activeReadController) {
-    activeReadController.abort()
-    activeReadController = null
-    loading.value = false
-    deferredDocumentReloadOnActivate = true
-  }
-})
-
 onBeforeUnmount(() => {
   fileGeneration++
   if (nowTickInterval) clearInterval(nowTickInterval)
@@ -904,7 +855,6 @@ onBeforeUnmount(() => {
   externalPollController?.abort()
   externalPollController = null
   activeReadController?.abort()
-  compareController?.abort()
   cleanupImageUrl()
   documentBlob.value = null
 })
@@ -1020,7 +970,7 @@ onBeforeUnmount(() => {
               size="sm"
               class="h-6 px-2 text-xs"
               :aria-describedby="compareStaleId"
-              @click="refreshCompare"
+              @click="openCompare"
             >
               <RefreshCw
                 class="mr-1 size-3"
@@ -1111,6 +1061,7 @@ onBeforeUnmount(() => {
         :blob="documentBlob"
         :kind="documentKind"
         :filename="filename"
+        :active="visible"
       >
         <template #action>
           <Button

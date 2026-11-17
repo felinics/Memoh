@@ -1,9 +1,10 @@
-import { computed, onScopeDispose, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { computed, onScopeDispose, shallowRef, toValue, watch, type MaybeRefOrGetter, type ShallowRef } from 'vue'
 import { useQuery, useQueryCache, type QueryCache } from '@pinia/colada'
 import { getBotsByBotIdContainerFs, getBotsByBotIdContainerFsRead } from '@memohai/sdk'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { apiErrorStatus, isApiErrorCode } from '@/utils/api-error'
+import { fileMetadataFingerprint } from './file-conflict'
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000
 // Workspace `modTime` is serialized as RFC3339 with 1-second resolution, so two
@@ -25,7 +26,7 @@ export interface ContainerTextFileSnapshot {
   size: number
 }
 
-export type StatSample = Pick<HandlersFsFileInfo, 'isDir' | 'size' | 'mode' | 'modTime'>
+export type StatSample = Pick<HandlersFsFileInfo, 'path' | 'isDir' | 'size' | 'modTime'>
 
 export type StatDecision = 'skip' | 'read' | 'read-and-lock'
 
@@ -39,10 +40,6 @@ export function isContainerFileNotFound(error: unknown): boolean {
 
 export function utf8ByteLength(text: string): number {
   return new TextEncoder().encode(text).byteLength
-}
-
-function statFingerprint(stat: StatSample): string {
-  return `${stat.size ?? -1}:${stat.mode ?? ''}:${stat.modTime ?? ''}`
 }
 
 // Decides, from lightweight stats alone, when the file body has to be read
@@ -78,7 +75,7 @@ export function createContainerFileStatTracker() {
     },
     observe(stat: StatSample, now = performance.now()): StatDecision {
       if (stat.isDir) return 'read'
-      const fingerprint = statFingerprint(stat)
+      const fingerprint = fileMetadataFingerprint(stat)
       if (fingerprint === lockedFingerprint) return 'skip'
       if (fingerprint !== candidateFingerprint) {
         // Two stats disagree: the file was written between them, so content
@@ -105,7 +102,7 @@ export function createContainerFileStatTracker() {
       return 'read'
     },
     lock(stat: StatSample) {
-      lockedFingerprint = statFingerprint(stat)
+      lockedFingerprint = fileMetadataFingerprint(stat)
       contentFresh = false
     },
   }
@@ -123,6 +120,11 @@ interface SharedFileWatch {
   // (see syncContainerTextFileCache). A read that was already in flight at
   // that point may carry older bytes and must not replace the synced content.
   syncEpoch: number
+  // A stat that failed for a reason other than "not found". The body may still
+  // be readable, so this is reported separately from the query's own error.
+  // The poll is shared, so its failure is too: whichever consumer's timer ran
+  // the stat, every consumer sees the failure and sees it clear.
+  pollError: ShallowRef<unknown>
 }
 
 const sharedWatches = new Map<string, SharedFileWatch>()
@@ -144,6 +146,7 @@ export function syncContainerTextFileCache(
   if (shared) {
     shared.syncEpoch += 1
     shared.tracker.recordSync(snapshot.size, Date.now(), true)
+    shared.pollError.value = null
   }
   queryCache.setQueryData(containerTextFileQueryKey(botId, path), snapshot)
 }
@@ -164,35 +167,40 @@ export function useContainerTextFileQuery(
   const queryEnabled = computed(() => Boolean(toValue(options.enabled ?? true) && visible.value && botId.value && path.value))
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
 
-  let shared: SharedFileWatch | null = null
+  const shared = shallowRef<SharedFileWatch | null>(null)
   let sharedKey = ''
   let pollController: AbortController | null = null
-  // A stat that failed for a reason other than "not found". The body may still
-  // be readable, so this is reported separately from the query's own error.
-  const pollError = shallowRef<unknown>(null)
+  const pollError = computed(() => shared.value?.pollError.value ?? null)
 
   function releaseShared() {
-    if (!shared) return
-    shared.consumers -= 1
-    if (shared.consumers <= 0) sharedWatches.delete(sharedKey)
-    shared = null
+    const current = shared.value
+    if (!current) return
+    current.consumers -= 1
+    if (current.consumers <= 0) sharedWatches.delete(sharedKey)
+    shared.value = null
     sharedKey = ''
   }
 
   watch([botId, path], ([nextBot, nextPath]) => {
     pollController?.abort()
     pollController = null
-    pollError.value = null
     releaseShared()
     if (!nextBot || !nextPath) return
     sharedKey = sharedWatchKey(nextBot, nextPath)
     let next = sharedWatches.get(sharedKey)
     if (!next) {
-      next = { tracker: createContainerFileStatTracker(), consumers: 0, polling: false, lastPollAt: Number.NEGATIVE_INFINITY, syncEpoch: 0 }
+      next = {
+        tracker: createContainerFileStatTracker(),
+        consumers: 0,
+        polling: false,
+        lastPollAt: Number.NEGATIVE_INFINITY,
+        syncEpoch: 0,
+        pollError: shallowRef<unknown>(null),
+      }
       sharedWatches.set(sharedKey, next)
     }
     next.consumers += 1
-    shared = next
+    shared.value = next
   }, { immediate: true })
 
   watch(queryEnabled, (isEnabled) => {
@@ -232,7 +240,7 @@ export function useContainerTextFileQuery(
 
   useVisiblePoll(
     async () => {
-      const watchAtStart = shared
+      const watchAtStart = shared.value
       // No content yet: the query's first read is about to start or already
       // under way, and a stat now would only trigger a second one.
       if (!watchAtStart || query.isPending.value || query.isLoading.value || watchAtStart.polling) return
@@ -245,7 +253,7 @@ export function useContainerTextFileQuery(
       watchAtStart.lastPollAt = startedAt
       const controller = new AbortController()
       pollController = controller
-      const superseded = () => controller.signal.aborted || shared !== watchAtStart
+      const superseded = () => controller.signal.aborted || shared.value !== watchAtStart
       const epochBeforeStat = watchAtStart.syncEpoch
       try {
         const { data: stat } = await getBotsByBotIdContainerFs({
@@ -255,7 +263,7 @@ export function useContainerTextFileQuery(
           throwOnError: true,
         })
         if (superseded()) return
-        pollError.value = null
+        watchAtStart.pollError.value = null
         // Content was synced while this stat was in flight; the stat may
         // describe the file from before that sync.
         if (watchAtStart.syncEpoch !== epochBeforeStat) return
@@ -270,9 +278,10 @@ export function useContainerTextFileQuery(
       } catch (error) {
         if (superseded()) return
         if (!isContainerFileNotFound(error)) {
-          pollError.value = error
+          watchAtStart.pollError.value = error
           return
         }
+        watchAtStart.pollError.value = null
         watchAtStart.tracker.reset()
         // Surface the deletion through the query once; later polls keep
         // statting so a recreated file is picked up again.

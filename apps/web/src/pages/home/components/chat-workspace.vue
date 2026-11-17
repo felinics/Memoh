@@ -45,7 +45,8 @@ import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
 import { prefetchLater, whenNetworkQuiet } from '@/lib/idle-prefetch'
 import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import PanelChat from './dockview/panel-chat.vue'
-import PanelLoading, { retryPanelLoadKey } from './dockview/panel-loading.vue'
+import PanelLoading from './dockview/panel-loading.vue'
+import { retryPanelLoadKey } from './dockview/panel-load-state.vue'
 import { PanelLoadFailed } from './dockview/lazy-panel-content'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTab from './dockview/workspace-tab.vue'
@@ -153,7 +154,7 @@ function relayoutAfterAncestorTransform(event: TransitionEvent) {
 // Retry button remounts by changing the key, so recovering one panel leaves
 // the others, and any unsaved edits in them, untouched. A chunk removed by a
 // deployment since the page loaded fails on every retry; the failed state
-// also offers a page reload for that (see panel-loading.vue).
+// also offers a page reload for that (see panel-load-state.vue).
 const lazyPanel = (loader: AsyncComponentLoader) => {
   const Panel = defineAsyncComponent({
     loader,
