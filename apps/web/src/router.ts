@@ -6,6 +6,7 @@ import {
 import { toast } from '@felinic/ui'
 import { useUserStore } from '@/store/user'
 import { ensureOnboarding, hasOnboardingInProgress } from '@/router-guards/onboarding'
+import { guardAuthenticatedRoute } from '@/router-guards/return-to'
 import { installBackHistory } from '@/composables/useBackOr'
 import { isChunkLoadError, reloadForChunkLoadError } from '@/lib/chunk-load-error'
 import { showBootFailure } from '@/lib/boot-splash'
@@ -62,36 +63,12 @@ router.beforeEach(async (to) => {
       : { path: '/' }
   }
 
-  const token = localStorage.getItem('token')
-
-  if (to.fullPath === '/login') {
-    return token ? { path: '/' } : true
-  }
-  if (to.path.startsWith('/oauth/')) {
-    return true
-  }
-  if (!token) {
-    return { name: 'Login' }
-  }
-  if (to.meta.adminOnly) {
-    const userStore = useUserStore()
-    if (String(userStore.userInfo.role).toLowerCase() !== 'admin') {
-      return { name: 'bots' }
-    }
-  }
-
-  if (to.path === '/onboarding') {
-    if (hasOnboardingInProgress()) return true
-    const completed = await ensureOnboarding()
-    return completed ? { path: '/' } : true
-  }
-
-  const completed = await ensureOnboarding()
-  if (!completed) {
-    return { path: '/onboarding' }
-  }
-
-  return true
+  return guardAuthenticatedRoute(to, {
+    readToken: () => localStorage.getItem('token'),
+    readUserRole: () => useUserStore().userInfo.role,
+    hasOnboardingInProgress,
+    ensureOnboarding,
+  })
 })
 
 export default router

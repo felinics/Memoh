@@ -74,6 +74,7 @@ import { useRoute, useRouter } from 'vue-router'
 import LoadingButton from '@memohai/web/components/loading-button/index.vue'
 import DotMatrixBg from '@memohai/web/pages/login/components/dot-matrix-bg.vue'
 import { setupApiClient } from '@memohai/web/api-client'
+import { buildLoginRedirect, currentReturnToTarget } from '@memohai/web/router-guards/return-to'
 import { useUserStore } from '@memohai/web/store/user'
 import { LOGIN_ENTRY_ANIMATION_KEY } from '@memohai/web/pages/login/transition'
 import {
@@ -130,7 +131,7 @@ const onSubmit = handleSubmit(async ({ baseUrl }) => {
       baseUrl: result.baseUrl,
       onUnauthorized: () => {
         if (shouldRedirectOnUnauthorized(router.currentRoute?.value?.path)) {
-          void router.replace({ name: 'Login' })
+          void router.replace(buildLoginRedirect(currentReturnToTarget(router)))
         }
       },
     })

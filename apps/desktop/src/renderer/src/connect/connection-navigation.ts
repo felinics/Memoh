@@ -1,3 +1,5 @@
+import { sanitizeReturnTo } from '@memohai/web/router-guards/return-to'
+
 export interface PostConnectNavigationInput {
   changed: boolean
   hasToken: boolean
@@ -18,7 +20,7 @@ export function isCurrentServerProbe(probedBaseUrl: string, currentBaseUrl: stri
 
 export function shouldRedirectOnUnauthorized(currentPath: unknown): boolean {
   const path = typeof currentPath === 'string' ? currentPath : ''
-  return path !== '/connect' && !path.startsWith('/oauth/')
+  return path !== '/login' && path !== '/connect' && !path.startsWith('/oauth/')
 }
 
 export function applyPostConnectSessionCleanup(
@@ -49,10 +51,5 @@ export function decidePostConnectNavigation(
   if (!input.hasToken) {
     return { clearAuth: false, animateLogin: true, destination: { name: 'Login' } }
   }
-  const returnTo = typeof input.returnTo === 'string'
-    && input.returnTo.startsWith('/')
-    && !input.returnTo.startsWith('//')
-    ? input.returnTo
-    : '/'
-  return { clearAuth: false, animateLogin: false, destination: returnTo }
+  return { clearAuth: false, animateLogin: false, destination: sanitizeReturnTo(input.returnTo) }
 }

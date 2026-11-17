@@ -6,6 +6,7 @@ import {
 } from 'vue-router'
 import { createAppRoutes } from '@memohai/web/routes'
 import { ensureOnboarding, hasOnboardingInProgress } from '@memohai/web/router-guards/onboarding'
+import { guardAuthenticatedRoute } from '@memohai/web/router-guards/return-to'
 import { useUserStore } from '@memohai/web/store/user'
 import { installBackHistory } from '@memohai/web/composables/useBackOr'
 
@@ -48,36 +49,12 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
 
   if (to.path === '/connect') return true
 
-  const token = localStorage.getItem('token')
-  if (to.fullPath === '/login') {
-    return token ? { path: '/' } : true
-  }
-  if (to.path.startsWith('/oauth/')) {
-    return true
-  }
-  if (!token) {
-    return { name: 'Login' }
-  }
-  if (to.meta.adminOnly) {
-    const userStore = useUserStore()
-    if (String(userStore.userInfo.role).toLowerCase() !== 'admin') {
-      return { name: 'bots' }
-    }
-  }
-
-  // Onboarding: redirect completed users away, let incomplete users through
-  if (to.path === '/onboarding') {
-    if (hasOnboardingInProgress()) return true
-    const completed = await ensureOnboarding()
-    return completed ? { path: '/' } : true
-  }
-
-  const completed = await ensureOnboarding()
-  if (!completed) {
-    return { path: '/onboarding' }
-  }
-
-  return true
+  return guardAuthenticatedRoute(to, {
+    readToken: () => localStorage.getItem('token'),
+    readUserRole: () => useUserStore().userInfo.role,
+    hasOnboardingInProgress,
+    ensureOnboarding,
+  })
 })
 
 // Dev convenience: reach the component wall from devtools without a URL bar

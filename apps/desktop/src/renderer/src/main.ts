@@ -11,6 +11,7 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import { watchEffect } from 'vue'
 import i18n, { i18nReady } from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
+import { buildLoginRedirect, currentReturnToTarget } from '@memohai/web/router-guards/return-to'
 import { configureProviderIconLoader } from '@memohai/web/components/provider-icon/preload'
 import { installFileDropGuard } from '@memohai/web/lib/file-drop-guard'
 import { appKeyboardCommands, createKeyboardCommandRegistry, type AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
@@ -65,7 +66,7 @@ async function bootstrap() {
     baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     onUnauthorized: () => {
       if (shouldRedirectOnUnauthorized(router.currentRoute?.value?.path)) {
-        void router.replace({ name: 'Login' })
+        void router.replace(buildLoginRedirect(currentReturnToTarget(router)))
       }
     },
   })

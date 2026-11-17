@@ -229,5 +229,8 @@ describe('useUserStore logout & unauthorized cleanup across routes', () => {
     expect(harness.queryCache.getEntries()).toHaveLength(0)
     expect(harness.storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
     expect(harness.router.currentRoute.value.path).toBe('/login')
+    expect(harness.router.currentRoute.value.query).toEqual({
+      return_to: '/settings/profile',
+    })
   })
 })

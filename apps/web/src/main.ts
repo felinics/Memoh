@@ -13,6 +13,7 @@ import { connectBrowserKeyboardShortcutsLive } from './lib/browser-keyboard-shor
 import { selectWebBindings } from './lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from './composables/useKeyboardCommand'
 import { setupApiClient } from './lib/api-client'
+import { buildLoginRedirect, currentReturnToTarget } from './router-guards/return-to'
 import { installFileDropGuard } from './lib/file-drop-guard'
 import { DesktopShellKey } from './lib/desktop-shell'
 import { registerWorkspaceTabCommands } from './pages/home/commands/workspace-tab-commands'
@@ -26,7 +27,11 @@ import { createQueryCachePersistencePlugin, whenQueryCacheRestored } from './lib
 import 'katex/dist/katex.min.css'
 
 setupApiClient({
-  onUnauthorized: () => router.replace({ name: 'Login' }),
+  onUnauthorized: () => {
+    const path = router.currentRoute.value.path
+    if (path === '/login' || path.startsWith('/oauth/')) return
+    void router.replace(buildLoginRedirect(currentReturnToTarget(router)))
+  },
 })
 
 // Before anything can render: an OS file drop that no zone claims would navigate
