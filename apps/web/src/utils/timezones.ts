@@ -52,11 +52,11 @@ export const timezoneOptions: TimezoneOption[] = timezones.map(tz => ({
 // chunks during idle time so it never blocks a frame; falls back to setTimeout
 // where requestIdleCallback is unavailable (older Safari).
 const scheduleIdle: (cb: () => void) => void
-  = typeof window !== 'undefined' && 'requestIdleCallback' in window
+  = 'requestIdleCallback' in window
     ? cb => window.requestIdleCallback(() => cb())
     : cb => setTimeout(cb, 1)
 
-if (typeof window !== 'undefined') {
+{
   let i = 0
   const warmChunk = () => {
     const end = Math.min(i + 40, timezones.length)

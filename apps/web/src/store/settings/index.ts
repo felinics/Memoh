@@ -87,7 +87,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const isDark = computed(() => resolvedColorMode.value === 'dark')
 
   const applyColorScheme = (value: ColorSchemeId) => {
-    if (typeof document === 'undefined') return
     document.documentElement.dataset.colorScheme = value
   }
 
@@ -133,9 +132,7 @@ export const useSettingsStore = defineStore('settings', () => {
     // it — chiefly the CJK font-weight de-emphasis (see :lang(zh) in style.css):
     // CJK glyphs render visually heavier than Latin at the same numeric weight, so
     // Chinese UI needs a lighter rung than English to read at the same density.
-    if (typeof document !== 'undefined') {
-      document.documentElement.lang = value
-    }
+    document.documentElement.lang = value
   }
 
   // Loads a language and registers it with vue-i18n (the same step i18n.ts
@@ -205,7 +202,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   const withViewTransition = (fn: () => void) => {
-    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+    if ('startViewTransition' in document) {
       (document as Document & { startViewTransition: (cb: () => void) => unknown }).startViewTransition(fn)
     } else {
       fn()

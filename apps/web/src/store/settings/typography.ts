@@ -239,8 +239,6 @@ export function applyTypographyVariables(options: {
   uiFontSizePx: number
   codeFontSizePx: number
 }) {
-  if (typeof document === 'undefined') return
-
   const uiSize = normalizeUiFontSizePx(options.uiFontSizePx)
   const codeSize = normalizeCodeFontSizePx(options.codeFontSizePx)
   const uiFamily = normalizeStoredFontFamilyInput(options.uiFontFamily, DEFAULT_UI_FONT_FAMILY)

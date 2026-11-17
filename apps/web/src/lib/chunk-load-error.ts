@@ -31,12 +31,10 @@ function failedStylesheetOf(error: unknown): string | undefined {
 const failedStylesheets = new Set<string>()
 const pendingStylesheets = new Map<string, Promise<void>>()
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('vite:preloadError', (event) => {
-    const href = failedStylesheetOf((event as Event & { payload?: unknown }).payload)
-    if (href) failedStylesheets.add(href)
-  })
-}
+window.addEventListener('vite:preloadError', (event) => {
+  const href = failedStylesheetOf((event as Event & { payload?: unknown }).payload)
+  if (href) failedStylesheets.add(href)
+})
 
 function loadStylesheet(href: string): Promise<void> {
   let pending = pendingStylesheets.get(href)

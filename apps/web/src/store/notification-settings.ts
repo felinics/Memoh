@@ -4,7 +4,7 @@ import { useLocalStorage } from '@vueuse/core'
 
 /** Notification permission belongs to this device; dots and unread cursors are independent. */
 export const useNotificationSettings = defineStore('notification-settings', () => {
-  const desktop = typeof window !== 'undefined' && !!window.api?.desktop?.notify
+  const desktop = !!window.api?.desktop?.notify
   const supported = desktop || (typeof Notification !== 'undefined' && window.isSecureContext)
   const enabled = useLocalStorage('memoh-system-notifications', desktop)
   const permission = ref<NotificationPermission>(typeof Notification === 'undefined' ? 'default' : Notification.permission)

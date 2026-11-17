@@ -237,7 +237,6 @@ async function loadShikiTheme(name: string): Promise<ShikiThemeLike | null> {
 // trip it through a 1px canvas, which yields the actual painted bytes regardless of the
 // CSS color space.
 function resolveSurfaceHex(): string | null {
-  if (typeof document === 'undefined') return null
   const probe = document.createElement('div')
   probe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;background-color:var(--surface-editor)'
   ;(document.body ?? document.documentElement).appendChild(probe)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { BackendCard, Button, DetailPane, PageShell, SectionGroup, SwapTransition } from '@felinic/ui'
 import { getProviderTemplates, getSpeechProviders, getTranscriptionProviders, postSpeechProvidersByIdImportModels, postTranscriptionProvidersByIdImportModels } from '@memohai/sdk'
@@ -9,10 +9,10 @@ import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
 import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
+import { avatarInitials } from '@/composables/useAvatarInitials'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
-import SpeechSetting from '@/pages/speech/components/provider-setting.vue'
-import TranscriptionSetting from '@/pages/transcription/provider-setting.vue'
 import { isTemplateConfigured, providerDraftFromTemplate } from '@/utils/provider-template'
+import AudioProviderSetting, { type TemplateAudioProvider } from './components/audio-provider-setting.vue'
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
@@ -48,16 +48,10 @@ const { data: transcriptionTemplateData, isLoading: transcriptionTemplatesLoadin
   },
 })
 
-type TemplateAudioProvider = AudioSpeechProviderResponse & {
-  provider_template_id?: string
-}
-
 const curTts = ref<TemplateAudioProvider>()
 const curTranscription = ref<TemplateAudioProvider>()
 const optimisticSpeechProvider = ref<TemplateAudioProvider>()
 const optimisticTranscriptionProvider = ref<TemplateAudioProvider>()
-provide('curTtsProvider', curTts)
-provide('curTranscriptionProvider', curTranscription)
 
 type VoiceDetailKind = 'speech' | 'transcription'
 type VoiceDetail = { kind: VoiceDetailKind, provider: TemplateAudioProvider }
@@ -171,9 +165,9 @@ const {
     curTts.value = detail?.kind === 'speech' ? detail.provider : undefined
     curTranscription.value = detail?.kind === 'transcription' ? detail.provider : undefined
   },
-  getRouteValue: detail => `${detail.kind}:${detail.provider.provider_template_id
-    ? `template:${detail.provider.provider_template_id}`
-    : detail.provider.id ?? ''}`,
+  getRouteValue: detail => `${detail.kind}:${detail.provider.id
+    ? detail.provider.id
+    : `template:${detail.provider.provider_template_id ?? ''}`}`,
   isLoading: (routeValue) => {
     if (routeValue.startsWith('speech:template:')) {
       return speechTemplatesLoading.value || speechLoading.value
@@ -214,11 +208,6 @@ const transcriptionListLoading = computed(() =>
   (transcriptionData.value === undefined && transcriptionLoading.value)
   || (transcriptionTemplateData.value === undefined && transcriptionTemplatesLoading.value),
 )
-
-function getInitials(name: string | undefined) {
-  const label = name?.trim() ?? ''
-  return label ? label.slice(0, 2).toUpperCase() : '?'
-}
 
 function openSpeech(provider: TemplateAudioProvider) {
   openDetail({ kind: 'speech', provider })
@@ -316,7 +305,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
                     v-else
                     class="text-xs font-medium text-muted-foreground"
                   >
-                    {{ getInitials(provider.name) }}
+                    {{ avatarInitials(provider.name, '?') }}
                   </span>
                 </span>
               </template>
@@ -338,7 +327,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
                     v-else
                     class="text-xs font-medium text-muted-foreground"
                   >
-                    {{ getInitials(provider.name) }}
+                    {{ avatarInitials(provider.name, '?') }}
                   </span>
                 </span>
               </template>
@@ -395,7 +384,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
                     v-else
                     class="text-xs font-medium text-muted-foreground"
                   >
-                    {{ getInitials(provider.name) }}
+                    {{ avatarInitials(provider.name, '?') }}
                   </span>
                 </span>
               </template>
@@ -417,7 +406,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
                     v-else
                     class="text-xs font-medium text-muted-foreground"
                   >
-                    {{ getInitials(provider.name) }}
+                    {{ avatarInitials(provider.name, '?') }}
                   </span>
                 </span>
               </template>
@@ -460,12 +449,18 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
       :loading="isDetailLoading || !(detailKind === 'speech' ? curTts : curTranscription)"
       @back="closeProvider"
     >
-      <SpeechSetting
+      <AudioProviderSetting
         v-if="detailKind === 'speech' && curTts"
+        key="speech"
+        v-model:provider="curTts"
+        domain="speech"
         @materialized="handleSpeechMaterialized"
       />
-      <TranscriptionSetting
+      <AudioProviderSetting
         v-else-if="detailKind === 'transcription' && curTranscription"
+        key="transcription"
+        v-model:provider="curTranscription"
+        domain="transcription"
         @materialized="handleTranscriptionMaterialized"
       />
     </DetailPane>

@@ -19,7 +19,6 @@ const themeVersion = inject<Ref<number>>('wallThemeVersion', ref(0))
 const resolved = ref('')
 
 function readValue() {
-  if (typeof document === 'undefined') return
   resolved.value = getComputedStyle(document.documentElement)
     .getPropertyValue(cssVar.value)
     .trim()

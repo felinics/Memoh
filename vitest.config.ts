@@ -28,6 +28,12 @@ export default defineConfig({
         },
         test: {
           name: 'web',
+          environment: 'jsdom',
+          environmentOptions: {
+            jsdom: {
+              url: 'http://localhost/',
+            },
+          },
           server: { deps: { inline: ['reka-ui', /@vueuse\//] } },
           globals: true,
           include: ['src/**/*.test.ts'],

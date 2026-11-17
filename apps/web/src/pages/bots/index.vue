@@ -149,7 +149,7 @@ const allBots = computed(() => {
   })
 })
 
-if (import.meta.env.DEV && typeof window !== 'undefined') {
+if (import.meta.env.DEV) {
   window.__previewBots = (n?: number | null) => {
     previewCount.value = n == null ? null : Math.max(0, Math.floor(n))
   }

@@ -22,7 +22,6 @@ export function useMacTrafficReserve(): ComputedRef<boolean> {
   return computed(() =>
     desktopShell
     && !fullScreen.value
-    && typeof navigator !== 'undefined'
     && navigator.platform.toLowerCase().includes('mac'),
   )
 }

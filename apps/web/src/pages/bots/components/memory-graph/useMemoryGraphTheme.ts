@@ -4,7 +4,6 @@ import { readResolvedColor } from './graph-nodes'
 import type { ChartTheme } from './types'
 
 function readColor(token: string, fallback: string, canvas: CanvasRenderingContext2D | null): string {
-  if (typeof document === 'undefined') return fallback
   const probe = document.createElement('span')
   probe.style.color = `var(${token})`
   probe.style.display = 'none'
@@ -17,9 +16,7 @@ function readColor(token: string, fallback: string, canvas: CanvasRenderingConte
 
 export function useMemoryGraphTheme() {
   const isDark = useDark()
-  const colorCanvas = typeof document !== 'undefined'
-    ? document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-    : null
+  const colorCanvas = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
 
   const chartTheme = computed<ChartTheme>(() => {
     void isDark.value
@@ -29,7 +26,7 @@ export function useMemoryGraphTheme() {
         core: readColor('--accent-gray', '#5f5e59', colorCanvas),
         disk: readColor('--accent-gray-border', '#d4d3cf', colorCanvas),
       },
-      fontFamily: typeof document !== 'undefined' ? getComputedStyle(document.body).fontFamily : 'inherit',
+      fontFamily: getComputedStyle(document.body).fontFamily || 'inherit',
       palette: [
         { core: readColor('--accent-blue', '#2383e2', colorCanvas), disk: readColor('--accent-blue-border', '#b6d4f3', colorCanvas) },
         { core: readColor('--accent-green', '#448361', colorCanvas), disk: readColor('--accent-green-border', '#bed9c9', colorCanvas) },

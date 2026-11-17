@@ -10,7 +10,6 @@ const props = defineProps<{
 }>()
 
 function scrollToReference() {
-  if (typeof document === 'undefined') return
   document.getElementById(`fnref-${props.node.id}`)?.scrollIntoView({ behavior: 'smooth' })
 }
 </script>

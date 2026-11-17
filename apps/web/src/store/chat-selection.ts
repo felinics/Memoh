@@ -13,6 +13,14 @@ export const useChatSelectionStore = defineStore('chat-selection', () => {
   // active panel, so a stale seed would fight that restore.
   const currentBotId = useTabScopedStorage<string | null>('chat-bot-id', null, { seed: true })
   const sessionId = useTabScopedStorage<string | null>('chat-session-id', null)
+  // Normalize raw browser storage values once at the store boundary so internal
+  // equality checks across chat/workspace stores can trust trimmed IDs.
+  if (currentBotId.value !== null) {
+    currentBotId.value = currentBotId.value.trim() || null
+  }
+  if (sessionId.value !== null) {
+    sessionId.value = sessionId.value.trim() || null
+  }
   // Persist the user's intent separately from the raw session id. `sessionId`
   // can be written by initialize() when it auto-picks the latest conversation;
   // default External Agent startup must be allowed to override that. A manually selected
