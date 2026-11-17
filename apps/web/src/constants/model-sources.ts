@@ -196,6 +196,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'subconscious', source: 'subconscious', name: 'Subconscious', client_type: 'anthropic-messages', base_url: 'https://api.subconscious.dev/v1' },
   { id: 'submodel', source: 'submodel', name: 'submodel', client_type: 'openai-completions', base_url: 'https://llm.submodel.ai/v1' },
   { id: 'synthetic', source: 'synthetic', name: 'Synthetic', client_type: 'openai-completions', base_url: 'https://api.synthetic.new/openai/v1' },
+  { id: 'teapotrouter', name: 'TeapotRouter', client_type: 'openai-completions', base_url: 'https://api.teapotrouter.com/v1' },
   { id: 'tempr', source: 'tempr', name: 'Tempr Gateway', client_type: 'openai-completions', base_url: 'https://api.temprhq.io/v1' },
   { id: 'tencent-coding-plan', source: 'tencent-coding-plan', name: 'Tencent Coding Plan (China)', client_type: 'openai-completions', base_url: 'https://api.lkeap.cloud.tencent.com/coding/v3' },
   { id: 'tencent-token-plan', source: 'tencent-token-plan', name: 'Tencent Token Plan', client_type: 'openai-completions', base_url: 'https://api.lkeap.cloud.tencent.com/plan/v3' },
