@@ -6,7 +6,7 @@
 
 在 `apps/web` 或 Desktop 渲染层编写、修改或审查代码前，按任务加载以下规范：
 
-1. **`.agents/skills/memoh-frontend-rules/SKILL.md`（主仓工程与行为总纲）**：冲突优先级、实现准则、22 条规则索引（`U1–U10`、`M1–M8`、`D1–D4`，含红线标注）、高频惯性纠偏速查，以及宿主架构地图（`references/architecture.md`）、完整规则（`references/rules.md`）与审查清单（`references/review.md`）。
+1. **`.agents/skills/memoh-frontend-rules/SKILL.md`（主仓工程与行为总纲）**：背景与目标、5 条核心原则、冲突优先级、22 条规则索引（`U1–U10`、`M1–M8`、`D1–D4`，含红线标注）、高频惯性纠偏速查，以及宿主架构地图（`references/architecture.md`）、完整规则（`references/rules.md`）与审查清单（`references/review.md`）。
 2. **`packages/ui/AGENTS.md`（组件库基础 Token 与视觉契约）**：`@felinic/ui` 的颜色、叠色梯、三态选中、圆角、细线边框、浮层阴影、5 级 z 梯、字号缩放与动效档位。
 3. **`packages/ui/skills/ui-owners/SKILL.md`（原子与布局原语字典）**：页面外壳、分组卡片、行、表单字段、统计磁贴、四级加载与弹窗原语的选型字典与手写边界。
 4. **`packages/ui/skills/ui-patterns/SKILL.md`（跨组件交互与场景规范库）**：表单与校验、保存模型与 Toast、空状态与加载、首屏 99/1 渐进披露与聚焦弹窗、分割线与推拉导航、实时状态面板与反模式速查。
