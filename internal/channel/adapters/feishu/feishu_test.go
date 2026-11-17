@@ -249,8 +249,12 @@ func TestFeishuDescriptorIncludesStreamingAndMedia(t *testing.T) {
 		t.Fatal("expected markdown capability for card markdown rendering")
 	}
 	policy := channel.NormalizeOutboundPolicy(desc.OutboundPolicy)
-	if policy.RichTextChunkLimit != feishuStreamMaxRunes {
-		t.Fatalf("RichTextChunkLimit = %d, want %d", policy.RichTextChunkLimit, feishuStreamMaxRunes)
+	if policy.TextChunkLimit != feishuStreamMaxRunes || policy.RichTextChunkLimit != feishuStreamMaxRunes {
+		t.Fatalf("chunk limits = (%d, %d), want %d", policy.TextChunkLimit, policy.RichTextChunkLimit, feishuStreamMaxRunes)
+	}
+	sf, ok := desc.ConfigSchema.Fields["enableStreaming"]
+	if !ok || sf.Type != channel.FieldBool || sf.Required || sf.Example != true || strings.TrimSpace(sf.Title) == "" || strings.TrimSpace(sf.Description) == "" {
+		t.Fatalf("unexpected enableStreaming schema field: ok=%v %+v", ok, sf)
 	}
 }
 
