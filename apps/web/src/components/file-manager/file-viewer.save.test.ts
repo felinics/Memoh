@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { KeepAlive, createApp, h, nextTick, reactive, ref, type App } from 'vue'
+import { createPinia } from 'pinia'
+import { PiniaColada } from '@pinia/colada'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import FileViewer from './file-viewer.vue'
 
@@ -79,6 +81,7 @@ async function mountViewer(initialVisible = true) {
   app = createApp({
     setup: () => () => h(FileViewer, { ...props, ref: viewer, 'onUpdate:dirty': dirty, onSaved: saved }),
   })
+  app.use(createPinia()).use(PiniaColada)
   app.mount(host)
   await nextTick()
   await nextTick()
@@ -99,9 +102,6 @@ beforeEach(() => {
   chatState.fsChangedAt = ref(0)
   chatState.affectsPath = () => false
   sdk.read.mockResolvedValue({ data: { content: 'initial', revision: 'r0', size: 7 } })
-  sdk.fs.mockResolvedValue({
-    data: { path: '/a.txt', name: 'a.txt', isDir: false, size: 7, mode: '-rw-r--r--', modTime: '1970-01-01T00:00:01Z' },
-  })
   sdk.write.mockResolvedValue({ data: { revision: 'r1' } })
   sdk.fs.mockResolvedValue({ data: { path: '/a.pdf', isDir: false, size: 100, modTime: '2026-01-01T00:00:00Z' } })
   bounded.fetchBoundedBlob.mockResolvedValue({ ok: true, blob: new Blob(['%PDF-1.4']) })
@@ -169,15 +169,17 @@ describe('file viewer save snapshot', () => {
   })
 
   it.each(['path', 'bot'] as const)('cancels a pending external poll when changing %s', async (change) => {
-    vi.useFakeTimers({ now: 20_000 })
+    vi.useFakeTimers({ now: 600_000 })
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
     const view = await mountViewer()
-    sdk.fs.mockResolvedValueOnce({
-      data: { path: '/a.txt', name: 'a.txt', isDir: false, size: 99, mode: '-rw-r--r--', modTime: '1970-01-01T00:00:15Z' },
+    // Changed on disk since the load. The first poll only notes the new stat
+    // (the content was read moments ago); the read follows once it has settled.
+    sdk.fs.mockResolvedValue({
+      data: { path: '/a.txt', name: 'a.txt', isDir: false, size: 99, mode: '-rw-r--r--', modTime: '1970-01-01T00:09:58Z' },
     })
     const pending = deferred()
     sdk.read.mockReturnValueOnce(pending.promise)
-    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(4_000)
     expect(sdk.read).toHaveBeenCalledTimes(2)
     const pollSignal: AbortSignal = sdk.read.mock.calls[1]![0].signal
     sdk.read.mockResolvedValue({ data: { content: 'other', revision: 'other-r0' } })
@@ -295,13 +297,18 @@ describe('file viewer save snapshot', () => {
   })
 
   it('polls via lightweight stat without re-reading file bytes when unchanged', async () => {
-    vi.useFakeTimers({ now: 20_000 })
+    vi.useFakeTimers({ now: 600_000 })
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    // Same size as the loaded content and last modified long before the load.
+    sdk.fs.mockResolvedValue({
+      data: { path: '/a.txt', name: 'a.txt', isDir: false, size: 7, mode: '-rw-r--r--', modTime: '1970-01-01T00:00:01Z' },
+    })
     await mountViewer()
     expect(sdk.read).toHaveBeenCalledTimes(1)
 
+    // One check as soon as the file is loaded, then one per 2s interval.
     await vi.advanceTimersByTimeAsync(6_000)
-    expect(sdk.fs).toHaveBeenCalledTimes(3)
+    expect(sdk.fs).toHaveBeenCalledTimes(4)
     expect(sdk.read).toHaveBeenCalledTimes(1)
   })
 

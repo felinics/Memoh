@@ -46,6 +46,7 @@ import { prefetchLater, whenNetworkQuiet } from '@/lib/idle-prefetch'
 import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelLoading, { retryPanelLoadKey } from './dockview/panel-loading.vue'
+import { PanelLoadFailed } from './dockview/lazy-panel-content'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTab from './dockview/workspace-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
@@ -153,7 +154,6 @@ function relayoutAfterAncestorTransform(event: TransitionEvent) {
 // the others, and any unsaved edits in them, untouched. A chunk removed by a
 // deployment since the page loaded fails on every retry; the failed state
 // also offers a page reload for that (see panel-loading.vue).
-const PanelLoadFailed = () => h(PanelLoading, { failed: true })
 const lazyPanel = (loader: AsyncComponentLoader) => {
   const Panel = defineAsyncComponent({
     loader,
@@ -174,9 +174,10 @@ const lazyPanel = (loader: AsyncComponentLoader) => {
 // chunks a click is more likely to need (on the web, the settings pages) and
 // only once the workspace's own first requests have finished; see
 // lib/idle-prefetch.ts. Waiting here covers the workspace opening after
-// sign-in, when the rest of the queue may have finished long before. The file
-// panel goes first: opening a file is the most common of these, and it
-// carries the editor.
+// sign-in, when the rest of the queue may have finished long before. Only the
+// panel shells are downloaded this way: the editor and the terminal sit behind
+// a second boundary inside their panels (see lazy-panel-content.ts) and are
+// fetched when such a panel is first shown.
 // Wrapped with withStylesheetRecovery so a stylesheet that failed during the
 // background download is loaded again when the panel opens or retries.
 const panelLoaders = {

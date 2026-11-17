@@ -1,76 +1,17 @@
 import type * as Monaco from 'monaco-editor'
-import { bundledThemes } from 'shiki/themes'
 
-interface ShikiThemeLike {
-  type?: string
-  colors?: Record<string, string>
-  tokenColors?: {
-    scope?: string | string[]
-    settings?: { foreground?: string; background?: string; fontStyle?: string }
-  }[]
-}
+// The minimap is painted on a canvas from the theme's `minimap.background`, so
+// CSS cannot align it with the `--surface-editor` plane the rest of the editor
+// sits on. Themes are registered by several parties and re-registered with the
+// raw Shiki colors every time a grammar loads (`@shikijs/monaco`), so the
+// surface is merged in at the single entry they all go through:
+// `monaco.editor.defineTheme`.
 
-interface BaseMonacoTheme {
-  base: 'vs' | 'vs-dark'
-  rules: Monaco.editor.ITokenThemeRule[]
-  colors: Record<string, string>
-}
+type MonacoApi = { editor: Pick<typeof Monaco.editor, 'defineTheme'> }
+type DefineTheme = typeof Monaco.editor.defineTheme
 
-const FONT_STYLES = ['italic', 'bold', 'underline', 'strikethrough'] as const
-
-function toHex(color?: string | string[]): string | undefined {
-  if (Array.isArray(color)) color = color[0]
-  if (!color) return undefined
-  color = (color.charCodeAt(0) === 35 ? color.slice(1) : color).toLowerCase()
-  if (color.length === 3 || color.length === 4) color = color.split('').map(c => c + c).join('')
-  return color
-}
-
-function toFontStyle(fontStyle?: string): string {
-  if (!fontStyle) return ''
-  const set = new Set(fontStyle.split(/[\s,]+/).map(s => s.trim().toLowerCase()))
-  return FONT_STYLES.filter(s => set.has(s)).join(' ')
-}
-
-function convertShikiTheme(theme: ShikiThemeLike): BaseMonacoTheme {
-  const rules: Monaco.editor.ITokenThemeRule[] = []
-  for (const entry of theme.tokenColors ?? []) {
-    const { foreground, background, fontStyle } = entry.settings ?? {}
-    if (!foreground && !background && !fontStyle) continue
-    const scopes = Array.isArray(entry.scope) ? entry.scope : entry.scope ? [entry.scope] : []
-    const fg = toHex(foreground)
-    const bg = toHex(background)
-    const fs = toFontStyle(fontStyle)
-    for (const scope of scopes) {
-      rules.push({ token: scope, foreground: fg, background: bg, fontStyle: fs })
-    }
-  }
-  const colors: Record<string, string> = {}
-  for (const [key, val] of Object.entries(theme.colors ?? {})) {
-    const hex = toHex(val)
-    if (hex) colors[key] = `#${hex}`
-  }
-  return {
-    base: theme.type === 'light' ? 'vs' : 'vs-dark',
-    rules,
-    colors,
-  }
-}
-
-const baseThemeCache = new Map<string, Promise<BaseMonacoTheme | null>>()
 const surfaceHexCache = new Map<string, string>()
 let sharedCanvasCtx: CanvasRenderingContext2D | null | undefined
-
-function loadBaseMonacoTheme(name: string): Promise<BaseMonacoTheme | null> {
-  const existing = baseThemeCache.get(name)
-  if (existing) return existing
-  const loader = (bundledThemes as Record<string, (() => Promise<{ default: ShikiThemeLike }>) | undefined>)[name]
-  const pending = loader
-    ? loader().then(mod => convertShikiTheme(mod.default)).catch(() => null)
-    : Promise.resolve(null)
-  baseThemeCache.set(name, pending)
-  return pending
-}
 
 function getSharedCanvasCtx(): CanvasRenderingContext2D | null {
   if (sharedCanvasCtx !== undefined) return sharedCanvasCtx
@@ -117,27 +58,41 @@ function resolveEditorSurfaceHex(colorMode: string, colorScheme: string): string
   }
 }
 
-// Re-registers `themeName` with `minimap.background` matched to `--surface-editor`.
-// Called from `useMonaco({ onThemeChange })` so incremental grammar loads via
-// `@shikijs/monaco` (which overwrite `defineTheme` with raw Shiki colors) and
-// A->B->A theme switches always keep the minimap canvas aligned with the editor plane.
-export async function applyMonacoMinimapSurface(
-  editorApi: Pick<typeof Monaco.editor, 'defineTheme' | 'setTheme'>,
-  themeName: string,
-  colorMode: string,
-  colorScheme: string,
-): Promise<void> {
+// Theme data as registered by its owner, without the surface override, so the
+// themes can be registered again when the surface color changes.
+const registeredThemes = new Map<string, Monaco.editor.IStandaloneThemeData>()
+let defineThemeOnMonaco: DefineTheme | null = null
+let currentSurface: string | null = null
+
+function withMinimapSurface(theme: Monaco.editor.IStandaloneThemeData): Monaco.editor.IStandaloneThemeData {
+  if (!currentSurface) return theme
+  return { ...theme, colors: { ...theme.colors, 'minimap.background': currentSurface } }
+}
+
+// Call from `useMonaco({ onBeforeCreate })`, which runs before the editor's
+// themes are registered. Wraps the shared Monaco instance once; later calls
+// only bring the surface up to date.
+export function installMinimapSurface(monaco: MonacoApi, colorMode: string, colorScheme: string): void {
+  if (!defineThemeOnMonaco) {
+    const original = monaco.editor.defineTheme.bind(monaco.editor)
+    defineThemeOnMonaco = original
+    monaco.editor.defineTheme = (name, theme) => {
+      registeredThemes.set(name, theme)
+      original(name, withMinimapSurface(theme))
+    }
+  }
+  syncMinimapSurface(colorMode, colorScheme)
+}
+
+// Call after the root color mode / scheme attributes have settled and before
+// switching the editor theme. Registering the active theme again makes Monaco
+// repaint with it, so no separate `setTheme` is needed.
+export function syncMinimapSurface(colorMode: string, colorScheme: string): void {
+  if (!defineThemeOnMonaco) return
   const surface = resolveEditorSurfaceHex(colorMode, colorScheme)
-  const base = await loadBaseMonacoTheme(themeName)
-  if (!base || !surface) return
-  editorApi.defineTheme(themeName, {
-    base: base.base,
-    inherit: false,
-    rules: base.rules,
-    colors: {
-      ...base.colors,
-      'minimap.background': surface,
-    },
-  })
-  editorApi.setTheme(themeName)
+  if (!surface || surface === currentSurface) return
+  currentSurface = surface
+  for (const [name, theme] of registeredThemes) {
+    defineThemeOnMonaco(name, withMinimapSurface(theme))
+  }
 }

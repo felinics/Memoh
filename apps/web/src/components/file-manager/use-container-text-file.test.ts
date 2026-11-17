@@ -19,56 +19,75 @@ vi.mock('@memohai/sdk', () => ({
   getBotsByBotIdContainerFsRead: sdk.read,
 }))
 
-describe('createContainerFileStatTracker', () => {
-  it('skips FSRead on the very first poll when disk modTime settled before initial sync', () => {
-    const tracker = createContainerFileStatTracker()
-    tracker.recordSync(120, 10_000)
+const file = (size: number, modTime: string) => ({ isDir: false, size, mode: '-rw-r--r--', modTime })
 
-    const decision = tracker.shouldRead({
-      isDir: false,
-      size: 120,
-      mode: '-rw-r--r--',
-      modTime: '1970-01-01T00:00:05Z', // 5_000ms < 10_000 - 1_500
-    })
-    expect(decision).toBe(false)
+describe('createContainerFileStatTracker', () => {
+  it('skips the read when the file was last modified long before the content was synced', () => {
+    const tracker = createContainerFileStatTracker()
+    tracker.recordSync(120, 600_000)
+
+    expect(tracker.observe(file(120, '1970-01-01T00:00:05Z'), 0)).toBe('skip')
+    // Locked: later polls skip as well, however much time has passed.
+    expect(tracker.observe(file(120, '1970-01-01T00:00:05Z'), 60_000)).toBe('skip')
   })
 
-  it('catches same-second same-byte-length consecutive edits despite 1s RFC3339 modTime', () => {
+  it('does not trust the browser clock for a recently modified file', () => {
+    const tracker = createContainerFileStatTracker()
+    // Browser clock 30s ahead of the workspace: the file looks 30s old but was
+    // written in the same second the content was read.
+    tracker.recordSync(4, 40_000)
+    const stat = file(4, '1970-01-01T00:00:10Z')
+
+    expect(tracker.observe(stat, 0)).toBe('skip')
+    expect(tracker.observe(stat, 2_000)).toBe('read-and-lock')
+    tracker.lock(stat)
+    expect(tracker.observe(stat, 4_000)).toBe('skip')
+  })
+
+  it('catches same-second same-size consecutive edits despite 1s modTime resolution', () => {
     const tracker = createContainerFileStatTracker()
     tracker.recordSync(4, 10_100)
+    tracker.lock(file(4, '1970-01-01T00:00:03Z'))
 
-    // External write #1 ("AAAA", 4 bytes) at 10.2s -> modTime is 10.0s (10_000ms).
-    const sameSecondStat = {
-      isDir: false,
-      size: 4,
-      mode: '-rw-r--r--',
-      modTime: '1970-01-01T00:00:10Z',
-    }
-
-    // Poll #1 at 10.3s: 10_000 is within the 1.5s unsettled window of 10_100 -> must read.
-    expect(tracker.shouldRead(sameSecondStat)).toBe(true)
-    // FSRead #1 finishes at 10_350ms; modTime (10_000) is STILL within 1.5s of 10_350 -> stays unlocked!
-    tracker.commitRead(sameSecondStat, 4, 10_350)
-
-    // External write #2 ("BBBB", 4 bytes) at 10.8s -> still produces exact same stat!
-    // Poll #2 at 12.3s: because fingerprint was kept unlocked, we read again and catch "BBBB".
-    expect(tracker.shouldRead(sameSecondStat)).toBe(true)
-    // FSRead #2 finishes at 12_350ms; now 10_000 < 12_350 - 1_500 -> locks fingerprint!
-    tracker.commitRead(sameSecondStat, 4, 12_350)
-
-    // Poll #3 at 14.3s: zero further FSRead calls.
-    expect(tracker.shouldRead(sameSecondStat)).toBe(false)
+    // External write #1 ("AAAA") lands in second 10; a write #2 ("BBBB") in the
+    // same second leaves the stat identical.
+    const sameSecond = file(4, '1970-01-01T00:00:10Z')
+    expect(tracker.observe(sameSecond, 300)).toBe('read')
+    tracker.recordSync(4, 10_350)
+    // Still the same stat 2s later: second 10 is over, so this read is final.
+    expect(tracker.observe(sameSecond, 2_300)).toBe('read-and-lock')
+    tracker.recordSync(4, 12_350)
+    tracker.lock(sameSecond)
+    expect(tracker.observe(sameSecond, 4_300)).toBe('skip')
   })
 
-  it('forces FSRead when directory replaces file or read previously failed to commit', () => {
+  it('reads at most once while a changed fingerprint is still settling', () => {
+    const tracker = createContainerFileStatTracker()
+    tracker.lock(file(4, '1970-01-01T00:00:03Z'))
+    const changed = file(9, '1970-01-01T00:00:10Z')
+
+    expect(tracker.observe(changed, 0)).toBe('read')
+    expect(tracker.observe(changed, 500)).toBe('skip')
+    expect(tracker.observe(changed, 1_500)).toBe('read-and-lock')
+  })
+
+  it('keeps asking for a read until one is locked, and always for a directory', () => {
     const tracker = createContainerFileStatTracker()
     tracker.recordSync(10, 20_000)
-    expect(tracker.shouldRead({ isDir: true, size: 10, mode: 'drwxr-xr-x', modTime: '1970-01-01T00:00:01Z' })).toBe(true)
+    expect(tracker.observe({ isDir: true, size: 10, mode: 'drwxr-xr-x', modTime: '1970-01-01T00:00:01Z' }, 0)).toBe('read')
 
-    const updatedStat = { isDir: false, size: 25, mode: '-rw-r--r--', modTime: '1970-01-01T00:00:15Z' }
-    expect(tracker.shouldRead(updatedStat)).toBe(true)
-    // Simulate failed FSRead (commitRead not called): next poll must still request FSRead.
-    expect(tracker.shouldRead(updatedStat)).toBe(true)
+    const updated = file(25, '1970-01-01T00:00:15Z')
+    expect(tracker.observe(updated, 0)).toBe('skip')
+    expect(tracker.observe(updated, 2_000)).toBe('read-and-lock')
+    // The read failed (lock not called): the next poll asks again.
+    expect(tracker.observe(updated, 4_000)).toBe('read-and-lock')
+  })
+
+  it('reads immediately after a reset', () => {
+    const tracker = createContainerFileStatTracker()
+    tracker.recordSync(10, 20_000)
+    tracker.reset()
+    expect(tracker.observe(file(10, '1970-01-01T00:00:15Z'), 0)).toBe('read')
   })
 })
 
@@ -123,6 +142,52 @@ describe('useContainerTextFileQuery', () => {
     expect(host.querySelectorAll('p')[0]?.textContent).toBe('# v2 saved')
     expect(host.querySelectorAll('p')[1]?.textContent).toBe('# v2 saved')
     expect(sdk.read).toHaveBeenCalledTimes(1)
+
+    app.unmount()
+  })
+
+  it('polls a file once for all its consumers and reads an external change once per settle step', async () => {
+    vi.useFakeTimers({ now: 600_000 })
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    sdk.read.mockResolvedValue({
+      data: { path: '/data/doc.md', content: '# v1', revision: 'rev-1', size: 4 },
+    })
+    const stat = (size: number, modTime: string) => ({
+      data: { path: '/data/doc.md', name: 'doc.md', isDir: false, size, mode: '-rw-r--r--', modTime },
+    })
+    sdk.stat.mockResolvedValue(stat(4, '1970-01-01T00:00:01Z'))
+
+    const Consumer = defineComponent({
+      setup() {
+        const query = useContainerTextFileQuery('bot-1', '/data/doc.md')
+        return () => h('p', query.data.value?.content ?? '')
+      },
+    })
+    const host = document.createElement('div')
+    const app = createApp({ setup: () => () => h('div', [h(Consumer), h(Consumer)]) })
+    app.use(createPinia()).use(PiniaColada)
+    app.mount(host)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sdk.read).toHaveBeenCalledTimes(1)
+
+    // Three poll rounds of two consumers: one stat per round, no body read.
+    await vi.advanceTimersByTimeAsync(6_000)
+    expect(sdk.stat).toHaveBeenCalledTimes(3)
+    expect(sdk.read).toHaveBeenCalledTimes(1)
+
+    // External change: read right away, once more when the stat has settled,
+    // then back to stats only.
+    sdk.stat.mockResolvedValue(stat(9, '1970-01-01T00:09:58Z'))
+    sdk.read.mockResolvedValue({
+      data: { path: '/data/doc.md', content: '# changed', revision: 'rev-2', size: 9 },
+    })
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(sdk.read).toHaveBeenCalledTimes(2)
+    expect(host.querySelectorAll('p')[1]?.textContent).toBe('# changed')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(sdk.read).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(6_000)
+    expect(sdk.read).toHaveBeenCalledTimes(3)
 
     app.unmount()
   })

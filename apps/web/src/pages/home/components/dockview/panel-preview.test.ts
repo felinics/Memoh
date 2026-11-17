@@ -130,13 +130,18 @@ describe('panel-preview refresh', () => {
     }))
   })
 
-  it('surfaces deleted file state, pauses 2s polling while missing, and recovers on manual retry', async () => {
+  it('surfaces deleted file state, keeps checking with stat only, and recovers when the file reappears', async () => {
     const notFoundError = Object.assign(new Error('Not Found'), { status: 404, code: 'workspace.file_not_found' })
     sdk.getBotsByBotIdContainerFsRead
       .mockResolvedValueOnce({ data: { content: 'initial', revision: 'rev-1', size: 7 } })
       .mockRejectedValueOnce(notFoundError)
       .mockResolvedValueOnce({ data: { content: 'restored', revision: 'rev-2', size: 8 } })
-    sdk.getBotsByBotIdContainerFs.mockRejectedValueOnce(notFoundError)
+    sdk.getBotsByBotIdContainerFs
+      .mockRejectedValueOnce(notFoundError)
+      .mockRejectedValueOnce(notFoundError)
+      .mockResolvedValueOnce({
+        data: { isDir: false, size: 8, mode: '-rw-r--r--', modTime: '2026-05-01T12:00:15Z' },
+      })
 
     app = createApp(PanelPreview, {
       params: {
@@ -155,18 +160,21 @@ describe('panel-preview refresh', () => {
     await flush()
 
     expect(root.textContent).toContain('bots.files.externalChange.deleted')
+    expect(root.querySelector('button')?.textContent).toContain('common.retry')
     expect(sdk.getBotsByBotIdContainerFs).toHaveBeenCalledTimes(1)
+    expect(sdk.getBotsByBotIdContainerFsRead).toHaveBeenCalledTimes(2)
 
-    // While missing, background 2s polling is paused until Retry or fsChangedAt.
-    vi.advanceTimersByTime(6_000)
+    // While the file is missing, each poll costs one stat and no body read.
+    vi.advanceTimersByTime(2_000)
     await flush()
-    expect(sdk.getBotsByBotIdContainerFs).toHaveBeenCalledTimes(1)
+    expect(sdk.getBotsByBotIdContainerFs).toHaveBeenCalledTimes(2)
+    expect(sdk.getBotsByBotIdContainerFsRead).toHaveBeenCalledTimes(2)
+    expect(root.textContent).toContain('bots.files.externalChange.deleted')
 
-    const retryButton = root.querySelector('button')
-    expect(retryButton?.textContent).toContain('common.retry')
-    retryButton?.click()
+    vi.advanceTimersByTime(2_000)
     await flush()
 
+    expect(sdk.getBotsByBotIdContainerFs).toHaveBeenCalledTimes(3)
     expect(root.querySelector('article')?.textContent).toBe('restored')
   })
 })

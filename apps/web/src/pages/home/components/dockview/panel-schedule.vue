@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { ConfirmDeleteDialog, InlineLoadingRow, toast } from '@felinic/ui'
@@ -58,13 +58,13 @@ import {
 } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
-import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import { useChatStore } from '@/store/chat-list'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { scheduleDeleteConfirmKey } from '@/utils/schedule-delete'
 import { usePanelVisible } from './use-panel-visible'
+import { lazyPanelContent } from './lazy-panel-content'
 
-const ScheduleEditor = defineAsyncComponent(withStylesheetRecovery(() => import('@/pages/bots/components/schedule-editor.vue').then(m => m.default)))
+const ScheduleEditor = lazyPanelContent(() => import('@/pages/bots/components/schedule-editor.vue').then(m => m.default))
 
 const props = defineProps<{
   params: {

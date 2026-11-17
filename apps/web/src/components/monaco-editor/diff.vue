@@ -5,7 +5,7 @@ import { useMonaco } from 'stream-monaco'
 import { DiffTitleBar } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
 import { getLanguageByFilename } from '@/components/file-manager/utils'
-import { applyMonacoMinimapSurface } from './minimap-theme'
+import { installMinimapSurface, syncMinimapSurface } from './minimap-theme'
 
 // Side-by-side Monaco diff editor used by the Compare view inside the file
 // viewer. Reuses stream-monaco's useMonaco so the theme, font, and language
@@ -49,7 +49,6 @@ const {
   updateModified,
   setTheme,
   setLanguage,
-  getEditor,
   getDiffEditorView,
 } = useMonaco({
   theme: resolveThemeName(),
@@ -63,13 +62,11 @@ const {
   fontSize: fontSize.value,
   fontFamily: fontFamily.value,
   padding: { top: 8, bottom: 8 },
-  onThemeChange: async (themeName) => {
-    await applyMonacoMinimapSurface(
-      getEditor() as unknown as Pick<typeof Monaco.editor, 'defineTheme' | 'setTheme'>,
-      String(themeName),
-      settings.resolvedColorMode,
-      settings.colorScheme,
-    )
+  // The diff has no minimap of its own, but themes are global to the shared
+  // Monaco instance: a grammar loaded here re-registers them for every editor.
+  onBeforeCreate: (monaco) => {
+    installMinimapSurface(monaco as unknown as typeof Monaco, settings.resolvedColorMode, settings.colorScheme)
+    return []
   },
 })
 
@@ -113,6 +110,7 @@ watch(
     themeFrame = requestAnimationFrame(() => {
       themeFrame = 0
       if (!getDiffEditorView()) return
+      syncMinimapSurface(settings.resolvedColorMode, settings.colorScheme)
       void setTheme(resolveThemeName(), true)
     })
   },

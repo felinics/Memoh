@@ -10,7 +10,7 @@ import { useSettingsStore } from '@/store/settings'
 // registers against the shared editor instance before any editor is created.
 import 'monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollContribution.js'
 import { getLanguageByFilename } from '@/components/file-manager/utils'
-import { applyMonacoMinimapSurface } from './minimap-theme'
+import { installMinimapSurface, syncMinimapSurface } from './minimap-theme'
 
 const props = withDefaults(defineProps<{
   modelValue: string
@@ -133,7 +133,6 @@ const {
   updateCode,
   setTheme,
   setLanguage,
-  getEditor,
   getEditorView,
 } = useMonaco({
   theme: resolveThemeName(),
@@ -149,15 +148,8 @@ const {
   stickyScroll: { enabled: true },
   onBeforeCreate: (monaco) => {
     registerMarkdownHeadingSymbols(monaco as unknown as typeof Monaco)
+    installMinimapSurface(monaco as unknown as typeof Monaco, settings.resolvedColorMode, settings.colorScheme)
     return []
-  },
-  onThemeChange: async (themeName) => {
-    await applyMonacoMinimapSurface(
-      getEditor() as unknown as Pick<typeof Monaco.editor, 'defineTheme' | 'setTheme'>,
-      String(themeName),
-      settings.resolvedColorMode,
-      settings.colorScheme,
-    )
   },
   scrollBeyondLastLine: true,
   scrollbar: {
@@ -193,6 +185,9 @@ function scheduleThemeSync() {
   themeFrame = requestAnimationFrame(() => {
     themeFrame = 0
     if (!getEditorView()) return
+    // The frame delay lets the root color attributes settle, so the surface
+    // read here is the new one and the theme switch below already carries it.
+    syncMinimapSurface(settings.resolvedColorMode, settings.colorScheme)
     void setTheme(resolveThemeName(), true)
   })
 }
@@ -317,7 +312,7 @@ watch(
  * token colors are untouched — only the background fill is nudged to the surface
  * token. !important beats Monaco's non-important inline fill. The minimap is a
  * canvas and can't be reached here; its fill is matched via the theme instead
- * (see applyMonacoMinimapSurface). */
+ * (see minimap-theme.ts). */
 :deep(.monaco-editor),
 :deep(.monaco-editor .overflow-guard),
 :deep(.monaco-editor-background),

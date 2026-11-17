@@ -17,7 +17,8 @@ vi.mock('@felinic/ui', () => ({
   PanePlaceholder: (_p: unknown, { slots }: { slots: { default?: () => unknown, action?: () => unknown } }) =>
     h('div', { 'data-state': 'placeholder' }, [slots.default?.(), slots.action?.()] as never),
 }))
-vi.mock('vue-i18n', () => ({
+vi.mock('vue-i18n', async importOriginal => ({
+  ...await importOriginal<typeof import('vue-i18n')>(),
   useI18n: () => ({ t: (key: string, args?: Record<string, unknown>) => (args?.size ? `${key}:${String(args.size)}` : key) }),
 }))
 vi.mock('@/components/monaco-editor/index.vue', () => ({

@@ -63,8 +63,9 @@ function handleDirty(dirty: boolean) {
 }
 
 // Let the tab close-confirm dialog write this file even while it's backgrounded.
-// FileViewer stays mounted (renderer:'always' + KeepAlive), so its save() is live
-// for the whole panel lifetime.
+// FileViewer stays mounted for the whole panel lifetime (panel-file.vue never
+// unmounts it once shown), so its save() is live even after the viewer has
+// dropped its background Monaco instance.
 onMounted(() => {
   workspaceTabs.registerFileSaveHandler(
     props.tabId,
