@@ -128,7 +128,6 @@ const transcriptionTemplateDrafts = computed<TemplateAudioProvider[]>(() =>
 // provider kinds (Speaking/Listening) — the header Add opens the Speaking
 // dialog, and each section keeps its own Add for the other kind.
 const props = defineProps<{ searchQuery: string }>()
-defineExpose({ openAdd: () => openAddSpeech() })
 
 function byName<T extends { name?: string }>(list: T[]): T[] {
   const keyword = props.searchQuery.trim().toLowerCase()
@@ -192,6 +191,8 @@ const {
     return true
   },
 })
+
+defineExpose({ openAdd: () => openAddSpeech(), view })
 
 const addProviderNames = computed(() => [
   ...catalogSpeechProviders.value.map((p) => ({ name: p.name })),

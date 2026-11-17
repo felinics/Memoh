@@ -42,7 +42,6 @@ const initialTemplateId = ref('')
 // Search box + Add button live in the Providers container's fixed header; this
 // panel receives the query and exposes its add dialog trigger instead.
 const props = defineProps<{ searchQuery: string }>()
-defineExpose({ openAdd: () => openAddProvider() })
 
 const providers = computed<VideoProviderResponse[]>(() => {
   const list = Array.isArray(providersData.value) ? providersData.value : []
@@ -97,6 +96,8 @@ const {
     ? templateData.value !== undefined && providersData.value !== undefined
     : providersData.value !== undefined,
 })
+
+defineExpose({ openAdd: () => openAddProvider(), view })
 
 const addProviderNames = computed(() => catalogProviders.value.map((p) => ({ name: p.name })))
 
