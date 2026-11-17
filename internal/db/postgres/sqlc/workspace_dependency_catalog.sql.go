@@ -10,11 +10,11 @@ import (
 )
 
 const cacheWorkspaceDependencyCatalog = `-- name: CacheWorkspaceDependencyCatalog :execrows
-INSERT INTO workspace_dependency_catalogs (source_url, catalog_bytes, generation, fetched_at)
+INSERT INTO template.workspace_dependency_catalogs (source_url, catalog_bytes, generation, fetched_at)
 VALUES ($1, $2, 1, now())
-ON CONFLICT (team_id, source_url) DO UPDATE
-SET catalog_bytes = EXCLUDED.catalog_bytes, generation = workspace_dependency_catalogs.generation + 1, fetched_at = now()
-WHERE workspace_dependency_catalogs.generation = $3::bigint
+ON CONFLICT (source_url) DO UPDATE
+SET catalog_bytes = EXCLUDED.catalog_bytes, generation = template.workspace_dependency_catalogs.generation + 1, fetched_at = now()
+WHERE template.workspace_dependency_catalogs.generation = $3::bigint
 `
 
 type CacheWorkspaceDependencyCatalogParams struct {
@@ -32,9 +32,9 @@ func (q *Queries) CacheWorkspaceDependencyCatalog(ctx context.Context, arg Cache
 }
 
 const cacheWorkspaceDependencyDefinition = `-- name: CacheWorkspaceDependencyDefinition :execrows
-INSERT INTO workspace_dependency_definitions (source_url, registry_id, dependency_id, revision, release_bytes, artifact_bytes, icon_digest)
+INSERT INTO template.workspace_dependency_definitions (source_url, registry_id, dependency_id, revision, release_bytes, artifact_bytes, icon_digest)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (team_id, source_url, registry_id, dependency_id, revision) DO NOTHING
+ON CONFLICT (source_url, registry_id, dependency_id, revision) DO NOTHING
 `
 
 type CacheWorkspaceDependencyDefinitionParams struct {
@@ -65,8 +65,8 @@ func (q *Queries) CacheWorkspaceDependencyDefinition(ctx context.Context, arg Ca
 
 const findWorkspaceDependencyIcon = `-- name: FindWorkspaceDependencyIcon :one
 SELECT source_url, registry_id, dependency_id, revision, release_bytes, artifact_bytes
-FROM workspace_dependency_definitions
-WHERE team_id = public.memoh_current_team_id() AND source_url = $1
+FROM template.workspace_dependency_definitions
+WHERE source_url = $1
   AND icon_digest = $2::text
 LIMIT 1
 `
@@ -100,16 +100,15 @@ func (q *Queries) FindWorkspaceDependencyIcon(ctx context.Context, arg FindWorks
 }
 
 const getWorkspaceDependencyCatalog = `-- name: GetWorkspaceDependencyCatalog :one
-SELECT team_id, source_url, catalog_bytes, generation, fetched_at
-FROM workspace_dependency_catalogs
-WHERE team_id = public.memoh_current_team_id() AND source_url = $1
+SELECT source_url, catalog_bytes, generation, fetched_at
+FROM template.workspace_dependency_catalogs
+WHERE source_url = $1
 `
 
-func (q *Queries) GetWorkspaceDependencyCatalog(ctx context.Context, sourceUrl string) (WorkspaceDependencyCatalog, error) {
+func (q *Queries) GetWorkspaceDependencyCatalog(ctx context.Context, sourceUrl string) (TemplateWorkspaceDependencyCatalog, error) {
 	row := q.db.QueryRow(ctx, getWorkspaceDependencyCatalog, sourceUrl)
-	var i WorkspaceDependencyCatalog
+	var i TemplateWorkspaceDependencyCatalog
 	err := row.Scan(
-		&i.TeamID,
 		&i.SourceUrl,
 		&i.CatalogBytes,
 		&i.Generation,
@@ -119,10 +118,10 @@ func (q *Queries) GetWorkspaceDependencyCatalog(ctx context.Context, sourceUrl s
 }
 
 const getWorkspaceDependencyDefinition = `-- name: GetWorkspaceDependencyDefinition :one
-UPDATE workspace_dependency_definitions SET last_accessed_at = now()
-WHERE team_id = public.memoh_current_team_id()
-  AND source_url = $1 AND registry_id = $2 AND dependency_id = $3 AND revision = $4
-RETURNING source_url, registry_id, dependency_id, revision, release_bytes, artifact_bytes
+
+SELECT source_url, registry_id, dependency_id, revision, release_bytes, artifact_bytes
+FROM template.workspace_dependency_definitions
+WHERE source_url = $1 AND registry_id = $2 AND dependency_id = $3 AND revision = $4
 `
 
 type GetWorkspaceDependencyDefinitionParams struct {
@@ -141,9 +140,8 @@ type GetWorkspaceDependencyDefinitionRow struct {
 	ArtifactBytes []byte `json:"artifact_bytes"`
 }
 
-// Renew the retention lease before a caller prepares or recovers an operation.
-// A concurrent prune either observes the renewed lease or wins first and makes
-// this lookup fail, so an accepted preview never loses its definition to GC.
+// Dependency definitions and catalogs are global: their content comes from the
+// server-level Supermarket source and is verified by digest on every read.
 func (q *Queries) GetWorkspaceDependencyDefinition(ctx context.Context, arg GetWorkspaceDependencyDefinitionParams) (GetWorkspaceDependencyDefinitionRow, error) {
 	row := q.db.QueryRow(ctx, getWorkspaceDependencyDefinition,
 		arg.SourceUrl,
@@ -161,39 +159,4 @@ func (q *Queries) GetWorkspaceDependencyDefinition(ctx context.Context, arg GetW
 		&i.ArtifactBytes,
 	)
 	return i, err
-}
-
-const pruneWorkspaceDependencyDefinitions = `-- name: PruneWorkspaceDependencyDefinitions :execrows
-WITH catalog_references AS MATERIALIZED (
-  SELECT entry ->> 'id' AS dependency_id, entry ->> 'revision' AS revision
-  FROM workspace_dependency_catalogs AS catalog,
-    jsonb_array_elements(convert_from(catalog.catalog_bytes, 'UTF8')::jsonb -> 'entries') AS entry
-  WHERE catalog.team_id = public.memoh_current_team_id()
-    AND catalog.source_url = $1
-)
-DELETE FROM workspace_dependency_definitions AS definition
-WHERE definition.team_id = public.memoh_current_team_id()
-  AND definition.source_url = $1
-  AND definition.last_accessed_at < now() - interval '30 days'
-  AND NOT EXISTS (
-    SELECT 1 FROM catalog_references AS reference
-    WHERE reference.dependency_id = definition.dependency_id AND reference.revision = definition.revision
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM bot_dependency_installations AS installation
-    WHERE installation.team_id = definition.team_id
-      AND installation.dependency_id = definition.dependency_id
-  )
-`
-
-// Keep current/retired catalog publications and every revision of dependencies
-// with installation intent: rollback state can refer to an earlier publication
-// from another source after the operator switches registries.
-// The grace period also protects previews and concurrently prepared operations.
-func (q *Queries) PruneWorkspaceDependencyDefinitions(ctx context.Context, sourceUrl string) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneWorkspaceDependencyDefinitions, sourceUrl)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }

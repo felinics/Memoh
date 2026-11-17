@@ -155,7 +155,7 @@ categories:
 | `bot_app_connector_refs` | 新增，`(team_id, installation_id, connector_type)` 唯一，`connection_id TEXT` 可空，`required BOOLEAN` |
 | `bot_dependency_installations` | 不变 |
 | `connectors` | 不变 |
-| `workspace_dependency_definitions`、`workspace_dependency_catalogs` | 不变 |
+| `workspace_dependency_definitions`、`workspace_dependency_catalogs` | 不变（位于 `template` schema，不含 team_id） |
 
 RLS 策略与现有表一致。
 

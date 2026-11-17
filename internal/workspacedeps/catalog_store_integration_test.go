@@ -7,11 +7,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
@@ -81,11 +81,13 @@ func TestPostgresCatalogPersistsReleasesAndCompareAndSwap(t *testing.T) {
 	}
 }
 
-func TestPostgresCatalogTeamPolicies(t *testing.T) {
+// The catalog belongs to the configured source, not to a team: a runtime role
+// without BYPASSRLS reads the same rows under any team context or none.
+func TestPostgresCatalogIsSharedAcrossTeams(t *testing.T) {
 	ctx := t.Context()
 	pool := openDependencyPostgres(t, ctx)
 	store := NewPostgresCatalogStore(postgresstore.NewQueries(dbsqlc.New(pool)))
-	source := "https://rls-" + uuid.NewString() + ".example"
+	source := "https://shared-" + uuid.NewString() + ".example"
 	if ok, err := store.PutCatalog(ctx, CachedCatalog{SourceURL: source, Data: []byte(`{"entries":[]}`)}); err != nil || !ok {
 		t.Fatal(err)
 	}
@@ -97,9 +99,9 @@ func TestPostgresCatalogTeamPolicies(t *testing.T) {
 	role := "deps_catalog_" + uuid.NewString()[:8]
 	identifier := pgx.Identifier{role}.Sanitize()
 	for _, statement := range []string{
-		"CREATE ROLE " + identifier + " NOLOGIN",
-		"GRANT USAGE ON SCHEMA public TO " + identifier,
-		"GRANT SELECT, INSERT, UPDATE ON workspace_dependency_catalogs, workspace_dependency_definitions TO " + identifier,
+		"CREATE ROLE " + identifier + " NOLOGIN NOBYPASSRLS",
+		"GRANT USAGE ON SCHEMA template TO " + identifier,
+		"GRANT SELECT, INSERT, UPDATE ON template.workspace_dependency_catalogs, template.workspace_dependency_definitions TO " + identifier,
 		"SET LOCAL ROLE " + identifier,
 	} {
 		if _, err := tx.Exec(ctx, statement); err != nil {
@@ -107,19 +109,21 @@ func TestPostgresCatalogTeamPolicies(t *testing.T) {
 		}
 	}
 	scoped := NewPostgresCatalogStore(postgresstore.NewQueries(dbsqlc.New(tx)))
-	if _, err := scoped.GetCatalog(ctx, source); err != nil {
-		t.Fatalf("own team: %v", err)
+	for _, teamID := range []string{team.DefaultTeamID, uuid.NewString(), ""} {
+		if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id',$1,true)", teamID); err != nil {
+			t.Fatal(err)
+		}
+		got, err := scoped.GetCatalog(ctx, source)
+		if err != nil || got.Generation != 1 {
+			t.Fatalf("team %q: generation=%d err=%v", teamID, got.Generation, err)
+		}
 	}
-	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id',$1,true)", uuid.NewString()); err != nil {
-		t.Fatal(err)
+	// Another team's publish advances the one shared generation.
+	if ok, err := scoped.PutCatalog(ctx, CachedCatalog{SourceURL: source, Data: []byte(`{"entries":[]}`), Generation: 1}); err != nil || !ok {
+		t.Fatalf("publish from another team: %v %v", ok, err)
 	}
-	if _, err := scoped.GetCatalog(ctx, source); !errors.Is(err, ErrCatalogCacheMiss) {
-		t.Fatalf("cross-team read: %v", err)
-	}
-	_, err = tx.Exec(ctx, "INSERT INTO workspace_dependency_catalogs(team_id,source_url,catalog_bytes) VALUES($1,$2,$3)", team.DefaultTeamID, source+"/other", []byte(`{"entries":[]}`))
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
-		t.Fatalf("cross-team write was not denied by RLS: %v", err)
+	if got, err := scoped.GetCatalog(ctx, source); err != nil || got.Generation != 2 {
+		t.Fatalf("shared generation=%d err=%v", got.Generation, err)
 	}
 }
 
@@ -147,7 +151,10 @@ func TestPostgresInstallationDefinitionProvenance(t *testing.T) {
 	}
 }
 
-func TestPostgresCatalogPrunesOnlyUnreferencedHistory(t *testing.T) {
+// Definitions are immutable and append-only: reading one, including during
+// catalog hydration, leaves the row untouched, and a new publication keeps the
+// previous revision available for rollback.
+func TestPostgresDefinitionReadsDoNotWrite(t *testing.T) {
 	ctx := t.Context()
 	pool := openDependencyPostgres(t, ctx)
 	store := NewPostgresCatalogStore(postgresstore.NewQueries(dbsqlc.New(pool)))
@@ -160,62 +167,37 @@ func TestPostgresCatalogPrunesOnlyUnreferencedHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	botID := createDependencyBot(t, ctx, pool)
-	// Current intent may use another registry while rollback state still
-	// references this source. Preserve every source for an installed identity.
 	codex := first.Catalog.MustGet("codex")
-	_, err = newIntegrationStore(pool).Upsert(ctx, UpsertInstallation{InstallationKey: InstallationKey{BotID: botID, DependencyID: "codex"}, Source: InstallationSourceManaged, Status: StatusInstalled, SourceURL: p.sourceURL + "/new-registry", RegistryID: "memoh", DefinitionRevision: codex.Revision})
-	if err != nil {
+	historical := DefinitionKey{SourceURL: p.sourceURL, DependencyID: codex.ID, Revision: codex.Revision}
+	rowVersion := func() string {
+		t.Helper()
+		var xmin string
+		if err := pool.QueryRow(ctx, `SELECT xmin::text FROM template.workspace_dependency_definitions WHERE source_url=$1 AND registry_id='memoh' AND dependency_id=$2 AND revision=$3`,
+			historical.SourceURL, historical.DependencyID, historical.Revision).Scan(&xmin); err != nil {
+			t.Fatal(err)
+		}
+		return xmin
+	}
+	before := rowVersion()
+	if _, err := store.GetDefinition(ctx, historical); err != nil {
 		t.Fatal(err)
 	}
-	historical := map[string]DefinitionKey{}
-	for _, dep := range first.Catalog.List() {
-		historical[dep.ID] = DefinitionKey{SourceURL: p.sourceURL, DependencyID: dep.ID, Revision: dep.Revision}
-		server.updateScript(t, dep.ID, "# next publication\n")
+	if _, err := p.StoredDefinition(ctx, historical); err != nil {
+		t.Fatal(err)
 	}
+	server.updateScript(t, codex.ID, "# next publication\n")
 	latest, err := p.Snapshot(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, "UPDATE workspace_dependency_definitions SET last_accessed_at = now() - interval '31 days' WHERE source_url = $1", p.sourceURL); err != nil {
-		t.Fatal(err)
+	if latest.Catalog.MustGet("codex").Revision == codex.Revision {
+		t.Fatal("fixture did not publish a new revision")
 	}
-	// A recent preview/download remains available throughout its grace period.
-	if _, err := pool.Exec(ctx, "UPDATE workspace_dependency_definitions SET last_accessed_at = now() WHERE source_url=$1 AND dependency_id='uv' AND revision=$2", p.sourceURL, historical["uv"].Revision); err != nil {
-		t.Fatal(err)
+	if after := rowVersion(); after != before {
+		t.Fatalf("definition row rewritten by reads: xmin %s -> %s", before, after)
 	}
-	// Reading an old publication for a new preview renews its retention lease.
-	other, err := store.GetDefinition(ctx, historical["node"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	other.SourceURL += "/other-source"
-	if err := store.PutDefinition(ctx, other); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, "UPDATE workspace_dependency_definitions SET last_accessed_at=now()-interval '31 days' WHERE source_url=$1", other.SourceURL); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.(*postgresCatalogStore).PruneDefinitions(ctx, p.sourceURL); err != nil {
-		t.Fatal(err)
-	}
-	for id, key := range historical {
-		_, err := store.GetDefinition(ctx, key)
-		if id == "codex" || id == "uv" || id == "node" {
-			if err != nil {
-				t.Fatalf("removed rollback or recent publication %s: %v", id, err)
-			}
-		} else if !errors.Is(err, ErrCatalogCacheMiss) {
-			t.Fatalf("unused historical %s retained: %v", id, err)
-		}
-	}
-	for _, dep := range latest.Catalog.List() {
-		if _, err := store.GetDefinition(ctx, DefinitionKey{SourceURL: p.sourceURL, DependencyID: dep.ID, Revision: dep.Revision}); err != nil {
-			t.Fatalf("removed catalog publication %s: %v", dep.ID, err)
-		}
-	}
-	if _, err := store.GetDefinition(ctx, other.DefinitionKey); err != nil {
-		t.Fatalf("pruned another source: %v", err)
+	if _, err := store.GetDefinition(ctx, historical); err != nil {
+		t.Fatalf("previous publication removed: %v", err)
 	}
 }
 
@@ -233,11 +215,11 @@ func TestPostgresIconLookupDoesNotParseUnrelatedRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	dep := result.Catalog.MustGet("codex")
-	if _, err := pool.Exec(ctx, `INSERT INTO workspace_dependency_definitions(source_url,registry_id,dependency_id,revision,release_bytes,artifact_bytes,icon_digest) VALUES($1,'memoh','corrupt-release',$2,$3,$3,'')`, p.sourceURL, strings.Repeat("a", 64), []byte("invalid JSON")); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO template.workspace_dependency_definitions(source_url,registry_id,dependency_id,revision,release_bytes,artifact_bytes,icon_digest) VALUES($1,'memoh','corrupt-release',$2,$3,$3,'')`, p.sourceURL, strings.Repeat("a", 64), []byte("invalid JSON")); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.WithoutCancel(ctx), "DELETE FROM workspace_dependency_definitions WHERE source_url=$1 AND dependency_id='corrupt-release'", p.sourceURL)
+		_, _ = pool.Exec(context.WithoutCancel(ctx), "DELETE FROM template.workspace_dependency_definitions WHERE source_url=$1 AND dependency_id='corrupt-release'", p.sourceURL)
 	})
 	if icon, err := p.Icon(ctx, dep.IconDigest); err != nil || len(icon) == 0 {
 		t.Fatalf("unrelated malformed release broke icon lookup: %v", err)
@@ -255,7 +237,7 @@ func TestPostgresIconLookupDoesNotParseUnrelatedRelease(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SET LOCAL enable_seqscan=off"); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := tx.Query(ctx, `EXPLAIN SELECT release_bytes FROM workspace_dependency_definitions WHERE team_id=public.memoh_current_team_id() AND source_url=$1 AND icon_digest=$2 LIMIT 1`, p.sourceURL, dep.IconDigest)
+	rows, err := tx.Query(ctx, `EXPLAIN SELECT release_bytes FROM template.workspace_dependency_definitions WHERE source_url=$1 AND icon_digest=$2 LIMIT 1`, p.sourceURL, dep.IconDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +253,7 @@ func TestPostgresIconLookupDoesNotParseUnrelatedRelease(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(plan, "idx_workspace_dependency_definitions_icon") {
+	if !strings.Contains(plan, "idx_template_workspace_dependency_definitions_icon") {
 		t.Fatalf("icon lookup has no indexed path: %s", plan)
 	}
 }
@@ -294,5 +276,85 @@ func TestPostgresUpsertClearsPriorOperationFailure(t *testing.T) {
 	}
 	if retried.LastError != "" || retried.Status != StatusInstalling {
 		t.Fatalf("retry kept prior failure: %+v", retried)
+	}
+}
+
+type catalogTeamKey struct{}
+
+// teamRoutedCatalogStore sends each call to the connection bound to the team
+// in its context, the way a multi-team deployment scopes queries per request.
+type teamRoutedCatalogStore struct {
+	CatalogStore
+	teams           map[string]CatalogStore
+	definitionReads atomic.Int64
+}
+
+func (s *teamRoutedCatalogStore) route(ctx context.Context) CatalogStore {
+	if teamID, ok := ctx.Value(catalogTeamKey{}).(string); ok {
+		return s.teams[teamID]
+	}
+	return s.CatalogStore
+}
+
+func (s *teamRoutedCatalogStore) GetCatalog(ctx context.Context, source string) (CachedCatalog, error) {
+	return s.route(ctx).GetCatalog(ctx, source)
+}
+
+func (s *teamRoutedCatalogStore) GetDefinition(ctx context.Context, key DefinitionKey) (CachedDefinition, error) {
+	s.definitionReads.Add(1)
+	return s.route(ctx).GetDefinition(ctx, key)
+}
+
+// Reads that alternate between teams share one hydrated snapshot: only the
+// first read verifies the stored definitions.
+func TestRemoteCatalogSnapshotIsSharedAcrossTeams(t *testing.T) {
+	ctx := t.Context()
+	pool := openDependencyPostgres(t, ctx)
+	server := newCatalogHTTPFixture(t)
+	publisher, err := NewRemoteCatalog(server.server.URL, NewPostgresCatalogStore(postgresstore.NewQueries(dbsqlc.New(pool))), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := publisher.Snapshot(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	teams := map[string]CatalogStore{}
+	for _, teamID := range []string{team.DefaultTeamID, uuid.NewString()} {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = tx.Rollback(context.WithoutCancel(ctx)) })
+		if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id',$1,true)", teamID); err != nil {
+			t.Fatal(err)
+		}
+		teams[teamID] = NewPostgresCatalogStore(postgresstore.NewQueries(dbsqlc.New(tx)))
+	}
+	store := &teamRoutedCatalogStore{CatalogStore: NewPostgresCatalogStore(postgresstore.NewQueries(dbsqlc.New(pool))), teams: teams}
+	reader, err := NewRemoteCatalog(server.server.URL, store, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.server.Close()
+
+	var hydrated int64
+	for range 2 {
+		for teamID := range teams {
+			result, err := reader.Cached(context.WithValue(ctx, catalogTeamKey{}, teamID))
+			if err != nil {
+				t.Fatalf("team %s: %v", teamID, err)
+			}
+			if result.Catalog.Fingerprint() != published.Catalog.Fingerprint() {
+				t.Fatalf("team %s read a different catalog", teamID)
+			}
+			if hydrated == 0 {
+				hydrated = store.definitionReads.Load()
+			}
+		}
+	}
+	if hydrated != int64(len(published.Catalog.List())) || store.definitionReads.Load() != hydrated {
+		t.Fatalf("definition reads = %d after first hydrate %d; want the snapshot reused across teams", store.definitionReads.Load(), hydrated)
 	}
 }

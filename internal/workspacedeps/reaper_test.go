@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func TestStartReaperRunsImmediatelyAndOnInterval(t *testing.T) {
@@ -124,5 +126,52 @@ func TestStartReaperWritesOneResultRecordPerPass(t *testing.T) {
 	rec := records[0]
 	if rec["msg"] != "job" || rec["operation"] != "workspacedeps.reap" || rec["level"] != "ERROR" || rec["reaped"] != float64(2) {
 		t.Fatalf("record = %v, want an ERROR job record for workspacedeps.reap with reaped=2", rec)
+	}
+}
+
+// countingCatalog records how often the Service loads the provider catalog.
+type countingCatalog struct {
+	snapshotCatalog
+	loads int
+}
+
+func (p *countingCatalog) Snapshot(ctx context.Context, refresh bool) (CatalogResult, error) {
+	p.loads++
+	return p.snapshotCatalog.Snapshot(ctx, refresh)
+}
+
+func (p *countingCatalog) Cached(ctx context.Context) (CatalogResult, error) {
+	p.loads++
+	return p.snapshotCatalog.Cached(ctx)
+}
+
+// A reaper pass with nothing to reconcile must not load the catalog: the
+// reaper runs per team, and hydrating verifies every stored definition.
+func TestReapStaleLoadsCatalogOnlyForAbandonedOperations(t *testing.T) {
+	f := newServiceFixture(t)
+	provider := &countingCatalog{snapshotCatalog: snapshotCatalog{cat: f.cat}}
+	f.svc.provider, f.svc.catalog = provider, catalog.Empty()
+	reap := func(want int) {
+		t.Helper()
+		if count, err := f.svc.ReapStale(f.ctx()); err != nil || count != want {
+			t.Fatalf("ReapStale = %d, %v; want %d", count, err, want)
+		}
+	}
+
+	reap(0)
+	f.store.seed(Installation{BotID: "settled", DependencyID: "agent-x", Status: StatusInstalled})
+	reap(0)
+	running := InstallationKey{BotID: "running", DependencyID: "agent-x"}
+	f.store.seed(Installation{BotID: running.BotID, DependencyID: running.DependencyID, Status: StatusInstalling, OperationID: strings.Repeat("d", 32), UpdatedAt: f.now.Add(-2 * time.Minute)})
+	f.svc.locks.tryLock(running)
+	reap(0)
+	f.svc.locks.unlock(running)
+	if provider.loads != 0 {
+		t.Fatalf("catalog loaded %d times with no abandoned operation", provider.loads)
+	}
+
+	reap(1)
+	if provider.loads != 1 {
+		t.Fatalf("catalog loads = %d, want one for the abandoned operation", provider.loads)
 	}
 }
