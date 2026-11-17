@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, onScopeDispose, ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { fetchWorkdirs, type BotWorkdir } from '@/composables/api/useWorkdirs'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -75,12 +75,6 @@ export const useWorkdirsStore = defineStore('workdirs', () => {
     return ensureWorkdirs(bid)
   }
 
-  const workingWorkdirId = computed(() => (botId: string | null | undefined) => {
-    const bid = (botId ?? '').trim()
-    if (!bid) return ''
-    return workingWorkdirByBot.value[bid] ?? ''
-  })
-
   function workingWorkdirFor(botId: string | null | undefined): BotWorkdir | null {
     const bid = (botId ?? '').trim()
     if (!bid) return null
@@ -120,7 +114,6 @@ export const useWorkdirsStore = defineStore('workdirs', () => {
     workdirById,
     ensureWorkdirs,
     refreshWorkdirs,
-    workingWorkdirId,
     workingWorkdirFor,
     setWorkingWorkdir,
     sessionWorkdirIdFor,

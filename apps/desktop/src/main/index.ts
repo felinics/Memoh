@@ -843,10 +843,6 @@ app.whenReady().then(async () => {
     assertTrustedRenderer(event)
     return getDesktopServerStatus()
   })
-  ipcMain.handle('desktop:api-base-url', (event) => {
-    assertTrustedRenderer(event)
-    return getDesktopApiBaseUrl()
-  })
   ipcMain.handle('desktop:probe-server', (event) => {
     assertTrustedRenderer(event)
     return probeConfiguredServer()

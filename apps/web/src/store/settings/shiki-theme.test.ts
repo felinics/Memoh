@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SHIKI_THEME_DARK,
   DEFAULT_SHIKI_THEME_LIGHT,
-  isBundledTheme,
   listBundledShikiThemes,
   normalizeShikiTheme,
 } from './shiki-theme'
@@ -11,15 +10,6 @@ describe('shiki-theme settings', () => {
   it('exposes GitHub themes as defaults', () => {
     expect(DEFAULT_SHIKI_THEME_LIGHT).toBe('github-light')
     expect(DEFAULT_SHIKI_THEME_DARK).toBe('github-dark')
-  })
-
-  it('classifies known theme ids', () => {
-    expect(isBundledTheme('github-light')).toBe(true)
-    expect(isBundledTheme('vitesse-dark')).toBe(true)
-    expect(isBundledTheme('not-a-theme')).toBe(false)
-    expect(isBundledTheme('')).toBe(false)
-    expect(isBundledTheme(undefined)).toBe(false)
-    expect(isBundledTheme(42)).toBe(false)
   })
 
   it('keeps a matching variant', () => {

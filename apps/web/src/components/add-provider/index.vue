@@ -10,19 +10,7 @@
       @submit="createProvider"
     >
       <template #trigger>
-        <span
-          v-if="hideTrigger"
-          class="hidden"
-        />
-        <Button
-          v-else
-          class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
-          variant="outline"
-        >
-          <Plus
-            class="mr-1 size-4"
-          /> {{ $t('provider.addBtn') }}
-        </Button>
+        <span class="hidden" />
       </template>
       <template #body>
         <div
@@ -175,7 +163,6 @@
 </template>
 <script setup lang="ts">
 import {
-  Button,
   Input,
   FormField,
   FormControl,
@@ -214,7 +201,6 @@ import { suggestProviderName } from './provider-presets'
 const open = defineModel<boolean>('open')
 const props = withDefaults(defineProps<{
   providers?: Array<{ name?: string }>
-  hideTrigger?: boolean
   presetDomain?: 'llm' | 'video' | 'speech' | 'transcription'
   templates?: ProvidertemplatesGetResponse[]
   initialTemplateId?: string
@@ -224,7 +210,6 @@ const props = withDefaults(defineProps<{
   importModels?: (providerId: string, defaultCompatibilities?: string[]) => Promise<{ created?: number, skipped?: number } | null | undefined>
 }>(), {
   providers: () => [],
-  hideTrigger: false,
   presetDomain: 'llm',
 })
 const { t } = useI18n()

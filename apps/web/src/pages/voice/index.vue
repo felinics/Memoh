@@ -424,7 +424,6 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
 
       <AddProvider
         v-model:open="openStatus.addSpeechOpen"
-        hide-trigger
         preset-domain="speech"
         :providers="addProviderNames"
         :templates="speechTemplates"
@@ -433,7 +432,6 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
       />
       <AddProvider
         v-model:open="openStatus.addTranscriptionOpen"
-        hide-trigger
         preset-domain="transcription"
         :providers="addProviderNames"
         :templates="transcriptionTemplates"

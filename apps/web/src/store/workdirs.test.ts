@@ -80,7 +80,7 @@ describe('useWorkdirsStore & user-scoped storage cleanup', () => {
     store.setWorkingWorkdir('bot-1', 'wd-user-a')
 
     expect(store.workdirsFor('bot-1')).toHaveLength(1)
-    expect(store.workingWorkdirId('bot-1')).toBe('wd-user-a')
+    expect(store.workingWorkdirFor('bot-1')?.id).toBe('wd-user-a')
 
     // Cached: calling ensureWorkdirs again before logout does not re-fetch.
     await store.ensureWorkdirs('bot-1')
@@ -89,7 +89,6 @@ describe('useWorkdirsStore & user-scoped storage cleanup', () => {
     notifyAuthSessionCleared('logout')
 
     expect(store.workdirsFor('bot-1')).toEqual([])
-    expect(store.workingWorkdirId('bot-1')).toBe('')
     expect(store.workingWorkdirFor('bot-1')).toBeNull()
 
     // Account B logs in and ensures workdirs for 'bot-1': loadedBots was cleared so fresh data is fetched.

@@ -45,16 +45,15 @@
   `lib/api-client.ts`（`VITE_API_URL`、Bearer 注入、401 统一清缓存跳登录）、`lib/query-cache-persistence.ts`
   （查询缓存落盘与密钥剥离）。
 - **页面（`pages/`）**：页面专属子组件放 `pages/<feature>/components/`，专属逻辑放 `pages/<feature>/composables/`：
-  - `main-section/` 与 `home/`：聊天与多面板工作区（`chat-workspace.vue` 承载 dockview 分屏：单实例 `chat` 面板，
-    以及 `file`、`terminal`、`browser`、`display` 面板）。
+  - `main-section/` 与 `home/`：聊天与多面板工作区（`chat-workspace.vue` 承载 dockview 分屏，支持多会话 `chat:<n>` 面板，
+    以及 `file`、`preview`、`asset`、`terminal`、`browser`、`display`、`schedule` 共 8 种面板）。
   - `settings-section/`：设置全屏层（带 `SettingsSidebar` 与 `<KeepAlive>`）。
-  - `bots/`：Bot 列表、创建向导与创建进度流（`new-progress.vue`）、多 Tab 详情页（概览、设置、桌面、渠道、记忆、
-    MCP、定时任务、容器、网络、工具审批、技能、访问控制、依赖与 App）。
+  - `bots/`：Bot 列表、创建向导与创建进度流（`new-progress.vue`）、多 Tab 详情页（11 个 Tab：`overview` 概览、`general` 常规设置、`remote-runtime` 远程运行时、`container` 容器、`memory` 记忆、`channels` 渠道、`advanced` 高级［桌面、网络、工具审批、Hooks、上下文压缩］、`access` 访问控制、`agents` Agents、`mcp` MCP、`apps` 依赖与 App）。
   - 其他设置页：`providers/`（服务商总页，通过 `?tab=` 切换 `models-panel.vue`、`web-search/`、`voice/`、`video/` 四个子范围面板；旧路径 `/settings/web-search`、`/settings/voice`、`/settings/video`、`/settings/speech`、`/settings/transcription` 均为重定向）、`runtimes/`（远程运行时与计算节点 Computers）、`supermarket/`、`usage/`、`people/`、`appearance/`、`keyboard-shortcuts/`、`profile/`（Account）、`about/`。独立 `/settings/memory` 已移除并入 Bot 详情的记忆 Tab（旧路径重定向至 `/settings/bots`）。
   - 独立全屏页：`login/`、`onboarding/`、`oauth/`、`providers/connect.vue`（通用 Provider 深度链接导入确认页）、
     `dev/components/`（开发组件墙）。
 - **业务共享组件（`components/`）**：跨两个以上页面复用的业务 owner（如 `sidebar/`、`master-detail-sidebar-layout/`、
-  `file-manager/`、`terminal/`、`monaco-editor/`、`loading-button/`、`form-dialog-shell/` 等）。选型前先查
+  `file-manager/`、`monaco-editor/`、`loading-button/` 等；`FormDialogShell` 与 `DiffTitleBar` 已下沉至 `@felinic/ui` / `packages/ui/src/components/`）。选型前先查
   `packages/ui/skills/ui-owners/SKILL.md`。
 - **组合式函数（`composables/`）**：接口与流封装在 `composables/api/`（`useChat.*`、`sse-error.ts`、`stream-json-sse.ts`、
   `useContainerStream.ts`、`useWorkspaceDependencyStream.ts`）；通用交互封装在顶层（`use-server-synced-form.ts`、
@@ -74,7 +73,7 @@
 | 列表与详情左右推拉切换 | `pages/web-search/index.vue`（`useViewSwap` + `SwapTransition` + `BackendCard` + `DetailPane`） | — |
 | 带统计数值块与图表的概览页 | `pages/bots/components/bot-overview.vue`（细线分隔数值块 + 黑白灰 ECharts） | — |
 | 表单或新建/编辑弹窗 | `pages/bots/components/schedule-editor.vue`（新建/编辑任务表单：字段间距、折叠更多选项、底部按钮排布） | — |
-| 全部原子组件与业务 owner 活体目录 | `pages/dev/components/`（开发模式下设置 `localStorage.setItem('memoh:dev-tools', '1')`，按 `Cmd/Ctrl+Shift+D` 打开） | — |
+| 全部原子组件与业务 owner 活体目录 | `pages/dev/components/`（开发模式下设置 `localStorage.setItem('memoh:dev-tools', '1')`，Web 端直接访问 `/dev/components`，Desktop 端也可按 `Cmd/Ctrl+Shift+D` 打开） | — |
 
 ## 宿主页面局部原语（Surface-scoped owners）
 
@@ -93,7 +92,7 @@
   - *刻意不合并不等距行*：`session-item`、`bot-switcher`、`search-dialog` 的行高、圆角和悬停 Token（`sidebar-hover` vs `bot-row-tint` vs `ui-hover`）有意区分，且 `bot-switcher` 因接入 `sortablejs` 必须保持裸 `div`，不强抽通用 `ListRow`。
 - **应用市场（`pages/supermarket/components/`）**：
   - `market-item-card.vue`（列表卡片：前导图标盒 + 标题 + 主页链接 + `#actions`）、`market-detail-header.vue`（详情页头部：返回/安装动作行 + `#icon` 盒 + 标题 + 标签徽标）、`info-item.vue`（详情页信息区的上标签下数值条目）。
-- **编辑器文件对比（`components/diff-title-bar/index.vue`）**：
+- **编辑器文件对比（`@felinic/ui` `DiffTitleBar` / `packages/ui/src/components/diff-title-bar/`）**：
   - `DiffTitleBar`：Monaco Diff 上方的标题条，仅管理容器布局、细线、内边距与静音字色，内容走默认插槽与可选 `#actions`（目前由文件对比与 Monaco Diff 两处复用；若第三处需要不同容器应局部实现或拆分，不要继续往里加 prop）。
 - **Dockview 分屏面板外壳（`pages/home/components/dockview/`）**：
   - `panel-frame.vue`（`DockPanelFrame`）：所有 `panel-*.vue` 根节点的统一外壳，封装 `relative flex h-full w-full flex-col` 与 `min-h-0 flex-1` 内容层；编辑器底色面板（文件/预览/资源）传 `editorSurface`；顶部面包屑条走 `#header`。新建 dock 面板必须组合它，严禁手写外层 flex 溢出容器。
@@ -126,7 +125,7 @@ Web 和 Desktop 各自的入口里。
    设置再切回来时，dockview 的分屏结构、终端连接和消息滚动位置完全不会卸载重排（Vue 的 `KeepAlive` 保不住
    dockview 布局，卸载必闪屏，见 U5）。
 2. **设置覆盖层（`pages/settings-section/`）**：全屏固定层，靠可见性切换盖在聊天层上方；离开设置页时会等离场过渡
-   `after-leave` 播完才放行路由守卫。内部用 `MainLayout` + `SettingsSidebar` + `<KeepAlive>` 包裹设置子页面；浏览器空闲时由 `prefetchSettingsPages()` 逐个串行预热设置页分包。
+   `after-leave` 播完才放行路由守卫。内部用 `MainLayout` + `SettingsSidebar` + `<KeepAlive>` 包裹设置子页面；浏览器空闲时由 `prefetchAppPages()` 串行预热应用与设置页分包及语言包。
    Web 端直接访问 `/settings` 会展示移动端设置导航列表；Desktop 端会重定向到 `/settings/bots`。
 3. **独立全屏页（`/login`、`/onboarding`、`/oauth/*`、`/dev/*`）**：处于这些路由时，上面两层都不挂载，由顶层
    `<RouterView>` 单独全屏渲染。
@@ -154,8 +153,8 @@ Pinia store 只管纯客户端状态：
 |---|---|
 | `user` | 登录态 token、当前用户信息；登录、登出及收到 401 时负责清空内存与 localStorage 查询缓存 |
 | `settings` | 主题（浅色/深色，联动 `useColorMode`）、界面语言（`en`/`zh`/`ja`）与排版字号档位 |
-| `capabilities` | 从 `getPing()` 初始化一次的服务端能力标志（容器后端类型、快照支持等） |
-| `chat-selection` | 当前选中的 Bot ID 与会话 ID（持久化到 localStorage） |
+| `capabilities` | 从 `getPing()` 初始化一次的服务端能力标志（快照支持、connectors 等） |
+| `chat-selection` | 当前标签页选中的 Bot ID 与会话 ID（走 `useTabScopedStorage` 存于 `sessionStorage`，仅各账号最近打开的 `lastBots` 持久化到 `localStorage` 作为冷启动种子） |
 | `chat-list` | 聊天消息投影、会话列表实时排序、WebSocket 与活动 SSE 事件归并（唯一允许独立管理流数据的 store） |
 | `workspace-tabs` | Dockview 面板句柄、各 Bot 分屏布局持久化、左侧活动栏开关与宽度（严禁后台事件调激活函数抢焦点，见 U7） |
 | `display-snapshots` | 各 Bot/会话最新的远程桌面预览截图缓存 |
@@ -188,9 +187,9 @@ Pinia store 只管纯客户端状态：
 
 ## 工作区面板、远程桌面与 Browser / Computer Use
 
-- 中央工作区由 `store/workspace-tabs.ts` 驱动 dockview 分屏，支持 `chat`（全局单例，内容跟随当前选中会话）、`file`、`terminal`、`browser`、`display` 五种面板（均开启 `renderer: 'always'`，切 tab 不销毁终端、iframe 与 WebRTC 连接）；工作区文件树固定在左侧边栏（`components/sidebar/files-pane.vue`），不进 dock。
+- 中央工作区由 `store/workspace-tabs.ts` 驱动 dockview 分屏，支持 `chat`（多会话 `chat:<n>` 面板）、`file`、`preview`、`asset`、`terminal`、`browser`、`display`、`schedule` 八种面板（均开启 `renderer: 'always'`，切 tab 不销毁终端、iframe 与 WebRTC 连接）；工作区文件树固定在左侧边栏（`components/sidebar/files-pane.vue`），不进 dock。
 - `terminal` 和 `file` 是常规工作区功能；`display`（远程桌面）仅在容器工作区下可用，当 Bot 绑定远程运行时（remote runtime）时隐藏。
-- `display-pane.vue` 连接的是带真实图形界面和浏览器的有头容器桌面（WebRTC 视频流 + 键鼠转发 + 预览截图），`bot-desktop.vue` 负责开关桌面服务与查看活跃会话。
+- `display-pane.vue` 连接的是带真实图形界面和浏览器的有头容器桌面（WebRTC 视频流 + 键鼠转发 + 预览截图），`bot-desktop.vue`（位于详情页 `advanced` Tab 的 desktop 分区）负责开关桌面服务与查看活跃会话。
 - Agent 的 Browser Use（`browser_action` / `browser_observe` / `browser_remote_session`）操控的是上面那台有头容器里的 Chrome 实例；Computer Use（`computer_observe` 调 `a11y-cli` 无障碍树或落盘截图，`computer_action` 按引用或 RFB 坐标点击输入）操控的是整个有头桌面。写文案或注释时绝不要把它们说成“无头 Playwright”（无头 Playwright 只是容器里普通命令行跑的脚本，跟这套桌面栈无关）。
 
 ## 本地开发与路径别名

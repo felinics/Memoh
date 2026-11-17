@@ -161,14 +161,6 @@ export function sortChatMessages(items: ChatMessage[]): ChatMessage[] {
   })
 }
 
-// Optimistic turns set `__optimistic: true` at construction
-// (createOptimisticUserTurn / createOptimisticAssistantTurn). Server-derived
-// turns from fetchMessagesUI and SSE never carry this flag, so an opaque id
-// shape (numeric, UUID, slug) is irrelevant here.
-export function isOptimisticTurn(turn: ChatMessage): boolean {
-  return '__optimistic' in turn && turn.__optimistic === true
-}
-
 export function createInvocationId(): string {
   return randomUUID()
 }

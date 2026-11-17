@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import {
   dependencyText,
-  dependencyIsInstalled,
   dependencyLastError,
   dependencyMenuActions,
   dependencyNeedsAttention,
@@ -15,7 +14,6 @@ import {
   missingPrerequisites,
   prerequisiteOrder,
   prerequisiteRevisions,
-  sortDependencies,
 } from './workspace-dependency'
 
 function item(overrides: Partial<DependencyItem> = {}): DependencyItem {
@@ -221,8 +219,6 @@ describe('dependencyMenuActions', () => {
     const overlay = imageCopy({ source: 'managed', overlay: true, actions: ['update', 'reinstall', 'remove'] })
     expect(dependencyMenuActions(overlay, 'running').map(action => String(action.kind))).not.toContain('remove')
     expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running').map(action => String(action.kind))).not.toContain('remove')
-    // After removal no copy or record remains, so the installed list drops it.
-    expect(dependencyIsInstalled(item({ actions: ['install'] }))).toBe(false)
   })
 
   it('keeps only the script preview clickable while the workspace is read-only', () => {
@@ -271,36 +267,6 @@ describe('dependencyNeedsAttention', () => {
     expect(dependencyNeedsAttention(item({ status: 'installed' }))).toBe(false)
     expect(dependencyNeedsAttention(imageCopy())).toBe(false)
     expect(dependencyNeedsAttention(item())).toBe(false)
-  })
-})
-
-describe('dependencyIsInstalled', () => {
-  it('lists rows with a record or a copy in effect, never a bare catalog entry', () => {
-    expect(dependencyIsInstalled(item({ status: 'installed' }))).toBe(true)
-    expect(dependencyIsInstalled(item({ status: 'failed' }))).toBe(true)
-    expect(dependencyIsInstalled(item({ status: 'missing' }))).toBe(true)
-    expect(dependencyIsInstalled(imageCopy({ status: undefined }))).toBe(true)
-    expect(dependencyIsInstalled(item())).toBe(false)
-    expect(dependencyIsInstalled(item({ installed_version: '  ' }))).toBe(false)
-  })
-})
-
-describe('sortDependencies', () => {
-  it('puts rows that need a hand first, then sorts by name regardless of category', () => {
-    const sorted = sortDependencies([
-      imageCopy({ id: 'uv', name: 'uv' }),
-      item({ id: 'codex', name: 'Codex', status: 'installed' }),
-      imageCopy({ id: 'python', name: 'Python', latest_version: '3.15.0' }),
-      item({ id: 'claude-code', name: 'Claude Code', status: 'failed' }),
-      imageCopy(),
-    ])
-    expect(sorted.map(entry => entry.id)).toEqual(['claude-code', 'python', 'codex', 'node', 'uv'])
-  })
-
-  it('sorts by the caller\'s display name and leaves the input untouched', () => {
-    const input = [item({ id: 'b', name: 'B' }), item({ id: 'a', name: 'A' })]
-    expect(sortDependencies(input, entry => entry.id === 'b' ? 'Alpha' : 'Beta').map(entry => entry.id)).toEqual(['b', 'a'])
-    expect(input.map(entry => entry.id)).toEqual(['b', 'a'])
   })
 })
 

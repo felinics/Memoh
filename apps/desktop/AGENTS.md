@@ -109,7 +109,6 @@ behavior. Keep it small and typed in both `src/preload/index.ts` and
 Current Desktop IPC includes:
 
 - `desktop:server-status`
-- `desktop:api-base-url`
 - `desktop:runtime-state`
 - `desktop:configure-runtime`
 - `desktop:set-runtime-paused`

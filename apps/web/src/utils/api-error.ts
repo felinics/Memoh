@@ -142,7 +142,6 @@ function readFault(record: ErrorRecord): ApiErrorFault | undefined {
 
 function readStatus(record: ErrorRecord): number | undefined {
   if (typeof record.status === 'number') return record.status
-  if (typeof record.http_status === 'number') return record.http_status
   return undefined
 }
 

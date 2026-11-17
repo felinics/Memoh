@@ -21,8 +21,6 @@
                it goes edge-to-edge with a right divider, matching SettingsSidebar. -->
           <div
             class="flex-1 flex flex-col overflow-hidden min-h-0"
-            :data-native-sidebar-surface="flush || undefined"
-            :data-native-sidebar-tint="flush || undefined"
             :class="flush
               ? 'workspace-divider-r bg-sidebar'
               : 'border border-border-soft bg-muted/10 rounded-lg'"

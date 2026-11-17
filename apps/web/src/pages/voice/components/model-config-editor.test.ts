@@ -25,7 +25,7 @@ describe('speech model test', () => {
     const root = document.createElement('div')
     document.body.append(root)
     app = createApp(ModelConfigEditor, {
-      modelId: 'm1', modelName: 'm', config: {}, schema: null,
+      modelId: 'm1', config: {}, schema: null,
       onTest: () => Promise.reject(new Error('upstream 10.0.0.7 returned 502')),
     })
     app.config.globalProperties.$t = (key: string) => key

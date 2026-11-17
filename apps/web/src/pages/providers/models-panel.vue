@@ -457,7 +457,6 @@ function openAddProvider() {
         v-model:open="addOpen"
         :providers="providers"
         :sources="MODEL_SOURCES"
-        hide-trigger
       />
     </PageShell>
 

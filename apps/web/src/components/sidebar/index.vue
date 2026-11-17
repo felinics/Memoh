@@ -7,9 +7,6 @@
        while closed so focus can't tab into the parked-off-screen rail. -->
   <aside
     class="workspace-divider-r relative flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-sidebar"
-    data-native-sidebar-surface
-    data-native-sidebar-tint
-    data-native-sidebar-seam
     :style="asideStyle"
     :inert="!workbenchOpen || undefined"
   >
@@ -21,7 +18,6 @@
          full-width (right edge aligns with the search row below). -->
     <header
       class="flex h-11 shrink-0 items-center bg-sidebar pr-2 [-webkit-app-region:drag]"
-      data-native-sidebar-surface
       :class="macTrafficReserve ? 'pl-22' : 'pl-3'"
     >
       <div class="min-w-0 flex-1">
@@ -145,7 +141,6 @@
       />
       <div
         class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent"
-        data-native-sidebar-fade
       />
     </div>
 
@@ -156,7 +151,6 @@
     <div
       v-if="!sidebarEntryHidden"
       class="relative z-1 shrink-0 bg-sidebar px-2.5 pt-1"
-      data-native-sidebar-surface
     >
       <SidebarExamplesEntry beside-account />
     </div>
@@ -166,12 +160,9 @@
          slack instead of overlapping it. px-2.5/pb-2.5 keep the row's hover
          chip equidistant from the window's left and bottom edges — a notch
          wider than the panel's px-2 column above, deliberately. Solid bg +
-         z-index keep list rows behind the footer on Web; the native-surface
-         hook lets macOS Desktop expose the same sidebar material as the
-         surrounding rail. -->
+         z-index keep list rows behind the footer on Web. -->
     <div
       class="relative z-1 flex shrink-0 items-center gap-2.5 bg-sidebar px-2.5 pt-1 pb-2.5"
-      data-native-sidebar-surface
     >
       <!-- DropdownMenu has no DOM root; the flex sizing belongs on a real wrapper. -->
       <div class="min-w-0 flex-1">
