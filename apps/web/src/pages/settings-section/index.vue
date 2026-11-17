@@ -220,9 +220,15 @@ function onAfterLeave(): void {
 [data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > [data-view-swap] {
   display: flow-root;
 }
-[data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > :not([data-view-swap]):not(:has([data-settings-detail-back])),
+[data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > :not([data-view-swap]):not([data-providers-shell]):not(:has([data-settings-detail-back])),
 [data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > [data-view-swap] > :not(:has([data-settings-detail-back])) {
   margin-top: calc(var(--spacing) * 11);
+}
+[data-settings-content-shell]:has(> [data-settings-content-bar]) [data-providers-header] {
+  top: calc(var(--spacing) * 11);
+}
+[data-settings-content-shell]:has(> [data-settings-content-bar]) [data-providers-shell] [data-view-swap] > :not(:has([data-settings-detail-back])) {
+  margin-top: calc(var(--providers-header-offset, 0px) + var(--spacing) * 11);
 }
 /* Cached KeepAlive pages are detached; the separate settings home bar is
    unaffected. The overlay can hide without resizing the scroll viewport. */

@@ -72,7 +72,6 @@ const addOpen = ref(false)
 // row for every scope); this panel receives the query and exposes its add
 // dialog trigger instead of rendering its own actions row.
 const props = defineProps<{ searchQuery: string }>()
-defineExpose({ openAdd: () => openAddProvider() })
 
 const providers = computed<ProvidersGetResponse[]>(() => {
   if (!Array.isArray(providerData.value)) return []
@@ -155,6 +154,8 @@ const {
   isLoading: () => providersLoading.value,
   isReady: () => providerData.value !== undefined,
 })
+
+defineExpose({ openAdd: () => openAddProvider(), view, scopeTab: 'models' as const })
 
 const modelCountByProvider = computed(() => {
   const counts: Record<string, number> = {}

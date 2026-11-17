@@ -213,6 +213,8 @@ const {
   },
 })
 
+defineExpose({ view, scopeTab: 'web-search' as const })
+
 const activeDetailKind = computed<WebDetailKind>(() => {
   if (activeRouteValue.value.startsWith('fetch:')) return 'fetch'
   if (activeRouteValue.value.startsWith('search:')) return 'search'
