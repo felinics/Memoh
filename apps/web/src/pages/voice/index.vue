@@ -165,9 +165,9 @@ const {
     curTts.value = detail?.kind === 'speech' ? detail.provider : undefined
     curTranscription.value = detail?.kind === 'transcription' ? detail.provider : undefined
   },
-  getRouteValue: detail => `${detail.kind}:${detail.provider.provider_template_id
-    ? `template:${detail.provider.provider_template_id}`
-    : detail.provider.id ?? ''}`,
+  getRouteValue: detail => `${detail.kind}:${detail.provider.id
+    ? detail.provider.id
+    : `template:${detail.provider.provider_template_id ?? ''}`}`,
   isLoading: (routeValue) => {
     if (routeValue.startsWith('speech:template:')) {
       return speechTemplatesLoading.value || speechLoading.value
@@ -451,12 +451,14 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
     >
       <AudioProviderSetting
         v-if="detailKind === 'speech' && curTts"
+        key="speech"
         v-model:provider="curTts"
         domain="speech"
         @materialized="handleSpeechMaterialized"
       />
       <AudioProviderSetting
         v-else-if="detailKind === 'transcription' && curTranscription"
+        key="transcription"
         v-model:provider="curTranscription"
         domain="transcription"
         @materialized="handleTranscriptionMaterialized"

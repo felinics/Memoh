@@ -7,8 +7,9 @@ import { loadLocaleMessages } from '@/i18n/messages'
 await Promise.all((['en', 'zh', 'ja'] as const).map(loadLocaleMessages))
 
 // jsdom omits window.matchMedia; components and composables such as
-// useMediaQuery and send-morph-icon read it on setup or mount.
-if (typeof window.matchMedia !== 'function') {
+// useMediaQuery and send-morph-icon read it on setup or mount. Guard `window`
+// so individual test files opting into `@vitest-environment node` keep working.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     configurable: true,
@@ -46,7 +47,7 @@ if (jsdomWindow) {
 // jsdom's Blob omits Blob.prototype.arrayBuffer and Blob.prototype.text.
 // Reading jsdom's internal buffer resolves in a microtask like Web/Node Blob
 // instead of FileReader's macrotask timer so unawaited fetches do not leak across tests.
-if (typeof Blob.prototype.arrayBuffer !== 'function') {
+if (typeof Blob !== 'undefined' && typeof Blob.prototype.arrayBuffer !== 'function') {
   const blobImplSymbol = Object.getOwnPropertySymbols(new Blob())[0]
   Blob.prototype.arrayBuffer = function arrayBuffer(): Promise<ArrayBuffer> {
     const impl = blobImplSymbol
@@ -56,6 +57,10 @@ if (typeof Blob.prototype.arrayBuffer !== 'function') {
       return Promise.resolve(new Uint8Array(impl._buffer).slice().buffer)
     }
     return new Promise((resolve, reject) => {
+      if (typeof FileReader === 'undefined') {
+        reject(new Error('Blob.arrayBuffer is unavailable without FileReader'))
+        return
+      }
       const reader = new FileReader()
       reader.onload = () => resolve(reader.result as ArrayBuffer)
       reader.onerror = () => reject(reader.error ?? new Error('Failed to read Blob'))
@@ -64,7 +69,7 @@ if (typeof Blob.prototype.arrayBuffer !== 'function') {
   }
 }
 
-if (typeof Blob.prototype.text !== 'function') {
+if (typeof Blob !== 'undefined' && typeof Blob.prototype.text !== 'function') {
   Blob.prototype.text = async function text(): Promise<string> {
     return new TextDecoder().decode(await this.arrayBuffer())
   }

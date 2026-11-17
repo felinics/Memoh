@@ -22,7 +22,7 @@
           </span>
           <Switch
             :model-value="curProvider.enable ?? false"
-            :disabled="enableLoading"
+            :disabled="enableLoading || saveLoading"
             :aria-label="t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
@@ -51,7 +51,7 @@
 
             <SchemaField
               v-for="field in orderedProviderFields"
-              :key="`${providerIdentity(providerDetail)}:${field.key}`"
+              :key="`${formEpoch}:${field.key}`"
               :field="field"
               :field-key="field.key"
               :id-prefix="`${domain}-provider`"
@@ -65,6 +65,7 @@
               type="submit"
               size="sm"
               :loading="saveLoading"
+              :disabled="enableLoading"
             >
               {{ t('provider.saveChanges') }}
             </LoadingButton>
@@ -116,7 +117,10 @@
         </template>
       </SettingsSection>
 
-      <Dialog v-model:open="modelDialogOpen">
+      <Dialog
+        v-model:open="modelDialogOpen"
+        @update:open="(open) => { if (!open) editingModel = null }"
+      >
         <DialogContent class="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
@@ -403,22 +407,38 @@ const providerModels = computed<AudioModelRecord[]>(() => {
 // providerName/providerConfig are shared between the user's draft and the
 // server snapshot that colada's refetchOnWindowFocus can replace at any
 // moment — the composables reconcile them (hard reset on provider switch,
-// per-field guard on background refresh). The detail pane is NOT keyed by
-// provider, so the identity function must cover id / template / client_type.
-const providerIdentity = (provider: typeof providerDetail.value) =>
-  String(provider?.id ?? curProvider.value.id ?? curProvider.value.provider_template_id ?? curProvider.value.client_type ?? '')
+// per-field guard on background refresh). Watching both providerDetail and
+// curProvider ensures template-to-template and uncached switches still reset.
+const formEpoch = ref(0)
 
-useServerSyncedScalar(providerName, {
-  source: () => providerDetail.value,
-  identity: providerIdentity,
-  server: provider => provider?.name ?? curProvider.value.name ?? '',
+function activeIdentity(
+  detail: AudioSpeechProviderResponse | null | undefined = providerDetail.value,
+  provider: TemplateAudioProvider = curProvider.value,
+): string {
+  const id = detail?.id ?? provider.id
+  if (id) return `id:${id}`
+  if (provider.provider_template_id) return `template:${provider.provider_template_id}`
+  return `client:${provider.client_type ?? ''}`
+}
+
+const { markClean: markNameClean } = useServerSyncedScalar(providerName, {
+  source: () => ({ detail: providerDetail.value, provider: curProvider.value }),
+  identity: ({ detail, provider }) => activeIdentity(detail, provider),
+  server: ({ detail, provider }) => detail?.name ?? provider.name ?? '',
   deep: true,
 })
-useServerSyncedRecord(providerConfig, {
-  source: () => providerDetail.value,
-  identity: providerIdentity,
-  server: provider => ({ ...(provider?.config ?? curProvider.value.config ?? {}) }),
+const { markClean: markConfigClean } = useServerSyncedRecord(providerConfig, {
+  source: () => ({ detail: providerDetail.value, provider: curProvider.value }),
+  identity: ({ detail, provider }) => activeIdentity(detail, provider),
+  server: ({ detail, provider }) => ({ ...(detail?.config ?? provider.config ?? {}) }),
   deep: true,
+  onSync: (hardReset) => {
+    if (hardReset) {
+      formEpoch.value++
+      modelDialogOpen.value = false
+      editingModel.value = null
+    }
+  },
 })
 
 function getModelSchema(modelID: string): AudioConfigSchema | null {
@@ -444,28 +464,38 @@ function showErrorToast(error: unknown, fallbackKey: string) {
 
 async function handleToggleEnable(value: boolean) {
   const prev = curProvider.value.enable ?? false
+  const targetIdentity = activeIdentity()
+  const providerId = curProviderId.value
+  const savedName = providerName.value.trim() || curProvider.value.name || ''
+  const savedConfig = sanitizeConfig(providerConfig)
   curProvider.value = { ...curProvider.value, enable: value }
 
   enableLoading.value = true
   try {
-    if (!curProviderId.value) {
+    if (!providerId) {
       await materializeProvider(value)
       return
     }
     await putProvidersById({
-      path: { id: curProviderId.value },
+      path: { id: providerId },
       body: {
-        name: providerName.value.trim() || curProvider.value.name || '',
+        name: savedName,
         client_type: curProvider.value.client_type,
         enable: value,
-        config: sanitizeConfig(providerConfig),
+        config: savedConfig,
       },
       throwOnError: true,
     })
+    if (activeIdentity() === targetIdentity) {
+      markNameClean(savedName)
+      markConfigClean(savedConfig)
+    }
     queryCache.invalidateQueries({ key: [spec.value.providersKey] })
-    queryCache.invalidateQueries({ key: [spec.value.providerDetailKey, curProviderId.value] })
+    queryCache.invalidateQueries({ key: [spec.value.providerDetailKey, providerId] })
   } catch (error) {
-    curProvider.value = { ...curProvider.value, enable: prev }
+    if (activeIdentity() === targetIdentity) {
+      curProvider.value = { ...curProvider.value, enable: prev }
+    }
     showErrorToast(error, 'common.saveFailed')
   } finally {
     enableLoading.value = false
@@ -473,26 +503,35 @@ async function handleToggleEnable(value: boolean) {
 }
 
 async function handleSaveProvider() {
+  const targetIdentity = activeIdentity()
+  const providerId = curProviderId.value
+  const savedName = providerName.value.trim() || curProvider.value.name || ''
+  const savedConfig = sanitizeConfig(providerConfig)
+
   saveLoading.value = true
   try {
-    if (!curProviderId.value) {
+    if (!providerId) {
       await materializeProvider(false)
       toast.success(t(spec.value.saveSuccessKey))
       return
     }
     await putProvidersById({
-      path: { id: curProviderId.value },
+      path: { id: providerId },
       body: {
-        name: providerName.value.trim() || curProvider.value.name || '',
+        name: savedName,
         client_type: curProvider.value.client_type,
         enable: curProvider.value.enable,
-        config: sanitizeConfig(providerConfig),
+        config: savedConfig,
       },
       throwOnError: true,
     })
+    if (activeIdentity() === targetIdentity) {
+      markNameClean(savedName)
+      markConfigClean(savedConfig)
+    }
     toast.success(t(spec.value.saveSuccessKey))
     queryCache.invalidateQueries({ key: [spec.value.providersKey] })
-    queryCache.invalidateQueries({ key: [spec.value.providerDetailKey, curProviderId.value] })
+    queryCache.invalidateQueries({ key: [spec.value.providerDetailKey, providerId] })
   } catch (error) {
     showErrorToast(error, 'common.saveFailed')
   } finally {
@@ -508,13 +547,17 @@ async function materializeProvider(enable: boolean) {
 
   const activeSpec = spec.value
   const activeDomain = props.domain
+  const targetIdentity = activeIdentity()
+  const savedName = providerName.value.trim() || curProvider.value.name || ''
+  const savedConfig = sanitizeConfig(providerConfig)
+
   materializePromise = (async () => {
     const { data: created } = await postProvidersFromTemplate({
       body: {
         template_id: templateId,
         domain: activeDomain,
-        name: providerName.value.trim() || curProvider.value.name || '',
-        config: sanitizeConfig(providerConfig),
+        name: savedName,
+        config: savedConfig,
       },
       throwOnError: true,
     })
@@ -530,8 +573,13 @@ async function materializeProvider(enable: boolean) {
       result = response.data ?? { ...created, enable: false }
     }
 
-    curProvider.value = result
-    emit('materialized', result)
+    if (activeIdentity() === targetIdentity) {
+      const nextIdentity = `id:${created.id}`
+      markNameClean(savedName, nextIdentity)
+      markConfigClean(savedConfig, nextIdentity)
+      curProvider.value = result
+      emit('materialized', result)
+    }
     queryCache.invalidateQueries({ key: [activeSpec.providersKey] })
     queryCache.invalidateQueries({ key: ['provider-templates', activeDomain] })
 

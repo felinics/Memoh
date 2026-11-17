@@ -211,7 +211,8 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
    * session, where the runtime snapshot resumes or settles it.
    */
   async function selectBot(targetBotId: string) {
-    if (deps.currentBotId.value === targetBotId) return
+    const botId = targetBotId.trim()
+    if (!botId || deps.currentBotId.value === botId) return
     deps.bumpSelectSessionRequest()
     deps.clearPendingExternalAgentSession()
     deps.clearFsForBotSwitch()
@@ -219,7 +220,7 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
     deps.replaceSessions([])
     deps.sessionsCursor.value = null
     deps.hasMoreSessions.value = false
-    deps.currentBotId.value = targetBotId
+    deps.currentBotId.value = botId
     deps.sessionId.value = null
     deps.clearRememberedSessions()
     deps.explicitSessionSelection.value = false

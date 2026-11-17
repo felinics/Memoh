@@ -813,7 +813,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // The session a chat panel renders, read from its dockview params (null = draft).
   function panelSessionId(panel: { params?: Record<string, unknown> }): string | null {
     const sid = panel.params?.sessionId
-    return typeof sid === 'string' && sid.trim() ? sid : null
+    const trimmed = typeof sid === 'string' ? sid.trim() : ''
+    return trimmed || null
   }
 
   function chatPanelForSession(sid: string) {

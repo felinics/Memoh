@@ -283,9 +283,10 @@ export function resolveKeyboardBinding<T extends KeyChord & Partial<Record<Keybo
 
 /**
  * Best-effort platform detection for the keydown listener. Accepts a
- * navigator-like object for testability; defaults to the global navigator.
- * The mac vs non-mac distinction decides `mod`; win and linux differ only where
- * a binding declares a platform chord.
+ * navigator-like object for testability; omitting the argument reads
+ * `window.navigator`, while passing `undefined` explicitly falls back to
+ * `'linux'` (unknown environment) via rest args rather than a default param.
+ * `/\bwin/i` avoids false-matching `darwin` in jsdom user agents.
  */
 export function detectPlatform(
   ...args: [navigatorLike?: { platform?: string; userAgent?: string }]

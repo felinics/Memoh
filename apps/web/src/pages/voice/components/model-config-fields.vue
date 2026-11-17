@@ -18,6 +18,7 @@
         />
         <InputGroupAddon align="inline-end">
           <InputGroupButton
+            type="button"
             size="icon-xs"
             variant="quiet"
             :aria-label="visibleSecrets[field.key]
@@ -123,7 +124,7 @@ function stringValue(key: string) {
 
 function numberValue(key: string) {
   const value = props.values[key]
-  return typeof value === 'number' ? value : undefined
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function enumOptions(field: AudioFieldWithKey): SearchableSelectOption[] {

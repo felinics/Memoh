@@ -4,6 +4,7 @@
       v-if="basicFields.length > 0"
       :fields="basicFields"
       :values="configData"
+      :id-prefix="`${mode}-field`"
       @update:field="setConfigField"
     />
 
@@ -42,6 +43,7 @@
             <ModelConfigFields
               :fields="advancedFields"
               :values="configData"
+              :id-prefix="`${mode}-advanced-field`"
               @update:field="setConfigField"
             />
           </div>
@@ -236,7 +238,11 @@ function resetTranscription() {
   transcriptionLanguage.value = ''
 }
 
-onBeforeUnmount(revokeAudio)
+let disposed = false
+onBeforeUnmount(() => {
+  disposed = true
+  revokeAudio()
+})
 
 async function handleSaveConfig() {
   saving.value = true
@@ -257,21 +263,23 @@ async function handleTest() {
 
   try {
     const result = await props.onTest(mode.value === 'synthesis' ? testText.value : selectedFile.value as File, buildConfig())
+    if (disposed) return
 
     if (mode.value === 'synthesis') {
       const blob = result as Blob
       audioUrl.value = URL.createObjectURL(blob)
       await new Promise<void>((resolve) => setTimeout(resolve, 50))
-      audioEl.value?.play()
+      if (!disposed) audioEl.value?.play()
     } else {
       const payload = result as { text?: string, language?: string }
       transcriptionText.value = payload.text ?? ''
       transcriptionLanguage.value = payload.language ?? ''
     }
   } catch (error: unknown) {
+    if (disposed) return
     const msg = resolveApiErrorMessage(error, t(mode.value === 'transcription' ? 'transcription.test.failed' : 'speech.test.failed'))
     testError.value = msg
-    toast.error(msg)
+    if (msg) toast.error(msg)
   } finally {
     testLoading.value = false
   }

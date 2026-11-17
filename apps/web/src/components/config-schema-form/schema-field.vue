@@ -56,6 +56,7 @@
         />
         <InputGroupAddon align="inline-end">
           <InputGroupButton
+            type="button"
             size="icon-xs"
             variant="quiet"
             :aria-label="revealed
