@@ -1,27 +1,46 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, reactive, ref, type App } from 'vue'
+import { KeepAlive, createApp, h, nextTick, reactive, ref, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import FileViewer from './file-viewer.vue'
 
-const sdk = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }))
+const sdk = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn(), fs: vi.fn() }))
+const bounded = vi.hoisted(() => ({ fetchBoundedBlob: vi.fn() }))
+const chatState = vi.hoisted(() => ({
+  fsChangedAt: null as unknown as ReturnType<typeof ref<number>>,
+  affectsPath: (_path: string): boolean => false,
+}))
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock('@memohai/sdk', () => ({
   getBotsByBotIdContainerFsRead: sdk.read,
   postBotsByBotIdContainerFsWrite: sdk.write,
-  getBotsByBotIdContainerFs: vi.fn(),
+  getBotsByBotIdContainerFs: sdk.fs,
   getBotsByBotIdContainerFsDownload: vi.fn(),
+}))
+vi.mock('@/lib/bounded-fetch', () => ({
+  fetchBoundedBlob: bounded.fetchBoundedBlob,
 }))
 vi.mock('@felinic/ui', () => ({
   toast, Button: 'button', DiffTitleBar: 'div', PanePlaceholder: 'div',
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, args?: Record<string, unknown>) =>
+      args?.size ? `${key}:${String(args.size)}` : key,
+  }),
+}))
 vi.mock('@/lib/api-client', () => ({ sdkApiUrl: vi.fn(), sdkAuthQuery: vi.fn() }))
 vi.mock('@/composables/useKeyboardCommand', () => ({ useKeyboardCommand: vi.fn() }))
 vi.mock('@/store/chat-list', () => ({
-  useChatStore: () => ({
-    fsChangedAt: ref(0), currentBotId: ref('bot-a'), bots: ref([]),
-    affectsPath: () => false, fsEventForPath: () => null,
-  }),
+  useChatStore: () => {
+    if (!chatState.fsChangedAt) chatState.fsChangedAt = ref(0)
+    return {
+      fsChangedAt: chatState.fsChangedAt,
+      currentBotId: ref('bot-a'),
+      bots: ref([]),
+      affectsPath: (path: string) => chatState.affectsPath(path),
+      fsEventForPath: () => null,
+    }
+  },
 }))
 vi.mock('@/components/monaco-editor/diff.vue', () => ({ default: 'div' }))
 vi.mock('@/components/monaco-editor/index.vue', () => ({
@@ -29,6 +48,13 @@ vi.mock('@/components/monaco-editor/index.vue', () => ({
     value: props.modelValue,
     onInput: (event: Event) => props['onUpdate:modelValue']((event.target as HTMLTextAreaElement).value),
   }),
+}))
+vi.mock('./document-preview.vue', () => ({
+  default: (props: { kind?: string, filename?: string, blob?: Blob }) => h('div', {
+    'data-testid': 'doc-preview',
+    'data-kind': props.kind,
+    'data-size': String(props.blob?.size ?? 0),
+  }, props.filename),
 }))
 
 function deferred() {
@@ -70,8 +96,12 @@ async function mountViewer() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  chatState.fsChangedAt = ref(0)
+  chatState.affectsPath = () => false
   sdk.read.mockResolvedValue({ data: { content: 'initial', revision: 'r0' } })
   sdk.write.mockResolvedValue({ data: { revision: 'r1' } })
+  sdk.fs.mockResolvedValue({ data: { path: '/a.pdf', isDir: false, size: 100, modTime: '2026-01-01T00:00:00Z' } })
+  bounded.fetchBoundedBlob.mockResolvedValue({ ok: true, blob: new Blob(['%PDF-1.4']) })
 })
 afterEach(() => {
   app?.unmount()
@@ -256,5 +286,137 @@ describe('file viewer save snapshot', () => {
       path: { bot_id: view.props.botId },
       body: { path: view.props.file.path, content: 'new draft', expectedRevision: 'other-r0' },
     }))
+  })
+})
+
+describe('file viewer binary document preview', () => {
+  const settle = async () => {
+    await nextTick()
+    await Promise.resolve()
+    await nextTick()
+  }
+
+  const mountDoc = async (fileProps: Record<string, unknown> | (() => ReturnType<typeof h>)) => {
+    host = document.createElement('div')
+    document.body.append(host)
+    app = createApp(typeof fileProps === 'function' ? fileProps : () => h(FileViewer, fileProps as never))
+    app.mount(host)
+    await settle()
+  }
+
+  it('renders oversized fallback and isolates document fingerprints across aborted mid-flight polls', async () => {
+    bounded.fetchBoundedBlob.mockResolvedValueOnce({ ok: false, reason: 'too-large', maxBytes: 20 * 1024 * 1024 })
+    await mountDoc({ botId: 'bot-a', file: { path: '/huge.docx', name: 'huge.docx' } })
+    expect(host.querySelector('[data-testid="doc-preview"]')).toBeNull()
+    expect(host.textContent).toContain('bots.files.previewTooLarge:20.0 MB')
+    app.unmount()
+    host.remove()
+
+    vi.useFakeTimers()
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    let resolveReloadA!: (res: { ok: true, blob: Blob }) => void
+    bounded.fetchBoundedBlob
+      .mockResolvedValueOnce({ ok: true, blob: new Blob(['pdf-a-v1']) })
+      .mockReturnValueOnce(new Promise((yes) => { resolveReloadA = yes }))
+      .mockResolvedValueOnce({ ok: true, blob: new Blob(['pdf-b-v1']) })
+      .mockResolvedValueOnce({ ok: true, blob: new Blob(['pdf-b-v2']) })
+
+    const props = reactive({ botId: 'bot-a', file: { path: '/a.pdf', name: 'a.pdf', modTime: 't1' } })
+    await mountDoc(props)
+
+    const sharedNextMeta = { path: '/b.pdf', isDir: false, size: 777, modTime: 't-next' }
+    sdk.fs.mockResolvedValueOnce({ data: sharedNextMeta })
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(3)
+
+    props.file = { path: '/b.pdf', name: 'b.pdf', modTime: 't-b1' }
+    await settle()
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(4)
+
+    resolveReloadA({ ok: true, blob: new Blob(['pdf-a-v2']) })
+    await settle()
+    sdk.fs.mockResolvedValueOnce({ data: sharedNextMeta })
+    await vi.advanceTimersByTimeAsync(2_000)
+    await settle()
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(5)
+  })
+
+  it('defers fsChangedAt document reloads while deactivated in KeepAlive and reloads upon reactivation', async () => {
+    const active = ref(true)
+    chatState.affectsPath = path => path === '/spec.docx'
+    await mountDoc(() => h(KeepAlive, null, [
+      active.value ? h(FileViewer, { key: 'doc-tab', botId: 'bot-a', file: { path: '/spec.docx', name: 'spec.docx' } }) : null,
+    ]))
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(1)
+
+    active.value = false
+    await nextTick()
+    chatState.fsChangedAt.value = Date.now()
+    await settle()
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(1)
+
+    active.value = true
+    await settle()
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(2)
+  })
+
+  it('aligns polling baseline without modTime and recovers automatically after 404 deleted or initial 503 stale', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    chatState.affectsPath = path => path === '/report.pdf'
+
+    const v1 = new Blob(['%PDF-1.4'])
+    const v2 = new Blob(['%PDF-1.4-updated'])
+    const v3 = new Blob(['%PDF-1.4-agent'])
+    bounded.fetchBoundedBlob
+      .mockResolvedValueOnce({ ok: true, blob: v1 })
+      .mockResolvedValueOnce({ ok: true, blob: v2 })
+      .mockResolvedValueOnce({ ok: true, blob: v3 })
+    sdk.fs.mockResolvedValue({ data: { path: '/report.pdf', isDir: false, size: v1.size, modTime: '2026-11-13T07:00:00Z' } })
+
+    await mountDoc({ botId: 'bot-a', file: { path: '/report.pdf', name: 'report.pdf', isDir: false } })
+    await vi.advanceTimersByTimeAsync(4_000)
+    await settle()
+    expect(sdk.fs).toHaveBeenCalledTimes(2)
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(1)
+
+    sdk.fs.mockResolvedValue({ data: { path: '/report.pdf', isDir: false, size: v2.size, modTime: '2026-11-13T07:05:00Z' } })
+    await vi.advanceTimersByTimeAsync(4_000)
+    await settle()
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(2)
+
+    sdk.fs.mockResolvedValue({ data: { path: '/report.pdf', isDir: false, size: v3.size, modTime: '2026-11-13T07:10:00Z' } })
+    chatState.fsChangedAt.value = Date.now()
+    await settle()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await settle()
+    expect(bounded.fetchBoundedBlob).toHaveBeenCalledTimes(3)
+
+    // Poll hits 404 -> deleted placeholder, then 200 -> restores preview
+    const restored = new Blob(['%PDF-1.4-restored'])
+    bounded.fetchBoundedBlob.mockResolvedValueOnce({ ok: true, blob: restored })
+    sdk.fs
+      .mockRejectedValueOnce({ status: 404 })
+      .mockResolvedValue({ data: { path: '/report.pdf', isDir: false, size: restored.size, modTime: '2026-11-13T09:00:00Z' } })
+    await vi.advanceTimersByTimeAsync(2_000)
+    await settle()
+    expect(host.textContent).toContain('bots.files.documentDeleted')
+    await vi.advanceTimersByTimeAsync(2_000)
+    await settle()
+    expect(host.querySelector('[data-testid="doc-preview"]')?.getAttribute('data-size')).toBe(String(restored.size))
+
+    // Initial 503 stale -> recovers on next 2s poll
+    app.unmount()
+    host.remove()
+    const recovered503 = new Blob(['%PDF-1.4-after-503'])
+    bounded.fetchBoundedBlob
+      .mockRejectedValueOnce({ status: 503 })
+      .mockResolvedValueOnce({ ok: true, blob: recovered503 })
+    sdk.fs.mockResolvedValue({ data: { path: '/s.pdf', isDir: false, size: recovered503.size, modTime: '2026-11-13T09:10:00Z' } })
+    await mountDoc({ botId: 'bot-a', file: { path: '/s.pdf', name: 's.pdf', isDir: false } })
+    expect(host.querySelector('[data-testid="doc-preview"]')).toBeNull()
+    await vi.advanceTimersByTimeAsync(2_000)
+    await settle()
+    expect(host.querySelector('[data-testid="doc-preview"]')?.getAttribute('data-size')).toBe(String(recovered503.size))
   })
 })

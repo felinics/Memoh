@@ -91,6 +91,12 @@ const IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif',
 ])
 
+export type DocumentPreviewKind = 'pdf' | 'docx'
+
+export const PDF_PREVIEW_MAX_BYTES = 50 * 1024 * 1024
+export const DOCX_PREVIEW_MAX_BYTES = 20 * 1024 * 1024
+export const TEXT_PREVIEW_MAX_BYTES = 5 * 1024 * 1024
+
 export function sortDirsFirst<T extends { isDir?: boolean, name?: string }>(entries: T[]): T[] {
   const byName = (a: T, b: T) => (a.name ?? '').localeCompare(b.name ?? '')
   const dirs = entries.filter(e => e.isDir).sort(byName)
@@ -122,6 +128,27 @@ export function isTextFile(filename: string): boolean {
 export function isImageFile(filename: string): boolean {
   const ext = getExtension(filename)
   return IMAGE_EXTENSIONS.has(ext)
+}
+
+export function getDocumentPreviewKind(filename: string | undefined): DocumentPreviewKind | null {
+  const ext = getExtension(filename ?? '')
+  if (ext === 'pdf') return 'pdf'
+  if (ext === 'docx') return 'docx'
+  return null
+}
+
+export function isDocumentFile(filename: string | undefined): boolean {
+  return getDocumentPreviewKind(filename) !== null
+}
+
+export function getDocumentPreviewMaxBytes(kind: DocumentPreviewKind): number {
+  return kind === 'pdf' ? PDF_PREVIEW_MAX_BYTES : DOCX_PREVIEW_MAX_BYTES
+}
+
+export function getDocumentMimeType(kind: DocumentPreviewKind): string {
+  return kind === 'pdf'
+    ? 'application/pdf'
+    : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 }
 
 export function isMarkdownFile(filename: string): boolean {
