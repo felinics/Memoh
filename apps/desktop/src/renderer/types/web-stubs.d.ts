@@ -16,26 +16,16 @@ declare module '@memohai/web/router-guards/onboarding' {
 
 declare module '@memohai/web/router-guards/return-to' {
   import type { NavigationGuardReturn, RouteLocationNormalized, Router } from 'vue-router'
-  export interface LoginRedirectLocation {
-    name: 'Login'
-    query?: { return_to: string }
-  }
-  export interface OnboardingRedirectLocation {
-    path: '/onboarding'
-    query?: { return_to: string }
-  }
   export interface AuthRouteGuardDeps {
     readToken: () => string | null
     readUserRole: () => string
     hasOnboardingInProgress: () => boolean
     ensureOnboarding: () => Promise<boolean>
   }
-  export function parseReturnTo(raw: unknown): string | null
   export function sanitizeReturnTo(raw: unknown): string
-  export function toReturnToParam(raw: unknown): string | undefined
-  export function buildLoginRedirect(targetFullPath?: unknown): LoginRedirectLocation
-  export function buildOnboardingRedirect(targetFullPath?: unknown): OnboardingRedirectLocation
-  export function currentReturnToTarget(router?: Pick<Router, 'currentRoute'> | null): string | undefined
+  export function loginRedirectForCurrentRoute(
+    router?: Pick<Router, 'currentRoute'> | null,
+  ): { name: 'Login', query?: { return_to: string } }
   export function guardAuthenticatedRoute(
     to: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query' | 'meta'>,
     deps: AuthRouteGuardDeps,

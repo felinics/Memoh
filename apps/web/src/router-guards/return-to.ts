@@ -1,19 +1,12 @@
-import type {
-  NavigationGuardReturn,
-  RouteLocationNormalized,
-  Router,
-} from 'vue-router'
+import type { NavigationGuardReturn, RouteLocationNormalized, Router } from 'vue-router'
 
 const INTERNAL_ORIGIN = 'https://memoh.invalid'
 const MAX_RETURN_TO_LENGTH = 2048
 
 // Auth boundaries, external OAuth callbacks, reverse-proxied backend endpoints,
 // and bearer-credential fragment deep links (`/providers/connect#payload=...`)
-// must never become post-login redirects: the first group loops or replays
-// stale handshakes, `/api` bypasses SPA views, and putting `#payload=` into
-// `?return_to=` would move an API key from the URL fragment into a
-// network-visible query parameter.
-const DISALLOWED_RETURN_PREFIXES = [
+// must never become post-login redirects.
+const DISALLOWED_PREFIXES = [
   '/login',
   '/oauth',
   '/connect',
@@ -22,138 +15,73 @@ const DISALLOWED_RETURN_PREFIXES = [
   '/api',
 ] as const
 
-function hasAsciiControlChar(value: string): boolean {
+function isSafePathInput(value: string): boolean {
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return false
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i)
-    if (code <= 0x1F || code === 0x7F) return true
+    if (code <= 0x1F || code === 0x7F) return false
   }
-  return false
+  return true
 }
 
-function isDisallowedReturnPathname(pathname: string): boolean {
-  return DISALLOWED_RETURN_PREFIXES.some(
-    prefix => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  )
-}
-
-/**
- * Validate an untrusted `return_to` value and return a normalized in-app
- * relative destination (`pathname + search + hash`), or `null` when invalid
- * or non-returnable.
- */
-export function parseReturnTo(raw: unknown): string | null {
-  const value = Array.isArray(raw) ? raw[0] : raw
-  if (typeof value !== 'string' || !value || value.length > MAX_RETURN_TO_LENGTH) return null
-  // Reject anything not starting with a single `/`, scheme-relative `//`,
-  // backslashes (`/\evil.example` normalizes to `//evil.example` in browsers),
-  // and ASCII control characters (`/\t/evil.example` strips `\t` in WHATWG URL).
-  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\') || hasAsciiControlChar(value)) {
-    return null
-  }
-  let parsed: URL
+function parseAllowedUrl(input: string): URL | null {
+  if (!isSafePathInput(input)) return null
   try {
-    parsed = new URL(value, INTERNAL_ORIGIN)
+    const url = new URL(input, INTERNAL_ORIGIN)
+    if (url.origin !== INTERNAL_ORIGIN || !url.pathname.startsWith('/') || url.pathname.startsWith('//')) return null
+    if (DISALLOWED_PREFIXES.some(p => url.pathname === p || url.pathname.startsWith(`${p}/`))) return null
+    return url
   } catch {
     return null
   }
-  if (parsed.origin !== INTERNAL_ORIGIN) return null
-  // Dot-segment collapse can turn `/..//evil.example` into `pathname === '//evil.example'`.
-  if (!parsed.pathname.startsWith('/') || parsed.pathname.startsWith('//')) return null
-  if (isDisallowedReturnPathname(parsed.pathname)) return null
-
-  let decodedPathname: string
-  try {
-    decodedPathname = decodeURIComponent(parsed.pathname)
-  } catch {
-    return null
-  }
-  if (
-    !decodedPathname.startsWith('/')
-    || decodedPathname.startsWith('//')
-    || decodedPathname.includes('\\')
-    || hasAsciiControlChar(decodedPathname)
-  ) {
-    return null
-  }
-  let decodedResolved: URL
-  try {
-    decodedResolved = new URL(decodedPathname, INTERNAL_ORIGIN)
-  } catch {
-    return null
-  }
-  if (
-    decodedResolved.origin !== INTERNAL_ORIGIN
-    || !decodedResolved.pathname.startsWith('/')
-    || decodedResolved.pathname.startsWith('//')
-    || isDisallowedReturnPathname(decodedResolved.pathname)
-  ) {
-    return null
-  }
-
-  return `${parsed.pathname}${parsed.search}${parsed.hash}`
 }
 
-/**
- * Return a safe in-app `return_to` destination, falling back to `'/'`.
- */
-export function sanitizeReturnTo(raw: unknown): string {
-  return parseReturnTo(raw) ?? '/'
-}
-
-/**
- * Return a non-root in-app `return_to` query value, or `undefined` when the
- * target is `'/'` or invalid so `/login` and `/onboarding` omit `?return_to=%2F`.
- */
+/** Return a non-root in-app `return_to` value, or `undefined` when `'/'` or invalid. */
 export function toReturnToParam(raw: unknown): string | undefined {
-  const safe = parseReturnTo(raw)
-  return safe && safe !== '/' ? safe : undefined
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (typeof value !== 'string' || !value || value.length > MAX_RETURN_TO_LENGTH) return undefined
+  const parsed = parseAllowedUrl(value)
+  if (!parsed) return undefined
+  try {
+    if (!parseAllowedUrl(decodeURIComponent(parsed.pathname))) return undefined
+  } catch {
+    return undefined
+  }
+  const normalized = `${parsed.pathname}${parsed.search}${parsed.hash}`
+  return normalized === '/' ? undefined : normalized
 }
 
-export interface LoginRedirectLocation {
-  name: 'Login'
-  query?: { return_to: string }
+/** Return a safe in-app `return_to` destination, falling back to `'/'`. */
+export function sanitizeReturnTo(raw: unknown): string {
+  return toReturnToParam(raw) ?? '/'
 }
 
-export function buildLoginRedirect(targetFullPath?: unknown): LoginRedirectLocation {
-  const returnTo = toReturnToParam(targetFullPath)
-  return returnTo
-    ? { name: 'Login', query: { return_to: returnTo } }
-    : { name: 'Login' }
+export function buildLoginRedirect(target?: unknown): { name: 'Login', query?: { return_to: string } } {
+  const returnTo = toReturnToParam(target)
+  return returnTo ? { name: 'Login', query: { return_to: returnTo } } : { name: 'Login' }
 }
 
-export interface OnboardingRedirectLocation {
-  path: '/onboarding'
-  query?: { return_to: string }
-}
-
-export function buildOnboardingRedirect(targetFullPath?: unknown): OnboardingRedirectLocation {
-  const returnTo = toReturnToParam(targetFullPath)
-  return returnTo
-    ? { path: '/onboarding', query: { return_to: returnTo } }
-    : { path: '/onboarding' }
+export function buildOnboardingRedirect(target?: unknown): { path: '/onboarding', query?: { return_to: string } } {
+  const returnTo = toReturnToParam(target)
+  return returnTo ? { path: '/onboarding', query: { return_to: returnTo } } : { path: '/onboarding' }
 }
 
 /**
- * Resolve the active destination to preserve across an unexpected 401 redirect.
- * Before the initial navigation commits (`currentRoute === START_LOCATION`),
- * fall back to the browser URL under web history so cold-start 401s on deep
- * links keep their target.
+ * Build the login redirect for an unexpected 401. Before the initial route
+ * commits (`matched.length === 0`), read `window.location` on web history.
  */
-export function currentReturnToTarget(
+export function loginRedirectForCurrentRoute(
   router?: Pick<Router, 'currentRoute'> | null,
-): string | undefined {
+): { name: 'Login', query?: { return_to: string } } {
   const current = router?.currentRoute?.value
-  const isCommitted = !!current && (!Array.isArray(current.matched) || current.matched.length > 0)
-  if (isCommitted) {
-    if (current.path === '/onboarding') {
-      return toReturnToParam(current.query?.return_to)
-    }
-    return current.fullPath
+  if (current && (!Array.isArray(current.matched) || current.matched.length > 0)) {
+    const target = current.path === '/onboarding' ? current.query?.return_to : current.fullPath
+    return buildLoginRedirect(target)
   }
   if (typeof window !== 'undefined' && (window.location.protocol === 'http:' || window.location.protocol === 'https:')) {
-    return `${window.location.pathname}${window.location.search}${window.location.hash}`
+    return buildLoginRedirect(`${window.location.pathname}${window.location.search}${window.location.hash}`)
   }
-  return current?.fullPath
+  return buildLoginRedirect(current?.fullPath)
 }
 
 export interface AuthRouteGuardDeps {
@@ -168,38 +96,21 @@ export async function guardAuthenticatedRoute(
   deps: AuthRouteGuardDeps,
 ): Promise<NavigationGuardReturn> {
   const token = deps.readToken()
-
-  if (to.path === '/login') {
-    return token ? sanitizeReturnTo(to.query.return_to) : true
-  }
-  if (to.path.startsWith('/oauth/')) {
-    return true
-  }
-  if (!token) {
-    return buildLoginRedirect(to.fullPath)
-  }
-  if (to.meta.adminOnly) {
-    if (String(deps.readUserRole()).toLowerCase() !== 'admin') {
-      return { name: 'bots' }
-    }
+  if (to.path === '/login') return token ? sanitizeReturnTo(to.query.return_to) : true
+  if (to.path.startsWith('/oauth/')) return true
+  if (!token) return buildLoginRedirect(to.fullPath)
+  if (to.meta.adminOnly && String(deps.readUserRole()).toLowerCase() !== 'admin') {
+    return { name: 'bots' }
   }
 
   if (to.path === '/onboarding') {
     if (deps.hasOnboardingInProgress()) return true
     const completed = await deps.ensureOnboarding()
-    if (!deps.readToken()) {
-      return buildLoginRedirect(to.query.return_to)
-    }
+    if (!deps.readToken()) return buildLoginRedirect(to.query.return_to)
     return completed ? sanitizeReturnTo(to.query.return_to) : true
   }
 
   const completed = await deps.ensureOnboarding()
-  if (!deps.readToken()) {
-    return buildLoginRedirect(to.fullPath)
-  }
-  if (!completed) {
-    return buildOnboardingRedirect(to.fullPath)
-  }
-
-  return true
+  if (!deps.readToken()) return buildLoginRedirect(to.fullPath)
+  return completed ? true : buildOnboardingRedirect(to.fullPath)
 }

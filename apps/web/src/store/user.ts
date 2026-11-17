@@ -14,7 +14,7 @@ import {
 import { resetOnboardingState } from '@/composables/useOnboarding'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { resetOnboardingSession } from '@/pages/onboarding/session'
-import { buildLoginRedirect, buildOnboardingRedirect, currentReturnToTarget } from '@/router-guards/return-to'
+import { buildOnboardingRedirect, loginRedirectForCurrentRoute } from '@/router-guards/return-to'
 import { safeLocalRemove } from '@/utils/safe-storage'
 
 export interface UserInfo {
@@ -299,7 +299,7 @@ export const useUserStore = defineStore(
         clearingExplicitly = false
       }
       if (shouldRedirectToLogin()) {
-        void router?.replace(buildLoginRedirect(currentReturnToTarget(router)))
+        void router?.replace(loginRedirectForCurrentRoute(router))
       }
     })
 

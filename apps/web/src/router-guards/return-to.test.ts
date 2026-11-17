@@ -5,8 +5,8 @@ import { createAppRoutes } from '@/routes'
 import {
   buildLoginRedirect,
   buildOnboardingRedirect,
-  currentReturnToTarget,
   guardAuthenticatedRoute,
+  loginRedirectForCurrentRoute,
   sanitizeReturnTo,
   toReturnToParam,
   type AuthRouteGuardDeps,
@@ -200,13 +200,16 @@ describe.each(['web', 'desktop'] as const)('%s auth route guard return_to flow',
   })
 })
 
-describe('currentReturnToTarget', () => {
+describe('loginRedirectForCurrentRoute', () => {
   it('extracts nested return_to when a 401 fires mid-onboarding', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: stubComponents(createAppRoutes('web')),
     })
     await router.push('/onboarding?step=2&return_to=%2Fsettings%2Fproviders%3Ftab%3Dvoice')
-    expect(currentReturnToTarget(router)).toBe('/settings/providers?tab=voice')
+    expect(loginRedirectForCurrentRoute(router)).toEqual({
+      name: 'Login',
+      query: { return_to: '/settings/providers?tab=voice' },
+    })
   })
 })
