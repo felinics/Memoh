@@ -10,9 +10,7 @@
         <slot name="sidebar" />
       </section>
 
-      <section class="main-left-section" />
       <slot name="main" />
-      <section class="main-right-section" />
     </sidebar-provider>
   </section>
 </template>

@@ -1,6 +1,6 @@
 {
   "apps/desktop/src/renderer/src/connect/ConnectServer.vue": 1,
-  "apps/web/src/components/add-provider/index.vue": 2,
+  "apps/web/src/components/add-provider/index.vue": 1,
   "apps/web/src/components/color-scheme-card/index.vue": 1,
   "apps/web/src/components/key-value-editor/index.vue": 1,
   "apps/web/src/components/markdown/md-footnote-anchor.vue": 1,

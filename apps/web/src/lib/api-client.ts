@@ -162,8 +162,6 @@ function installAuthRequestInterceptor() {
  */
 export function setupApiClient(options: SetupApiClientOptions = {}) {
   const apiBaseUrl = options.baseUrl?.trim() || import.meta.env.VITE_API_URL?.trim() || '/api'
-  const agentBaseUrl = import.meta.env.VITE_AGENT_URL?.trim() || '/agent'
-  void agentBaseUrl
 
   onUnauthorizedHook = options.onUnauthorized
   configuredBaseFetch = options.fetch

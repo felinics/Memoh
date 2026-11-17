@@ -77,7 +77,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const composerSendKey = useStorage<ComposerSendKey>('composer-send-key', DEFAULT_COMPOSER_SEND_KEY)
   const uiFontStack = computed(() => cssFontFamilyDeclaration(uiFontFamily.value, DEFAULT_UI_FONT_FAMILY))
   const codeFontStack = computed(() => cssCodeFontFamilyStyleValue(codeFontFamily.value))
-  const shikiThemes = computed(() => ({ light: shikiThemeLight.value, dark: shikiThemeDark.value }))
 
   // Expose the resolved active color mode as the single source of truth.
   // 'system' is resolved against the OS/browser preference so consumers don't
@@ -267,7 +266,6 @@ export const useSettingsStore = defineStore('settings', () => {
     codeFontSizePx,
     shikiThemeLight,
     shikiThemeDark,
-    shikiThemes,
     resolvedColorMode,
     isDark,
     mermaidTheme,

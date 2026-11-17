@@ -4,7 +4,6 @@ import {
   getBotsByBotIdDependencies,
   getBotsByBotIdDependenciesByDepIdScript,
   postBotsByBotIdDependenciesByDepIdRollback,
-  postBotsByBotIdDependenciesCheckUpdates,
   postBotsByBotIdDependenciesPreflight,
   type HandlersWorkspaceDependencyItem,
   type HandlersWorkspaceDependencyListResponse,
@@ -96,21 +95,6 @@ export async function rollbackDependency(
 ): Promise<DependencyOperationResponse> {
   const { data } = await postBotsByBotIdDependenciesByDepIdRollback({
     path: { bot_id: botId, dep_id: depId },
-    throwOnError: true,
-  })
-  return data
-}
-
-/**
- * Manual refresh re-discovers the workspace and runs the
- * upstream check of every installed tool dependency, returning the refreshed
- * list. Callers still invalidate the query so the panel re-renders from cache.
- */
-export async function checkDependencyUpdates(
-  botId: string,
-): Promise<DependencyListResponse> {
-  const { data } = await postBotsByBotIdDependenciesCheckUpdates({
-    path: { bot_id: botId },
     throwOnError: true,
   })
   return data

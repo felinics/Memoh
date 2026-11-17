@@ -11,8 +11,6 @@
     <Sidebar
       collapsible="none"
       :class="[!fullWidth && 'workspace-divider-r', desktopShell && 'h-dvh']"
-      data-native-sidebar-surface
-      data-native-sidebar-tint
     >
       <div
         v-if="macTrafficReserve"

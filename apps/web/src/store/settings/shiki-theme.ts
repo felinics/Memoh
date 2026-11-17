@@ -23,10 +23,6 @@ export function listBundledShikiThemes(): BundledShikiTheme[] {
   return Array.from(themesById.values())
 }
 
-export function isBundledTheme(value: unknown): value is BundledTheme {
-  return typeof value === 'string' && themesById.has(value)
-}
-
 export function normalizeShikiTheme(value: unknown, variant: ShikiThemeVariant): BundledTheme {
   if (typeof value === 'string') {
     const info = themesById.get(value)

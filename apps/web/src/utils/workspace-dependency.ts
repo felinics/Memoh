@@ -102,28 +102,6 @@ export function dependencyPlatformUnsupported(item: Pick<DependencyItem, 'platfo
 }
 
 /**
- * Rows the bot's Dependencies tab lists: anything with a record (`status`) or
- * a copy in effect (`installed_version`, image copies included). A catalog
- * entry that was never installed belongs to the Supermarket, not here.
- */
-export function dependencyIsInstalled(item: Pick<DependencyItem, 'status' | 'installed_version'>): boolean {
-  return !!item.status || !!formatDependencyVersion(item.installed_version)
-}
-
-/**
- * Panel order: rows that need a hand (failed / missing / update available)
- * first, then by display name. One flat list — agents, runtimes, and tools
- * are the same kind of thing to the user.
- */
-export function sortDependencies<T extends DependencyItem>(items: T[], nameOf: (item: T) => string = dependencyDisplayName): T[] {
-  return [...items].sort((a, b) => {
-    const attention = Number(dependencyNeedsAttention(b)) - Number(dependencyNeedsAttention(a))
-    if (attention !== 0) return attention
-    return nameOf(a).localeCompare(nameOf(b), undefined, { sensitivity: 'base' })
-  })
-}
-
-/**
  * Installed row whose last upstream check reported a version other than the
  * copy in effect. The Server pins nothing, so the rule is the same for every
  * dependency: the check-update result is the only source of "newer".

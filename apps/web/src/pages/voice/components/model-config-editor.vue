@@ -167,7 +167,6 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{
   modelId: string
-  modelName: string
   config: Record<string, unknown>
   schema: AudioConfigSchema | null
   mode?: 'synthesis' | 'transcription'

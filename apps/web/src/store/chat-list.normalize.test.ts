@@ -4,7 +4,6 @@ import {
   cloneRequestedSkills,
   cloneUserInputState,
   createInvocationId,
-  isOptimisticTurn,
   messageIdentityId,
   mergeApprovalState,
   normalizeForwardRef,
@@ -123,14 +122,6 @@ describe('sortChatMessages', () => {
     ] as ChatMessage[]
     expect(sortChatMessages(items).map(m => m.role)).toEqual(['user', 'assistant'])
   })
-})
-
-describe('isOptimisticTurn', () => {
-  it('only flags explicitly optimistic turns', () => {
-    expect(isOptimisticTurn(userTurn())).toBe(false)
-    expect(isOptimisticTurn(userTurn({ __optimistic: true } as Partial<ChatUserTurn>))).toBe(true)
-  })
-
 })
 
 describe('mergeApprovalState', () => {

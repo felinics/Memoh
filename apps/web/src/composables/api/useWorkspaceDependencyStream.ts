@@ -45,13 +45,6 @@ export interface WorkspaceDependencyStreamRequestOptions {
   signal?: AbortSignal
 }
 
-export interface WorkspaceDependencyStreamOptions extends WorkspaceDependencyStreamRequestOptions {
-  botId: string
-  depId: string
-  action: DependencyOperationAction
-  /** Omitted → the Server uses the bot's current target. */
-}
-
 function isStringRecord(value: unknown): value is Record<string, string> {
   return !!value
     && typeof value === 'object'
@@ -120,18 +113,4 @@ export async function* streamDependencyOperation(
       return postBotsByBotIdDependenciesByDepIdInstall(request)
     },
   })
-}
-
-/** Options-object form of `streamDependencyOperation`, same generator. */
-export function openWorkspaceDependencyStream(
-  options: WorkspaceDependencyStreamOptions,
-): { stream: AsyncGenerator<WorkspaceDependencyStreamEvent, void, unknown> } {
-  return {
-    stream: streamDependencyOperation(
-      options.botId,
-      options.depId,
-      options.action,
-      { version: options.version, definitionRevision: options.definitionRevision, prerequisiteRevisions: options.prerequisiteRevisions, sessionId: options.sessionId, signal: options.signal },
-    ),
-  }
 }

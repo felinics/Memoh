@@ -22,7 +22,6 @@ const api = {
       managed: boolean
     }> =>
       ipcRenderer.invoke('desktop:server-status'),
-    apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
     probeServer: (): Promise<ServerConnectionResult> => ipcRenderer.invoke('desktop:probe-server'),
     connectServer: (baseUrl: string): Promise<ServerConnectResult> =>
       ipcRenderer.invoke('desktop:connect-server', baseUrl),

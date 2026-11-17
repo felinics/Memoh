@@ -216,7 +216,6 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
 
       <AddProvider
         v-model:open="openStatus.addOpen"
-        hide-trigger
         preset-domain="video"
         :providers="addProviderNames"
         :templates="templates"

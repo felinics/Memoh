@@ -131,7 +131,6 @@
             v-if="editingModel"
             :key="editingModel.id"
             :model-id="editingModel.id ?? ''"
-            :model-name="editingModel.model_id ?? ''"
             :config="editingModel.config || {}"
             :schema="getModelSchema(editingModel.model_id ?? '')"
             :mode="spec.editorMode"
