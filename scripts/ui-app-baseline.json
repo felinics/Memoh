@@ -47,9 +47,6 @@
   "apps/web/src/pages/profile/components/connected-accounts-section.vue": 1,
   "apps/web/src/pages/profile/components/profile-identity.vue": 2,
   "apps/web/src/pages/providers/model-setting.vue": 1,
-  "apps/web/src/pages/speech/components/model-config-editor.vue": 3,
-  "apps/web/src/pages/speech/components/provider-setting.vue": 1,
-  "apps/web/src/pages/transcription/provider-setting.vue": 1,
   "apps/web/src/pages/web-search/components/fetch-provider-setting.vue": 1,
   "apps/web/src/pages/web-search/components/provider-setting.vue": 1
 }

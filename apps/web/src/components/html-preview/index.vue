@@ -19,7 +19,6 @@ const themeStyle = ref('')
 // User-authored CSS inside the HTML still wins because it appears later in
 // the document source order (equal specificity → later rule applies).
 function refreshThemeStyle() {
-  if (typeof document === 'undefined') return
   const cs = getComputedStyle(document.documentElement)
   const fg = cs.getPropertyValue('--color-foreground').trim()
   // Match the editor plane so the preview canvas is continuous with its tab.

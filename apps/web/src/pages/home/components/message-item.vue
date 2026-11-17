@@ -481,15 +481,13 @@ setCustomComponents({ mermaid: ThemedMermaidBlock })
 // reset-on-smooth-off branch — if that behavior changes, revisit this gate.
 // One module-level listener serves every message block.
 const streamRevealPulse = ref(false)
-if (typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return
-    streamRevealPulse.value = true
-    nextTick(() => {
-      streamRevealPulse.value = false
-    })
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return
+  streamRevealPulse.value = true
+  nextTick(() => {
+    streamRevealPulse.value = false
   })
-}
+})
 </script>
 
 <script setup lang="ts">

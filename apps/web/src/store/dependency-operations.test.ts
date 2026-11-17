@@ -70,13 +70,17 @@ const codex = { id: 'codex', name: 'Codex', category: 'agent' as const }
 const node = { id: 'node', name: 'Node.js', category: 'runtime' as const }
 
 describe('useDependencyOperationsStore', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     const pinia = createPinia()
     router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/settings/bots/:botName', name: 'bot-detail', component: { render: () => null } }],
+      routes: [
+        { path: '/', component: { render: () => null } },
+        { path: '/settings/bots/:botName', name: 'bot-detail', component: { render: () => null } },
+      ],
     })
     createApp({ render: () => null }).use(pinia).use(router)
+    await router.isReady()
     setActivePinia(pinia)
     streamDependencyOperation.mockReset()
     toastSuccess.mockReset()

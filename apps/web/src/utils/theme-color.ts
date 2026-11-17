@@ -16,7 +16,7 @@ function toHex(color: string): string | null {
 }
 
 export function syncThemeColorWithBackground(): void {
-  if (typeof document === 'undefined' || !document.body) return
+  if (!document.body) return
   const hex = toHex(getComputedStyle(document.body).backgroundColor)
   if (!hex) return
   const head = document.head

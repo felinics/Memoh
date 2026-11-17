@@ -609,12 +609,9 @@ const isDark = useDark()
 // hover". Painting a pixel collapses any renderable color to concrete sRGB
 // bytes, so the value zrender sees is always parseable. `void isDark.value`
 // re-runs this when the theme flips so the chart tracks light/dark.
-const colorCanvas = typeof document !== 'undefined'
-  ? document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-  : null
+const colorCanvas = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
 
 function readColor(token: string, fallback: string): string {
-  if (typeof document === 'undefined') return fallback
   const probe = document.createElement('span')
   probe.style.color = `var(${token})`
   probe.style.display = 'none'
@@ -638,9 +635,7 @@ function readColor(token: string, fallback: string): string {
 
 const chartTheme = computed(() => {
   void isDark.value
-  const fontFamily = typeof document !== 'undefined'
-    ? getComputedStyle(document.body).fontFamily
-    : 'inherit'
+  const fontFamily = getComputedStyle(document.body).fontFamily || 'inherit'
   return {
     // Black / white / grey only. `--primary` is a violet in this theme, so the
     // bars use the neutral foreground (input) + muted-foreground (output); no

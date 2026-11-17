@@ -288,12 +288,12 @@ export function resolveKeyboardBinding<T extends KeyChord & Partial<Record<Keybo
  * a binding declares a platform chord.
  */
 export function detectPlatform(
-  navigatorLike: { platform?: string; userAgent?: string } | undefined =
-    typeof window === 'undefined' ? undefined : window.navigator,
+  ...args: [navigatorLike?: { platform?: string; userAgent?: string }]
 ): KeyboardPlatform {
+  const navigatorLike = args.length > 0 ? args[0] : window.navigator
   const haystack = `${navigatorLike?.platform ?? ''} ${navigatorLike?.userAgent ?? ''}`
   if (/mac/i.test(haystack)) return 'mac'
-  if (/win/i.test(haystack)) return 'win'
+  if (/\bwin/i.test(haystack)) return 'win'
   return 'linux'
 }
 

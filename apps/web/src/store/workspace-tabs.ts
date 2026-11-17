@@ -177,7 +177,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const chatActivationExplicitOverrides = new Map<string, boolean>()
 
   function ensureBotLayout(botId: string | null | undefined): BotLayoutState | null {
-    const bid = (botId ?? '').trim()
+    const bid = botId ?? ''
     if (!bid) return null
     if (!storage.value[bid]) {
       storage.value = { ...storage.value, [bid]: emptyBotLayout() }
@@ -297,22 +297,22 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function terminalTitleFallback(id: string): string {
-    const prefix = i18n.global.t('bots.terminal.defaultTabLabel').trim() || DEFAULT_TERMINAL_TITLE
+    const prefix = i18n.global.t('bots.terminal.defaultTabLabel') || DEFAULT_TERMINAL_TITLE
     return numberedFallbackTitle(prefix, id)
   }
 
   // System-titled panels always label from the current locale; the English
   // constants are only guards against a missing key.
   function defaultChatTitle(): string {
-    return i18n.global.t('chat.newSession').trim() || DEFAULT_CHAT_TITLE
+    return i18n.global.t('chat.newSession') || DEFAULT_CHAT_TITLE
   }
 
   function browserTabTitle(): string {
-    return i18n.global.t('chat.tabs.browser').trim() || 'Browser'
+    return i18n.global.t('chat.tabs.browser') || 'Browser'
   }
 
   function scheduleTabTitle(): string {
-    return i18n.global.t('chat.tabs.schedule').trim() || 'Schedule'
+    return i18n.global.t('chat.tabs.schedule') || 'Schedule'
   }
 
   // Per-session chat title fallback (syncChatTitles overlays the server title
@@ -467,7 +467,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     handler: (event: DocumentEventMap[K]) => void,
     options?: AddEventListenerOptions,
   ): { dispose(): void } {
-    if (typeof document === 'undefined') return { dispose() {} }
     document.addEventListener(type, handler as EventListener, options)
     return {
       dispose() {
@@ -555,7 +554,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         // so Recents must stop highlighting it. A chat tab taking focus instead
         // updates the selection through its own activation.
         else if (!suppressPersist && panelComponentOf(panel.id) === 'chat') {
-          const sid = (chatStore.sessionId ?? '').trim()
+          const sid = chatStore.sessionId ?? ''
           const active = dock.activePanel
           if (
             sid
@@ -596,7 +595,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       domListener('dragend', () => { panelDragging.value = false }, { capture: true }),
       domListener('pointerup', () => { panelDragging.value = false }, { capture: true }),
     ]
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (bid) {
       restoreLayout(bid)
       reconcileDeletedChatPanels()
@@ -836,7 +835,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function isDeletedSessionForCurrentBot(sid: string | null): boolean {
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid || !sid) return false
     const latestDeleted = chatStore.deletedSession
     if (latestDeleted?.botId === bid && latestDeleted.id === sid) return true
@@ -866,7 +865,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const sid = opts.sessionId.trim()
     if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
@@ -960,7 +959,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const sid = opts.sessionId.trim()
     if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     // Same guard as openSessionChat: a row mid-deletion can still be visible in
     // the sidebar, so refuse to (re)open a session being deleted for this bot.
@@ -997,7 +996,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const sid = opts.sessionId.trim()
     if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
@@ -1034,7 +1033,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function openDraftChat(opts?: { title?: string, groupId?: string, explicitSelection?: boolean }) {
     const dock = api.value
     if (!dock) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     focusChatInputAfterEntry()
     const draftCandidates = opts?.groupId
@@ -1114,7 +1113,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function alignSelectionWithDock() {
     const dock = api.value
     if (!dock) return
-    const sid = (chatStore.sessionId ?? '').trim()
+    const sid = chatStore.sessionId ?? ''
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
     // A non-explicit pick may still be overridden by the default External
     // Agent while chats load; the loadingChats watcher runs this again.
@@ -1204,7 +1203,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // valid even when it is not present in the current sidebar page.
   function reconcileDeletedChatPanels(targetBotId?: string | null) {
     const dock = api.value
-    const bid = (targetBotId ?? loadedBotId ?? currentBotId.value ?? '').trim()
+    const bid = targetBotId ?? loadedBotId ?? currentBotId.value ?? ''
     if (!dock || !bid) return
     if (!targetBotId && loadedBotId && loadedBotId !== bid) return
     const deletedSessionIds = deletedSessionIdsByBot.get(bid)
@@ -1232,20 +1231,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const dock = api.value
     if (!dock || suppressPersist || draftChatQueued) return
     if (dock.panels.length > 0) return
-    if (!(currentBotId.value ?? '').trim()) return
+    if (!currentBotId.value) return
 
     draftChatQueued = true
     void nextTick(() => {
       draftChatQueued = false
       const latestDock = api.value
       if (!latestDock || suppressPersist || latestDock.panels.length > 0) return
-      if (!(currentBotId.value ?? '').trim()) return
+      if (!currentBotId.value) return
       // Only an EXPLICIT selection may refill as that session. A non-explicit
       // sessionId is layout bookkeeping (or a stale leftover); honoring it here
       // would surface a random Untitled Session the moment the user closes the
       // last file tab. Live tabs that already selected a session explicitly
       // keep that refill.
-      const sid = (chatStore.sessionId ?? '').trim()
+      const sid = chatStore.sessionId ?? ''
       const explicitSelection = chatStore.hasExplicitSessionSelection === true
       if (sid && explicitSelection && !isDeletedSessionForCurrentBot(sid)) {
         openSessionChat({
@@ -1264,11 +1263,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // the next file open evicts another panel from its ephemeral slot.
   function activateChatPanel() {
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     // Do not focus the previous bot's panels while its replacement is queued.
     if (!dock || !bid || loadedBotId !== bid) return
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
-    const sid = (selection.sessionId ?? '').trim()
+    const sid = selection.sessionId ?? ''
     if (sid && !isDeletedSessionForCurrentBot(sid)) {
       const current = chatPanelForSession(sid)
       if (current) {
@@ -1457,7 +1456,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function openTerminal(groupId?: string) {
     if (!hasCurrentPermission('workspace_exec')) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     const state = ensureBotLayout(bid)
     const dock = api.value
     if (!state || !dock) return
@@ -1514,7 +1513,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // link-click path (after a dedup miss, titled with the address). Returns false
   // when there is no dock/bot layout.
   function addBrowserPanel(address: string, title: string | undefined, groupId?: string): boolean {
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     const state = ensureBotLayout(bid)
     if (!state || !api.value) return false
     const next = nextTabNumber('browser', state.browserCounter)
@@ -1615,7 +1614,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
     switch (comp) {
       case 'chat': {
-        const bid = (currentBotId.value ?? '').trim()
+        const bid = currentBotId.value ?? ''
         if (!bid) return
         const id = nextChatPanelId(bid)
         const explicitSelection = typeof params?.explicitSelection === 'boolean'
@@ -1640,7 +1639,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       case 'terminal': {
         if (!hasCurrentPermission('workspace_exec')) return
-        const bid = (currentBotId.value ?? '').trim()
+        const bid = currentBotId.value ?? ''
         const state = ensureBotLayout(bid)
         if (!state) return
         const next = nextTabNumber('terminal', state.terminalCounter)
@@ -1670,7 +1669,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       case 'browser': {
         if (!hasCurrentPermission('manage')) return
-        const bid = (currentBotId.value ?? '').trim()
+        const bid = currentBotId.value ?? ''
         const state = ensureBotLayout(bid)
         if (!state) return
         const next = nextTabNumber('browser', state.browserCounter)
@@ -1719,7 +1718,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function openSchedule(scheduleId?: string, title?: string, groupId?: string) {
     if (!hasCurrentPermission('manage')) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     const panelTitle = title?.trim() || scheduleTabTitle()
     const state = ensureBotLayout(bid)
@@ -1976,12 +1975,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // ---- lifecycle -----------------------------------------------------------
 
   function resetBot(botId: string) {
-    const bid = (botId ?? '').trim()
-    if (!bid) return
+    if (!botId) return
     const next = { ...storage.value }
-    delete next[bid]
+    delete next[botId]
     storage.value = next
-    if (loadedBotId === bid && api.value) {
+    if (loadedBotId === botId && api.value) {
       suppressPersist = true
       try {
         api.value.clear()
@@ -1989,7 +1987,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         suppressPersist = false
       }
     }
-    void nextTick(() => clearTerminalSnapshotsForBot(bid))
+    void nextTick(() => clearTerminalSnapshotsForBot(botId))
   }
 
   function resetAll() {
@@ -2010,7 +2008,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   onAuthSessionCleared(() => resetAll())
 
   watch(currentBotId, (bid) => {
-    const next = (bid ?? '').trim()
+    const next = bid ?? ''
     if (!next) {
       loadedBotId = null
       return
@@ -2063,7 +2061,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.draftPromoted, (sig) => {
     if (!sig) return
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!dock || !bid || sig.botId !== bid) return
     const panel = dock.getPanel(sig.viewId)
     if (!panel || panelComponentOf(panel.id) !== 'chat') return
@@ -2080,7 +2078,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.userSentInSession, (sig) => {
     if (!sig) return
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!dock || !bid || sig.botId !== bid) return
     const panel = dock.getPanel(sig.viewId)
     if (!panel || panelComponentOf(panel.id) !== 'chat') return
@@ -2103,7 +2101,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.draftViewRequested, (request) => {
     if (!request) return
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!dock || request.botId !== bid) return
     const panel = dock.getPanel(request.viewId)
     if (!panel || panelComponentOf(panel.id) !== 'chat') return
@@ -2143,7 +2141,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.forkedSessionRequested, (request) => {
     if (!request) return
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!dock || request.botId !== bid) return
     const panel = dock.getPanel(request.viewId)
     if (!panel || panelComponentOf(panel.id) !== 'chat') return

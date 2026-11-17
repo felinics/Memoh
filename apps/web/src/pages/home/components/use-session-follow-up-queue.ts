@@ -221,7 +221,7 @@ export function useSessionFollowUpQueue(
     stopAutoRefresh()
     if (!toValue(active) || !hasItems.value) return
     refreshTimer = setInterval(() => {
-      if (loading.value || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
+      if (loading.value || document.visibilityState === 'hidden') return
       void refresh().catch(() => {})
     }, QUEUE_FALLBACK_REFRESH_MS)
   }

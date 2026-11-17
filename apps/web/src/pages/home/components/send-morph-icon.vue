@@ -48,8 +48,7 @@ const easeOut = (x: number) => 1 - (1 - x) ** 3
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const fmt = (n: number) => n.toFixed(2)
 
-const reducedMotion = typeof window !== 'undefined'
-  && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+const reducedMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
 
 let frame = 0
 let last = 0

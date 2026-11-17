@@ -113,7 +113,7 @@ export function handleBrowserKeyboardShortcut(
 export function connectBrowserKeyboardShortcuts(
   registry: Pick<KeyboardCommandRegistry, 'dispatch'>,
   bindings: BrowserKeyboardShortcutBinding[],
-  target: BrowserKeyboardShortcutTarget | undefined = typeof window === 'undefined' ? undefined : window,
+  target: BrowserKeyboardShortcutTarget | undefined = window,
 ): () => void {
   if (!target || bindings.length === 0) return () => {}
   const platform = detectPlatform()
@@ -135,7 +135,7 @@ export function connectBrowserKeyboardShortcuts(
 export function connectBrowserKeyboardShortcutsLive(
   registry: Pick<KeyboardCommandRegistry, 'dispatch'>,
   getBindings: () => BrowserKeyboardShortcutBinding[],
-  target: BrowserKeyboardShortcutTarget | undefined = typeof window === 'undefined' ? undefined : window,
+  target: BrowserKeyboardShortcutTarget | undefined = window,
 ): () => void {
   if (!target) return () => {}
   const platform = detectPlatform()

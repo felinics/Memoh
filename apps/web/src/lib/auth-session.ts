@@ -41,15 +41,12 @@ export function clearPersistedUserScopedState() {
 export function notifyAuthSessionCleared(reason: AuthSessionClearReason) {
   clearPersistedUserScopedState()
 
-  if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent<AuthSessionClearedDetail>(AUTH_SESSION_CLEARED_EVENT, {
     detail: { reason },
   }))
 }
 
 export function onAuthSessionCleared(callback: (detail: AuthSessionClearedDetail) => void) {
-  if (typeof window === 'undefined') return () => {}
-
   const listener = (event: Event) => {
     callback((event as CustomEvent<AuthSessionClearedDetail>).detail)
   }

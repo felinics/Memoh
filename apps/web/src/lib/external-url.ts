@@ -1,9 +1,8 @@
 export function canOpenDesktopExternalUrl(): boolean {
-  return typeof window !== 'undefined' && typeof window.api?.desktop?.openExternalUrl === 'function'
+  return typeof window.api?.desktop?.openExternalUrl === 'function'
 }
 
 export function openDesktopExternalUrl(url: string): Promise<void> | undefined {
-  if (typeof window === 'undefined') return undefined
   const open = window.api?.desktop?.openExternalUrl
   return typeof open === 'function' ? Promise.resolve(open(url)) : undefined
 }
