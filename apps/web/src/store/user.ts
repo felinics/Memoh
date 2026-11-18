@@ -14,6 +14,12 @@ import {
 import { resetOnboardingState } from '@/composables/useOnboarding'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { resetOnboardingSession } from '@/pages/onboarding/session'
+import {
+  loginRedirectForCurrentRoute,
+  normalizeRoutePath,
+  onboardingRedirectForCurrentRoute,
+  shouldRedirectOnUnauthorized,
+} from '@/router-guards/return-to'
 import { safeLocalRemove } from '@/utils/safe-storage'
 
 export interface UserInfo {
@@ -247,10 +253,7 @@ export const useUserStore = defineStore(
     const shouldRedirectToLogin = () => {
       const current = router?.currentRoute?.value
       if (!router || !current) return false
-      const path = typeof current.path === 'string' ? current.path : ''
-      return current.name !== 'Login'
-        && path !== '/connect'
-        && !path.startsWith('/oauth/')
+      return shouldRedirectOnUnauthorized(current.path)
     }
 
     let clearingExplicitly = false
@@ -265,7 +268,7 @@ export const useUserStore = defineStore(
         clearingExplicitly = false
       }
       if (shouldRedirectToLogin()) {
-        void router?.replace({ name: 'Login' })
+        void router?.replace({ path: '/login' })
       }
     }
 
@@ -277,7 +280,7 @@ export const useUserStore = defineStore(
           resetOnboarding()
           resetUserInfo()
           if (shouldRedirectToLogin()) {
-            void router?.replace({ name: 'Login' })
+            void router?.replace({ path: '/login' })
           }
         }
       },
@@ -298,7 +301,7 @@ export const useUserStore = defineStore(
         clearingExplicitly = false
       }
       if (shouldRedirectToLogin()) {
-        void router?.replace({ name: 'Login' })
+        void router?.replace(loginRedirectForCurrentRoute(router))
       }
     })
 
@@ -315,8 +318,8 @@ export const useUserStore = defineStore(
       void loadMe().then((fetched) => {
         if (!fetched || onboardingCompleted.value) return
         if (tokenUserId(localToken.value) !== signedInUserId) return
-        if (router && router.currentRoute?.value?.path !== '/onboarding') {
-          void router.replace({ path: '/onboarding' })
+        if (router && normalizeRoutePath(router.currentRoute?.value?.path ?? '') !== '/onboarding') {
+          void router.replace(onboardingRedirectForCurrentRoute(router))
         }
       })
     }

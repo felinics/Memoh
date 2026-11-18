@@ -31,7 +31,7 @@ describe('post-connect navigation', () => {
     })).toEqual({
       clearAuth: true,
       animateLogin: true,
-      destination: { name: 'Login' },
+      destination: { path: '/login' },
     })
   })
 
@@ -47,7 +47,7 @@ describe('post-connect navigation', () => {
     })
   })
 
-  it('opens login without clearing state when the same server has no token', () => {
+  it('opens login with return_to preserved without clearing state when the same server has no token', () => {
     expect(decidePostConnectNavigation({
       changed: false,
       hasToken: false,
@@ -55,7 +55,16 @@ describe('post-connect navigation', () => {
     })).toEqual({
       clearAuth: false,
       animateLogin: true,
-      destination: { name: 'Login' },
+      destination: { path: '/login', query: { return_to: '/settings/about' } },
+    })
+    expect(decidePostConnectNavigation({
+      changed: false,
+      hasToken: false,
+      returnTo: undefined,
+    })).toEqual({
+      clearAuth: false,
+      animateLogin: true,
+      destination: { path: '/login' },
     })
   })
 
@@ -64,6 +73,16 @@ describe('post-connect navigation', () => {
       changed: false,
       hasToken: true,
       returnTo: '//example.com',
+    }).destination).toBe('/')
+    expect(decidePostConnectNavigation({
+      changed: false,
+      hasToken: true,
+      returnTo: '/\\example.com',
+    }).destination).toBe('/')
+    expect(decidePostConnectNavigation({
+      changed: false,
+      hasToken: true,
+      returnTo: '/login',
     }).destination).toBe('/')
   })
 })
@@ -108,10 +127,13 @@ describe('server-switch session cleanup & unauthorized route preservation', () =
     expect(clear).not.toHaveBeenCalled()
   })
 
-  it('suppresses /login redirect on /connect and /oauth/* while redirecting normal routes', () => {
+  it('suppresses /login redirect on /login, /connect, and /oauth/* while redirecting normal routes', () => {
+    expect(shouldRedirectOnUnauthorized('/login')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/Login/')).toBe(false)
     expect(shouldRedirectOnUnauthorized('/connect')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/Connect/')).toBe(false)
     expect(shouldRedirectOnUnauthorized('/oauth/mcp-callback')).toBe(false)
-    expect(shouldRedirectOnUnauthorized('/oauth/provider')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/OAuth/provider/')).toBe(false)
     expect(shouldRedirectOnUnauthorized('/')).toBe(true)
     expect(shouldRedirectOnUnauthorized('/bot/kitty-3')).toBe(true)
     expect(shouldRedirectOnUnauthorized(undefined)).toBe(true)

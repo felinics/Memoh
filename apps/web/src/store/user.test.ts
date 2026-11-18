@@ -23,6 +23,7 @@ import {
   createQueryCachePersistencePlugin,
   saveQueryCacheToDiskNow,
 } from '@/lib/query-cache-persistence'
+import { getUsersMe } from '@memohai/sdk'
 import { notifyAuthSessionCleared } from '@/lib/auth-session'
 import { useUserStore } from './user'
 
@@ -73,6 +74,7 @@ async function mountSessionHarness(initialPath: string) {
     routes: [
       { path: '/', name: 'Home', component: EmptyPage },
       { path: '/login', name: 'Login', component: EmptyPage },
+      { path: '/onboarding', name: 'onboarding', component: EmptyPage },
       { path: '/connect', name: 'DesktopConnect', component: EmptyPage },
       { path: '/oauth/mcp-callback', name: 'McpOAuthCallback', component: EmptyPage },
       { path: '/bot/:botId', name: 'BotChat', component: EmptyPage },
@@ -229,5 +231,35 @@ describe('useUserStore logout & unauthorized cleanup across routes', () => {
     expect(harness.queryCache.getEntries()).toHaveLength(0)
     expect(harness.storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
     expect(harness.router.currentRoute.value.path).toBe('/login')
+    expect(harness.router.currentRoute.value.query).toEqual({
+      return_to: '/settings/profile',
+    })
+  })
+
+  it('unwraps nested return_to when trustRememberedOnboarding redirects from /login?return_to=...', async () => {
+    const harness = await mountSessionHarness('/bot/kitty-3')
+    activeApp = harness.app
+    // Mark user-1 as remembered-completed, sign out, then sign back in from /login?return_to=...
+    harness.userStore.onboardingCompleted = true
+    harness.userStore.exitLogin()
+    await settleRouter()
+
+    await harness.router.replace('/login?return_to=%2Fsettings%2Fprofile')
+    const replaceSpy = vi.spyOn(harness.router, 'replace')
+    vi.mocked(getUsersMe).mockResolvedValueOnce({
+      data: { id: 'user-1', username: 'alice', metadata: { onboarding_completed: false } },
+    } as never)
+
+    harness.userStore.login(
+      { id: 'user-1', username: 'alice', role: 'admin', displayName: 'Alice', avatarUrl: '', timezone: 'UTC' },
+      'header.eyJ1c2VyX2lkIjoidXNlci0xIn0.sig',
+    )
+    await settleRouter()
+    await Promise.all(replaceSpy.mock.results.map(r => r.value))
+
+    expect(harness.router.currentRoute.value.path).toBe('/onboarding')
+    expect(harness.router.currentRoute.value.query).toEqual({
+      return_to: '/settings/profile',
+    })
   })
 })

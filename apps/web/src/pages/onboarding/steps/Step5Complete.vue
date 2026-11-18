@@ -40,7 +40,7 @@ async function handleComplete(example?: ChatExample) {
   exiting.value = true
   safeSessionSet(ONBOARDING_KEYS.entryAnimation, '1')
   const ok = await finishOnboardingWithPrompt({
-    complete: () => complete(175),
+    complete: () => complete(175, { preferCreatedBot: !!example }),
     prefill: prefillStore,
     botId: botResult?.botId,
     prompt: example ? localizeText(example.prompt, locale.value) : undefined,
