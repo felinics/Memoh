@@ -6,6 +6,7 @@
       :bot-id="botId"
       :file="fileInfo"
       :readonly="!canWrite"
+      :visible="visible"
       :keyboard-active="workspaceTabs.activeId === tabId"
       @update:dirty="handleDirty"
     />
@@ -21,10 +22,13 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   filePath: string
   tabId: string
-}>()
+  visible?: boolean
+}>(), {
+  visible: true,
+})
 
 const viewerRef = ref<InstanceType<typeof FileViewer> | null>(null)
 
@@ -59,8 +63,8 @@ function handleDirty(dirty: boolean) {
 }
 
 // Let the tab close-confirm dialog write this file even while it's backgrounded.
-// FileViewer stays mounted (renderer:'always' + KeepAlive), so its save() is live
-// for the whole panel lifetime.
+// FileViewer stays mounted for the whole panel lifetime (panel-file.vue never
+// unmounts it once shown), so its save() is live while the tab is hidden.
 onMounted(() => {
   workspaceTabs.registerFileSaveHandler(
     props.tabId,

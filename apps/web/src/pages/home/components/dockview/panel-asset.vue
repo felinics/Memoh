@@ -1,7 +1,8 @@
 <template>
   <DockPanelFrame editor-surface>
+    <!-- A restored background tab loads nothing until it is first shown. -->
     <PanePlaceholder
-      v-if="loading"
+      v-if="loading || !hasActivated"
       loading
     >
       {{ t('common.loading') }}
@@ -11,6 +12,7 @@
       v-else-if="isText && oversizedMaxBytes === null && !loadFailed"
       v-model="content"
       :filename="name"
+      :active="visible"
       readonly
       class="h-full"
     />
@@ -32,6 +34,7 @@
       :blob="documentBlob"
       :kind="documentKind"
       :filename="name"
+      :active="visible"
     >
       <template
         v-if="renderUrl"
@@ -76,14 +79,16 @@ import { useI18n } from 'vue-i18n'
 import { File, Download } from 'lucide-vue-next'
 import { Button, PanePlaceholder, toast } from '@felinic/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
-import MonacoEditor from '@/components/monaco-editor/index.vue'
 import DocumentPreview from '@/components/file-manager/document-preview.vue'
 import DockPanelFrame from './panel-frame.vue'
+import { lazyPanelContent } from './lazy-panel-content'
 import { TEXT_PREVIEW_MAX_BYTES, formatFileSize, getDocumentMimeType, getDocumentPreviewKind, getDocumentPreviewMaxBytes, isImageFile, isTextFile } from '@/components/file-manager/utils'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { fetchBoundedBlob, fetchBoundedText, type BoundedFetchTarget } from '@/lib/bounded-fetch'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { usePanelVisible } from './use-panel-visible'
+
+const MonacoEditor = lazyPanelContent(() => import('@/components/monaco-editor/index.vue').then(m => m.default))
 
 // Renders a message attachment (a stored media asset) inside its own dock tab,
 // instead of handing the source URL to the OS. The source is re-resolved from
@@ -101,6 +106,7 @@ const props = defineProps<{
 const { t } = useI18n()
 
 const visible = usePanelVisible(props.params.api)
+const hasActivated = ref(visible.value)
 
 const name = computed(() => props.params.params.name ?? '')
 const isText = computed(() => isTextFile(name.value))
@@ -189,6 +195,10 @@ watch(assetIdentityKey, () => {
   loading.value = false
   if (visible.value) void loadAsset()
 }, { immediate: true })
-watch(visible, (isVisible) => { if (isVisible) void loadAsset() })
+watch(visible, (isVisible) => {
+  if (!isVisible) return
+  hasActivated.value = true
+  void loadAsset()
+})
 onBeforeUnmount(() => { activeLoadController?.abort(); documentBlob.value = null })
 </script>

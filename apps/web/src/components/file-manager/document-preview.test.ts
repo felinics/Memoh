@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { KeepAlive, createApp, h, nextTick, reactive, ref, type App } from 'vue'
+import { createApp, h, nextTick, reactive, ref, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const docxSandbox = vi.hoisted(() => ({
@@ -88,9 +88,9 @@ describe('DocumentPreview component', () => {
     expect(openExternalUrl).toHaveBeenCalledWith('https://memoh.ai/docs')
   })
 
-  it('defers KeepAlive deactivated renders and displays localized fallbacks on too-large or invalid', async () => {
+  it('defers renders while inactive and displays localized fallbacks on too-large or invalid', async () => {
     const active = ref(true); const blob = ref(new Blob(['v1']))
-    await mountRoot(() => h(KeepAlive, null, [active.value ? h(DocumentPreview, { key: 'doc', blob: blob.value, kind: 'docx', filename: 'r.docx' }) : null]))
+    await mountRoot(() => h(DocumentPreview, { blob: blob.value, kind: 'docx', filename: 'r.docx', active: active.value }))
     expect(docxSandbox.renderDocxBlobToSrcdoc).toHaveBeenCalledTimes(1)
 
     active.value = false; await flush(); blob.value = new Blob(['v2']); await flush()

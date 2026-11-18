@@ -28,9 +28,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useDark } from '@vueuse/core'
+import { storeToRefs } from 'pinia'
 import { ChevronRight } from 'lucide-vue-next'
 import { resolveFileIcon } from '@/components/file-manager/file-icon'
+import { useSettingsStore } from '@/store/settings'
 
 // Path breadcrumb for file / preview panels only. Sessions, terminals, browsers
 // and the desktop panel carry no breadcrumb: the dockview tab already states
@@ -42,7 +43,7 @@ const props = defineProps<{
   path: string
 }>()
 
-const isDark = useDark()
+const { isDark } = storeToRefs(useSettingsStore())
 
 const pathSegments = computed(() => {
   const path = props.path || ''

@@ -338,7 +338,7 @@ import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
-import MonacoEditor from '@/components/monaco-editor/index.vue'
+import { LazyMonacoEditor as MonacoEditor } from '@/components/monaco-editor/lazy'
 
 const props = defineProps<{
   botId: string

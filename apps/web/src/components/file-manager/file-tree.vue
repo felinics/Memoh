@@ -3,7 +3,7 @@ import { inject, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { InlineLoadingRow } from '@felinic/ui'
-import { sortDirsFirst } from './utils'
+import { directoryEntriesFingerprint, sortDirsFirst } from './utils'
 import { FileTreeKey } from './file-tree-context'
 import FileTreeNode from './file-tree-node.vue'
 
@@ -14,11 +14,17 @@ if (!ctx) throw new Error('FileTree must be used within a FileTree provider')
 const nodes = ref<HandlersFsFileInfo[]>([])
 const loading = ref(false)
 const loaded = ref(false)
+let lastFingerprint: string | null = null
 
 async function load() {
   loading.value = true
   try {
-    nodes.value = sortDirsFirst(await ctx!.listDirectory(ctx!.rootPath))
+    const sorted = sortDirsFirst(await ctx!.listDirectory(ctx!.rootPath))
+    const nextFingerprint = directoryEntriesFingerprint(sorted)
+    if (nextFingerprint !== lastFingerprint) {
+      nodes.value = sorted
+      lastFingerprint = nextFingerprint
+    }
     loaded.value = true
   } finally {
     loading.value = false
