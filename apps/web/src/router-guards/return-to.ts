@@ -36,7 +36,6 @@ function parseAllowedUrl(input: string): URL | null {
   try {
     const url = new URL(input, INTERNAL_ORIGIN)
     if (url.origin !== INTERNAL_ORIGIN || !url.pathname.startsWith('/') || url.pathname.includes('//')) return null
-    if (url.hash && new URLSearchParams(url.hash.slice(1)).has('payload')) return null
     const canonical = normalizeRoutePath(url.pathname)
     if (DISALLOWED_PREFIXES.some(p => canonical === p || canonical.startsWith(`${p}/`))) return null
     return url
@@ -81,18 +80,11 @@ export function shouldRedirectOnUnauthorized(currentPath: unknown): boolean {
   return path !== '/login' && path !== '/connect' && path !== '/oauth' && !path.startsWith('/oauth/')
 }
 
-function extractRouteReturnTarget(
-  route: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query'> & { matched?: unknown[] },
-): unknown {
-  if (Array.isArray(route.matched) && route.matched.length === 0) return undefined
-  const path = normalizeRoutePath(route.path)
-  return path === '/login' || path === '/onboarding' ? route.query?.return_to : route.fullPath
-}
-
 function resolveActiveReturnTarget(router?: Pick<Router, 'currentRoute'> | null): unknown {
   const current = router?.currentRoute?.value
   if (current && (!Array.isArray(current.matched) || current.matched.length > 0)) {
-    return extractRouteReturnTarget(current)
+    const path = normalizeRoutePath(current.path)
+    return path === '/login' || path === '/onboarding' ? current.query?.return_to : current.fullPath
   }
   if (typeof window !== 'undefined' && (window.location.protocol === 'http:' || window.location.protocol === 'https:')) {
     const path = normalizeRoutePath(window.location.pathname)
@@ -100,7 +92,7 @@ function resolveActiveReturnTarget(router?: Pick<Router, 'currentRoute'> | null)
       ? new URLSearchParams(window.location.search).get('return_to')
       : `${window.location.pathname}${window.location.search}${window.location.hash}`
   }
-  return current ? extractRouteReturnTarget(current) : undefined
+  return undefined
 }
 
 export function loginRedirectForCurrentRoute(
@@ -123,14 +115,14 @@ export interface AuthRouteGuardDeps {
 }
 
 export async function guardAuthenticatedRoute(
-  to: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query' | 'meta'> & { matched?: unknown[] },
+  to: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query' | 'meta'>,
   deps: AuthRouteGuardDeps,
 ): Promise<NavigationGuardReturn> {
   const token = deps.readToken()
   const path = normalizeRoutePath(to.path)
   if (path === '/login') return token ? sanitizeReturnTo(to.query.return_to) : true
   if (path === '/oauth' || path.startsWith('/oauth/')) return true
-  if (!token) return buildLoginRedirect(extractRouteReturnTarget(to))
+  if (!token) return buildLoginRedirect(path === '/onboarding' ? to.query.return_to : to.fullPath)
   if (to.meta.adminOnly && String(deps.readUserRole()).toLowerCase() !== 'admin') {
     return { name: 'bots' }
   }
@@ -143,6 +135,6 @@ export async function guardAuthenticatedRoute(
   }
 
   const completed = await deps.ensureOnboarding()
-  if (!deps.readToken()) return buildLoginRedirect(extractRouteReturnTarget(to))
-  return completed ? true : buildOnboardingRedirect(extractRouteReturnTarget(to))
+  if (!deps.readToken()) return buildLoginRedirect(to.fullPath)
+  return completed ? true : buildOnboardingRedirect(to.fullPath)
 }

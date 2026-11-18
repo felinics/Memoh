@@ -45,6 +45,7 @@ describe('sanitizeReturnTo & redirect builders', () => {
   it('preserves valid in-app deep links including query parameters and hashes', () => {
     expect(sanitizeReturnTo('/settings/providers?tab=voice')).toBe('/settings/providers?tab=voice')
     expect(sanitizeReturnTo('/bot/my-bot?agent=codex#composer')).toBe('/bot/my-bot?agent=codex#composer')
+    expect(sanitizeReturnTo('/bot/my-bot#payload')).toBe('/bot/my-bot#payload')
     expect(sanitizeReturnTo(['/settings/appearance?theme=dark', '/ignored'])).toBe('/settings/appearance?theme=dark')
     expect(sanitizeReturnTo('/?welcome=1')).toBe('/?welcome=1')
   })

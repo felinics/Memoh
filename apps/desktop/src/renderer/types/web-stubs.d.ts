@@ -30,7 +30,7 @@ declare module '@memohai/web/router-guards/return-to' {
     router?: Pick<Router, 'currentRoute'> | null,
   ): { path: '/login', query?: { return_to: string } }
   export function guardAuthenticatedRoute(
-    to: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query' | 'meta'> & { matched?: unknown[] },
+    to: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query' | 'meta'>,
     deps: AuthRouteGuardDeps,
   ): Promise<NavigationGuardReturn>
 }
