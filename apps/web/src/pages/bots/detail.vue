@@ -65,7 +65,7 @@
                     <!-- Edit Overlay -->
                     <button
                       type="button"
-                      class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                      class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
                       :title="$t('common.edit')"
                       :aria-label="$t('common.edit')"
                       :disabled="!bot || botLifecyclePending"
@@ -100,7 +100,7 @@
                         <button
                           v-if="bot"
                           type="button"
-                          class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
+                          class="opacity-0 group-hover/name:opacity-100 focus-visible:opacity-100 group-focus-within/name:opacity-100 pointer-coarse:opacity-100 p-1 shrink-0"
                           :disabled="botLifecyclePending"
                           @click="handleStartEditBotName"
                         >

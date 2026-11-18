@@ -61,6 +61,7 @@
     "active": "アクティブ",
     "inactive": "非アクティブ",
     "loadFailed": "読み込みに失敗しました",
+    "unavailableOption": "利用不可",
     "saveFailed": "保存に失敗しました",
     "networkError": "ネットワークに接続できません。接続を確認してもう一度お試しください。",
     "createdAt": "作成日時",
@@ -2591,6 +2592,7 @@
       "reserved": "この名前は予約されています"
     },
     "avatarUrl": "アバターURL",
+    "avatar": "アバター",
     "avatarUrlPlaceholder": "アバター画像を入力してくださいURL",
     "timezone": "タイムゾーン",
     "timezonePlaceholder": "例: America/New_York",

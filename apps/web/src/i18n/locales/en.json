@@ -66,6 +66,7 @@
     "active": "Active",
     "inactive": "Inactive",
     "loadFailed": "Failed to load",
+    "unavailableOption": "Unavailable",
     "saveFailed": "Failed to save",
     "networkError": "Network connection failed. Check your connection and try again.",
     "createdAt": "Created at",
@@ -2591,6 +2592,7 @@
       "reserved": "This name is reserved"
     },
     "avatarUrl": "Avatar URL",
+    "avatar": "Avatar",
     "avatarUrlPlaceholder": "Enter avatar image URL",
     "timezone": "Timezone",
     "timezonePlaceholder": "e.g. America/New_York",

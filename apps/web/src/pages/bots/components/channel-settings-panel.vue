@@ -25,7 +25,7 @@
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <span
-            v-if="isFormDirty && !isHydratingCredentials"
+            v-if="isFormDirty && !isHydratingCredentials && channelItem.meta.type !== 'weixin'"
             class="hidden text-xs text-muted-foreground sm:inline"
           >
             {{ $t('common.unsaved') }}
@@ -41,6 +41,7 @@
             {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
           </Button>
           <Button
+            v-if="channelItem.meta.type !== 'weixin'"
             size="sm"
             :disabled="(!isFormDirty && isEditMode) || isBusy || isHydratingCredentials"
             :loading="action === 'save'"

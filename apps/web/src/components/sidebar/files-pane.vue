@@ -13,7 +13,7 @@
       class="group/pane-header min-h-[1.6875rem] mx-1 pl-[11px] mt-2"
       :label="botName || t('bots.files.panelTitle')"
     >
-      <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100">
+      <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100 group-focus-within/pane-header:opacity-100 pointer-coarse:opacity-100">
         <Button
           v-if="canWrite"
           variant="ghost"
