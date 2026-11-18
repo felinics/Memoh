@@ -3,16 +3,37 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, ref } from 'vue'
 
-const state = vi.hoisted(() => ({ settings: null as unknown, push: vi.fn() }))
+const state = vi.hoisted(() => ({ settings: null as unknown, channels: null as unknown, push: vi.fn() }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: { tab: 'channels' } }), useRouter: () => ({ push: state.push }) }))
 vi.mock('@pinia/colada', () => ({ useQuery: (options: { key: () => string[] }) => ({
-  data: options.key()[0] === 'bot-settings' ? state.settings : ref([]), error: ref(null), isLoading: ref(false), refetch: vi.fn(),
+  data: options.key()[0] === 'bot-settings'
+    ? state.settings
+    : options.key()[0] === 'bot-channels'
+      ? state.channels
+      : ref([]),
+  error: ref(null),
+  isLoading: ref(false),
+  refetch: vi.fn(),
 }) }))
 vi.mock('@felinic/ui', async () => {
   const { defineComponent, h } = await import('vue')
   const shell = defineComponent({
     setup: (_, { slots }) => () => h('div', [slots.actions?.(), slots.default?.()]),
+  })
+  const backendCard = defineComponent({
+    props: {
+      name: { type: String, default: '' },
+      subtitle: { type: String, default: '' },
+      enabled: { type: Boolean, default: false },
+    },
+    emits: ['click'],
+    setup: (props, { emit }) => () => h('button', {
+      'data-channel': props.name,
+      'data-subtitle': props.subtitle,
+      'data-enabled': String(props.enabled),
+      'onClick': () => emit('click'),
+    }, props.name),
   })
   const banner = defineComponent({
     props: {
@@ -27,7 +48,7 @@ vi.mock('@felinic/ui', async () => {
   return Object.fromEntries([
     'SettingsSection', 'Button', 'Skeleton', 'Dialog', 'DialogContent', 'DialogHeader', 'DialogTitle',
     'Empty', 'EmptyTitle', 'EmptyDescription', 'EmptyContent', 'BackendCard', 'PageShell', 'SwapTransition', 'CalloutBanner',
-  ].map(name => [name, name === 'CalloutBanner' ? banner : shell]))
+  ].map(name => [name, name === 'CalloutBanner' ? banner : name === 'BackendCard' ? backendCard : shell]))
 })
 vi.mock('./channel-settings-panel.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/channel-icon/index.vue', () => ({ default: { template: '<span />' } }))
@@ -40,8 +61,9 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-async function render(settings: unknown) {
+async function render(settings: unknown, channels: unknown[] = []) {
   state.settings = ref(settings)
+  state.channels = ref(channels)
   const target = document.createElement('div')
   document.body.append(target)
   const app = createApp(BotChannels, { botId: 'bot-1' })
@@ -70,5 +92,40 @@ describe('channel model setup guidance', () => {
     settings.value = { chat_model_id: 'model-1' }
     await nextTick()
     expect(target.querySelector('[data-notice]')).toBeNull()
+  })
+})
+
+describe('configured channel ordering', () => {
+  it('places enabled channels (including omitted disabled flag) before disabled ones while preserving platform order and excluding unconfigured channels', async () => {
+    const target = await render(
+      { chat_runtime: 'model', chat_model_id: 'model-1' },
+      [
+        { meta: { type: 'telegram', display_name: 'Telegram' }, configured: true, config: { disabled: true } },
+        { meta: { type: 'discord', display_name: 'Discord' }, configured: true, config: { disabled: false } },
+        { meta: { type: 'slack', display_name: 'Slack' }, configured: false, config: null },
+        { meta: { type: 'feishu', display_name: 'Feishu' }, configured: true, config: {} },
+        { meta: { type: 'line', display_name: 'Line' }, configured: true, config: { disabled: true } },
+      ],
+    )
+
+    const cards = [...target.querySelectorAll('[data-channel]')]
+    expect(cards.map(card => card.getAttribute('data-channel'))).toEqual([
+      'Discord',
+      'Feishu',
+      'Telegram',
+      'Line',
+    ])
+    expect(cards.map(card => card.getAttribute('data-enabled'))).toEqual([
+      'true',
+      'true',
+      'false',
+      'false',
+    ])
+    expect(cards.map(card => card.getAttribute('data-subtitle'))).toEqual([
+      'bots.channels.statusActive',
+      'bots.channels.statusActive',
+      'bots.channels.configured',
+      'bots.channels.configured',
+    ])
   })
 })

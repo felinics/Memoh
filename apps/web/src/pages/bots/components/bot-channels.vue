@@ -64,8 +64,8 @@
               v-for="item in configuredChannels"
               :key="item.meta.type"
               :name="channelTitle(item.meta)"
-              :subtitle="!item.config?.disabled ? t('bots.channels.statusActive') : t('bots.channels.configured')"
-              :enabled="!item.config?.disabled"
+              :subtitle="isChannelEnabled(item) ? t('bots.channels.statusActive') : t('bots.channels.configured')"
+              :enabled="isChannelEnabled(item)"
               @click="openPlatform(item)"
             >
               <template #leading>
@@ -221,8 +221,16 @@ const loadErrorDetail = computed(() => (error.value ? resolveApiErrorMessage(err
 
 const selectedType = ref<string | null>(null)
 
+function isChannelEnabled(item: BotChannelItem): boolean {
+  return !item.config?.disabled
+}
+
 const allChannels = computed<BotChannelItem[]>(() => channels.value ?? [])
-const configuredChannels = computed(() => allChannels.value.filter((c) => c.configured))
+const configuredChannels = computed(() =>
+  allChannels.value
+    .filter((c) => c.configured)
+    .sort((a, b) => Number(isChannelEnabled(b)) - Number(isChannelEnabled(a))),
+)
 const unconfiguredChannels = computed(() => allChannels.value.filter((c) => !c.configured))
 
 const selectedItem = computed(() => allChannels.value.find((c) => c.meta.type === selectedType.value) ?? null)
