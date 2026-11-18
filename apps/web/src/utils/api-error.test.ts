@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  apiErrorCorrelation,
   apiErrorStatus,
   isApiErrorAnswered,
   isApiErrorCode,
@@ -384,5 +385,35 @@ describe('resolveApiErrorMessage', () => {
 
   it('reads legacy HTTP status without parsing a message', () => {
     expect(apiErrorStatus({ response: { status: 409 }, message: 'legacy' })).toBe(409)
+  })
+})
+
+describe('apiErrorCorrelation', () => {
+  it('extracts request_id and trace_id from nested error records without crossing records', () => {
+    expect(apiErrorCorrelation({
+      error: { request_id: 'req-inner' },
+      trace_id: 'trace-outer',
+    })).toEqual({
+      requestId: undefined,
+      traceId: 'trace-outer',
+    })
+
+    expect(apiErrorCorrelation({
+      body: { request_id: 'req-body', trace_id: 'trace-body' },
+    })).toEqual({
+      requestId: 'req-body',
+      traceId: 'trace-body',
+    })
+  })
+
+  it('falls back to X-Request-ID and X-Trace-ID response headers', () => {
+    const headers = new Headers({
+      'X-Request-ID': 'req-hdr',
+      'X-Trace-ID': 'trace-hdr',
+    })
+    expect(apiErrorCorrelation({ response: { headers } })).toEqual({
+      requestId: 'req-hdr',
+      traceId: 'trace-hdr',
+    })
   })
 })

@@ -349,31 +349,37 @@
                 </div>
               </div>
 
-              <CalloutBanner
+              <ChatErrorBlock
                 v-else-if="node.block.type === 'error' && (node.block.code || node.block.content)"
-                tone="destructive"
-                size="sm"
-                :description="errorBlockContent(node.block)"
+                :message="errorBlockContent(node.block)"
+                :error="node.block"
+                :reveal="itemMounted"
+                :lang="contentLang(errorBlockContent(node.block))"
               >
                 <!-- The one failure the user fixes outside the chat: sign the
                      Agent in again. -->
-                <Button
-                  v-if="node.block.code === AUTH_REQUIRED_CODE && (botName || botId)"
-                  size="sm"
-                  variant="outline"
-                  @click="openAgentSettings"
+                <template
+                  v-if="(node.block.code === AUTH_REQUIRED_CODE && (botName || botId)) || (canResetAgentSession && node.block.code === SESSION_RESUME_FAILED_CODE)"
+                  #default
                 >
-                  {{ t('bots.agent.openSettings') }}
-                </Button>
-                <Button
-                  v-else-if="canResetAgentSession && node.block.code === SESSION_RESUME_FAILED_CODE"
-                  variant="outline"
-                  size="sm"
-                  @click="emit('resetAgentSession')"
-                >
-                  {{ t('chat.externalAgent.resetSession') }}
-                </Button>
-              </CalloutBanner>
+                  <Button
+                    v-if="node.block.code === AUTH_REQUIRED_CODE && (botName || botId)"
+                    size="sm"
+                    variant="outline"
+                    @click="openAgentSettings"
+                  >
+                    {{ t('bots.agent.openSettings') }}
+                  </Button>
+                  <Button
+                    v-else-if="canResetAgentSession && node.block.code === SESSION_RESUME_FAILED_CODE"
+                    variant="outline"
+                    size="sm"
+                    @click="emit('resetAgentSession')"
+                  >
+                    {{ t('chat.externalAgent.resetSession') }}
+                  </Button>
+                </template>
+              </ChatErrorBlock>
 
               <!-- Runtime notice block: a degradation the runtime wants the
                    user to see (tools unavailable, an interaction declined).
@@ -491,7 +497,7 @@ document.addEventListener('visibilitychange', () => {
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { Copy, Pencil, Sparkles, Target } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, InfoHint, Textarea, toast, useClipboard } from '@felinic/ui'
@@ -499,6 +505,7 @@ import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
 import ChatAnswersCard from './chat-answers-card.vue'
+import ChatErrorBlock from './chat-error-block.vue'
 import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import AttachmentBlock from './attachment-block.vue'
 import CollapsibleUserText from './collapsible-user-text.vue'
@@ -588,6 +595,12 @@ const showExecutionLocation = computed(() => {
 })
 
 const userStore = useUserStore()
+
+// Children mount before this hook runs, so a block rendered with the item
+// (loaded history, a remount on scroll) sees false; one that arrives later
+// while the turn is on screen sees true and may animate in.
+const itemMounted = ref(false)
+onMounted(() => { itemMounted.value = true })
 
 const isVisible = useElementVisibility(messageEl, {
   threshold: 0.1

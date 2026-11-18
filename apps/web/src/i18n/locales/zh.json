@@ -46,6 +46,7 @@
     "tabImportJson": "导入 JSON",
     "copyAsJson": "复制为 JSON",
     "requestId": "请求 ID",
+    "traceId": "Trace ID",
     "fillForm": "填入表单",
     "batchSelected": "已选 {count} 项",
     "batchDelete": "批量删除",
@@ -1850,6 +1851,24 @@
     "notifyNotice": {
       "title": "已提醒你",
       "description": "这次运行会出现在「需要你」中"
+    },
+    "errorActions": {
+      "copy": "复制",
+      "copied": "已复制",
+      "providerSettings": "模型服务设置",
+      "showDetails": "详情",
+      "hideDetails": "收起详情",
+      "titles": {
+        "default": "未能完成本次回复",
+        "providerQuota": "模型服务商余额不足",
+        "timeout": "模型服务响应超时",
+        "unreachable": "无法连接模型服务",
+        "overloaded": "模型服务当前繁忙",
+        "auth": "模型服务凭证无效",
+        "rejected": "模型服务拒绝了请求",
+        "interrupted": "回复生成已中断",
+        "agentAuth": "Agent 账号需要重新登录"
+      }
     }
   },
   "chatExamples": {

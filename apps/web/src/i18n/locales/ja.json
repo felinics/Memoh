@@ -41,6 +41,7 @@
     "tabImportJson": "JSONをインポート",
     "copyAsJson": "JSONとしてコピー",
     "requestId": "リクエスト ID",
+    "traceId": "Trace ID",
     "fillForm": "フォームに入力",
     "batchSelected": "{count}件選択中",
     "batchDelete": "一括削除",
@@ -1850,6 +1851,24 @@
     "notifyNotice": {
       "title": "通知しました",
       "description": "この実行は「確認が必要」に表示されます"
+    },
+    "errorActions": {
+      "copy": "コピー",
+      "copied": "コピー済み",
+      "providerSettings": "プロバイダー設定",
+      "showDetails": "詳細",
+      "hideDetails": "詳細を隠す",
+      "titles": {
+        "default": "応答を完了できませんでした",
+        "providerQuota": "プロバイダーの残高が不足しています",
+        "timeout": "モデルの応答がタイムアウトしました",
+        "unreachable": "モデルプロバイダーに接続できませんでした",
+        "overloaded": "モデルプロバイダーが混み合っています",
+        "auth": "プロバイダーの認証情報が拒否されました",
+        "rejected": "モデルプロバイダーがリクエストを拒否しました",
+        "interrupted": "応答が中断されました",
+        "agentAuth": "Agent アカウントの再サインインが必要です"
+      }
     }
   },
   "chatExamples": {
