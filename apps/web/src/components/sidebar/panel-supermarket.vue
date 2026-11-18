@@ -10,6 +10,7 @@
     <ScrollArea
       ref="scrollAreaRef"
       class="sidebar-scroll min-h-0 flex-1"
+      :scroll-hide-delay="300"
     >
       <div class="px-2 pb-6">
         <p
@@ -234,6 +235,7 @@ import SidebarPanelHeader from './panel-header.vue'
 import { useSupermarketFeed } from './use-supermarket-feed'
 import { useSidebarInfiniteScroll } from './use-sidebar-infinite-scroll'
 import { filterInstalledApps, uninstalledApps } from './supermarket-apps'
+import '@/styles/sidebar-scroll.css'
 
 /** The frame spans both text lines and their gap; the logo keeps the market card glyph size. */
 const appIconFrameClass = 'flex size-9.5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent'

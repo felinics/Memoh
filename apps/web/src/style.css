@@ -202,6 +202,7 @@
   --workspace-divider-width: 1.2px;
   --workspace-tab-stroke-width: 1px;
   --workspace-divider-color: rgb(240 239 237);
+  --workspace-divider-active-color: var(--border);
 
   --workspace-tab-strip-color: color-mix(
     in oklab,
@@ -269,6 +270,7 @@
   --surface-composer: var(--card);
   --composer-edge-focus: oklch(0.42 0 0);
   --workspace-divider-color: var(--border);
+  --workspace-divider-active-color: var(--border-hairline);
   /* Dark = a solid deep purple ≈ rgb(83,45,141) with pure-white ink (a filled
    * "sent" bubble); same relative recipe, just a darker L and near-full C. */
   --chat-user-bubble: oklch(from var(--brand) 0.40 0.15 calc(h + 7));
@@ -277,6 +279,7 @@
 }
 
 @theme inline {
+  --color-workspace-divider-active: var(--workspace-divider-active-color);
   --color-surface-editor: var(--surface-editor);
   --color-surface-chrome: var(--surface-chrome);
   --color-surface-composer: var(--surface-composer);
