@@ -252,7 +252,7 @@
 
 <script setup lang="ts">
 import { SettingsSection } from '@felinic/ui'
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   AutoHeight, Badge, Button, Dialog, DialogClose, DialogDescription, DialogFooter,
@@ -266,15 +266,11 @@ import type { McpImportRequest, McpToolDescriptor } from '@memohai/sdk'
 import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import McpServerDetail from './mcp-server-detail.vue'
 import type { McpItem } from './mcp-types'
-import { withStylesheetRecovery } from '@/lib/chunk-load-error'
+import { LazyMonacoEditor as MonacoEditor } from '@/components/monaco-editor/lazy'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { joinShellWords } from '@/utils/shell-words'
-
-// The editor only appears inside a dialog. Loading it on demand keeps its
-// ~700 KB out of this page, which the chat page prefetches while idle.
-const MonacoEditor = defineAsyncComponent(withStylesheetRecovery(() => import('@/components/monaco-editor/index.vue').then(m => m.default)))
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()

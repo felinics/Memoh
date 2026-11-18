@@ -260,10 +260,18 @@ function applyDiskSnapshot(snapshot: ContainerTextFileSnapshot, force: boolean) 
       })
   if (action === 'ignore') {
     // The disk holds the revision the editor is based on again: a failed read
-    // or stat recovered, or a deleted file was recreated with the same content.
-    if (recovered) {
+    // or stat recovered, a deleted file was recreated with the same content, or
+    // an external change was reverted. `observedExternalRevision` being set
+    // means an earlier snapshot differed, so this one is a newer read and the
+    // save baseline is confirmed as of now.
+    const revertedToBase = conflictState.value !== 'compare'
+      && observedExternalRevision.value !== ''
+      && snapshot.revision !== ''
+      && snapshot.revision === baseRevision.value
+    if (recovered || revertedToBase) {
       diskState.value = 'available'
       observedExternalRevision.value = ''
+      if (revertedToBase) lastLoadedAt.value = Date.now()
       if (conflictState.value === 'chip') conflictState.value = 'none'
     }
     return
@@ -305,15 +313,20 @@ function markDiskUnreadable(error: unknown) {
 // file; `savingContent` is cleared on a switch.)
 function reconcileText() {
   if (!isText.value || !loaded.value || loading.value || savingContent.value !== null) return
-  const force = forceApplyNextRead
-  forceApplyNextRead = false
-  const error = textQuery.error.value ?? textQuery.pollError.value
+  const readError = textQuery.error.value
+  const error = readError ?? textQuery.pollError.value
   if (error) {
+    // A pending Reload ends with the read it asked for, failed or applied. A
+    // failed stat says nothing about that read, so it leaves the request alone.
+    if (readError) forceApplyNextRead = false
     markDiskUnreadable(error)
     return
   }
   const snapshot = textQuery.data.value
-  if (snapshot) applyDiskSnapshot(snapshot, force)
+  if (!snapshot) return
+  const force = forceApplyNextRead
+  forceApplyNextRead = false
+  applyDiskSnapshot(snapshot, force)
 }
 
 watch(

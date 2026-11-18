@@ -84,6 +84,9 @@ export function createContainerFileStatTracker() {
         candidateFingerprint = fingerprint
         candidateSince = now
       }
+      // The first stat after a sync has no earlier stat to disagree with, but a
+      // size other than the synced one already proves the file was written since.
+      if (lastSync && stat.size !== lastSync.size) contentFresh = false
       // Unchanged for longer than the modTime resolution: that second is over
       // in the workspace, so a read issued now can be locked to this stat.
       if (now - candidateSince >= FINGERPRINT_SETTLE_MS) return 'read-and-lock'
@@ -216,12 +219,20 @@ export function useContainerTextFileQuery(
       const requestPath = path.value
       const requestWatch = sharedWatches.get(sharedWatchKey(requestBot, requestPath))
       const epochAtStart = requestWatch?.syncEpoch
-      const { data } = await getBotsByBotIdContainerFsRead({
-        path: { bot_id: requestBot },
-        query: { path: requestPath },
-        signal,
-        throwOnError: true,
-      })
+      let data
+      try {
+        ({ data } = await getBotsByBotIdContainerFsRead({
+          path: { bot_id: requestBot },
+          query: { path: requestPath },
+          signal,
+          throwOnError: true,
+        }))
+      } finally {
+        // The read is the more direct answer about the file: a success shows
+        // it is reachable again, a failure is reported as the query's error.
+        // Either way an earlier failed stat no longer describes it.
+        if (requestWatch && !signal.aborted) requestWatch.pollError.value = null
+      }
       if (requestWatch && requestWatch.syncEpoch !== epochAtStart) {
         const synced = queryCache.getQueryData<ContainerTextFileSnapshot>(containerTextFileQueryKey(requestBot, requestPath))
         if (synced) return synced

@@ -77,10 +77,19 @@ describe('createContainerFileStatTracker', () => {
     expect(tracker.observe({ isDir: true, size: 10, modTime: '1970-01-01T00:00:01Z' }, 0)).toBe('read')
 
     const updated = file(25, '1970-01-01T00:00:15Z')
-    expect(tracker.observe(updated, 0)).toBe('skip')
+    // A size other than the synced one: written since, so read without waiting.
+    expect(tracker.observe(updated, 0)).toBe('read')
     expect(tracker.observe(updated, 2_000)).toBe('read-and-lock')
     // The read failed (lock not called): the next poll asks again.
     expect(tracker.observe(updated, 4_000)).toBe('read-and-lock')
+  })
+
+  it('reads on the first stat after a sync when the size already differs', () => {
+    const tracker = createContainerFileStatTracker()
+    // Our own save, then an external write before the next stat.
+    tracker.recordSync(7, 10_000, true)
+
+    expect(tracker.observe(file(99, '1970-01-01T00:00:10Z'), 0)).toBe('read')
   })
 
   it('reads immediately after a reset', () => {

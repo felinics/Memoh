@@ -403,6 +403,38 @@ describe('file viewer text disk state', () => {
     expect(sdk.read).toHaveBeenCalledTimes(1)
   })
 
+  it('reloads over a draft when Try again is pressed before the failed check has recovered by itself', async () => {
+    const view = await mountViewer()
+    await view.edit('my draft')
+    sdk.fs.mockRejectedValueOnce({ status: 503 })
+    await vi.advanceTimersByTimeAsync(2_000)
+    await settleRead()
+    expect(host.textContent).toContain('bots.files.externalChange.reloadFailed')
+
+    await clickButton('bots.files.externalChange.tryAgain')
+    expect(host.querySelector('[role="status"]')).toBeNull()
+    expect(host.querySelector('textarea')!.value).toBe('initial')
+  })
+
+  it('lifts the conflict once an external change to a file with a draft is reverted', async () => {
+    const view = await mountViewer()
+    await view.edit('my draft')
+    sdk.fs.mockResolvedValue(stat(99, '1970-01-01T00:09:58Z'))
+    sdk.read.mockResolvedValue({ data: { content: 'agent v2', revision: 'r2', size: 99 } })
+    await vi.advanceTimersByTimeAsync(4_000)
+    await settleRead()
+    expect(host.querySelector('[role="status"]')).not.toBeNull()
+
+    sdk.fs.mockResolvedValue(stat(7, '1970-01-01T00:10:20Z'))
+    sdk.read.mockResolvedValue({ data: { content: 'initial', revision: 'r0', size: 7 } })
+    await vi.advanceTimersByTimeAsync(4_000)
+    await settleRead()
+    expect(host.querySelector('[role="status"]')).toBeNull()
+    expect(host.querySelector('textarea')!.value).toBe('my draft')
+    expect(await view.save()).toBe(true)
+    expect(sdk.write).toHaveBeenCalledTimes(1)
+  })
+
   it('compares against what the disk holds now and does not call that diff stale', async () => {
     const view = await mountViewer()
     await view.edit('my draft')
