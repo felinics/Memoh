@@ -4,9 +4,7 @@
   <div class="flex flex-col gap-2">
     <ComposerPanelUsage
       v-if="usageNotice"
-      :exhausted="usageNotice.exhausted"
-      :message="usageNotice.message"
-      @dismiss="emit('dismissUsage')"
+      :message="usageNotice"
     />
     <ComposerPanelError
       v-if="errorMessage"
@@ -103,22 +101,16 @@ interface CommandPanelData {
   items: CommandActionListItem[]
 }
 
-interface UsageNotice {
-  exhausted: boolean
-  message: string
-}
-
 const props = defineProps<{
   approvals: PendingApprovalItem[]
   commandPanel: CommandPanelData | null
   errorMessage: string
-  usageNotice?: UsageNotice | null
+  usageNotice?: string
 }>()
 
 const emit = defineEmits<{
   (e: 'selectCommandItem', item: CommandActionListItem): void
   (e: 'dismissCommand'): void
-  (e: 'dismissUsage'): void
   (e: 'dismissError'): void
 }>()
 

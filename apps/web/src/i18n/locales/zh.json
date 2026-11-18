@@ -1629,11 +1629,8 @@
     },
     "compactSuccess": "上下文压缩完成",
     "codexUsage": {
-      "warning": "{window}已用 {percent}%，{time}重置",
-      "warningNoReset": "{window}已用 {percent}%",
       "exhausted": "{window}已用完，{time}重置",
-      "exhaustedNoReset": "{window}已用完",
-      "dismiss": "关闭提示"
+      "exhaustedNoReset": "{window}已用完"
     },
     "compactFailed": "上下文压缩失败",
     "sessionStreaming": "生成中",

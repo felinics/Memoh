@@ -1617,11 +1617,8 @@
     },
     "compactSuccess": "コンテキストの圧縮が完了しました",
     "codexUsage": {
-      "warning": "{window}：{percent}% 使用済み・{time}にリセット",
-      "warningNoReset": "{window}：{percent}% 使用済み",
       "exhausted": "{window}に達しました・{time}にリセット",
-      "exhaustedNoReset": "{window}に達しました",
-      "dismiss": "閉じる"
+      "exhaustedNoReset": "{window}に達しました"
     },
     "compactFailed": "コンテキストの圧縮に失敗しました",
     "sessionStreaming": "生成中",

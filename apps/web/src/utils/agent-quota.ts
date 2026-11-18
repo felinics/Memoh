@@ -5,12 +5,6 @@ type Translate = (key: string, params?: Record<string, unknown>) => string
 
 const WEEK_MINUTES = 7 * 24 * 60
 const DAY_MINUTES = 24 * 60
-export const AGENT_QUOTA_WARNING_PERCENT = 90
-
-export interface AgentQuotaNotice {
-  exhausted: boolean
-  window: ExternalagentAgentQuotaWindow
-}
 
 export function agentQuotaWindowLabel(window: Pick<ExternalagentAgentQuotaWindow, 'window_minutes' | 'model'>, t: Translate): string {
   const label = windowLengthLabel(window.window_minutes, t)
@@ -31,23 +25,13 @@ export function agentQuotaResetTime(resetsAt: string, locale: string): string {
   return withinDay ? formatRelativeTime(resetsAt, { locale }) : formatCalendarTime(resetsAt, { locale })
 }
 
-// When the account is blocked, point at the window that keeps it blocked the
-// longest; otherwise warn about the fullest window once it nears the limit.
-export function agentQuotaNotice(usage: ExternalagentAgentQuotaResponse | undefined): AgentQuotaNotice | null {
+// When the account is blocked, point at the window that keeps it blocked the longest.
+export function agentQuotaNotice(usage: ExternalagentAgentQuotaResponse | undefined): ExternalagentAgentQuotaWindow | null {
   const windows = usage?.windows ?? []
-  if (!windows.length) return null
-  if (usage?.limit_reached) {
-    const full = windows.filter(window => window.used_percent >= 100)
-    const candidates = full.length ? full : windows
-    const window = candidates.reduce((latest, next) => resetMillis(next) > resetMillis(latest) ? next : latest)
-    return { exhausted: true, window }
-  }
-  const fullest = windows.reduce((max, next) => next.used_percent > max.used_percent ? next : max)
-  return fullest.used_percent >= AGENT_QUOTA_WARNING_PERCENT ? { exhausted: false, window: fullest } : null
-}
-
-export function agentQuotaNoticeKey(botAgentId: string, notice: AgentQuotaNotice): string {
-  return `${botAgentId}:${notice.window.window_minutes}:${notice.window.resets_at ?? ''}`
+  if (!usage?.limit_reached || !windows.length) return null
+  const full = windows.filter(window => window.used_percent >= 100)
+  const candidates = full.length ? full : windows
+  return candidates.reduce((latest, next) => resetMillis(next) > resetMillis(latest) ? next : latest)
 }
 
 function resetMillis(window: ExternalagentAgentQuotaWindow): number {
