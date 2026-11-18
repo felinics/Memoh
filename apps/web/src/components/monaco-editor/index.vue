@@ -219,6 +219,9 @@ onMounted(async () => {
 
   const editor = getEditorView()
   if (editor) {
+    // Creation is asynchronous and the model-value watcher skips updates while
+    // there is no editor yet, so a value that changed meanwhile is applied here.
+    if (editor.getValue() !== props.modelValue) updateCode(props.modelValue, resolveLanguage())
     editor.updateOptions({
       fontSize: editorFontSize.value,
       fontFamily: editorFontFamily.value,

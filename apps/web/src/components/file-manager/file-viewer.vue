@@ -342,6 +342,11 @@ watch(
 // Reads the text file through the shared query and reports whether this is
 // still the read the viewer is waiting for. A newer read, or a switch to
 // another file, takes over from it.
+//
+// `loading` stays set on success: the caller clears it in the same synchronous
+// step in which it applies the result. Clearing it here would leave a render
+// between "not loading" and "content applied", and on first open the editor
+// would be created with the empty buffer.
 async function readTextFromDisk(): Promise<boolean> {
   const generation = fileGeneration
   const token = ++textReadToken
@@ -350,9 +355,7 @@ async function readTextFromDisk(): Promise<boolean> {
   // join that read. Otherwise always read again, so the editor never opens on
   // a copy that was cached while no panel was watching the file.
   await (!loaded.value && textQuery.isLoading.value ? textQuery.refresh() : textQuery.refetch())
-  if (generation !== fileGeneration || token !== textReadToken) return false
-  loading.value = false
-  return true
+  return generation === fileGeneration && token === textReadToken
 }
 
 // `forceApply` replaces the editor content with the disk content even over
@@ -362,6 +365,7 @@ async function readTextFromDisk(): Promise<boolean> {
 async function loadTextContent(options: { forceApply?: boolean; notifyOnError?: boolean } = {}) {
   if (options.forceApply || !loaded.value) forceApplyNextRead = true
   if (!(await readTextFromDisk())) return
+  loading.value = false
   loaded.value = true
   reconcileText()
   const error = textQuery.error.value
@@ -784,9 +788,9 @@ async function acceptExternalChange() {
 async function openCompare() {
   if (!isText.value) return
   const request = ++compareRequest
-  const current = await readTextFromDisk()
+  if (!(await readTextFromDisk())) return
+  loading.value = false
   if (request !== compareRequest) return
-  if (!current) return
   const error = textQuery.error.value
   const snapshot = textQuery.data.value
   if (error || !snapshot) {

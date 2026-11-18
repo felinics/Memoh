@@ -47,12 +47,25 @@ vi.mock('@/store/chat-list', () => ({
   },
 }))
 vi.mock('@/components/monaco-editor/diff.vue', () => ({ default: 'div' }))
-vi.mock('@/components/monaco-editor/index.vue', () => ({
-  default: (props: { modelValue: string; 'onUpdate:modelValue': (value: string) => void }) => h('textarea', {
-    value: props.modelValue,
-    onInput: (event: Event) => props['onUpdate:modelValue']((event.target as HTMLTextAreaElement).value),
-  }),
-}))
+// The real editor is created asynchronously from the value it is mounted with,
+// so the value at mount time is recorded and asserted on.
+const editorMountValues = vi.hoisted(() => [] as string[])
+vi.mock('@/components/monaco-editor/index.vue', async () => {
+  const vue = await import('vue')
+  return {
+    default: vue.defineComponent({
+      props: { modelValue: { type: String, default: '' } },
+      emits: ['update:modelValue'],
+      setup(props, { emit }) {
+        editorMountValues.push(props.modelValue)
+        return () => vue.h('textarea', {
+          value: props.modelValue,
+          onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLTextAreaElement).value),
+        })
+      },
+    }),
+  }
+})
 vi.mock('./document-preview.vue', () => ({
   default: (props: { kind?: string, filename?: string, blob?: Blob }) => h('div', {
     'data-testid': 'doc-preview',
@@ -122,6 +135,13 @@ afterEach(() => {
 })
 
 describe('file viewer save snapshot', () => {
+  it('creates the editor with the loaded content, not an empty buffer', async () => {
+    editorMountValues.length = 0
+    await mountViewer()
+    expect(host.querySelector('textarea')!.value).not.toBe('')
+    expect(editorMountValues).toEqual([host.querySelector('textarea')!.value])
+  })
+
   it('keeps edits during save dirty and saves their latest text with the confirmed revision', async () => {
     const view = await mountViewer()
     await view.edit('A')
