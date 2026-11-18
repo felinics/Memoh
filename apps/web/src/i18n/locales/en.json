@@ -1617,11 +1617,8 @@
     },
     "compactSuccess": "Context compaction completed",
     "codexUsage": {
-      "warning": "{window}: {percent}% used · resets {time}",
-      "warningNoReset": "{window}: {percent}% used",
       "exhausted": "{window} reached · resets {time}",
-      "exhaustedNoReset": "{window} reached",
-      "dismiss": "Dismiss"
+      "exhaustedNoReset": "{window} reached"
     },
     "compactFailed": "Context compaction failed",
     "sessionStreaming": "Generating",

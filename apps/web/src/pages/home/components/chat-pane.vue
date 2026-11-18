@@ -487,7 +487,6 @@
               :usage-notice="composerUsageNotice"
               @select-command-item="selectCommandResultItem"
               @dismiss-command="clearCurrentCommandEvent"
-              @dismiss-usage="dismissCodexUsageNotice"
               @dismiss-error="dismissComposerPanelError"
               @reveal-composer="handleDockRevealComposer"
             >
@@ -1328,10 +1327,10 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useAttentionFocusStore } from '@/store/attention-focus'
 import { isNotifyNotice } from './notify-notice'
 import { storeToRefs } from 'pinia'
-import { useElementSize, useIntersectionObserver, useLocalStorage } from '@vueuse/core'
+import { useElementSize, useIntersectionObserver } from '@vueuse/core'
 import { useRuntimeControls } from '@/composables/useRuntimeControls'
 import { useAgentQuota } from '@/composables/useAgentQuota'
-import { agentQuotaNotice, agentQuotaNoticeKey, agentQuotaResetTime, agentQuotaWindowLabel } from '@/utils/agent-quota'
+import { agentQuotaNotice, agentQuotaResetTime, agentQuotaWindowLabel } from '@/utils/agent-quota'
 import { useQuery } from '@pinia/colada'
 import { deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession, getAcpProfiles, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
@@ -2309,32 +2308,15 @@ watch(streaming, (now, was) => {
   if (codexUsageTurnAgentId.value === codexUsageAgentId.value) void codexUsage.refetch()
   else codexUsageTurnAgentId.value = codexUsageAgentId.value
 })
-// Dismissal holds until the window resets: a new reset time is a new key.
-const dismissedCodexUsageNotices = useLocalStorage<Record<string, string>>('memoh:codex-usage-dismissed', {})
-const codexUsageNoticeState = computed(() => {
-  const notice = agentQuotaNotice(codexUsage.data.value)
-  return notice ? { notice, key: agentQuotaNoticeKey(codexUsageAgentId.value, notice) } : null
-})
 const composerUsageNotice = computed(() => {
-  const state = codexUsageNoticeState.value
-  if (!state) return null
-  const { exhausted, window } = state.notice
-  if (!exhausted && dismissedCodexUsageNotices.value[codexUsageAgentId.value] === state.key) return null
+  const window = agentQuotaNotice(codexUsage.data.value)
+  if (!window) return ''
   const params = {
     window: agentQuotaWindowLabel(window, t),
-    percent: window.used_percent,
     time: window.resets_at ? agentQuotaResetTime(window.resets_at, locale.value) : '',
   }
-  const message = exhausted
-    ? t(window.resets_at ? 'chat.codexUsage.exhausted' : 'chat.codexUsage.exhaustedNoReset', params)
-    : t(window.resets_at ? 'chat.codexUsage.warning' : 'chat.codexUsage.warningNoReset', params)
-  return { exhausted, message }
+  return t(window.resets_at ? 'chat.codexUsage.exhausted' : 'chat.codexUsage.exhaustedNoReset', params)
 })
-function dismissCodexUsageNotice() {
-  const state = codexUsageNoticeState.value
-  if (!state || !codexUsageAgentId.value) return
-  dismissedCodexUsageNotices.value = { ...dismissedCodexUsageNotices.value, [codexUsageAgentId.value]: state.key }
-}
 const rawRuntimeControlSnapshot = computed(() => activeIsPendingExternalAgent.value && activeUsesACPRuntime.value ? pendingRuntimeControls.value : runtimeControls.controls.value)
 const runtimeControlSnapshot = computed(() => localizeRuntimeControls(rawRuntimeControlSnapshot.value, runtimeText))
 // A draft creates its session on send; read and operation commands need one first.
