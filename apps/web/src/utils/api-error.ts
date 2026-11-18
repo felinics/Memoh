@@ -268,3 +268,34 @@ export function resolveApiErrorMessage(
 
   return detail
 }
+
+/** Preserve operation IDs separately from message text, including nested feedback. */
+export interface ErrorCorrelation {
+  requestId?: string
+  traceId?: string
+}
+
+export function apiErrorCorrelation(error: unknown): ErrorCorrelation {
+  const records = collectErrorRecords(error)
+  function value(record: ErrorRecord, keys: string[]): string | undefined {
+    for (const key of keys) {
+      const candidate = record[key]
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+    }
+    return undefined
+  }
+  // A saved operation may carry only one ID. Its other ID must not be filled
+  // from a later polling response, which would join unrelated operations.
+  for (const record of records) {
+    const requestId = value(record, ['request_id', 'requestId'])
+    const traceId = value(record, ['trace_id', 'traceId'])
+    if (requestId || traceId) return { requestId, traceId }
+  }
+  for (const record of records) {
+    if (!(record.headers instanceof Headers)) continue
+    const requestId = record.headers.get('X-Request-ID')?.trim() || undefined
+    const traceId = record.headers.get('X-Trace-ID')?.trim() || undefined
+    if (requestId || traceId) return { requestId, traceId }
+  }
+  return { requestId: undefined, traceId: undefined }
+}

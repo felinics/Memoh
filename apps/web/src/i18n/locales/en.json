@@ -46,6 +46,7 @@
     "tabImportJson": "Import JSON",
     "copyAsJson": "Copy as JSON",
     "requestId": "Request ID",
+    "traceId": "Trace ID",
     "fillForm": "Fill form",
     "batchSelected": "{count} selected",
     "batchDelete": "Batch delete",
@@ -1850,6 +1851,24 @@
     "notifyNotice": {
       "title": "Notified you",
       "description": "This run shows in Needs you"
+    },
+    "errorActions": {
+      "copy": "Copy",
+      "copied": "Copied",
+      "providerSettings": "Provider settings",
+      "showDetails": "Details",
+      "hideDetails": "Hide details",
+      "titles": {
+        "default": "Couldn't complete this reply",
+        "providerQuota": "Provider balance is exhausted",
+        "timeout": "Couldn't get a response in time",
+        "unreachable": "Couldn't reach the model provider",
+        "overloaded": "Model provider is busy",
+        "auth": "Provider credentials were rejected",
+        "rejected": "Model provider rejected the request",
+        "interrupted": "Response was interrupted",
+        "agentAuth": "Agent account needs sign-in"
+      }
     }
   },
   "chatExamples": {
