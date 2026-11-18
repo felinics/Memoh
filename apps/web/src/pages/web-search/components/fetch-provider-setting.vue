@@ -36,7 +36,7 @@
             </template>
           </ConfirmPopover>
           <Switch
-            :model-value="curProvider?.enable ?? false"
+            :model-value="curProvider?.id ? (curProvider.enable ?? true) : (curProvider?.enable ?? false)"
             :disabled="isNative || enableLoading || editLoading"
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"

@@ -360,7 +360,11 @@ const { data: channels, error: channelsError, isLoading: channelsLoading, refetc
 
 const channelsErrorDetail = computed(() => (channelsError.value ? resolveApiErrorMessage(channelsError.value, '') : ''))
 
-const configuredChannels = computed(() => (channels.value ?? []).filter((c) => c.configured))
+const configuredChannels = computed(() =>
+  (channels.value ?? [])
+    .filter((c) => c.configured)
+    .sort((a, b) => Number(Boolean(a.config?.disabled)) - Number(Boolean(b.config?.disabled))),
+)
 
 // Platforms is low-weight: only shown when nothing is connected yet (Connect
 // nudge) or the bot has a check issue (so a broken connection stays visible).
