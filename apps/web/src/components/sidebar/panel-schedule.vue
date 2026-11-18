@@ -189,10 +189,10 @@ function groupLabel(date: Date, now: Date): string {
   const week = 7 * 86_400_000
 
   if (isSameDay(date, now)) {
-    return locale.value.startsWith('zh') ? '今天' : locale.value.startsWith('ja') ? '今日' : 'Today'
+    return t('bots.schedule.today')
   }
   if (isSameDay(date, tomorrow)) {
-    return locale.value.startsWith('zh') ? '明天' : locale.value.startsWith('ja') ? '明日' : 'Tomorrow'
+    return t('bots.schedule.tomorrow')
   }
   if (diff < week) {
     return date.toLocaleDateString(uiLocale.value, { weekday: 'short' })

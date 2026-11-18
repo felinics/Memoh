@@ -3856,6 +3856,8 @@
       "sortStatus": "ステータス別",
       "sortNextRun": "次回の実行までに",
       "nextRun": "次回実行 {time}",
+      "today": "今日",
+      "tomorrow": "明日",
       "execution": {
         "runsIn": "実行先",
         "newSession": "毎回新しいセッション",

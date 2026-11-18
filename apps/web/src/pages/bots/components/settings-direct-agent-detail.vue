@@ -136,9 +136,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Input,
@@ -167,6 +166,7 @@ import {
 import AgentCredentialDisconnect from './agent-credential-disconnect.vue'
 import AgentCredentialInput from './agent-credential-input.vue'
 import AgentQuotaRows from './agent-quota-rows.vue'
+import { agentDependencyRequirement } from './dependency-enable-flow'
 import DeviceLoginPanel from './device-login-panel.vue'
 import { localizeRuntimeControls } from '@/utils/runtime-control-presentation'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
@@ -182,7 +182,6 @@ import {
   isDirectBotAgentRuntime,
   normalizeBotAgentRuntime,
 } from '@/utils/bot-agent'
-import { externalAgentDisplayName } from '@/utils/external-agent'
 
 interface DirectAgentConfig {
   auth: string
@@ -196,9 +195,11 @@ const props = defineProps<{
   botId: string
   agent: BotagentsBotAgent
 }>()
-const emit = defineEmits<{ authorized: [] }>()
+const emit = defineEmits<{
+  authorized: []
+  missingDependency: []
+}>()
 const { t, te } = useI18n()
-const router = useRouter()
 const queryCache = useQueryCache()
 
 const runtime = computed(() => normalizeBotAgentRuntime(props.agent.runtime))
@@ -414,24 +415,14 @@ async function startDeviceLogin() {
       path: { bot_id: props.botId, id: props.agent.id! },
       throwOnError: true,
     })
+    if (unmounted) return
     deviceLogin.value = data
     // A code_required sign-in completes when its code is submitted.
     if (!data.code_required) void pollDeviceLogin(data.login_id)
   } catch (error) {
-    if (isApiErrorCode(error, 'agent_dependency_missing')) {
-      const dependencyId = props.agent.dependency?.dependency_id
-      toast.error(t('chat.externalAgent.dependencyMissing', { dep_id: externalAgentDisplayName(runtime.value, runtime.value) }), {
-        action: {
-          label: t('chat.externalAgent.dependencyOpen'),
-          onClick: () => {
-            void router.push({
-              name: 'bot-detail',
-              params: { botName: props.botId },
-              query: { tab: 'dependencies', dependency_id: dependencyId },
-            }).catch(() => {})
-          },
-        },
-      })
+    if (!active.value || unmounted) return
+    if (isApiErrorCode(error, 'agent_dependency_missing') && agentDependencyRequirement(props.agent)) {
+      emit('missingDependency')
     } else {
       toast.error(resolveApiErrorMessage(error, t(loginCopy.value.failed)))
     }
@@ -481,5 +472,15 @@ async function cancelDeviceLogin() {
   }
 }
 
-onBeforeUnmount(stopPolling)
+// KeepAlive does not deactivate pending async requests on tab switch; a late
+// rejection must not emit into DependencyEnableFlow and steal focus over another tab.
+const active = ref(true)
+let unmounted = false
+onActivated(() => { active.value = true })
+onDeactivated(() => { active.value = false })
+onBeforeUnmount(() => {
+  unmounted = true
+  active.value = false
+  stopPolling()
+})
 </script>

@@ -135,7 +135,7 @@
             :schema="getModelSchema(editingModel.model_id ?? '')"
             :mode="spec.editorMode"
             :on-test="(payload, cfg) => spec.testModel(editingModel?.id ?? '', payload, cfg)"
-            @save="(cfg) => handleSaveModel(editingModel?.id ?? '', cfg)"
+            :on-save="(cfg) => handleSaveModel(editingModel?.id ?? '', cfg)"
           />
         </DialogContent>
       </Dialog>

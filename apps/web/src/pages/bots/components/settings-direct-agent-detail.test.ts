@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createApp, h, ref, type App } from 'vue'
+import { createApp, h, KeepAlive, nextTick, ref, type App } from 'vue'
 const api = vi.hoisted(() => ({
   authorize: vi.fn(), poll: vi.fn(), cancel: vi.fn(), patch: vi.fn(),
   invalidate: vi.fn(), toastSuccess: vi.fn(), toastError: vi.fn(),
+  onMissingDependency: vi.fn(),
 }))
 vi.mock('@memohai/sdk', () => ({
   postBotsByBotIdAgentsByIdLoginDeviceAuthorize: api.authorize, postBotsByBotIdAgentsByIdLoginDevicePoll: api.poll,
   postBotsByBotIdAgentsByIdLoginDeviceCancel: api.cancel, patchBotsByBotIdAgentsById: api.patch,
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 const runtimeAccount = ref<{ signed_in: boolean, email?: string } | undefined>()
 vi.mock('@pinia/colada', () => ({
   useQuery: (options: { key: () => string[] }) => ({ data: options.key()[0] === 'agent-account' ? runtimeAccount : ref(undefined), error: ref(null) }),
@@ -44,7 +44,11 @@ function connect() { panel()!.dispatchEvent(new Event('connect')) }
 function mount(runtime: string, auth: string, connected = false, extra: Record<string, unknown> = {}) {
   agent.value = { id: 'agent', runtime, metadata: { provider: runtime, auth }, ...(connected && { agent_credential_id: 'cred' }), ...extra }
   root = document.createElement('div')
-  app = createApp(() => h(SettingsDirectAgentDetail, { botId: 'bot', agent: agent.value }))
+  app = createApp(() => h(SettingsDirectAgentDetail, {
+    botId: 'bot',
+    agent: agent.value,
+    onMissingDependency: api.onMissingDependency,
+  }))
   app.config.globalProperties.$t = (key: string) => key
   app.mount(root)
 }
@@ -93,4 +97,52 @@ it('takes the ChatGPT sign-in from Codex itself, not from a stored credential', 
   await vi.advanceTimersByTimeAsync(0)
   expect(panel()!.dataset.auth).toBe('chatgpt')
   expect(root.querySelector('[data-agent-quota]')).not.toBeNull()
+})
+
+it('emits missingDependency when device login fails due to an undeployed agent dependency', async () => {
+  api.authorize.mockRejectedValueOnce({ error: { code: 'agent_dependency_missing' } })
+  mount('codex', 'chatgpt', false, { dependency: { dependency_id: 'codex' } })
+  connect()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(api.onMissingDependency).toHaveBeenCalledOnce()
+  expect(api.toastError).not.toHaveBeenCalled()
+})
+
+it('shows error toast when agent_dependency_missing has no declared dependency requirement', async () => {
+  api.authorize.mockRejectedValueOnce({ error: { code: 'agent_dependency_missing' } })
+  mount('codex', 'chatgpt')
+  connect()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(api.onMissingDependency).not.toHaveBeenCalled()
+  expect(api.toastError).toHaveBeenCalledOnce()
+})
+
+it('suppresses missingDependency emission when KeepAlive deactivates the tab mid-request', async () => {
+  let rejectAuthorize!: (reason: unknown) => void
+  api.authorize.mockImplementationOnce(() => new Promise((_, reject) => { rejectAuthorize = reject }))
+  const shown = ref(true)
+  agent.value = { id: 'agent', runtime: 'codex', metadata: { provider: 'codex', auth: 'chatgpt' }, dependency: { dependency_id: 'codex' } }
+  root = document.createElement('div')
+  app = createApp(() => h(KeepAlive, null, {
+    default: () => (shown.value
+      ? h(SettingsDirectAgentDetail, {
+          key: 'detail',
+          botId: 'bot',
+          agent: agent.value,
+          onMissingDependency: api.onMissingDependency,
+        })
+      : h('div')),
+  }))
+  app.config.globalProperties.$t = (key: string) => key
+  app.mount(root)
+
+  connect()
+  shown.value = false
+  await nextTick()
+
+  rejectAuthorize({ error: { code: 'agent_dependency_missing' } })
+  await vi.advanceTimersByTimeAsync(0)
+
+  expect(api.onMissingDependency).not.toHaveBeenCalled()
+  expect(api.toastError).not.toHaveBeenCalled()
 })

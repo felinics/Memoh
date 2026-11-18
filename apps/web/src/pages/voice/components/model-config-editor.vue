@@ -171,10 +171,7 @@ const props = defineProps<{
   schema: AudioConfigSchema | null
   mode?: 'synthesis' | 'transcription'
   onTest: (payload: string | File, config: Record<string, unknown>) => Promise<Blob | { text?: string, language?: string }>
-}>()
-
-const emit = defineEmits<{
-  save: [config: Record<string, unknown>]
+  onSave?: (config: Record<string, unknown>) => Promise<unknown> | unknown
 }>()
 
 const { t } = useI18n()
@@ -244,9 +241,10 @@ onBeforeUnmount(() => {
 })
 
 async function handleSaveConfig() {
+  if (saving.value) return
   saving.value = true
   try {
-    emit('save', buildConfig())
+    await props.onSave?.(buildConfig())
   } finally {
     saving.value = false
   }

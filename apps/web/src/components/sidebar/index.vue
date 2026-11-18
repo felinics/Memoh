@@ -136,6 +136,7 @@
         v-if="supermarketMounted"
         v-show="sidebarView === 'supermarket'"
         :bot-id="currentBotId || ''"
+        :bot-name="currentBot?.name || ''"
         :can-manage="hasBotPermission(currentBot?.current_user_permissions, 'manage')"
         class="h-full"
       />

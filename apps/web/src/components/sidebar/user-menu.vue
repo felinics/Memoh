@@ -73,7 +73,7 @@
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        v-if="userInfo.role === 'admin'"
+        v-if="userInfo.role?.toLowerCase() === 'admin'"
         class="gap-2"
         @select="router.push({ name: 'people' })"
       >

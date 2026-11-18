@@ -565,6 +565,7 @@ import {
   reasoningBudgetError,
   reasoningFormFrom,
   reasoningIsUncontrollable,
+  resolveEditedOptionalNumber,
   type CapabilityForm,
   type ReasoningForm,
 } from './model-config'
@@ -583,14 +584,19 @@ const UNSET = '__unset'
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
+const optionalPositiveNumber = (message: string) => z.preprocess(
+  value => (value === '' || value === null || (typeof value === 'string' && value.trim() === '') ? undefined : value),
+  z.coerce.number().min(1, message).optional(),
+)
+
 const formSchema = toTypedSchema(z.object({
   type: z.string().min(1, t('models.typeRequired')),
   model_id: z.string().min(1, t('models.modelIdRequired')),
   name: z.string().optional(),
   description: z.string().optional(),
-  dimensions: z.coerce.number().min(1, t('models.dimensionsMin')).optional(),
-  context_window: z.coerce.number().min(1, t('models.contextWindowMin')).optional(),
-  max_output_tokens: z.coerce.number().min(1, t('models.maxOutputTokensMin')).optional(),
+  dimensions: optionalPositiveNumber(t('models.dimensionsMin')),
+  context_window: optionalPositiveNumber(t('models.contextWindowMin')),
+  max_output_tokens: optionalPositiveNumber(t('models.maxOutputTokensMin')),
 }))
 
 const props = withDefaults(defineProps<{
@@ -715,22 +721,12 @@ async function addModel() {
 
   if (!type || !model_id) return
 
-  // A cleared number input holds '' rather than undefined. Treat it as empty so
-  // the server detects dimensions instead of rejecting a string for an int.
-  const dimensions = typeof form.values.dimensions === 'number' ? form.values.dimensions : undefined
-
   const config = buildModelConfig({
     type,
     description: form.values.description,
-    dimensions: dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
-    // A cleared input holds ''. That removes the stored context window, so it
-    // must not fall through to the edit fallback below.
-    contextWindow: form.values.context_window === ''
-      ? undefined
-      : (typeof form.values.context_window === 'number' ? form.values.context_window : undefined)
-        ?? (isEdit ? fallback!.config?.context_window : undefined),
-    maxOutputTokens: (typeof form.values.max_output_tokens === 'number' ? form.values.max_output_tokens : undefined)
-      ?? (isEdit ? fallback!.config?.max_output_tokens : undefined),
+    dimensions: resolveEditedOptionalNumber(form.values.dimensions, isEdit ? fallback!.config?.dimensions : undefined),
+    contextWindow: resolveEditedOptionalNumber(form.values.context_window, isEdit ? fallback!.config?.context_window : undefined),
+    maxOutputTokens: resolveEditedOptionalNumber(form.values.max_output_tokens, isEdit ? fallback!.config?.max_output_tokens : undefined),
     capabilities: capabilities.value,
     reasoning: reasoning.value,
     existing: isEdit ? fallback!.config : undefined,
