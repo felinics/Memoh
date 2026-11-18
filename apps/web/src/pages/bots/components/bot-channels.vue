@@ -217,7 +217,7 @@ function openModelSettings() {
 
 const { data: channels, error, isLoading, refetch } = useBotChannels(botIdRef)
 
-const loadErrorDetail = computed(() => (error?.value ? resolveApiErrorMessage(error.value, '') : ''))
+const loadErrorDetail = computed(() => (error.value ? resolveApiErrorMessage(error.value, '') : ''))
 
 const selectedType = ref<string | null>(null)
 

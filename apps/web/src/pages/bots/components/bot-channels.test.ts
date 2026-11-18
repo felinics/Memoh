@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({ settings: null as unknown, push: vi.fn() }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: { tab: 'channels' } }), useRouter: () => ({ push: state.push }) }))
 vi.mock('@pinia/colada', () => ({ useQuery: (options: { key: () => string[] }) => ({
-  data: options.key()[0] === 'bot-settings' ? state.settings : ref([]), isLoading: ref(false), refetch: vi.fn(),
+  data: options.key()[0] === 'bot-settings' ? state.settings : ref([]), error: ref(null), isLoading: ref(false), refetch: vi.fn(),
 }) }))
 vi.mock('@felinic/ui', async () => {
   const { defineComponent, h } = await import('vue')

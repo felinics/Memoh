@@ -343,6 +343,7 @@ import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
+import { canManageBotPermissions } from '@/utils/bot-permissions'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
 import { appNeedsAttention, useBotAppsQuery } from '@/composables/api/useApps'
 type BotContainerInfo = HandlersGetContainerResponse
@@ -402,15 +403,9 @@ const botWorkspaceBackend = computed(() =>
   resolveBotWorkspaceBackend(containerInfo.value?.workspace_backend),
 )
 
-const canManageBot = computed(() => {
-  const perms = bot.value?.current_user_permissions
-  // Only restrict management when the backend explicitly reports a permission
-  // set without "manage". When the field is absent (older backend, cache, etc.)
-  // default to allowing management so owners are never locked out of their own
-  // bot; the backend still enforces access on every management endpoint.
-  if (!perms || perms.length === 0) return true
-  return perms.includes('manage')
-})
+const canManageBot = computed(() =>
+  canManageBotPermissions(bot.value?.current_user_permissions),
+)
 
 const capabilitiesStore = useCapabilitiesStore()
 

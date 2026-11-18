@@ -79,7 +79,7 @@
         <SettingsRow
           v-else-if="channelsError && configuredChannels.length === 0"
           :label="$t('common.loadFailed')"
-          :description="(channelsError ? resolveApiErrorMessage(channelsError, '') : '') || undefined"
+          :description="channelsErrorDetail || undefined"
         >
           <Button
             variant="outline"
@@ -310,7 +310,7 @@ import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { hasBotPermission } from '@/utils/bot-permissions'
+import { canManageBotPermissions } from '@/utils/bot-permissions'
 import { resolveBotWorkspaceBackend, resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
 import { buildRuntimeMetricCards } from '@/utils/format-bytes'
 import { formatDateTime } from '@/utils/date-time'
@@ -347,13 +347,9 @@ const { data: memoryStatus, isLoading: memoryLoading } = useQuery({
   enabled: () => !!botId.value,
 })
 
-const canManageBot = computed(() => {
-  const perms = bot.value?.current_user_permissions
-  // Match detail.vue: only restrict management when permissions are explicitly
-  // scoped without "manage", avoiding spurious 403s on chat-only members.
-  if (!perms || perms.length === 0) return true
-  return hasBotPermission(perms, 'manage')
-})
+const canManageBot = computed(() =>
+  canManageBotPermissions(bot.value?.current_user_permissions),
+)
 
 // Shares one query with bot-channels.vue, so visiting Platforms after
 // Overview (or vice versa) reuses the cached probe instead of refetching.
@@ -361,6 +357,8 @@ const { data: channels, error: channelsError, isLoading: channelsLoading, refetc
   botId,
   { enabled: () => canManageBot.value },
 )
+
+const channelsErrorDetail = computed(() => (channelsError.value ? resolveApiErrorMessage(channelsError.value, '') : ''))
 
 const configuredChannels = computed(() => (channels.value ?? []).filter((c) => c.configured))
 

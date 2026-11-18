@@ -1,9 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createApp, h, type Component } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { PiniaColada, useQueryCache } from '@pinia/colada'
-import { clearQueryCacheAndPersistence } from '@/lib/query-cache-persistence'
 import { notifyAuthSessionCleared } from '@/lib/auth-session'
 
 const mocks = vi.hoisted(() => ({
@@ -16,36 +13,9 @@ vi.mock('@memohai/sdk', () => ({
 
 import { useCapabilitiesStore } from './capabilities'
 
-let unmount = () => {}
-
 afterEach(() => {
-  unmount()
-  unmount = () => {}
   vi.clearAllMocks()
 })
-
-function mountWithPiniaColada() {
-  const pinia = createPinia()
-  let store!: ReturnType<typeof useCapabilitiesStore>
-  let queryCache!: ReturnType<typeof useQueryCache>
-
-  const Host: Component = {
-    setup() {
-      queryCache = useQueryCache()
-      store = useCapabilitiesStore()
-      return () => h('div')
-    },
-  }
-
-  const app = createApp(Host)
-  app.use(pinia)
-  app.use(PiniaColada)
-  const el = document.createElement('div')
-  app.mount(el)
-  unmount = () => app.unmount()
-
-  return { store, queryCache }
-}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -58,11 +28,11 @@ function deferred<T>() {
 }
 
 describe('useCapabilitiesStore', () => {
-  it('deduplicates concurrent cold-start load() calls with PiniaColada', async () => {
+  it('deduplicates concurrent cold-start load() calls and caches loaded state', async () => {
+    setActivePinia(createPinia())
+    const store = useCapabilitiesStore()
     const ping = deferred<{ data: Record<string, unknown> }>()
     mocks.getPing.mockReturnValue(ping.promise)
-
-    const { store } = mountWithPiniaColada()
 
     const pending = Promise.all([store.load(), store.load(), store.load()])
     expect(mocks.getPing).toHaveBeenCalledTimes(1)
@@ -88,7 +58,8 @@ describe('useCapabilitiesStore', () => {
   })
 
   it('does not lock loaded=true after /ping failure or empty payload and retries cleanly', async () => {
-    const { store } = mountWithPiniaColada()
+    setActivePinia(createPinia())
+    const store = useCapabilitiesStore()
 
     mocks.getPing.mockRejectedValueOnce({ status: 502 })
     await expect(store.load()).resolves.toBeUndefined()
@@ -115,52 +86,43 @@ describe('useCapabilitiesStore', () => {
     expect(store.serverVersion).toBe('2.0.0')
   })
 
-  it('resets state and re-fetches after query cache clear and auth session reset', async () => {
-    const { store, queryCache } = mountWithPiniaColada()
-    mocks.getPing
-      .mockResolvedValueOnce({ data: { connectors: true, version: '1.0.0', commit_hash: 'aaa' } })
-      .mockResolvedValueOnce({ data: { connectors: false, version: '2.0.0', commit_hash: 'bbb' } })
-
-    await store.load()
-    expect(store.loaded).toBe(true)
-    expect(store.serverVersion).toBe('1.0.0')
-
-    clearQueryCacheAndPersistence(queryCache)
-    notifyAuthSessionCleared('logout')
-
-    expect(store.loaded).toBe(false)
-    expect(store.connectors).toBe(false)
-    expect(store.serverVersion).toBe('')
-
-    await store.load()
-    expect(mocks.getPing).toHaveBeenCalledTimes(2)
-    expect(store.loaded).toBe(true)
-    expect(store.serverVersion).toBe('2.0.0')
-  })
-
-  it('deduplicates, retries, and resets under isolated Pinia without PiniaColada', async () => {
+  it('ignores stale in-flight responses across auth session reset', async () => {
     setActivePinia(createPinia())
     const store = useCapabilitiesStore()
 
-    const ping = deferred<{ data: Record<string, unknown> }>()
-    mocks.getPing.mockReturnValueOnce(ping.promise)
-    const p = Promise.all([store.load(), store.load()])
-    expect(mocks.getPing).toHaveBeenCalledTimes(1)
-    ping.reject(new Error('502'))
-    await p
-    expect(store.loaded).toBe(false)
+    const stalePing = deferred<{ data: Record<string, unknown> }>()
+    const freshPing = deferred<{ data: Record<string, unknown> }>()
+    mocks.getPing
+      .mockReturnValueOnce(stalePing.promise)
+      .mockReturnValueOnce(freshPing.promise)
 
-    mocks.getPing.mockResolvedValueOnce({
-      data: { snapshot_supported: false, connectors: true, version: '3.0.0', commit_hash: 'ccc' },
-    })
-    await store.load()
-    expect(store.loaded).toBe(true)
-    expect(store.snapshotSupported).toBe(false)
-    expect(store.serverVersion).toBe('3.0.0')
+    const firstLoad = store.load()
+    expect(mocks.getPing).toHaveBeenCalledTimes(1)
 
     notifyAuthSessionCleared('logout')
+
+    const secondLoad = store.load()
+    expect(mocks.getPing).toHaveBeenCalledTimes(2)
+
+    // Stale response lands first; it must neither apply state nor clear fresh inflight.
+    stalePing.resolve({
+      data: { snapshot_supported: false, connectors: true, version: 'stale', commit_hash: '111' },
+    })
+    await firstLoad
     expect(store.loaded).toBe(false)
-    expect(store.snapshotSupported).toBe(true)
     expect(store.serverVersion).toBe('')
+
+    // Concurrent third call still shares secondLoad instead of launching a third request.
+    const thirdLoad = store.load()
+    expect(mocks.getPing).toHaveBeenCalledTimes(2)
+
+    freshPing.resolve({
+      data: { snapshot_supported: true, connectors: false, version: 'fresh', commit_hash: '222' },
+    })
+    await Promise.all([secondLoad, thirdLoad])
+
+    expect(store.loaded).toBe(true)
+    expect(store.serverVersion).toBe('fresh')
+    expect(store.connectors).toBe(false)
   })
 })

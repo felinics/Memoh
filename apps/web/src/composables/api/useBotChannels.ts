@@ -1,8 +1,7 @@
 import { toValue, type MaybeRefOrGetter } from 'vue'
 import { useQuery } from '@pinia/colada'
-import { getBotsByIdChannels, getBotsByIdChannelByPlatform, getChannels } from '@memohai/sdk'
+import { getBotsByIdChannels, getChannels } from '@memohai/sdk'
 import type { ChannelChannelConfig, HandlersChannelMeta } from '@memohai/sdk'
-import { apiErrorStatus, isApiErrorCode } from '@/utils/api-error'
 
 export interface BotChannelItem {
   meta: HandlersChannelMeta
@@ -12,62 +11,6 @@ export interface BotChannelItem {
 
 export interface UseBotChannelsOptions {
   enabled?: MaybeRefOrGetter<boolean>
-}
-
-interface BatchLookupResult {
-  supported: boolean
-  configsByType: Map<string, ChannelChannelConfig>
-}
-
-function isMissingEndpointFallback(error: unknown): boolean {
-  // Distinguish an older server without `GET /bots/:id/channels` (generic 404)
-  // from a deleted/unknown bot (`bot.not_found`).
-  return apiErrorStatus(error) === 404 && !isApiErrorCode(error, 'bot.not_found')
-}
-
-async function fetchConfiguredChannelsBatch(botId: string): Promise<BatchLookupResult> {
-  try {
-    const { data } = await getBotsByIdChannels({ path: { id: botId }, throwOnError: true })
-    if (!data || typeof data !== 'object' || !Array.isArray((data as { items?: unknown }).items)) {
-      // Older all-in-one servers serve index.html (200 text/html) for unknown
-      // backend paths instead of JSON 404.
-      return { supported: false, configsByType: new Map() }
-    }
-    const configsByType = new Map<string, ChannelChannelConfig>()
-    for (const item of data.items) {
-      if (item.channel_type) {
-        configsByType.set(item.channel_type, item)
-      }
-    }
-    return { supported: true, configsByType }
-  } catch (error) {
-    if (isMissingEndpointFallback(error)) {
-      return { supported: false, configsByType: new Map() }
-    }
-    throw error
-  }
-}
-
-async function fetchConfiguredChannelsLegacy(
-  botId: string,
-  configurableTypes: HandlersChannelMeta[],
-): Promise<BotChannelItem[]> {
-  return Promise.all(
-    configurableTypes.map(async (meta) => {
-      try {
-        const { data: config } = await getBotsByIdChannelByPlatform({
-          path: { id: botId, platform: meta.type ?? '' },
-          throwOnError: true,
-        })
-        return { meta, config: config ?? null, configured: true }
-      } catch (error) {
-        if (isApiErrorCode(error, 'channel.config_not_found') || apiErrorStatus(error) === 404) {
-          return { meta, config: null, configured: false }
-        }
-        throw error
-      }
-    }),
-  )
 }
 
 /**
@@ -80,24 +23,28 @@ export function useBotChannels(botId: MaybeRefOrGetter<string>, options?: UseBot
     key: () => ['bot-channels', toValue(botId)],
     query: async (): Promise<BotChannelItem[]> => {
       const id = toValue(botId)
-      const [{ data: metas }, batch] = await Promise.all([
+      const [{ data: metas }, { data: batch }] = await Promise.all([
         getChannels({ throwOnError: true }),
-        fetchConfiguredChannelsBatch(id),
+        getBotsByIdChannels({ path: { id }, throwOnError: true }),
       ])
       if (!metas) return []
-      const configurableTypes = metas.filter((m) => !m.configless)
-      if (!batch.supported) {
-        return fetchConfiguredChannelsLegacy(id, configurableTypes)
+      const configsByType = new Map<string, ChannelChannelConfig>()
+      for (const item of batch?.items ?? []) {
+        if (item.channel_type) {
+          configsByType.set(item.channel_type, item)
+        }
       }
-      return configurableTypes.map((meta) => {
-        const config = batch.configsByType.get(meta.type ?? '') ?? null
-        return { meta, config, configured: config !== null }
-      })
+      return metas
+        .filter((m) => !m.configless)
+        .map((meta) => {
+          const config = configsByType.get(meta.type ?? '') ?? null
+          return { meta, config, configured: config !== null }
+        })
     },
     // Persisted localStorage cache strips config.credentials via deepStripSecrets,
     // so always revalidate on mount instead of serving a secret-stripped entry within
     // Colada's default 5s staleTime window.
     staleTime: 0,
-    enabled: () => !!toValue(botId) && (options?.enabled === undefined ? true : toValue(options.enabled)),
+    enabled: () => !!toValue(botId) && toValue(options?.enabled ?? true),
   })
 }
