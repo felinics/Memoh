@@ -62,14 +62,19 @@
   --dv-icon-hover-background-color: var(--ui-hover);
   --dv-scrollbar-background-color: var(--border);
 
+  /* ui-allow-z: dockview's internal overlay variable contract (read without
+   * fallback by PopupService and outranking .dv-sash's built-in z-index: 99
+   * inside main-section's isolated stacking context; matches line ~300). */
+  --dv-overlay-z-index: 999;
   --dv-context-menu-background-color: var(--popover);
-  --dv-context-menu-color: var(--foreground);
+  --dv-context-menu-color: var(--popover-foreground);
 
   --dv-border-radius: 0px;
   --dv-tab-border-radius: 0px;
   --dv-tab-margin: 0;
 
   --dv-floating-border: 1px solid var(--border);
+  --dv-floating-box-shadow: var(--shadow-dropdown);
 
   /* Tab geometry contract — ONE source of truth for the dock header.
    *
@@ -785,4 +790,45 @@
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- Tab right-click context menu (PopupService → .dv-popover-anchor) ---------
+ * Dockview's base .dv-context-menu reads --dv-tab-divider-color (zeroed above to
+ * silence inter-tab lines) and --dv-border-radius (0px), leaving the menu
+ * borderless and square-cornered once --dv-overlay-z-index lifts it above
+ * .dv-render-overlay. Mirror @felinic/ui's shared menu surface recipe
+ * (packages/ui/src/lib/menu.ts) so tab context menus match DropdownMenu /
+ * ContextMenu across light and dark modes. */
+.dockview-theme-memoh .dv-context-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--menu-row-gap);
+  min-width: var(--menu-min-width);
+  padding: var(--menu-frame-spacing);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border-menu);
+  border-radius: var(--radius-menu-shell);
+  box-shadow: var(--shadow-dropdown);
+}
+
+.dockview-theme-memoh .dv-context-menu-item {
+  height: auto;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-menu);
+  font-size: var(--text-control);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-control--letter-spacing);
+  cursor: default;
+  transition: background-color 60ms;
+}
+
+.dockview-theme-memoh .dv-context-menu-item:hover {
+  background: var(--ui-selected);
+}
+
+.dockview-theme-memoh .dv-context-menu-separator {
+  background: var(--menu-separator-color);
+  margin-block: max(0rem, calc(var(--menu-frame-spacing) - var(--menu-row-gap)));
+  margin-inline: calc(var(--menu-frame-spacing) * 2);
 }
