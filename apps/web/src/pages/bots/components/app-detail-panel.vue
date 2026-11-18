@@ -8,6 +8,7 @@
 // streaming.
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { handleDarkIconLoad, shouldInvertDarkIcon } from '@/utils/dark-icon-contrast'
 import {
   ExternalLink,
   MoreHorizontal,
@@ -167,7 +168,8 @@ function dependencyName(dep: AppDependencyItem): string {
           v-else-if="fallbackIconUrl"
           :src="fallbackIconUrl"
           alt=""
-          class="size-8 object-contain"
+          :class="['size-8 object-contain', shouldInvertDarkIcon(fallbackIconUrl) && 'dark:invert']"
+          @load="handleDarkIconLoad($event)"
         >
         <AppIcon
           v-else

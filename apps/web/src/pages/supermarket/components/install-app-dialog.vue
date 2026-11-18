@@ -40,7 +40,7 @@
               class="flex items-center gap-2"
             >
               <BrainCircuit class="size-3.5" />
-              {{ $t('apps.section.skills', { count: pkg.skills.length }, pkg.skills.length) }}
+              {{ $t('supermarket.installPreviewSkill', { count: pkg.skills.length }, pkg.skills.length) }}
             </li>
             <li
               v-for="dep in pkg.dependencies"

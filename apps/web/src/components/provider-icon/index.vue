@@ -27,7 +27,7 @@
     :height="numericSize"
     :style="cssSize ? { width: cssSize, height: cssSize } : undefined"
     alt=""
-    class="[color-scheme:light] dark:[color-scheme:dark]"
+    :class="['[color-scheme:light] dark:[color-scheme:dark]', monochrome && 'dark:invert']"
     v-bind="$attrs"
     @error="onImageError"
   >

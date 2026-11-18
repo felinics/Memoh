@@ -18,7 +18,7 @@ import {
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
 import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManagerProvider'
-import i18n from '@/i18n'
+import i18n, { type Locale } from '@/i18n'
 
 // Workspace shell state (activity bar + side panel + dockview layout):
 // - the dockview layout in the center area (chat / file / terminal / browser /
@@ -43,6 +43,14 @@ const DEFAULT_TERMINAL_TITLE = 'Terminal'
 // Persisted layouts from older releases used this value as the terminal title.
 // It is only recognized for migration; it is never used as a new title.
 const LEGACY_TERMINAL_TITLE = 'zsh'
+const PREVIEW_TAB_FORMATTERS = [
+  (name: string) => `Preview: ${name}`,
+  (name: string) => `预览：${name}`,
+  (name: string) => `プレビュー: ${name}`,
+]
+const TERMINAL_FALLBACK_PREFIXES = ['Terminal', '终端']
+const BROWSER_FALLBACK_PREFIXES = ['Browser', '浏览器', 'ブラウザ']
+const DISPLAY_FALLBACK_TITLES = ['Desktop', '桌面', 'デスクトップ']
 
 export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule'
 
@@ -356,10 +364,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
   }
 
+  function matchesLocalizedTitle(
+    title: string,
+    resolve: (locale: Locale) => string,
+    knownTitles: readonly string[] = [],
+  ): boolean {
+    if (knownTitles.includes(title)) return true
+    return i18n.global.availableLocales.some(loc => resolve(loc as Locale) === title)
+  }
+
   // Beyond filling empty titles, regenerate system-titled panels (draft chat,
-  // unsaved schedule, terminal/browser/display fallbacks) from the current
-  // locale: titles are persisted in the layout, so a workspace saved under
-  // another language would otherwise keep stale foreign titles forever.
+  // unsaved schedule, preview, and terminal/browser/display fallbacks) from the
+  // current locale: titles are persisted in the layout, and live language
+  // switches re-derive them in place without a reload.
   function repairPanelTitles(): boolean {
     const dock = api.value
     if (!dock) return false
@@ -373,8 +390,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return repaired
   }
 
-  // The title this panel should have after restore, or null to keep the
-  // persisted one (sessions, files, user-named schedules, live terminal titles).
+  // The title this panel should have after restore or locale change, or null to
+  // keep the existing one (sessions, non-preview files, user-named schedules,
+  // live shell titles).
   function repairedPanelTitle(panel: { id: string, api: { title?: string }, params?: Record<string, unknown> }): string | null {
     const title = (panel.api.title ?? '').trim()
     const component = panelComponentOf(panel.id)
@@ -384,17 +402,44 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (component === 'chat' && panelSessionId(panel) === null) return defaultChatTitle()
     if (component === 'schedule' && panel.id.startsWith('schedule:new:')) return scheduleTabTitle()
     if (!title) return panelTitleFallback(panel)
-    // Pre-localization builds persisted English fallback titles; recognize those
-    // exact shapes so old layouts migrate. A live page or shell reporting
-    // exactly "Browser 2"-style text is negligible.
-    if (component === 'terminal'
-      && (title.toLowerCase() === LEGACY_TERMINAL_TITLE || /^Terminal( \d+)?$/.test(title))) {
-      return terminalTitleFallback(panel.id)
+    if (component === 'preview') {
+      const name = fileBaseName(panel.id.slice('preview:'.length))
+      if (matchesLocalizedTitle(
+        title,
+        loc => i18n.global.t('chat.previewTab', { name }, { locale: loc }),
+        PREVIEW_TAB_FORMATTERS.map(format => format(name)),
+      )) {
+        return i18n.global.t('chat.previewTab', { name })
+      }
+      return null
     }
-    if (component === 'browser' && /^Browser( \d+)?$/.test(title)) {
-      return numberedFallbackTitle(browserTabTitle(), panel.id)
+    if (component === 'terminal') {
+      const isDefaultTerminal = title.toLowerCase() === LEGACY_TERMINAL_TITLE
+        || matchesLocalizedTitle(
+          title,
+          (loc) => {
+            const prefix = i18n.global.t('bots.terminal.defaultTabLabel', {}, { locale: loc })
+            return prefix ? numberedFallbackTitle(prefix, panel.id) : ''
+          },
+          TERMINAL_FALLBACK_PREFIXES.map(prefix => numberedFallbackTitle(prefix, panel.id)),
+        )
+      return isDefaultTerminal ? terminalTitleFallback(panel.id) : null
     }
-    if (component === 'display' && /^Desktop( \d+)?$/.test(title)) {
+    if (component === 'browser') {
+      const address = typeof panel.params?.address === 'string' ? panel.params.address.trim() : ''
+      if (address) return null
+      const isDefaultBrowser = matchesLocalizedTitle(
+        title,
+        loc => numberedFallbackTitle(i18n.global.t('chat.tabs.browser', {}, { locale: loc }), panel.id),
+        BROWSER_FALLBACK_PREFIXES.map(prefix => numberedFallbackTitle(prefix, panel.id)),
+      )
+      return isDefaultBrowser ? numberedFallbackTitle(browserTabTitle(), panel.id) : null
+    }
+    if (component === 'display' && matchesLocalizedTitle(
+      title,
+      loc => i18n.global.t('chat.display.title', {}, { locale: loc }),
+      DISPLAY_FALLBACK_TITLES,
+    )) {
       return i18n.global.t('chat.display.title')
     }
     return null
@@ -2185,6 +2230,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.loadingChats, (loading) => {
     if (loading) return
     alignSelectionWithDock()
+  })
+
+  watch(() => i18n.global.locale.value, () => {
+    if (repairPanelTitles()) persistLayout()
   })
 
   return {

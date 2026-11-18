@@ -476,6 +476,12 @@ function fmt(value: number) {
   transition: opacity var(--tab-hover-duration, 150ms) ease-out;
 }
 
+/* Active tabs already sit on opaque --surface-editor; stacking --surface-chrome
+ * underneath tinted the fade band grey instead of blending cleanly. */
+:global(.dockview-theme-memoh .dv-tab.memoh-tab-active) .close-fade:not(.is-dot) {
+  background: linear-gradient(to right, transparent, var(--surface-editor) 0.75rem);
+}
+
 /* Dirty-dot slot: reuse close-fade for GEOMETRY ONLY, never its paint. The fade is
  * a hover affordance (blots the title under the close button); this layer is shown
  * only at rest (opacity-100, fading to 0 on hover), so painting the fade here put a

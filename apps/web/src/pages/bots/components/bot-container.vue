@@ -754,7 +754,7 @@ const containerTaskText = computed(() => {
 })
 
 function formatDate(value: string | undefined): string {
-  return formatDateTime(value, { fallback: '-' })
+  return formatDateTime(value, { fallback: '-', locale: locale.value })
 }
 
 function snapshotCreatedAt(value: BotContainerSnapshot) {

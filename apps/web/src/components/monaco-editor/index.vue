@@ -12,17 +12,21 @@ import 'monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollCon
 import { getLanguageByFilename } from '@/components/file-manager/utils'
 import { installMinimapSurface, syncMinimapSurface } from './minimap-theme'
 
+const MINIMAP_MIN_CONTAINER_WIDTH = 560
+
 const props = withDefaults(defineProps<{
   modelValue: string
   language?: string
   readonly?: boolean
   filename?: string
   active?: boolean
+  options?: Monaco.editor.IStandaloneEditorConstructionOptions
 }>(), {
   language: undefined,
   readonly: false,
   filename: undefined,
   active: true,
+  options: undefined,
 })
 
 const emit = defineEmits<{
@@ -35,10 +39,29 @@ const editorFontSize = computed(() => settings.codeFontSizePx)
 // Keep Monaco's built-in platform default font unless the user explicitly
 // customizes the code font; `undefined` resets to the editor default.
 const editorFontFamily = computed(() => settings.codeFontFamily ? settings.codeFontStack : undefined)
+const isNarrowContainer = ref(false)
 let heightObserver: MutationObserver | null = null
+let resizeObserver: ResizeObserver | null = null
 let themeFrame = 0
 let themeDirtyWhileInactive = false
 let mounted = false
+
+function resolveMinimapOption(): Monaco.editor.IEditorMinimapOptions {
+  const callerMinimap = props.options?.minimap
+  if (callerMinimap?.enabled !== undefined) return callerMinimap
+  return { ...callerMinimap, enabled: !isNarrowContainer.value }
+}
+
+function buildRuntimeOptions(): Monaco.editor.IStandaloneEditorConstructionOptions {
+  return {
+    ...props.options,
+    readOnly: props.readonly,
+    fontSize: editorFontSize.value,
+    fontFamily: editorFontFamily.value,
+    lineHeight: Math.round(editorFontSize.value * 1.7),
+    minimap: resolveMinimapOption(),
+  }
+}
 
 function resolveLanguage(): string {
   if (props.language) return props.language
@@ -133,20 +156,13 @@ const {
 } = useMonaco({
   theme: resolveThemeName(),
   themes: [settings.shikiThemeDark, settings.shikiThemeLight],
-  readOnly: props.readonly,
   automaticLayout: true,
   autoScrollInitial: false,
   autoScrollOnUpdate: false,
-  minimap: { enabled: true },
   // Pin the current heading / scope trail at the top while scrolling. Uses the
   // document-symbol model, so it works for code out of the box and for Markdown via
   // the heading provider registered in onBeforeCreate.
   stickyScroll: { enabled: true },
-  onBeforeCreate: (monaco) => {
-    registerMarkdownHeadingSymbols(monaco as unknown as typeof Monaco)
-    installMinimapSurface(monaco as unknown as typeof Monaco, settings.resolvedColorMode, settings.colorScheme)
-    return []
-  },
   scrollBeyondLastLine: true,
   scrollbar: {
     vertical: 'auto',
@@ -155,13 +171,6 @@ const {
     horizontalScrollbarSize: 12,
     useShadows: true,
   },
-  fontSize: editorFontSize.value,
-  fontFamily: editorFontFamily.value,
-  // Monaco's computed default line box (~1.35×font) packs lines tight, and CJK
-  // glyphs (no descender, full em) read bottom-heavy inside it. A roomier
-  // explicit lineHeight (1.7×, matching our relaxed prose rhythm) spreads the
-  // air evenly above/below and makes consecutive lines distinguishable.
-  lineHeight: Math.round(editorFontSize.value * 1.7),
   // Mono at 400 reads thin next to the ~420 Latin body; one step up keeps code
   // legible without approaching bold-token territory (700).
   fontWeight: '500',
@@ -170,6 +179,21 @@ const {
   tabSize: 2,
   wordWrap: 'on',
   padding: { top: 8, bottom: 8 },
+  ...props.options,
+  readOnly: props.readonly,
+  minimap: resolveMinimapOption(),
+  fontSize: editorFontSize.value,
+  fontFamily: editorFontFamily.value,
+  // Monaco's computed default line box (~1.35×font) packs lines tight, and CJK
+  // glyphs (no descender, full em) read bottom-heavy inside it. A roomier
+  // explicit lineHeight (1.7×, matching our relaxed prose rhythm) spreads the
+  // air evenly above/below and makes consecutive lines distinguishable.
+  lineHeight: Math.round(editorFontSize.value * 1.7),
+  onBeforeCreate: (monaco) => {
+    registerMarkdownHeadingSymbols(monaco as unknown as typeof Monaco)
+    installMinimapSurface(monaco as unknown as typeof Monaco, settings.resolvedColorMode, settings.colorScheme)
+    return []
+  },
 })
 
 function scheduleThemeSync() {
@@ -203,6 +227,20 @@ onMounted(async () => {
   mounted = true
   if (!editorRef.value) return
 
+  const initialWidth = editorRef.value.clientWidth
+  if (initialWidth > 0) {
+    isNarrowContainer.value = initialWidth < MINIMAP_MIN_CONTAINER_WIDTH
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? editorRef.value?.clientWidth ?? 0
+      if (width > 0) {
+        isNarrowContainer.value = width < MINIMAP_MIN_CONTAINER_WIDTH
+      }
+    })
+    resizeObserver.observe(editorRef.value)
+  }
+
   await createEditor(editorRef.value, props.modelValue, resolveLanguage())
   if (!mounted || !editorRef.value) return
 
@@ -218,10 +256,7 @@ onMounted(async () => {
     // Creation is asynchronous and the model-value watcher skips updates while
     // there is no editor yet, so a value that changed meanwhile is applied here.
     if (editor.getValue() !== props.modelValue) updateCode(props.modelValue, resolveLanguage())
-    editor.updateOptions({
-      fontSize: editorFontSize.value,
-      fontFamily: editorFontFamily.value,
-    })
+    editor.updateOptions(buildRuntimeOptions())
     editor.setPosition({ lineNumber: 1, column: 1 })
     editor.revealLine(1)
     editor.onDidChangeModelContent(() => {
@@ -239,6 +274,8 @@ onBeforeUnmount(() => {
   }
   heightObserver?.disconnect()
   heightObserver = null
+  resizeObserver?.disconnect()
+  resizeObserver = null
   cleanupEditor()
 })
 
@@ -272,6 +309,10 @@ watch(editorFontSize, (fontSize) => {
 watch(editorFontFamily, (fontFamily) => {
   getEditorView()?.updateOptions({ fontFamily })
 })
+
+watch([() => props.options, isNarrowContainer], () => {
+  getEditorView()?.updateOptions(buildRuntimeOptions())
+}, { deep: true })
 
 watch([() => props.language, () => props.filename], () => {
   setLanguage(resolveLanguage())
