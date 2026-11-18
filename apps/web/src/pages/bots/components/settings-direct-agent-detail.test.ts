@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createApp, h, ref, type App } from 'vue'
+import { createApp, h, KeepAlive, nextTick, ref, type App } from 'vue'
 const api = vi.hoisted(() => ({
   authorize: vi.fn(), poll: vi.fn(), cancel: vi.fn(), patch: vi.fn(),
   invalidate: vi.fn(), toastSuccess: vi.fn(), toastError: vi.fn(),
@@ -115,4 +115,34 @@ it('shows error toast when agent_dependency_missing has no declared dependency r
   await vi.advanceTimersByTimeAsync(0)
   expect(api.onMissingDependency).not.toHaveBeenCalled()
   expect(api.toastError).toHaveBeenCalledOnce()
+})
+
+it('suppresses missingDependency emission when KeepAlive deactivates the tab mid-request', async () => {
+  let rejectAuthorize!: (reason: unknown) => void
+  api.authorize.mockImplementationOnce(() => new Promise((_, reject) => { rejectAuthorize = reject }))
+  const shown = ref(true)
+  agent.value = { id: 'agent', runtime: 'codex', metadata: { provider: 'codex', auth: 'chatgpt' }, dependency: { dependency_id: 'codex' } }
+  root = document.createElement('div')
+  app = createApp(() => h(KeepAlive, null, {
+    default: () => (shown.value
+      ? h(SettingsDirectAgentDetail, {
+          key: 'detail',
+          botId: 'bot',
+          agent: agent.value,
+          onMissingDependency: api.onMissingDependency,
+        })
+      : h('div')),
+  }))
+  app.config.globalProperties.$t = (key: string) => key
+  app.mount(root)
+
+  connect()
+  shown.value = false
+  await nextTick()
+
+  rejectAuthorize({ error: { code: 'agent_dependency_missing' } })
+  await vi.advanceTimersByTimeAsync(0)
+
+  expect(api.onMissingDependency).not.toHaveBeenCalled()
+  expect(api.toastError).not.toHaveBeenCalled()
 })

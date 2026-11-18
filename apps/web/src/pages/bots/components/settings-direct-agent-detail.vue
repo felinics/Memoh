@@ -136,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -415,10 +415,12 @@ async function startDeviceLogin() {
       path: { bot_id: props.botId, id: props.agent.id! },
       throwOnError: true,
     })
+    if (unmounted) return
     deviceLogin.value = data
     // A code_required sign-in completes when its code is submitted.
     if (!data.code_required) void pollDeviceLogin(data.login_id)
   } catch (error) {
+    if (!active.value || unmounted) return
     if (isApiErrorCode(error, 'agent_dependency_missing') && agentDependencyRequirement(props.agent)) {
       emit('missingDependency')
     } else {
@@ -470,5 +472,15 @@ async function cancelDeviceLogin() {
   }
 }
 
-onBeforeUnmount(stopPolling)
+// KeepAlive does not deactivate pending async requests on tab switch; a late
+// rejection must not emit into DependencyEnableFlow and steal focus over another tab.
+const active = ref(true)
+let unmounted = false
+onActivated(() => { active.value = true })
+onDeactivated(() => { active.value = false })
+onBeforeUnmount(() => {
+  unmounted = true
+  active.value = false
+  stopPolling()
+})
 </script>
