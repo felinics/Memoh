@@ -148,7 +148,10 @@
       <div class="absolute inset-0">
         <ContextMenu>
           <ContextMenuTrigger as-child>
-            <ScrollArea class="h-full">
+            <ScrollArea
+              class="sidebar-scroll h-full"
+              :scroll-hide-delay="300"
+            >
               <FileTree />
             </ScrollArea>
           </ContextMenuTrigger>
@@ -392,6 +395,7 @@ import { FileTreeKey } from '@/components/file-manager/file-tree-context'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
+import '@/styles/sidebar-scroll.css'
 
 const props = withDefaults(defineProps<{
   botId: string
