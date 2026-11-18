@@ -3,7 +3,7 @@
        this root in desktop-shell.css: SidebarInset still paints the content pane,
        while the sidebar exposes the native material behind the renderer. -->
   <div
-    class="flex h-dvh flex-col overflow-hidden bg-background"
+    class="flex h-dvh flex-col overflow-clip bg-background"
     data-desktop-window-layer
   >
     <div class="min-h-0 flex-1">
@@ -42,7 +42,7 @@
             </template>
             <template #main>
               <SidebarInset
-                class="relative flex flex-col overflow-hidden"
+                class="relative flex min-h-0 min-w-0 flex-col overflow-clip"
                 data-settings-content-shell
               >
                 <!-- Top drag strip over the content pane only (not full-width), so

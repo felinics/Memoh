@@ -39,7 +39,7 @@ export function useComposerKeyboardFocus(options: {
       if (!live || !pending.value || !options.enabled() || !options.available() || !options.ready() || !textarea) return
       if (activeKeyboardDialog()) return cancel()
       if (!isKeyboardElementVisible(textarea) || textarea.disabled || textarea.readOnly) return
-      textarea.focus()
+      textarea.focus({ preventScroll: true })
       if (document.activeElement === textarea) pending.value = false
     }
     await nextTick()

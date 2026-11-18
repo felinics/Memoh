@@ -724,17 +724,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
         }
 
         if (anchorId && !newValue) {
-          const el: HTMLElement | null = document.querySelector(`[data-message-id="${anchorId}"]`)
-          if (el) {
-            const cachePos = anchorTop
-            el.scrollIntoView()
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                scrollEl.value?.scrollBy({
-                  top: -cachePos,
-                })
-              })
-            })
+          const container = scrollEl.value
+          const anchorEl = findMessageElement(anchorId)
+          if (container && anchorEl) {
+            const desiredViewportTop = 48 + anchorTop
+            const desiredOffsetInContainer = desiredViewportTop - container.getBoundingClientRect().top
+            container.scrollTop = Math.max(0, getElementAbsoluteTop(anchorEl, container) - desiredOffsetInContainer)
           }
           setTimeout(() => {
             lockScroll.value = false

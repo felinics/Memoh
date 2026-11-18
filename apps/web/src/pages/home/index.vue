@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full overflow-hidden">
+  <div class="flex h-full min-h-0 min-w-0 overflow-clip">
     <ChatWorkspace v-if="currentBotId && !urlBotPending && !urlBotFailedName" />
     <div
       v-else

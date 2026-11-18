@@ -249,6 +249,22 @@
   --workspace-tab-outline-color: var(--dock-stroke);
 }
 
+/* Lock outer dockview shells with overflow:clip so stale hidden-panel heights
+ * or transient oversized descendants can never turn the workspace, split-view
+ * slots (.dv-split-view-container has overflow:hidden; .dv-view has overflow:auto),
+ * overlay host, or group shell (.dv-groupview sets inline style.overflow='hidden'
+ * in JS, requiring !important) into a programmatic scroll target. */
+.dockview-theme-memoh.dv-dockview,
+.dockview-theme-memoh .dv-dockview,
+.dockview-theme-memoh .dv-split-view-container,
+.dockview-theme-memoh .dv-split-view-container > .dv-view-container > .dv-view,
+.dockview-theme-memoh .dv-groupview,
+.dockview-theme-memoh .dv-render-overlay {
+  overflow: clip !important;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* The custom tab content (workspace-tab.vue) owns its padding/ellipsis; .dv-tab
  * carries the chip background (from the --dv-* vars above). Editor tabs use a
  * fixed measure so label truncation, hover geometry, and close placement remain

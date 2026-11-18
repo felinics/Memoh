@@ -648,4 +648,45 @@ describe('message destination during native scrolling', () => {
     expect(harness.scrollTo).toHaveBeenLastCalledWith({ top: 704, behavior: 'smooth' })
     expect(harness.scroll.turnReserveStyle('persisted')).toBeDefined()
   })
+
+  it('restores remembered scroll anchor directly on scrollEl without scrollIntoView or shifting ancestors', async () => {
+    const ancestorShell = document.createElement('div')
+    ancestorShell.scrollTop = 0
+    const harness = mountHarness([userMessage('anchor-1')])
+    harness.scroll.markEscaped()
+    ancestorShell.append(harness.viewport)
+    document.body.append(ancestorShell)
+
+    harness.viewport.getBoundingClientRect = () => rect(40, 200)
+    const msgEl = document.createElement('div')
+    msgEl.dataset.messageId = 'anchor-1'
+    const absoluteMsgTop = 460
+    msgEl.getBoundingClientRect = () => rect(40 + absoluteMsgTop - harness.viewport.scrollTop, 40)
+    harness.content.append(msgEl)
+    await flushDom()
+
+    const originalScrollIntoView = Element.prototype.scrollIntoView
+    const scrollIntoViewSpy = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoViewSpy
+    try {
+      // Simulate scrolled-up user reading anchor-1 (original top = 72 -> top offset = 24), then switching tabs
+      harness.viewport.scrollTop = 428
+      harness.scroll.onMessageActive(true, { id: 'anchor-1', top: 24 })
+      harness.scroll.onDeactivatedResetScroll()
+
+      // Simulate scroll position drifting before reactivation while tab stayed KeepAlive-mounted
+      harness.viewport.scrollTop = 100
+      const loadingMessages = ref(false)
+      harness.scroll.onActivatedRestoreScroll(loadingMessages)
+      await flushDom()
+
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled()
+      expect(ancestorShell.scrollTop).toBe(0)
+      // Restored message top lands at 48 + 24 = 72 (32px below 40px viewport top)
+      expect(harness.viewport.scrollTop).toBe(428)
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView
+      ancestorShell.remove()
+    }
+  })
 })

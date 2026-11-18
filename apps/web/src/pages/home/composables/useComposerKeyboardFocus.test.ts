@@ -130,4 +130,16 @@ describe('composer keyboard focus', () => {
     await nextTick()
     expect(document.activeElement).toBe(document.body)
   })
+
+  it('calls focus with preventScroll: true so outer shells cannot be scrolled', async () => {
+    const view = mountComposer()
+    view.mounted.value = true
+    view.ready.value = true
+    await nextTick()
+    const textarea = view.host.querySelector('textarea')!
+    const focusSpy = vi.spyOn(textarea, 'focus')
+    view.registry.dispatch(appKeyboardCommands.focusChatInput)
+    await nextTick()
+    await vi.waitFor(() => expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true }))
+  })
 })
