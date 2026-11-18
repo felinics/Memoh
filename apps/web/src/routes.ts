@@ -319,6 +319,19 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
       component: () => import('@/pages/oauth/mcp-callback.vue'),
     },
     {
+      path: '/supermarket',
+      redirect: '/settings/supermarket',
+    },
+    {
+      path: '/supermarket/:pathMatch(.*)*',
+      redirect: (to) => {
+        const rest = Array.isArray(to.params.pathMatch)
+          ? to.params.pathMatch.join('/')
+          : (to.params.pathMatch ?? '')
+        return { path: rest ? `/settings/supermarket/${rest}` : '/settings/supermarket' }
+      },
+    },
+    {
       // Generic provider deep-link target (`#payload=` carries the prefilled
       // provider as base64url JSON; see utils/provider-connect.ts). Standalone
       // confirm page — the key stays in the fragment and is only saved after

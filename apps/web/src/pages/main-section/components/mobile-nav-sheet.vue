@@ -18,10 +18,24 @@
         <SheetDescription>{{ t('chat.mobileNav.description') }}</SheetDescription>
       </SheetHeader>
       <div class="flex h-full w-full min-h-0 flex-col overflow-hidden">
-        <header class="flex h-11 shrink-0 items-center pl-3 pr-2">
+        <header class="flex h-11 shrink-0 items-center gap-1 pl-3 pr-2">
           <div class="min-w-0 flex-1">
             <BotSwitcher full-width />
           </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            shape="circle"
+            class="shrink-0"
+            :title="t('chat.searchSessions')"
+            :aria-label="t('chat.searchSessions')"
+            @click="openSearch"
+          >
+            <Search
+              :stroke-width="2"
+              class="size-[18px]"
+            />
+          </Button>
         </header>
 
         <!-- View switch rows reuse the rail's nav-button owner so the icon
@@ -77,16 +91,18 @@
       </div>
     </SheetContent>
   </Sheet>
+  <SessionSearchDialog v-model:open="searchOpen" />
 </template>
 
 <script setup lang="ts">
-import { computed, watch, type Component } from 'vue'
+import { computed, ref, watch, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { Calendar, Files, MessageCircle } from 'lucide-vue-next'
+import { Calendar, Files, MessageCircle, Search } from 'lucide-vue-next'
 import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import {
+  Button,
   Sheet,
   SheetContent,
   SheetDescription,
@@ -104,6 +120,7 @@ import SidebarNavButton from '@/components/sidebar/nav-button.vue'
 import PanelSessions from '@/components/sidebar/panel-sessions.vue'
 import PanelFiles from '@/components/sidebar/panel-files.vue'
 import PanelSchedule from '@/components/sidebar/panel-schedule.vue'
+import SessionSearchDialog from '@/components/sidebar/session-search-dialog.vue'
 
 interface NavView {
   id: SidebarView
@@ -120,6 +137,12 @@ const chatStore = useChatStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
 const { sidebarEntryHidden } = useChatExamplesUi()
 const selectionStore = useChatSelectionStore()
+const searchOpen = ref(false)
+
+function openSearch() {
+  workspaceTabs.closeMobileNav()
+  searchOpen.value = true
+}
 
 const currentBot = computed(() =>
   bots.value.find(bot => bot.id === currentBotId.value) ?? null,
