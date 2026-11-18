@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
-import type * as Monaco from 'monaco-editor'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { isFileSaveEligible } from './file-save-command'
-import { useCleanEditorRetention } from './use-clean-editor-retention'
 import {
   isContainerFileNotFound,
   syncContainerTextFileCache,
@@ -119,11 +117,6 @@ let diskUnreadable = false
 let textReadToken = 0
 // The next disk content applied replaces the editor content unconditionally.
 let forceApplyNextRead = false
-// Scroll / cursor / folding of the editor, handed back when it is created again
-// after being unmounted in the background. Deliberately not reactive: it changes
-// on every scroll event and is only read at that moment, so tracking it would
-// re-render this component for each one.
-const savedEditorViewState: { current: Monaco.editor.ICodeEditorViewState | null } = { current: null }
 let externalPollController: AbortController | null = null
 // Stable ids so the chip buttons can aria-describedby the relevant inline
 // message span, giving keyboard / screen-reader users the "why is this here"
@@ -149,15 +142,9 @@ const documentKind = computed(() => getDocumentPreviewKind(filename.value))
 const isDocument = computed(() => documentKind.value !== null)
 const isDirty = computed(() => content.value !== originalContent.value
   || (savingContent.value !== null && content.value !== savingContent.value))
-// Only unsaved edits keep a hidden editor out of the capped pool: their undo
-// history cannot be rebuilt. A clean editor showing a notice can.
-const editorRetained = useCleanEditorRetention(
-  () => props.visible && isText.value,
-  isDirty,
-)
 // The first load shows a full-area spinner instead; afterwards the editor stays
 // mounted through reloads so content swaps in place.
-const editorMounted = computed(() => isText.value && editorRetained.value && (loaded.value || !loading.value))
+const editorMounted = computed(() => isText.value && (loaded.value || !loading.value))
 
 const chatStore = useChatStore()
 const { fsChangedAt, currentBotId, bots } = storeToRefs(chatStore)
@@ -695,7 +682,6 @@ watch([() => props.botId, () => props.file.path], () => {
   pendingExternalRefresh = false
   diskUnreadable = false
   forceApplyNextRead = false
-  savedEditorViewState.current = null
   loaded.value = false
   if (isText.value) {
     void loadTextContent()
@@ -945,9 +931,7 @@ onBeforeUnmount(() => {
         :filename="filename"
         :readonly="readonly"
         :active="visible && conflictState !== 'compare'"
-        :initial-view-state="savedEditorViewState.current"
         class="h-full"
-        @update:view-state="savedEditorViewState.current = $event"
       />
 
       <!-- Compare view: diff editor replacing the main pane -->
@@ -1032,14 +1016,6 @@ onBeforeUnmount(() => {
       >
         {{ t('common.loading') }}
       </PanePlaceholder>
-
-      <!-- Stands in for a clean background editor that was unmounted to cap
-           the number of live Monaco instances. -->
-      <div
-        v-else-if="isText"
-        v-show="!editorMounted"
-        class="h-full w-full bg-surface-editor"
-      />
 
       <PanePlaceholder v-else-if="(isImage || isDocument) && diskState === 'deleted'">
         <template #icon>

@@ -18,18 +18,15 @@ const props = withDefaults(defineProps<{
   readonly?: boolean
   filename?: string
   active?: boolean
-  initialViewState?: Monaco.editor.ICodeEditorViewState | null
 }>(), {
   language: undefined,
   readonly: false,
   filename: undefined,
   active: true,
-  initialViewState: null,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
-  'update:viewState': [state: Monaco.editor.ICodeEditorViewState | null]
 }>()
 
 const editorRef = ref<HTMLDivElement>()
@@ -39,7 +36,6 @@ const editorFontSize = computed(() => settings.codeFontSizePx)
 // customizes the code font; `undefined` resets to the editor default.
 const editorFontFamily = computed(() => settings.codeFontFamily ? settings.codeFontStack : undefined)
 let heightObserver: MutationObserver | null = null
-let viewStateDisposables: Monaco.IDisposable[] = []
 let themeFrame = 0
 let themeDirtyWhileInactive = false
 let mounted = false
@@ -226,23 +222,8 @@ onMounted(async () => {
       fontSize: editorFontSize.value,
       fontFamily: editorFontFamily.value,
     })
-    if (props.initialViewState) {
-      editor.restoreViewState(props.initialViewState)
-    } else {
-      editor.setPosition({ lineNumber: 1, column: 1 })
-      editor.revealLine(1)
-    }
-    const captureLiveViewState = () => {
-      if (!props.active) return
-      const host = editorRef.value
-      if (!host || host.clientWidth <= 0 || host.clientHeight <= 0) return
-      emit('update:viewState', editor.saveViewState())
-    }
-    viewStateDisposables.push(
-      editor.onDidChangeCursorSelection(captureLiveViewState),
-      editor.onDidScrollChange(captureLiveViewState),
-      editor.onDidChangeHiddenAreas(captureLiveViewState),
-    )
+    editor.setPosition({ lineNumber: 1, column: 1 })
+    editor.revealLine(1)
     editor.onDidChangeModelContent(() => {
       const value = editor.getValue() ?? ''
       emit('update:modelValue', value)
@@ -256,8 +237,6 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(themeFrame)
     themeFrame = 0
   }
-  for (const d of viewStateDisposables) d.dispose()
-  viewStateDisposables = []
   heightObserver?.disconnect()
   heightObserver = null
   cleanupEditor()
