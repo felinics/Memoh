@@ -7,7 +7,10 @@ import {
   buildOnboardingRedirect,
   guardAuthenticatedRoute,
   loginRedirectForCurrentRoute,
+  normalizeRoutePath,
+  onboardingRedirectForCurrentRoute,
   sanitizeReturnTo,
+  shouldRedirectOnUnauthorized,
   toReturnToParam,
   type AuthRouteGuardDeps,
 } from './return-to'
@@ -31,7 +34,8 @@ function makeGuardedRouter(platform: 'web' | 'desktop', deps: AuthRouteGuardDeps
     routes: [...extra, ...stubComponents(createAppRoutes(platform))],
   })
   router.beforeEach(async (to) => {
-    if (platform === 'desktop' && to.path === '/connect') return true
+    const path = normalizeRoutePath(to.path)
+    if (platform === 'desktop' && path === '/connect') return true
     return guardAuthenticatedRoute(to, deps)
   })
   return router
@@ -68,27 +72,37 @@ describe('sanitizeReturnTo & redirect builders', () => {
     '/\n/evil.example',
     '/settings\r\nInjected:1',
     '/login',
+    '/Login/',
     '/login?return_to=%2Fsettings%2Fproviders',
     '/settings/../login',
     '/settings/%2e%2e%2flogin',
     '/%2flogin',
     '/oauth/mcp/callback?code=1&state=2',
+    '/OAuth/mcp/callback',
     '/connect?returnTo=%2Fsettings%2Fabout',
+    '/Connect/',
     '/onboarding?step=2',
+    '/Onboarding/',
     '/providers/connect#payload=eyJhcGlfa2V5Ijoic2stc2VjcmV0In0',
+    '/Providers/Connect#payload=eyJhcGlfa2V5Ijoic2stc2VjcmV0In0',
+    '/providers/connect/#payload=eyJhcGlfa2V5Ijoic2stc2VjcmV0In0',
+    '/%50roviders/connect#payload=eyJhcGlfa2V5Ijoic2stc2VjcmV0In0',
+    '/providers//connect#payload=eyJhcGlfa2V5Ijoic2stc2VjcmV0In0',
     '/providers%2fconnect#payload=eyJhcGlfa2V5Ijoic2stc2VjcmV0In0',
     '/api/providers/1/oauth/authorize',
+    '/API/users/me',
+    '/dev/components',
     `/${'a'.repeat(2050)}`,
   ])('rejects unsafe, looping, or secret-bearing return_to input %o back to /', (input) => {
     expect(sanitizeReturnTo(input)).toBe('/')
     expect(toReturnToParam(input)).toBeUndefined()
-    expect(buildLoginRedirect(input)).toEqual({ name: 'Login' })
+    expect(buildLoginRedirect(input)).toEqual({ path: '/login' })
   })
 
-  it('omits redundant ?return_to=/ while encoding non-root targets', () => {
-    expect(buildLoginRedirect('/')).toEqual({ name: 'Login' })
+  it('omits redundant ?return_to=/ while encoding non-root targets with path /login', () => {
+    expect(buildLoginRedirect('/')).toEqual({ path: '/login' })
     expect(buildLoginRedirect('/settings/providers?tab=voice')).toEqual({
-      name: 'Login',
+      path: '/login',
       query: { return_to: '/settings/providers?tab=voice' },
     })
     expect(buildOnboardingRedirect('/')).toEqual({ path: '/onboarding' })
@@ -96,6 +110,14 @@ describe('sanitizeReturnTo & redirect builders', () => {
       path: '/onboarding',
       query: { return_to: '/settings/providers?tab=voice' },
     })
+  })
+
+  it('matches auth boundary paths case-insensitively and ignores trailing slashes', () => {
+    expect(shouldRedirectOnUnauthorized('/login')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/Login/')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/Connect/')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/OAuth/mcp/callback/')).toBe(false)
+    expect(shouldRedirectOnUnauthorized('/settings/providers')).toBe(true)
   })
 })
 
@@ -115,7 +137,6 @@ describe.each(['web', 'desktop'] as const)('%s auth route guard return_to flow',
       return_to: '/settings/providers?tab=voice#models',
     })
 
-    // Simulate successful credential sign-in followed by login page's replace().
     token = 'jwt-token'
     await router.replace(sanitizeReturnTo(router.currentRoute.value.query.return_to))
     expect(router.currentRoute.value.path).toBe('/settings/providers')
@@ -123,7 +144,7 @@ describe.each(['web', 'desktop'] as const)('%s auth route guard return_to flow',
     expect(router.currentRoute.value.hash).toBe('#models')
   })
 
-  it('bounces an already-authenticated visit to /login?return_to=... straight to the sanitized destination', async () => {
+  it('handles case and trailing-slash variants on /login and /onboarding boundaries', async () => {
     const router = makeGuardedRouter(platform, {
       readToken: () => 'jwt-token',
       readUserRole: () => 'admin',
@@ -131,14 +152,17 @@ describe.each(['web', 'desktop'] as const)('%s auth route guard return_to flow',
       ensureOnboarding: async () => true,
     })
 
-    await router.push('/login?return_to=%2Fsettings%2Fproviders%3Ftab%3Dvoice')
+    await router.push('/Login/?return_to=%2Fsettings%2Fproviders%3Ftab%3Dvoice')
     expect(router.currentRoute.value.fullPath).toBe('/settings/providers?tab=voice')
+
+    await router.push('/Onboarding/?return_to=%2Fsettings%2Fappearance')
+    expect(router.currentRoute.value.fullPath).toBe('/settings/appearance')
 
     await router.push('/login?return_to=https%3A%2F%2Fevil.example')
     expect(router.currentRoute.value.fullPath).toBe('/')
   })
 
-  it('carries return_to into /onboarding when first-run setup is incomplete', async () => {
+  it('carries return_to into /onboarding and preserves nested return_to on logged-out onboarding reloads', async () => {
     let token: string | null = null
     let onboardingCompleted = false
     const router = makeGuardedRouter(platform, {
@@ -148,23 +172,23 @@ describe.each(['web', 'desktop'] as const)('%s auth route guard return_to flow',
       ensureOnboarding: async () => onboardingCompleted,
     })
 
-    await router.push('/settings/providers?tab=voice')
+    // Logged-out visit to /onboarding?step=2&return_to=... unwraps the nested target.
+    await router.push('/onboarding?step=2&return_to=%2Fsettings%2Fappearance')
     expect(router.currentRoute.value.path).toBe('/login')
     expect(router.currentRoute.value.query).toEqual({
-      return_to: '/settings/providers?tab=voice',
+      return_to: '/settings/appearance',
     })
 
     token = 'jwt-token'
     await router.replace(sanitizeReturnTo(router.currentRoute.value.query.return_to))
     expect(router.currentRoute.value.path).toBe('/onboarding')
     expect(router.currentRoute.value.query).toEqual({
-      return_to: '/settings/providers?tab=voice',
+      return_to: '/settings/appearance',
     })
 
-    // Visiting /onboarding?return_to=... after completion forwards to return_to.
     onboardingCompleted = true
-    await router.replace('/onboarding?step=1&return_to=%2Fsettings%2Fproviders%3Ftab%3Dvoice')
-    expect(router.currentRoute.value.fullPath).toBe('/settings/providers?tab=voice')
+    await router.replace('/onboarding?step=1&return_to=%2Fsettings%2Fappearance')
+    expect(router.currentRoute.value.fullPath).toBe('/settings/appearance')
   })
 
   it('preserves return_to when an expired token is cleared by a 401 during ensureOnboarding', async () => {
@@ -186,7 +210,13 @@ describe.each(['web', 'desktop'] as const)('%s auth route guard return_to flow',
     })
   })
 
-  it('never leaks /providers/connect#payload=... fragment secrets into login query', async () => {
+  it.each([
+    '/providers/connect#payload=sk-live-secret',
+    '/Providers/Connect#payload=sk-live-secret',
+    '/providers/connect/#payload=sk-live-secret',
+    '/%50roviders/connect#payload=sk-live-secret',
+    '/providers//connect#payload=sk-live-secret',
+  ])('never leaks fragment secrets from %s into login query', async (url) => {
     const router = makeGuardedRouter(platform, {
       readToken: () => null,
       readUserRole: () => 'admin',
@@ -194,21 +224,52 @@ describe.each(['web', 'desktop'] as const)('%s auth route guard return_to flow',
       ensureOnboarding: async () => true,
     })
 
-    await router.push('/providers/connect#payload=sk-live-secret')
+    await router.push(url)
     expect(router.currentRoute.value.fullPath).toBe('/login')
     expect(router.currentRoute.value.query).toEqual({})
   })
+
+  it('redirects unknown routes and removed settings subpaths to home instead of rendering blank overlays', async () => {
+    const router = makeGuardedRouter(platform, {
+      readToken: () => 'jwt-token',
+      readUserRole: () => 'admin',
+      hasOnboardingInProgress: () => false,
+      ensureOnboarding: async () => true,
+    })
+
+    await router.push('/unknown-legacy-route')
+    expect(router.currentRoute.value.path).toBe('/')
+
+    await router.push('/settings/removed-platform-page')
+    expect(router.currentRoute.value.path).toBe('/')
+  })
 })
 
-describe('loginRedirectForCurrentRoute', () => {
-  it('extracts nested return_to when a 401 fires mid-onboarding', async () => {
+describe('current-route redirect unwrapping', () => {
+  it('unwraps nested return_to from /onboarding and /login on committed routes and cold-start URLs', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: stubComponents(createAppRoutes('web')),
     })
+
+    // Cold-start (uncommitted START_LOCATION): reads window.location and unwraps /onboarding?return_to=...
+    window.history.replaceState({}, '', '/onboarding?step=2&return_to=%2Fsettings%2Fappearance')
+    expect(loginRedirectForCurrentRoute(router)).toEqual({
+      path: '/login',
+      query: { return_to: '/settings/appearance' },
+    })
+
+    // Committed /login?return_to=... during login transition: unwraps return_to for onboarding redirect.
+    await router.push('/login?return_to=%2Fsettings%2Fproviders%3Ftab%3Dvoice')
+    expect(onboardingRedirectForCurrentRoute(router)).toEqual({
+      path: '/onboarding',
+      query: { return_to: '/settings/providers?tab=voice' },
+    })
+
+    // Committed /onboarding?step=2&return_to=...: unwraps return_to on 401.
     await router.push('/onboarding?step=2&return_to=%2Fsettings%2Fproviders%3Ftab%3Dvoice')
     expect(loginRedirectForCurrentRoute(router)).toEqual({
-      name: 'Login',
+      path: '/login',
       query: { return_to: '/settings/providers?tab=voice' },
     })
   })

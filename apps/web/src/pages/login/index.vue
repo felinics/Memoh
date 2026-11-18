@@ -121,6 +121,7 @@ const readBrowserTimezone = (): string | null => {
 
 const login = async () => {
   if (!canSubmit.value || isSubmitting.value) return
+  const destination = sanitizeReturnTo(route.query.return_to)
   await submitLogin(
     { username: username.value.trim(), password: password.value },
     isSubmitting,
@@ -151,7 +152,7 @@ const login = async () => {
         exiting.value = true
         safeSessionSet(ONBOARDING_KEYS.entryAnimation, '1')
         await new Promise<void>(resolve => setTimeout(resolve, 175))
-        await router.replace(sanitizeReturnTo(route.query.return_to))
+        await router.replace(destination)
       },
       notifyInvalidCredentials: () => {
         // 可显隐密码框:失败不清空,用户多半只改账号或笔误。

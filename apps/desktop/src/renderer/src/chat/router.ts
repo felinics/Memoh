@@ -6,7 +6,7 @@ import {
 } from 'vue-router'
 import { createAppRoutes } from '@memohai/web/routes'
 import { ensureOnboarding, hasOnboardingInProgress } from '@memohai/web/router-guards/onboarding'
-import { guardAuthenticatedRoute } from '@memohai/web/router-guards/return-to'
+import { guardAuthenticatedRoute, normalizeRoutePath } from '@memohai/web/router-guards/return-to'
 import { useUserStore } from '@memohai/web/store/user'
 import { installBackHistory } from '@memohai/web/composables/useBackOr'
 
@@ -43,11 +43,12 @@ router.onError((error: Error) => {
 
 router.beforeEach(async (to: RouteLocationNormalized) => {
   // Dev component wall: allow in dev builds, never reachable in prod.
-  if (to.path.startsWith('/dev/')) {
+  const path = normalizeRoutePath(to.path)
+  if (path === '/dev' || path.startsWith('/dev/')) {
     return import.meta.env.DEV ? true : { path: '/' }
   }
 
-  if (to.path === '/connect') return true
+  if (path === '/connect') return true
 
   return guardAuthenticatedRoute(to, {
     readToken: () => localStorage.getItem('token'),

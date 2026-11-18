@@ -339,5 +339,9 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
           },
         ]
       : []),
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: () => ({ path: '/', query: {}, hash: '' }),
+    },
   ]
 }

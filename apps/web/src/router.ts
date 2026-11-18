@@ -6,7 +6,7 @@ import {
 import { toast } from '@felinic/ui'
 import { useUserStore } from '@/store/user'
 import { ensureOnboarding, hasOnboardingInProgress } from '@/router-guards/onboarding'
-import { guardAuthenticatedRoute } from '@/router-guards/return-to'
+import { guardAuthenticatedRoute, normalizeRoutePath } from '@/router-guards/return-to'
 import { installBackHistory } from '@/composables/useBackOr'
 import { isChunkLoadError, reloadForChunkLoadError } from '@/lib/chunk-load-error'
 import { showBootFailure } from '@/lib/boot-splash'
@@ -56,7 +56,8 @@ router.onError((error, _to, from) => {
 
 router.beforeEach(async (to) => {
   // Dev component wall: only reachable in dev builds with the flag set.
-  if (to.path.startsWith('/dev/')) {
+  const path = normalizeRoutePath(to.path)
+  if (path === '/dev' || path.startsWith('/dev/')) {
     return import.meta.env.DEV
       && localStorage.getItem('memoh:dev-tools') === '1'
       ? true

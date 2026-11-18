@@ -22,12 +22,15 @@ declare module '@memohai/web/router-guards/return-to' {
     hasOnboardingInProgress: () => boolean
     ensureOnboarding: () => Promise<boolean>
   }
+  export function normalizeRoutePath(pathname: string): string
   export function sanitizeReturnTo(raw: unknown): string
+  export function buildLoginRedirect(target?: unknown): { path: '/login', query?: { return_to: string } }
+  export function shouldRedirectOnUnauthorized(currentPath: unknown): boolean
   export function loginRedirectForCurrentRoute(
     router?: Pick<Router, 'currentRoute'> | null,
-  ): { name: 'Login', query?: { return_to: string } }
+  ): { path: '/login', query?: { return_to: string } }
   export function guardAuthenticatedRoute(
-    to: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query' | 'meta'>,
+    to: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query' | 'meta'> & { matched?: unknown[] },
     deps: AuthRouteGuardDeps,
   ): Promise<NavigationGuardReturn>
 }
