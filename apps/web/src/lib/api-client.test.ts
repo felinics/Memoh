@@ -129,7 +129,7 @@ describe('setupApiClient auth handling', () => {
     await expect(client.get({
       url: '/users/me',
       throwOnError: true,
-    })).rejects.toEqual({ message: 'expired' })
+    })).rejects.toEqual({ message: 'expired', status: 401 })
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1)
     expect(localStorage.getItem('token')).toBeNull()
@@ -281,8 +281,37 @@ describe('setupApiClient auth handling', () => {
     await client.get({ url: '/users/me' })
 
     expect(client.interceptors.request.fns.filter(Boolean)).toHaveLength(1)
+    expect(client.interceptors.error.fns.filter(Boolean)).toHaveLength(1)
     const request = fetchMock.mock.calls[0]?.[0] as Request
     expect(request.headers.get('Authorization')).toBe('Bearer valid-token')
+  })
+
+  it('preserves HTTP response.status on thrown JSON and plain-text errors while leaving network errors intact', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('{"message":"already taken"}', {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response('Bad Gateway', {
+        status: 502,
+        headers: { 'Content-Type': 'text/plain' },
+      }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    setupApiClient({
+      baseUrl: 'http://example.test',
+      fetch: fetchMock as unknown as typeof fetch,
+    })
+
+    await expect(client.get({ url: '/conflict', throwOnError: true })).rejects.toMatchObject({
+      status: 409,
+      message: 'already taken',
+    })
+    await expect(client.get({ url: '/gateway', throwOnError: true })).rejects.toMatchObject({
+      status: 502,
+      message: 'Bad Gateway',
+    })
+    await expect(client.get({ url: '/offline', throwOnError: true })).rejects.toBeInstanceOf(TypeError)
   })
 
   it('still injects the bearer token through request interceptors', async () => {

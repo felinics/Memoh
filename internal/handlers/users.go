@@ -111,6 +111,7 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup.PUT("/:id", h.UpdateBot)
 	botGroup.PUT("/:id/owner", h.TransferBotOwner)
 	botGroup.DELETE("/:id", h.DeleteBot)
+	botGroup.GET("/:id/channels", h.ListBotChannelConfigs)
 	botGroup.GET("/:id/channel/:platform", h.GetBotChannelConfig)
 	botGroup.PUT("/:id/channel/:platform", h.UpsertBotChannelConfig)
 	botGroup.PATCH("/:id/channel/:platform/status", h.UpdateBotChannelStatus)
@@ -954,6 +955,47 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 		"id":     botID,
 		"status": bots.BotStatusDeleting,
 	})
+}
+
+type ListBotChannelsResponse struct {
+	Items []channel.ChannelConfig `json:"items" validate:"required"`
+}
+
+// ListBotChannelConfigs godoc
+// @Summary List bot channel configs
+// @Description List all configured channel integrations for a bot
+// @Tags bots
+// @Param id path string true "Bot ID"
+// @Success 200 {object} ListBotChannelsResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{id}/channels [get].
+func (h *UsersHandler) ListBotChannelConfigs(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
+	if err != nil {
+		return err
+	}
+	if h.channelStore == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel store not configured")
+	}
+	items, err := h.channelStore.ListConfigs(c.Request().Context(), bot.ID)
+	if err != nil {
+		return errs.Wrap(err, "list bot channel configs")
+	}
+	if items == nil {
+		items = []channel.ChannelConfig{}
+	}
+	return c.JSON(http.StatusOK, ListBotChannelsResponse{Items: items})
 }
 
 // GetBotChannelConfig godoc

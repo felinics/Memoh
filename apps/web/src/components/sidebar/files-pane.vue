@@ -462,15 +462,7 @@ type FileSystemHandleLike =
   | (FileSystemFileHandleLike & { kind: 'file' })
 
 function isTransientWorkspaceError(error: unknown): boolean {
-  if (isApiErrorCode(error, 'workspace.unreachable')) return true
-
-  // Desktop can connect to older hosted servers that only expose a message.
-  const detail = resolveApiErrorMessage(error, '').toLowerCase()
-  return detail.includes('workspace is not reachable')
-    || detail.includes('container not reachable')
-    || detail.includes('unavailable')
-    || detail.includes('client connection is closing')
-    || detail.includes('transport is closing')
+  return isApiErrorCode(error, 'workspace.unreachable')
 }
 
 function wait(ms: number): Promise<void> {
