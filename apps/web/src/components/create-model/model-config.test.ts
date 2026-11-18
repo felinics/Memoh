@@ -145,9 +145,11 @@ describe('buildModelConfig', () => {
 
   it('drops cleared optional numbers instead of keeping previous stored values', () => {
     expect(resolveEditedOptionalNumber('', 4096)).toBeUndefined()
+    expect(resolveEditedOptionalNumber('   ', 4096)).toBeUndefined()
     expect(resolveEditedOptionalNumber(null, 4096)).toBeUndefined()
     expect(resolveEditedOptionalNumber(undefined, 4096)).toBe(4096)
     expect(resolveEditedOptionalNumber(8192, 4096)).toBe(8192)
+    expect(resolveEditedOptionalNumber('8192', 4096)).toBe(8192)
 
     const clearedEmbedding = buildModelConfig({
       type: 'embedding',

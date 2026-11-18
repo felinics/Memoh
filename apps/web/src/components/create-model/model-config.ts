@@ -121,9 +121,9 @@ export function withoutLegacyKeys(config?: ModelsModelConfig | null): ModelsMode
 }
 
 /**
- * Distinguishes an intentionally cleared number input (`''` or `null`) from an
- * untouched field (`undefined`) during model edits so clearing falls back to
- * server defaults instead of re-sending the previous stored number.
+ * Distinguishes a cleared number input (`''` or `null`) from an unmounted/unset
+ * field (`undefined`) during model edits so clearing removes the stored limit
+ * instead of falling back to the previous config value.
  */
 export function resolveEditedOptionalNumber(
   raw: unknown,
@@ -131,6 +131,12 @@ export function resolveEditedOptionalNumber(
 ): number | undefined {
   if (raw === '' || raw === null) return undefined
   if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (trimmed === '') return undefined
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) return parsed
+  }
   return editFallback
 }
 

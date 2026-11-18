@@ -603,6 +603,7 @@ watch([isVisible, toRef(props, 'isScrolling'), () => props.message.id], (_, prev
   emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
 }, {
   immediate: true,
+  deep:true
 })
 
 const isSelf = computed(() =>

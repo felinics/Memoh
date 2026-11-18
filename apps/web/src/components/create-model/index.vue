@@ -584,14 +584,19 @@ const UNSET = '__unset'
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
+const optionalPositiveNumber = (message: string) => z.preprocess(
+  value => (value === '' || value === null || (typeof value === 'string' && value.trim() === '') ? undefined : value),
+  z.coerce.number().min(1, message).optional(),
+)
+
 const formSchema = toTypedSchema(z.object({
   type: z.string().min(1, t('models.typeRequired')),
   model_id: z.string().min(1, t('models.modelIdRequired')),
   name: z.string().optional(),
   description: z.string().optional(),
-  dimensions: z.coerce.number().min(1, t('models.dimensionsMin')).optional(),
-  context_window: z.coerce.number().min(1, t('models.contextWindowMin')).optional(),
-  max_output_tokens: z.coerce.number().min(1, t('models.maxOutputTokensMin')).optional(),
+  dimensions: optionalPositiveNumber(t('models.dimensionsMin')),
+  context_window: optionalPositiveNumber(t('models.contextWindowMin')),
+  max_output_tokens: optionalPositiveNumber(t('models.maxOutputTokensMin')),
 }))
 
 const props = withDefaults(defineProps<{

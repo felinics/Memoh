@@ -173,6 +173,7 @@
             :bot-id="botId"
             :agent="selectedAgent"
             @authorized="refreshDirectRuntimeModels"
+            @missing-dependency="selectedAgent && void ensureAgentDependency(selectedAgent)"
           />
         </div>
       </SettingsShell>
