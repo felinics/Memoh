@@ -38,6 +38,23 @@
             />
           </div>
 
+          <SettingsSection v-else-if="error && allChannels.length === 0">
+            <Empty class="py-16">
+              <EmptyTitle>{{ t('common.loadFailed') }}</EmptyTitle>
+              <EmptyDescription v-if="loadErrorDetail">
+                {{ loadErrorDetail }}
+              </EmptyDescription>
+              <EmptyContent>
+                <Button
+                  variant="outline"
+                  @click="refetch()"
+                >
+                  {{ t('common.retry') }}
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </SettingsSection>
+
           <!-- Platforms + a dashed add tile to drop another in -->
           <div
             v-else-if="configuredChannels.length > 0"
@@ -163,6 +180,7 @@ import ChannelSettingsPanel from './channel-settings-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { useBotChannels, type BotChannelItem } from '@/composables/api/useBotChannels'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 
 const props = defineProps<{ botId: string }>()
@@ -197,7 +215,9 @@ function openModelSettings() {
   void router.push({ query: { ...route.query, tab: 'general', section: 'interaction' } })
 }
 
-const { data: channels, isLoading, refetch } = useBotChannels(botIdRef)
+const { data: channels, error, isLoading, refetch } = useBotChannels(botIdRef)
+
+const loadErrorDetail = computed(() => (error?.value ? resolveApiErrorMessage(error.value, '') : ''))
 
 const selectedType = ref<string | null>(null)
 

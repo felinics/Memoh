@@ -77,6 +77,21 @@
         </SettingsRow>
 
         <SettingsRow
+          v-else-if="channelsError && configuredChannels.length === 0"
+          :label="$t('common.loadFailed')"
+          :description="(channelsError ? resolveApiErrorMessage(channelsError, '') : '') || undefined"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            @click="refetchChannels()"
+          >
+            {{ $t('common.retry') }}
+          </Button>
+        </SettingsRow>
+
+        <SettingsRow
           v-else-if="configuredChannels.length === 0"
           :label="$t('bots.overview.platformsEmpty')"
           :description="$t('bots.overview.platformsEmptyHint')"
@@ -294,6 +309,8 @@ import BotChecksPanel from './bot-checks-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { hasBotPermission } from '@/utils/bot-permissions'
 import { resolveBotWorkspaceBackend, resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
 import { buildRuntimeMetricCards } from '@/utils/format-bytes'
 import { formatDateTime } from '@/utils/date-time'
@@ -330,16 +347,27 @@ const { data: memoryStatus, isLoading: memoryLoading } = useQuery({
   enabled: () => !!botId.value,
 })
 
+const canManageBot = computed(() => {
+  const perms = bot.value?.current_user_permissions
+  // Match detail.vue: only restrict management when permissions are explicitly
+  // scoped without "manage", avoiding spurious 403s on chat-only members.
+  if (!perms || perms.length === 0) return true
+  return hasBotPermission(perms, 'manage')
+})
+
 // Shares one query with bot-channels.vue, so visiting Platforms after
 // Overview (or vice versa) reuses the cached probe instead of refetching.
-const { data: channels, isLoading: channelsLoading } = useBotChannels(botId)
+const { data: channels, error: channelsError, isLoading: channelsLoading, refetch: refetchChannels } = useBotChannels(
+  botId,
+  { enabled: () => canManageBot.value },
+)
 
 const configuredChannels = computed(() => (channels.value ?? []).filter((c) => c.configured))
 
 // Platforms is low-weight: only shown when nothing is connected yet (Connect
 // nudge) or the bot has a check issue (so a broken connection stays visible).
 // Connected + healthy hides it — the user knows what they connected.
-const showPlatforms = computed(() => configuredChannels.value.length === 0 || hasIssue.value)
+const showPlatforms = computed(() => canManageBot.value && (configuredChannels.value.length === 0 || hasIssue.value))
 
 function channelTitle(meta: HandlersChannelMeta) {
   return channelTypeDisplayName(t, meta.type, meta.display_name)

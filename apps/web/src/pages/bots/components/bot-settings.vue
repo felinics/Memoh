@@ -671,10 +671,7 @@ watch(botIdRef, (nextBotId) => {
 function isNameConflict(error: unknown): boolean {
   const code = parseMemohError(error)?.code
   if (code) return code === 'bot.name_taken'
-  if (apiErrorStatus(error) === 409) return true
-  // Desktop can connect to older hosted servers whose conflict response
-  // carries neither a code nor a status field — only the English message.
-  return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
+  return apiErrorStatus(error) === 409
 }
 
 async function handleBackupImported(botId: string) {

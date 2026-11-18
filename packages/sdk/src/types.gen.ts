@@ -2290,6 +2290,10 @@ export type HandlersHooksEventsResponse = {
     events?: Array<HandlersHookEventInfo>;
 };
 
+export type HandlersListBotChannelsResponse = {
+    items: Array<ChannelChannelConfig>;
+};
+
 export type HandlersListSnapshotsResponse = {
     snapshots?: Array<HandlersSnapshotInfo>;
     snapshotter?: string;
@@ -14735,6 +14739,48 @@ export type PostBotsByIdChannelByPlatformWebhookEndpointResponses = {
 };
 
 export type PostBotsByIdChannelByPlatformWebhookEndpointResponse = PostBotsByIdChannelByPlatformWebhookEndpointResponses[keyof PostBotsByIdChannelByPlatformWebhookEndpointResponses];
+
+export type GetBotsByIdChannelsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channels';
+};
+
+export type GetBotsByIdChannelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetBotsByIdChannelsError = GetBotsByIdChannelsErrors[keyof GetBotsByIdChannelsErrors];
+
+export type GetBotsByIdChannelsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersListBotChannelsResponse;
+};
+
+export type GetBotsByIdChannelsResponse = GetBotsByIdChannelsResponses[keyof GetBotsByIdChannelsResponses];
 
 export type GetBotsByIdChecksData = {
     body?: never;

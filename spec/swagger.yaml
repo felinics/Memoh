@@ -3991,6 +3991,15 @@ definitions:
           $ref: '#/definitions/handlers.HookEventInfo'
         type: array
     type: object
+  handlers.ListBotChannelsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/channel.ChannelConfig'
+        type: array
+    required:
+    - items
+    type: object
   handlers.ListSnapshotsResponse:
     properties:
       snapshots:
@@ -16476,6 +16485,39 @@ paths:
           schema:
             $ref: '#/definitions/server.Problem'
       summary: Set bot channel webhook endpoint
+      tags:
+      - bots
+  /bots/{id}/channels:
+    get:
+      description: List all configured channel integrations for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ListBotChannelsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: List bot channel configs
       tags:
       - bots
   /bots/{id}/checks:
