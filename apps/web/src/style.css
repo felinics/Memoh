@@ -286,7 +286,7 @@
   --color-cop-title: var(--cop-title);
 }
 
-/* Shell-divider owners outside dockview. Keep the colour role on the component;
+/* Shell-divider owners outside the workbench split sash. Keep the colour role on the component;
  * this utility only shares the workspace family's physical stroke width. */
 .workspace-divider-r {
   border-right: var(--workspace-divider-width) solid var(--workspace-divider-color);
@@ -524,7 +524,7 @@
  * CJK keeps the 1em base and is never tracked (it sets its own metrics).
  *
  * Scope: [data-chat-content] (chat bubble) AND .markstream-vue (every rendered
- * surface, incl. the dockview file preview, which emits the same spans through
+ * surface, incl. the workbench file preview, which emits the same spans through
  * md-text but has no data-chat-content wrapper). Without the .markstream-vue
  * branch the preview falls back to markstream's raw 600 strong/headings and
  * renders visibly heavier than chat — the font-level weight clamp in the

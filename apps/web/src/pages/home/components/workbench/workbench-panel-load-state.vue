@@ -1,7 +1,7 @@
 <template>
   <!-- The loading / failed states of code that is downloaded on demand: a whole
-       panel (PanelLoading wraps this in the panel frame) or the heavy body
-       inside a panel that already has its frame (lazyPanelContent). Retry
+       panel (workbench-panel-loading wraps this in the panel frame) or the heavy
+       body inside a panel that already has its frame (lazyPanelContent). Retry
        downloads the code again in place, without reloading the page, since
        other open panels may hold unsaved edits. Retry can't recover a chunk
        that a deployment has removed since this page loaded; reloading the page

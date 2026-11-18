@@ -66,7 +66,6 @@ Compose 为主；移动壳是 WebView，只取讲平台行为的部分，例如 
 | vue-i18n | 三语文案 | https://vue-i18n.intlify.dev | 有 | 未发现 |
 | markstream-vue | Markdown 渲染 | https://markstream-vue-docs.simonhe.me | 有 | 未发现 |
 | Shiki / Mermaid / KaTeX | 代码高亮、图表、公式 | https://shiki.style 、https://mermaid.js.org 、https://katex.org | 无 | 未发现 |
-| dockview | 工作区面板 | https://dockview.dev | 有 | 未发现 |
 | ECharts / xterm.js / Monaco | 图表、终端、编辑器 | https://echarts.apache.org 、https://xtermjs.org 、https://microsoft.github.io/monaco-editor/ | 无 | 未发现 |
 | lucide | 图标 | https://lucide.dev | 有 | 未发现 |
 | Vite / Vitest | 构建、测试 | https://vite.dev 、https://vitest.dev | 都有 | 未发现 |

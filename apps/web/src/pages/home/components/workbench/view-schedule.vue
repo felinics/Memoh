@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full w-full overflow-y-auto">
+  <div class="h-full w-full overflow-y-auto bg-surface-editor">
     <section
       v-if="hasActivated && currentBotId"
       class="mx-auto max-w-2xl px-6 py-8"
@@ -22,7 +22,7 @@
         :bot-id="currentBotId"
         :mode="scheduleId ? 'edit' : 'create'"
         :schedule="schedule"
-        @cancel="params.api.close()"
+        @cancel="workspaceTabs.closeTab(tabId)"
         @delete="handleDelete"
         @saved="handleSaved"
       />
@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { ConfirmDeleteDialog, InlineLoadingRow, toast } from '@felinic/ui'
@@ -57,51 +57,42 @@ import {
   getBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
-import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { scheduleDeleteConfirmKey } from '@/utils/schedule-delete'
-import { usePanelVisible } from './use-panel-visible'
 import { lazyPanelContent } from './lazy-panel-content'
 
 const ScheduleEditor = lazyPanelContent(() => import('@/pages/bots/components/schedule-editor.vue').then(m => m.default))
 
 const props = defineProps<{
-  params: {
-    params: { scheduleId?: string }
-    api: DockviewPanelApi
-    containerApi: DockviewApi
-  }
+  tabId: string
+  scheduleId?: string
+  visible: boolean
 }>()
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const workspaceTabs = useWorkspaceTabsStore()
 const { currentBotId } = storeToRefs(chatStore)
 
-const visible = usePanelVisible(props.params.api)
-const hasActivated = ref(visible.value)
-watch(visible, (isVisible) => {
+const hasActivated = ref(props.visible)
+watch(() => props.visible, (isVisible) => {
   if (isVisible) hasActivated.value = true
 })
 
-const scheduleId = ref(typeof props.params.params.scheduleId === 'string' ? props.params.params.scheduleId : undefined)
 const schedule = ref<ScheduleSchedule | null>(null)
 const isLoading = ref(false)
 const deleteTarget = ref<ScheduleSchedule | null>(null)
 const isDeleting = ref(false)
 
-const parametersSub = props.params.api.onDidParametersChange((parameters) => {
-  const next = parameters as { scheduleId?: unknown }
-  scheduleId.value = typeof next.scheduleId === 'string' ? next.scheduleId : undefined
-})
-
 async function fetchSchedule() {
   if (!hasActivated.value) return
   const botId = currentBotId.value
-  const id = scheduleId.value
+  const id = props.scheduleId
   if (!botId || !id) {
     schedule.value = null
-    props.params.api.setTitle(t('bots.schedule.title'))
+    workspaceTabs.updateScheduleTitle(props.tabId, '')
     return
   }
   isLoading.value = true
@@ -111,10 +102,10 @@ async function fetchSchedule() {
       throwOnError: true,
     })
     schedule.value = data ?? null
-    props.params.api.setTitle(schedule.value?.name?.trim() || t('bots.schedule.title'))
+    workspaceTabs.updateScheduleTitle(props.tabId, schedule.value?.name?.trim() ?? '')
   } catch (error) {
     schedule.value = null
-    props.params.api.setTitle(t('bots.schedule.title'))
+    workspaceTabs.updateScheduleTitle(props.tabId, '')
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.loadFailed')))
   } finally {
     isLoading.value = false
@@ -141,7 +132,7 @@ async function confirmDelete() {
       throwOnError: true,
     })
     toast.success(t('bots.schedule.deleteSuccess'))
-    props.params.api.close()
+    workspaceTabs.closeTab(props.tabId)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.deleteFailed')))
   } finally {
@@ -150,11 +141,7 @@ async function confirmDelete() {
   }
 }
 
-watch([hasActivated, currentBotId, scheduleId], ([activated]) => {
+watch([hasActivated, currentBotId, () => props.scheduleId], ([activated]) => {
   if (activated) void fetchSchedule()
 }, { immediate: true })
-
-onBeforeUnmount(() => {
-  parametersSub.dispose()
-})
 </script>

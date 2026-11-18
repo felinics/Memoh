@@ -203,8 +203,8 @@
       /* Exit. The splash leaving and the app entering are a view transition
          (lib/boot-splash.ts sets boot-entering for its duration), so the motions
          play on snapshots and the app itself is never scaled. Scaling #app
-         directly broke the chat workspace: dockview sizes its panels from their
-         on-screen boxes, measured them mid-scale, and left them 15% too large.
+         directly broke the chat workspace: panel hosts measured from on-screen
+         boxes during a transform stayed 15% too large until the next resize.
          The stage is captured on its own so that it scales while the splash
          background only fades. Blending is set back to normal because the two
          root snapshots are not a cross-fade (their durations differ). Browsers

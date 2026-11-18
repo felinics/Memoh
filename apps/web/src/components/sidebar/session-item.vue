@@ -27,9 +27,11 @@
         :data-unread="unread.isUnread(session.id) || undefined"
         :data-selecting="selecting || undefined"
         :title="hoverTitle"
-        @click="activate"
-        @keydown.enter.exact.prevent="activate"
-        @keydown.space.prevent="activate"
+        @pointerdown="onRowPointerDown"
+        @click="activate($event)"
+        @auxclick.middle.prevent="onMiddleClick"
+        @keydown.enter.exact.prevent="activate()"
+        @keydown.space.prevent="activate()"
         @contextmenu="suppressNativeMenu"
       >
         <!-- The row itself is the checkbox while selecting (role/aria-checked
@@ -247,6 +249,9 @@ import MarqueeText from './marquee-text.vue'
 import { SessionSelectionKey } from './session-selection'
 import { useUnreadStore } from '@/store/unread'
 import { useUserStore } from '@/store/user'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { findGroup } from '@/workbench/tree'
+import { startWorkbenchExternalPointerDrag } from '@/workbench/drag'
 import { canHoldUnread } from '@/utils/session-attention'
 import AttentionDot from './attention-dot.vue'
 import { SessionBotAgentsKey } from './session-bot-agents'
@@ -287,9 +292,41 @@ const selection = injectedSelection
 const selecting = computed(() => selection.active.value)
 const selected = computed(() => selection.isSelected(props.session.id))
 
-function activate() {
-  if (selecting.value) selection.toggle(props.session.id)
-  else emit('select', props.session)
+function activate(event?: MouseEvent) {
+  if (selecting.value) {
+    selection.toggle(props.session.id)
+    return
+  }
+  if (event && (event.metaKey || event.ctrlKey)) {
+    emit('openNewTab', props.session)
+    return
+  }
+  emit('select', props.session)
+}
+
+function onMiddleClick() {
+  if (!selecting.value) emit('openNewTab', props.session)
+}
+
+function onRowPointerDown(event: PointerEvent) {
+  if (selecting.value || event.button !== 0) return
+  if ((event.target as HTMLElement | null)?.closest('[data-slot="sidebar-session-overlay"]')) return
+  const store = useWorkspaceTabsStore()
+  if (store.isMobile) return
+  const rawTitle = (props.session.title ?? '').trim()
+  const chipTitle = rawTitle || displayLabel.value || t('chat.untitledSession')
+  startWorkbenchExternalPointerDrag({
+    event,
+    dragId: `ext:session:${props.session.id}`,
+    getTitle: () => chipTitle,
+    isMobile: () => store.isMobile,
+    getGroupTabIds: gid => findGroup(store.workbench.root, gid)?.tabIds ?? [],
+    isTabPinned: tid => Boolean(store.workbench.tabs[tid]?.pinned),
+    onDragStateChange: (dragging) => { store.panelDragging = dragging },
+    onCommitDrop: (targetGid, zone, idx) => {
+      store.dropExternalItem({ kind: 'session', sessionId: props.session.id, title: rawTitle }, targetGid, zone, idx)
+    },
+  })
 }
 
 function startSelection() {

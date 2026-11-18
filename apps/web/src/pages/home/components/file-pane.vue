@@ -63,7 +63,7 @@ function handleDirty(dirty: boolean) {
 }
 
 // Let the tab close-confirm dialog write this file even while it's backgrounded.
-// FileViewer stays mounted for the whole panel lifetime (panel-file.vue never
+// FileViewer stays mounted for the whole panel lifetime (view-file.vue never
 // unmounts it once shown), so its save() is live while the tab is hidden.
 onMounted(() => {
   workspaceTabs.registerFileSaveHandler(

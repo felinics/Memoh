@@ -57,9 +57,9 @@ const MainSection = defineAsyncComponent({
   },
 })
 
-// The chat workspace (MainSection: sidebar + dockview) is mounted persistently
+// The chat workspace (MainSection: sidebar + workbench) is mounted persistently
 // here rather than as a route component. This keeps the chat DOM attached and
-// full-size while the user is in settings, so dockview never relayouts from a
+// full-size while the user is in settings, so the workbench never relayouts from a
 // zero size, the message list keeps its scroll position, and returning has no
 // black flash / no re-scroll.
 // (KeepAlive can't achieve this: it detaches the subtree, which is what caused
@@ -108,7 +108,7 @@ const toastHeadings = computed(() => ({
 <template>
   <section>
     <!-- Persistent chat area. Stays mounted (and full-size) across chat↔settings
-         so its dockview/scroll survive untouched. Unmounts only when leaving the
+         so its workbench/scroll survive untouched. Unmounts only when leaving the
          authenticated app area (login/onboarding). -->
     <MainSection v-if="isAppArea" />
 

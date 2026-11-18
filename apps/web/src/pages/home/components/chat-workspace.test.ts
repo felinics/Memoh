@@ -1,127 +1,105 @@
 // @vitest-environment jsdom
-
-import { createApp, defineComponent, h, inject, nextTick, onMounted, ref } from 'vue'
+import { createApp, defineComponent, h, inject, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { createEmptyWorkbenchState, insertTab } from '@/workbench/tree'
 
-const dock = {
-  panels: [
-    { id: 'file:/data/AGENTS.md' },
-    { id: 'preview:/data/AGENTS.md' },
-  ],
-  layout: vi.fn(),
-}
-const api = ref<typeof dock | null>(null)
+const initialState = insertTab(
+  insertTab(
+    createEmptyWorkbenchState(),
+    { id: 'file:/data/AGENTS.md', pinned: false, target: { kind: 'file', filePath: '/data/AGENTS.md' } },
+  ).state,
+  { id: 'preview:/data/AGENTS.md', pinned: false, target: { kind: 'preview', filePath: '/data/AGENTS.md' } },
+).state
+
 const workspaceStore = {
-  api,
+  workbench: initialState,
+  isMobile: false,
   panelDragging: false,
-  registerApi: vi.fn((nextApi: typeof dock) => {
-    api.value = nextApi
-  }),
-  requestCloseTab: vi.fn(),
-  requestCloseTabs: vi.fn(),
-  releaseApi: vi.fn(),
+  pendingClose: ref(null),
+  mountWorkspace: vi.fn(),
+  unmountWorkspace: vi.fn(),
   openSessionChat: vi.fn(),
   openDraftChat: vi.fn(),
   openFilePinned: vi.fn(),
+  openFilesAt: vi.fn(),
+  openAsset: vi.fn(),
+  resolvePendingClose: vi.fn(),
 }
-
-vi.mock('dockview-vue', () => ({
-  DockviewVue: defineComponent({
-    emits: ['ready'],
-    setup(_, { emit }) {
-      const openFile = inject(openInFileManagerKey)!
-      onMounted(() => emit('ready', { api: dock }))
-      return () => [
-        h('button', { class: 'open-workspace-file', onClick: () => openFile('/data/a.md') }, 'Open file'),
-        h('button', { class: 'open-outside-file', onClick: () => openFile('/home/user/project/package.json') }, 'Open outside file'),
-      ]
-    },
-  }),
-}))
 
 vi.mock('@/store/workspace-tabs', () => ({
   useWorkspaceTabsStore: () => workspaceStore,
 }))
 
-vi.mock('@/store/chat-list', () => ({
-  useChatStore: () => ({
-    currentBotId: 'bot-1',
-    sessionId: null,
-    hasExplicitSessionSelection: false,
-  }),
+vi.mock('@felinic/ui', () => ({
+  Button: 'button',
+  Dialog: 'div',
+  DialogContent: 'div',
+  DialogDescription: 'div',
+  DialogFooter: 'div',
+  DialogHeader: 'div',
+  DialogTitle: 'div',
+  PanePlaceholder: 'div',
 }))
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }))
 
-vi.mock('./dockview/panel-chat.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/panel-file.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/panel-preview.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/panel-asset.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/panel-terminal.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/panel-browser.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/panel-display.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/panel-schedule.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/workspace-watermark.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/workspace-tab.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/group-actions.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/header-add-actions.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/prefix-header-actions.vue', () => ({ default: { render: () => null } }))
-vi.mock('./dockview/tab-close-confirm.vue', () => ({ default: { render: () => null } }))
+vi.mock('./workbench/workbench-tree.vue', () => ({
+  default: defineComponent({
+    props: ['node'],
+    emits: ['slotMounted', 'slotUnmounted'],
+    setup() {
+      const openFile = inject(openInFileManagerKey)!
+      return () => h('div', [
+        h('button', { class: 'open-workspace-file', onClick: () => openFile('/data/a.md') }, 'Open file'),
+        h('button', { class: 'open-outside-file', onClick: () => openFile('/home/user/project/package.json') }, 'Open outside file'),
+      ])
+    },
+  }),
+}))
 
-class ResizeObserverMock {
-  observe() {}
-  disconnect() {}
-}
-
-Object.defineProperty(globalThis, 'ResizeObserver', {
-  value: ResizeObserverMock,
-  configurable: true,
-})
+vi.mock('./workbench/workbench-stage.vue', () => ({
+  default: defineComponent({
+    props: ['slotMap', 'slotVersion'],
+    setup: () => () => h('div'),
+  }),
+}))
 
 describe('chat workspace initialization', () => {
   let root: HTMLElement | null = null
 
   afterEach(() => {
-    workspaceStore.registerApi.mockClear()
+    workspaceStore.mountWorkspace.mockClear()
+    workspaceStore.unmountWorkspace.mockClear()
     workspaceStore.openSessionChat.mockClear()
     workspaceStore.openDraftChat.mockClear()
-    workspaceStore.releaseApi.mockClear()
     workspaceStore.openFilePinned.mockClear()
-    dock.layout.mockClear()
-    api.value = null
     root?.remove()
     root = null
   })
 
-  it('leaves a restored non-empty workspace unchanged when it has no chat panel', async () => {
+  it('mounts the workbench store without forcing a chat tab onto a non-empty file workspace and forwards file links cleanly', async () => {
     const ChatWorkspace = (await import('./chat-workspace.vue')).default
     root = document.createElement('div')
-    Object.defineProperties(root, {
-      clientWidth: { value: 1200 },
-      clientHeight: { value: 800 },
-    })
     document.body.appendChild(root)
 
     const app = createApp(ChatWorkspace)
     app.mount(root)
     await nextTick()
 
-    expect(workspaceStore.registerApi).toHaveBeenCalledWith(dock)
+    expect(workspaceStore.mountWorkspace).toHaveBeenCalledOnce()
     expect(workspaceStore.openSessionChat).not.toHaveBeenCalled()
     expect(workspaceStore.openDraftChat).not.toHaveBeenCalled()
 
     root.querySelector<HTMLButtonElement>('.open-workspace-file')!.click()
     expect(workspaceStore.openFilePinned).toHaveBeenCalledWith('/data/a.md')
 
-    // An absolute path outside the workspace mount must reach the store as-is;
-    // the workspace root used to be prefixed onto it.
     root.querySelector<HTMLButtonElement>('.open-outside-file')!.click()
     expect(workspaceStore.openFilePinned).toHaveBeenCalledWith('/home/user/project/package.json')
 
     app.unmount()
+    expect(workspaceStore.unmountWorkspace).toHaveBeenCalledOnce()
   })
 })

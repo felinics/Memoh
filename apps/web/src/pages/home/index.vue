@@ -70,7 +70,7 @@ useComposerPrefillResolver({
   currentBotId: () => currentBotId.value,
   // Wait out a bot switch: until the new bot's chats load, the dock may still
   // show the previous bot's panels.
-  dockReady: () => !!workspaceTabs.api && !chatStore.loadingChats,
+  dockReady: () => workspaceTabs.ready && !chatStore.loadingChats,
   activeChatWritable: () => !!workspaceTabs.activeId && workspaceTabs.activePanelIsChat && !chatStore.activeChatReadOnly,
   openDraftChat: () => workspaceTabs.openDraftChat({ title: t('chat.newSession'), explicitSelection: false }),
 })
@@ -346,9 +346,9 @@ watch(currentBotId, async (newBotId) => {
 
 /** Resolve notification links only after the destination bot's dock and sessions are ready. */
 watch(
-  () => [route.name, route.params.botName, route.query.session, currentBotId.value, chatStore.loadingChats, workspaceTabs.api] as const,
-  async ([name, botName, sessionId, botId, loading, dock]) => {
-    if (!CHAT_ROUTE_NAMES.has(String(name)) || typeof sessionId !== 'string' || !sessionId.trim() || !dock || loading || !botId) return
+  () => [route.name, route.params.botName, route.query.session, currentBotId.value, chatStore.loadingChats, workspaceTabs.ready] as const,
+  async ([name, botName, sessionId, botId, loading, dockReady]) => {
+    if (!CHAT_ROUTE_NAMES.has(String(name)) || typeof sessionId !== 'string' || !sessionId.trim() || !dockReady || loading || !botId) return
     const bot = bots.value.find(item => item.id === botId)
     if (botName !== botId && botName !== bot?.name) return
     workspaceTabs.openSessionChat({ sessionId })

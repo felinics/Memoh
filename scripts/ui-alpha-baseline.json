@@ -35,7 +35,6 @@
   "apps/web/src/pages/home/components/chat-pane.vue": 1,
   "apps/web/src/pages/home/components/chat-scroll-rail.vue": 3,
   "apps/web/src/pages/home/components/display-pane.vue": 1,
-  "apps/web/src/pages/home/components/dockview/panel-asset.vue": 1,
   "apps/web/src/pages/home/components/live-peek-line.vue": 1,
   "apps/web/src/pages/home/components/media-gallery-lightbox.vue": 4,
   "apps/web/src/pages/home/components/message-item.vue": 7,

@@ -1410,7 +1410,7 @@ import {
 } from '@/utils/runtime-slash-commands'
 
 const props = withDefaults(defineProps<{
-  // Stable dockview panel id (e.g. `chat:3`). Used for per-tab composer drafts and
+  // Stable workbench tab id (e.g. `chat:3`). Used for per-tab composer drafts and
   // the keep-alive key — it does NOT change when a draft acquires a real session.
   tabId?: string
   // The session this pane renders (null = unsaved draft). Decoupled from tabId so

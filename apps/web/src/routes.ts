@@ -7,7 +7,7 @@ import { prefetchInIdle } from './lib/idle-prefetch'
 import { withStylesheetRecovery } from './lib/chunk-load-error'
 
 /**
- * The persistent chat workspace (sidebar + dockview). App.vue mounts it outside
+ * The persistent chat workspace (sidebar + workbench). App.vue mounts it outside
  * RouterView on chat and settings routes and loads it on demand: it carries
  * the chat UI, Markdown rendering and code highlighting, which the login and
  * onboarding pages must not wait on. prefetchAppPages warms it first.
@@ -96,7 +96,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
       component: () => import('@/pages/onboarding/index.vue'),
     },
     {
-      // Chat area. The chat UI (main-section: sidebar + dockview) is mounted
+      // Chat area. The chat UI (main-section: sidebar + workbench) is mounted
       // persistently in App.vue, NOT here — these routes exist only so the URL
       // (/, /bot/:name) matches and the breadcrumb/active-bot sync works. Their
       // components render nothing; App.vue shows the persistent MainSection on

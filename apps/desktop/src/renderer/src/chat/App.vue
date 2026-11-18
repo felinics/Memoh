@@ -57,7 +57,7 @@ const MainSection = defineAsyncComponent({
   },
 })
 
-// Mirror apps/web App.vue: keep chat dockview/scroll alive (DOM attached,
+// Mirror apps/web App.vue: keep chat workbench/scroll alive (DOM attached,
 // full-size) while in settings, so returning has no black flash / re-scroll /
 // relayout.
 const route = useRoute()

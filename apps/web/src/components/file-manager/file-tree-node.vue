@@ -27,6 +27,9 @@ import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { directoryEntriesFingerprint, isArchiveFile, sortDirsFirst } from './utils'
 import { resolveFileIcon } from './file-icon'
 import { FileTreeKey } from './file-tree-context'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { findGroup } from '@/workbench/tree'
+import { startWorkbenchExternalPointerDrag } from '@/workbench/drag'
 import {
   treeGlyphSlotClass,
   treeIndentClass,
@@ -73,13 +76,46 @@ const { expanded, loaded, spinnerVisible, expand, toggle, reload } = useTreeDisc
   return true
 })
 
-function onRowClick() {
+function onRowClick(event: MouseEvent) {
   if (selectionMode.value && path.value) {
     tree.toggleSelect(props.entry, !selected.value)
     return
   }
-  if (props.entry.isDir) toggle()
-  else tree.openFile(props.entry)
+  if (props.entry.isDir) {
+    toggle()
+    return
+  }
+  if (event.metaKey || event.ctrlKey) {
+    tree.openFilePinned(props.entry)
+    return
+  }
+  tree.openFile(props.entry)
+}
+
+function onRowMiddleClick() {
+  if (!selectionMode.value && !props.entry.isDir) {
+    tree.openFilePinned(props.entry)
+  }
+}
+
+function onRowPointerDown(event: PointerEvent) {
+  if (selectionMode.value || props.entry.isDir || !path.value || event.button !== 0) return
+  const store = useWorkspaceTabsStore()
+  if (store.isMobile) return
+  const filePath = path.value
+  const label = props.entry.name ?? filePath.slice(filePath.lastIndexOf('/') + 1)
+  startWorkbenchExternalPointerDrag({
+    event,
+    dragId: `ext:file:${filePath}`,
+    getTitle: () => label,
+    isMobile: () => store.isMobile,
+    getGroupTabIds: gid => findGroup(store.workbench.root, gid)?.tabIds ?? [],
+    isTabPinned: tid => Boolean(store.workbench.tabs[tid]?.pinned),
+    onDragStateChange: (dragging) => { store.panelDragging = dragging },
+    onCommitDrop: (targetGid, zone, idx) => {
+      store.dropExternalItem({ kind: 'file', filePath }, targetGid, zone, idx)
+    },
+  })
 }
 
 // Re-fetch an expanded folder's children when the workspace changes.
@@ -115,7 +151,9 @@ function onCheckbox(checked: boolean | 'indeterminate') {
       <div
         ref="rowEl"
         :class="[treeRowClass, isActive ? treeRowSelectedClass : treeRowIdleClass]"
-        @click="onRowClick"
+        @pointerdown="onRowPointerDown"
+        @click="onRowClick($event)"
+        @auxclick.middle.prevent="onRowMiddleClick"
       >
         <span
           v-for="g in depth"

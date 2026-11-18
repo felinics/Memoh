@@ -23,6 +23,12 @@
         class="shrink-0"
       >{{ segment }}</span>
     </template>
+    <div
+      v-if="$slots.actions"
+      class="ml-auto flex shrink-0 items-center gap-1"
+    >
+      <slot name="actions" />
+    </div>
   </div>
 </template>
 
@@ -33,12 +39,6 @@ import { ChevronRight } from 'lucide-vue-next'
 import { resolveFileIcon } from '@/components/file-manager/file-icon'
 import { useSettingsStore } from '@/store/settings'
 
-// Path breadcrumb for file / preview panels only. Sessions, terminals, browsers
-// and the desktop panel carry no breadcrumb: the dockview tab already states
-// what they are, so a single-segment crumb would only echo the tab. A real path
-// is the one case with genuine hierarchy worth showing, since the tab shows just
-// the file's base name. Sized to the editor body (13px) so the header reads as
-// part of the code surface rather than looming above it.
 const props = defineProps<{
   path: string
 }>()
@@ -47,22 +47,18 @@ const { isDark } = storeToRefs(useSettingsStore())
 
 const pathSegments = computed(() => {
   const path = props.path || ''
-  // /data/ is the workspace mount root — strip it for a cleaner path.
   const display = path.startsWith('/data/') ? path.slice('/data/'.length) : path.replace(/^\//, '')
   return display.split('/').filter(Boolean)
 })
 
 const fileName = computed(() => pathSegments.value.at(-1) ?? '')
-
 const fileIcon = computed(() => resolveFileIcon(fileName.value, isDark.value))
 </script>
 
 <style scoped>
 .seti-icon {
   font-family: 'seti';
-  /* A hair over the 13px label text so the glyph reads as an icon, not a
-   * character — trimmed from 16px so the row stays compact. */
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1;
   font-style: normal;
   font-weight: normal;
