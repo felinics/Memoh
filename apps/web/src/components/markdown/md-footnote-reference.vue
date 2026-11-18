@@ -13,7 +13,7 @@ const props = defineProps<{
 }>()
 
 function scrollToDefinition() {
-  document.querySelector(`#fnref--${props.node.id}`)?.scrollIntoView({ behavior: 'smooth' })
+  document.getElementById(`fnref--${props.node.id}`)?.scrollIntoView({ behavior: 'smooth' })
 }
 </script>
 

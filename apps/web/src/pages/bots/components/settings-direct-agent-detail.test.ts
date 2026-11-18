@@ -4,13 +4,17 @@ import { createApp, h, ref, type App } from 'vue'
 const api = vi.hoisted(() => ({
   authorize: vi.fn(), poll: vi.fn(), cancel: vi.fn(), patch: vi.fn(),
   invalidate: vi.fn(), toastSuccess: vi.fn(), toastError: vi.fn(),
+  push: vi.fn(), routeParams: { botName: 'neko' as string | undefined },
 }))
 vi.mock('@memohai/sdk', () => ({
   postBotsByBotIdAgentsByIdLoginDeviceAuthorize: api.authorize, postBotsByBotIdAgentsByIdLoginDevicePoll: api.poll,
   postBotsByBotIdAgentsByIdLoginDeviceCancel: api.cancel, patchBotsByBotIdAgentsById: api.patch,
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: api.push }),
+  useRoute: () => ({ params: api.routeParams }),
+}))
 const runtimeAccount = ref<{ signed_in: boolean, email?: string } | undefined>()
 vi.mock('@pinia/colada', () => ({
   useQuery: (options: { key: () => string[] }) => ({ data: options.key()[0] === 'agent-account' ? runtimeAccount : ref(undefined), error: ref(null) }),
@@ -50,6 +54,8 @@ function mount(runtime: string, auth: string, connected = false, extra: Record<s
 }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks()
+  api.push.mockResolvedValue(undefined)
+  api.routeParams.botName = 'neko'
   runtimeAccount.value = { signed_in: false }
   api.authorize.mockResolvedValue({ data: login })
   api.poll.mockResolvedValue({ data: { status: 'pending' } })
@@ -93,4 +99,37 @@ it('takes the ChatGPT sign-in from Codex itself, not from a stored credential', 
   await vi.advanceTimersByTimeAsync(0)
   expect(panel()!.dataset.auth).toBe('chatgpt')
   expect(root.querySelector('[data-agent-quota]')).not.toBeNull()
+})
+
+it('routes missing dependency toast action to the apps tab using route botName slug', async () => {
+  api.authorize.mockRejectedValueOnce({ error: { code: 'agent_dependency_missing' } })
+  mount('codex', 'chatgpt', false, { dependency: { dependency_id: 'codex' } })
+  connect()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(api.toastError).toHaveBeenCalledOnce()
+
+  const options = api.toastError.mock.calls[0]![1] as { action: { onClick: () => void } }
+  options.action.onClick()
+  expect(api.push).toHaveBeenCalledWith({
+    name: 'bot-detail',
+    params: { botName: 'neko' },
+    query: { tab: 'apps', dependency_id: 'codex' },
+  })
+})
+
+it('falls back to botId when route botName param is empty', async () => {
+  api.routeParams.botName = '   '
+  api.authorize.mockRejectedValueOnce({ error: { code: 'agent_dependency_missing' } })
+  mount('codex', 'chatgpt', false, { dependency: { dependency_id: 'codex' } })
+  connect()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(api.toastError).toHaveBeenCalledOnce()
+
+  const options = api.toastError.mock.calls[0]![1] as { action: { onClick: () => void } }
+  options.action.onClick()
+  expect(api.push).toHaveBeenCalledWith({
+    name: 'bot-detail',
+    params: { botName: 'bot' },
+    query: { tab: 'apps', dependency_id: 'codex' },
+  })
 })

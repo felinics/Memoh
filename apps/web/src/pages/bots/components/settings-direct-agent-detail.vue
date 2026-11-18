@@ -138,7 +138,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Input,
@@ -198,6 +198,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ authorized: [] }>()
 const { t, te } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const queryCache = useQueryCache()
 
@@ -424,10 +425,11 @@ async function startDeviceLogin() {
         action: {
           label: t('chat.externalAgent.dependencyOpen'),
           onClick: () => {
+            const botName = (typeof route.params.botName === 'string' && route.params.botName.trim()) || props.botId
             void router.push({
               name: 'bot-detail',
-              params: { botName: props.botId },
-              query: { tab: 'dependencies', dependency_id: dependencyId },
+              params: { botName },
+              query: { tab: 'apps', ...(dependencyId ? { dependency_id: dependencyId } : {}) },
             }).catch(() => {})
           },
         },

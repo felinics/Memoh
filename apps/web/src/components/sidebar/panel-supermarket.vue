@@ -240,7 +240,7 @@ const appIconFrameClass = 'flex size-9.5 shrink-0 items-center justify-center ov
 
 const appRowClass = 'flex min-w-0 cursor-pointer items-start gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-3 py-2.5 transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-style: App cards reuse the schedule sidebar card surface (bordered in both modes — rationale in schedule-item.vue) and hover token while retaining their content layout. */
 
-const props = defineProps<{ botId: string, canManage: boolean }>()
+const props = defineProps<{ botId: string, botName?: string, canManage: boolean }>()
 const { t, locale } = useI18n()
 const { appDependencyIconUrl } = useWorkspaceDependencyText()
 const router = useRouter()
@@ -309,7 +309,8 @@ async function prepareInstall(app: HandlersSupermarketAppSummary) {
 }
 
 function openInstalled(app: HandlersAppItem) {
-  void router.push({ name: 'bot-detail', params: { botName: props.botId }, query: { tab: 'apps', app: appKey(app) } })
+  const botName = props.botName?.trim() || props.botId
+  void router.push({ name: 'bot-detail', params: { botName }, query: { tab: 'apps', app: appKey(app) } })
 }
 /** Preserve the selected bot when browsing an uninstalled App. */
 function openCatalog(app: HandlersSupermarketAppSummary) {

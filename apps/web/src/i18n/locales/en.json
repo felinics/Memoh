@@ -3856,6 +3856,8 @@
       "sortStatus": "By status",
       "sortNextRun": "By next run",
       "nextRun": "Next run {time}",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
       "execution": {
         "runsIn": "Runs in",
         "newSession": "A new session each run",

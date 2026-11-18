@@ -40,4 +40,33 @@ describe('speech model test', () => {
     expect(root.textContent).toContain('speech.test.failed')
     expect(root.textContent).not.toContain('10.0.0.7')
   })
+
+  it('awaits async onSave and blocks duplicate saves while pending', async () => {
+    let resolveSave!: () => void
+    const onSave = vi.fn().mockImplementation(() => new Promise<void>(resolve => { resolveSave = resolve }))
+    const root = document.createElement('div')
+    document.body.append(root)
+    app = createApp(ModelConfigEditor, {
+      modelId: 'm1',
+      config: { voice: 'alloy' },
+      schema: null,
+      onTest: async () => new Blob(),
+      onSave,
+    })
+    app.config.globalProperties.$t = (key: string) => key
+    app.mount(root)
+
+    const saveBtn = [...root.querySelectorAll('button')].find(b => b.textContent?.includes('provider.saveChanges'))!
+    const isBusy = () => saveBtn.classList.contains('pointer-events-none') || saveBtn.hasAttribute('data-loading')
+    saveBtn.click()
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    expect(isBusy()).toBe(true)
+
+    // Second click while save promise is still pending is ignored.
+    saveBtn.click()
+    expect(onSave).toHaveBeenCalledOnce()
+
+    resolveSave()
+    await vi.waitFor(() => expect(isBusy()).toBe(false))
+  })
 })

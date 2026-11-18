@@ -3856,6 +3856,8 @@
       "sortStatus": "按状态",
       "sortNextRun": "按下次触发",
       "nextRun": "下次运行 {time}",
+      "today": "今天",
+      "tomorrow": "明天",
       "execution": {
         "runsIn": "运行位置",
         "newSession": "每次运行新建会话",
