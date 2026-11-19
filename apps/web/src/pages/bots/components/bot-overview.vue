@@ -213,14 +213,15 @@
           >
             <Skeleton class="size-full rounded-md" />
           </div>
-          <!-- Inline style, not a Tailwind height class: vue-echarts puts an
-               inline height on its root, which beats a class and collapses the
-               canvas to 0. Mirrors the Usage page's `style="height:..."`. -->
-          <VChart
+          <DataChart
             v-else-if="hasUsage"
-            :option="dailyOption"
-            autoresize
-            style="height: 200px; width: 100%"
+            type="bar"
+            stacked
+            :categories="usageDays"
+            :series="dailyUsageSeries"
+            :height="200"
+            :x-axis-label-formatter="formatShortDay"
+            :value-formatter="formatNumber"
           />
           <div
             v-else
@@ -286,12 +287,6 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { BarChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
-import VChart from 'vue-echarts'
-import { useDark } from '@vueuse/core'
 import { Badge, Button, CalloutBanner, MetricReadout, PageShell, SettingsRow, SettingsSection, Skeleton } from '@felinic/ui'
 import {
   getBotsByBotIdSettings,
@@ -307,6 +302,7 @@ import { useBotChannels } from '@/composables/api/useBotChannels'
 import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import BotChecksPanel from './bot-checks-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
+import { DataChart } from '@/components/chart'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -314,8 +310,6 @@ import { canManageBotPermissions } from '@/utils/bot-permissions'
 import { resolveBotWorkspaceBackend, resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
 import { buildRuntimeMetricCards } from '@/utils/format-bytes'
 import { formatDateTime } from '@/utils/date-time'
-
-use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
 
 const route = useRoute()
 const router = useRouter()
@@ -625,65 +619,9 @@ const usageStats = computed(() => {
   ]
 })
 
-const isDark = useDark()
-
-// echarts paints on a <canvas> and can't read our CSS custom properties (the
-// tokens are oklch + nested vars), so resolve each design token to a concrete
-// color through a probe element, then rasterize it to a single pixel and read
-// the bytes back as rgb/rgba. The pixel round-trip matters: echarts' default
-// hover (emphasis) state runs the bar's fill through zrender's `liftColor`,
-// which only parses #hex/rgb/rgba/hsl — NOT oklch/color(). On Electron 34's
-// Chromium 132, `getComputedStyle(...).color` (and a canvas `fillStyle`
-// round-trip) keep CSS Color 4 values as `oklch(...)`, so liftColor returns
-// undefined and the hovered bar paints transparent — i.e. "the bar vanishes on
-// hover". Painting a pixel collapses any renderable color to concrete sRGB
-// bytes, so the value zrender sees is always parseable. `void isDark.value`
-// re-runs this when the theme flips so the chart tracks light/dark.
-const colorCanvas = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-
-function readColor(token: string, fallback: string): string {
-  const probe = document.createElement('span')
-  probe.style.color = `var(${token})`
-  probe.style.display = 'none'
-  document.body.appendChild(probe)
-  const resolved = getComputedStyle(probe).color
-  probe.remove()
-  if (!resolved) return fallback
-  if (!colorCanvas) return resolved
-  try {
-    colorCanvas.clearRect(0, 0, 1, 1)
-    colorCanvas.fillStyle = '#000'
-    colorCanvas.fillStyle = resolved
-    colorCanvas.fillRect(0, 0, 1, 1)
-    const [r = 0, g = 0, b = 0, a = 0] = colorCanvas.getImageData(0, 0, 1, 1).data
-    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
-  }
-  catch {
-    return fallback
-  }
-}
-
-const chartTheme = computed(() => {
-  void isDark.value
-  const fontFamily = getComputedStyle(document.body).fontFamily || 'inherit'
-  return {
-    // Black / white / grey only. `--primary` is a violet in this theme, so the
-    // bars use the neutral foreground (input) + muted-foreground (output); no
-    // brand or accent color anywhere in the chart.
-    bar: readColor('--foreground', '#18181b'),
-    barMuted: readColor('--muted-foreground', '#a1a1aa'),
-    text: readColor('--muted-foreground', '#a1a1aa'),
-    line: readColor('--border', '#e4e4e7'),
-    fontFamily,
-  }
-})
-
-const dailyOption = computed(() => {
+const dailyUsageSeries = computed(() => {
   const days = usageDays.value
   const maps = dayMaps.value
-  const c = chartTheme.value
-  const inputLabel = t('bots.overview.usageInput')
-  const outputLabel = t('bots.overview.usageOutput')
   const sumDay = (day: string, field: 'input_tokens' | 'output_tokens') => {
     let sum = 0
     for (const tp of ['chat', 'schedule'] as const) {
@@ -691,91 +629,15 @@ const dailyOption = computed(() => {
     }
     return sum
   }
-  return {
-    textStyle: { fontFamily: c.fontFamily },
-    // The tooltip is real DOM (not canvas), so its CSS references the SAME
-    // tokens as Popover/HoverCard directly — shell radius, the --border-menu
-    // hairline and --shadow-dropdown — for a pixel-identical surface. echarts'
-    // own background/border/padding are zeroed so they don't fight the token
-    // CSS. Body copy uses --text-body (the popover's own size/leading) + the
-    // page font. axisPointer is a soft solid hairline, not echarts' dashed line.
-    tooltip: {
-      trigger: 'axis' as const,
-      backgroundColor: 'transparent',
-      borderWidth: 0,
-      padding: 0,
-      extraCssText: [
-        'background: var(--popover)',
-        'color: var(--popover-foreground)',
-        'border: 1px solid var(--border-menu)',
-        'border-radius: var(--radius-menu-shell)',
-        'box-shadow: var(--shadow-dropdown)',
-        'padding: 12px 14px',
-        `font-family: ${c.fontFamily}`,
-      ].join('; '),
-      // `shadow`, NOT `line`: a 1px line pointer paints ON TOP of the bar, and a
-      // 30-day bar is only a few px wide, so the line fully covers the hovered
-      // bar — which reads as "the bar vanishes when I hover it". A shadow band
-      // paints a faint wash BEHIND the bars, so the hovered bar stays visible.
-      axisPointer: {
-        type: 'shadow' as const,
-        shadowStyle: { color: 'rgba(128, 128, 128, 0.12)' },
-      },
-      formatter: (params: { seriesName?: string, value?: number, color?: string, axisValueLabel?: string }[]) => {
-        const list = Array.isArray(params) ? params : [params]
-        const head = list[0]?.axisValueLabel ?? ''
-        const rows = list.map((p) => {
-          const val = formatNumber(typeof p.value === 'number' ? p.value : 0)
-          const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:9999px;margin-right:7px;background:${p.color ?? 'var(--muted-foreground)'};"></span>`
-          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:24px;line-height:1.7;">'
-            + `<span style="color:var(--muted-foreground);">${dot}${p.seriesName ?? ''}</span>`
-            + `<span style="color:var(--popover-foreground);font-weight:500;font-variant-numeric:tabular-nums;">${val}</span></div>`
-        }).join('')
-        return '<div style="font-size:var(--text-body);line-height:var(--text-body--line-height);letter-spacing:var(--text-body--letter-spacing);min-width:132px;">'
-          + `<div style="color:var(--muted-foreground);margin-bottom:3px;">${head}</div>${rows}</div>`
-      },
-    },
-    legend: {
-      data: [inputLabel, outputLabel],
-      bottom: 0,
-      itemGap: 16,
-      icon: 'roundRect',
-      itemWidth: 8,
-      itemHeight: 8,
-      textStyle: { color: c.text, fontFamily: c.fontFamily, fontSize: 11 },
-    },
-    grid: { left: 8, right: 8, top: 14, bottom: 40, containLabel: true },
-    xAxis: {
-      type: 'category' as const,
-      data: days,
-      axisTick: { show: false },
-      axisLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: (v: string) => v.slice(5) },
-    },
-    yAxis: {
-      type: 'value' as const,
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: (v: number) => formatNumber(v) },
-    },
-    series: [
-      {
-        name: inputLabel,
-        type: 'bar' as const,
-        stack: 'tokens',
-        itemStyle: { color: c.bar },
-        data: days.map((d) => sumDay(d, 'input_tokens')),
-      },
-      {
-        name: outputLabel,
-        type: 'bar' as const,
-        stack: 'tokens',
-        itemStyle: { color: c.barMuted, borderRadius: [3, 3, 0, 0] as [number, number, number, number] },
-        data: days.map((d) => sumDay(d, 'output_tokens')),
-      },
-    ],
-  }
+  return [
+    { name: t('bots.overview.usageInput'), data: days.map(d => sumDay(d, 'input_tokens')) },
+    { name: t('bots.overview.usageOutput'), data: days.map(d => sumDay(d, 'output_tokens')) },
+  ]
 })
+
+function formatShortDay(day: string): string {
+  return day.slice(5)
+}
 
 function go(tab: string, section?: string) {
   // One atomic navigation writing both tab and (optional) section: doing two
