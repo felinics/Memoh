@@ -1,27 +1,25 @@
 <template>
-  <div class="relative flex h-full w-full flex-col">
-    <div class="min-h-0 flex-1">
-      <KeepAlive>
-        <ChatPane
-          v-if="visible"
-          :key="`chat-pane:${currentBotId}:${tabId}`"
-          :tab-id="tabId"
-          :session-id="sessionId"
-          :visible="visible"
-          :active="focused"
-        />
-      </KeepAlive>
-    </div>
-  </div>
+  <KeepAlive>
+    <ChatPane
+      v-if="visible && effectiveBotId"
+      :key="`chat-pane:${effectiveBotId}:${tabId}`"
+      :bot-id="effectiveBotId"
+      :tab-id="tabId"
+      :session-id="sessionId"
+      :visible="visible"
+      :active="focused"
+    />
+  </KeepAlive>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/store/chat-list'
 import ChatPane from '../chat-pane.vue'
 
 const props = defineProps<{
+  botId?: string
   tabId: string
   sessionId: string | null
   visible: boolean
@@ -30,11 +28,11 @@ const props = defineProps<{
 
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
+const effectiveBotId = computed(() => (props.botId ?? currentBotId.value ?? '').trim())
 
 watch(
-  [currentBotId, () => props.sessionId, () => props.visible],
-  ([botId, sessionId, isVisible]) => {
-    const bid = botId?.trim() ?? ''
+  [effectiveBotId, () => props.sessionId, () => props.visible],
+  ([bid, sessionId, isVisible]) => {
     if (!bid) return
     chatStore.bindChatView(
       props.tabId,
@@ -57,5 +55,5 @@ watch(
   { immediate: true },
 )
 
-onBeforeUnmount(() => chatStore.unbindChatView(props.tabId))
+onBeforeUnmount(() => chatStore.unbindChatView(props.tabId, effectiveBotId.value || undefined))
 </script>

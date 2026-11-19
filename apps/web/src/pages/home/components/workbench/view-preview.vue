@@ -67,12 +67,14 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isContainerFileNotFound, useContainerTextFileQuery } from '@/components/file-manager/use-container-text-file'
 import { isMarkdownFile, isHtmlFile } from '@/components/file-manager/utils'
 import { useChatStore } from '@/store/chat-list'
+import { workbenchFileBaseName } from '@/workbench/titles'
 import WorkbenchBreadcrumb from './workbench-breadcrumb.vue'
 
 const MarkdownPreview = defineAsyncComponent(withStylesheetRecovery(() => import('@/components/markdown-preview/index.vue').then(m => m.default)))
 const HtmlPreview = defineAsyncComponent(withStylesheetRecovery(() => import('@/components/html-preview/index.vue').then(m => m.default)))
 
 const props = defineProps<{
+  botId?: string
   filePath: string
   visible: boolean
 }>()
@@ -80,18 +82,15 @@ const props = defineProps<{
 const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId, fsChangedAt } = storeToRefs(chatStore)
+const effectiveBotId = computed(() => (props.botId ?? currentBotId.value ?? '').trim())
 
-const filename = computed(() => {
-  const path = props.filePath
-  const idx = path.lastIndexOf('/')
-  return idx >= 0 ? path.slice(idx + 1) : path
-})
+const filename = computed(() => workbenchFileBaseName(props.filePath))
 const isMd = computed(() => isMarkdownFile(filename.value))
 const isHtml = computed(() => isHtmlFile(filename.value))
 const canPreview = computed(() => isMd.value || isHtml.value)
 
 const { data, error, isPending, refetch } = useContainerTextFileQuery(
-  () => currentBotId.value ?? '',
+  () => effectiveBotId.value,
   () => props.filePath,
   { visible: () => props.visible, enabled: canPreview },
 )
@@ -99,7 +98,8 @@ const { data, error, isPending, refetch } = useContainerTextFileQuery(
 const isDeletedError = computed(() => Boolean(error.value && isContainerFileNotFound(error.value)))
 
 watch(fsChangedAt, () => {
-  if (!props.visible || !canPreview.value || !currentBotId.value) return
+  if (!props.visible || !canPreview.value || !effectiveBotId.value) return
+  if (props.botId !== undefined && currentBotId.value?.trim() !== effectiveBotId.value) return
   if (!chatStore.affectsPath(props.filePath)) return
   void refetch()
 })

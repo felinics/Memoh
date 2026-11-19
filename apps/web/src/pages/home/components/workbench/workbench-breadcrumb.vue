@@ -23,12 +23,6 @@
         class="shrink-0"
       >{{ segment }}</span>
     </template>
-    <div
-      v-if="$slots.actions"
-      class="ml-auto flex shrink-0 items-center gap-1"
-    >
-      <slot name="actions" />
-    </div>
   </div>
 </template>
 

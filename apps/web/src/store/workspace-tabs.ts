@@ -9,6 +9,7 @@ import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { hasBotPermission, type BotPermission } from '@/utils/bot-permissions'
 import { parseBrowserAddress } from '@/utils/browser-address'
+import { cancelActiveWorkbenchDrag, startWorkbenchExternalPointerDrag } from '@/workbench/drag'
 import {
   clearTerminalSnapshots,
   clearTerminalSnapshotsForBot,
@@ -20,9 +21,9 @@ import {
   activateGroup as treeActivateGroup,
   activateTab as treeActivateTab,
   createEmptyWorkbenchState,
-  findAdjacentGroupId,
   findGroup,
   findGroupOfTab,
+  findRightNeighborOfSpatialFirst,
   findSpatialFirstGroupId,
   insertTab,
   keepOpenTab as treeKeepOpenTab,
@@ -35,34 +36,30 @@ import {
   setSplitRatio as treeSetSplitRatio,
   setTabPinned,
   splitGroupWithTab,
-  splitRootWithTab,
   updateTabTarget,
-  WORKBENCH_ROOT_DROP_ID,
 } from '@/workbench/tree'
-import { resolveWorkbenchTabTitle, workbenchFileBaseName } from '@/workbench/titles'
+import { resolveWorkbenchTabTitle } from '@/workbench/titles'
 import type {
   WorkbenchDropZone,
   WorkbenchSplitDirection,
   WorkbenchState,
   WorkbenchTab,
-  WorkbenchTabKind,
 } from '@/workbench/types'
 
 export type SidebarView = 'sessions' | 'files' | 'schedule' | 'supermarket'
-export type WorkspacePanelComponent = WorkbenchTabKind
 
-export const CHAT_PANEL_ID = 'chat'
 export const DISPLAY_PANEL_ID = 'display:1'
 
 const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
 const WORKBENCH_STORAGE_KEY = 'memoh:workbench:v1'
 const LEGACY_STORAGE_KEYS = ['workspace-tabs', 'workspace-panes', 'workspace-layout'] as const
+const CHAT_DRAFTS_STORAGE_KEY = 'chat-input-drafts'
 
 const ENTRY_OVERLAY = '[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"], [role="listbox"]'
 const ENTRY_OVERLAY_MAX_FRAMES = 120
 const ENTRY_FOCUS_RETURN_MAX_FRAMES = 6
 
-export interface BotWorkbenchRecord {
+interface BotWorkbenchRecord {
   workbench: WorkbenchState | null
   terminalCounter: number
   browserCounter: number
@@ -71,28 +68,66 @@ export interface BotWorkbenchRecord {
 }
 
 type WorkbenchStorageMap = Record<string, BotWorkbenchRecord>
+type NumberedTabKind = 'chat' | 'terminal' | 'browser' | 'schedule'
+
+const COUNTER_KEY: Record<NumberedTabKind, keyof Omit<BotWorkbenchRecord, 'workbench'>> = {
+  chat: 'chatCounter',
+  terminal: 'terminalCounter',
+  browser: 'browserCounter',
+  schedule: 'scheduleCounter',
+}
 
 function emptyBotRecord(): BotWorkbenchRecord {
-  return {
-    workbench: null,
-    terminalCounter: 0,
-    browserCounter: 0,
-    scheduleCounter: 0,
-    chatCounter: 0,
+  return { workbench: null, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 }
+}
+
+function safeCounter(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0
+}
+
+function numberedTabId(kind: NumberedTabKind, n: number): string {
+  return kind === 'schedule' ? `schedule:new:${n}` : `${kind}:${n}`
+}
+
+function maxCountersInState(state: WorkbenchState | null | undefined) {
+  const max = { chat: 0, terminal: 0, browser: 0, schedule: 0 }
+  const has = { terminal: false, browser: false }
+  if (!state || typeof state !== 'object' || !state.tabs || typeof state.tabs !== 'object') {
+    return { max, has }
   }
+  for (const tab of Object.values(state.tabs)) {
+    if (!tab || typeof tab !== 'object' || !tab.target || typeof tab.target !== 'object') continue
+    if (tab.target.kind === 'terminal') {
+      has.terminal = true
+      max.terminal = Math.max(max.terminal, safeCounter(tab.target.instance))
+    } else if (tab.target.kind === 'browser') {
+      has.browser = true
+      max.browser = Math.max(max.browser, safeCounter(tab.target.instance))
+    } else if (tab.target.kind === 'chat') {
+      const m = /^chat:(\d+)$/.exec(tab.id)
+      if (m) max.chat = Math.max(max.chat, safeCounter(Number(m[1])))
+    } else if (tab.target.kind === 'schedule' && !tab.target.scheduleId) {
+      const m = /^schedule:new:(\d+)$/.exec(tab.id)
+      if (m) max.schedule = Math.max(max.schedule, safeCounter(Number(m[1])))
+    }
+  }
+  return { max, has }
 }
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const selection = useChatSelectionStore()
   const { currentBotId } = storeToRefs(selection)
   const chatStore = useChatStore()
-  const currentBot = computed(() =>
-    chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null,
-  )
+  const currentBot = computed(() => chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null)
   const isMobile = useIsMobile()
 
   if (typeof localStorage !== 'undefined') {
+    const hasSessionWorkbench = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(WORKBENCH_STORAGE_KEY) !== null
+    const upgradingFromLegacyLayout = localStorage.getItem('workspace-layout') !== null
+      && localStorage.getItem(WORKBENCH_STORAGE_KEY) === null
+      && !hasSessionWorkbench
     for (const key of LEGACY_STORAGE_KEYS) localStorage.removeItem(key)
+    if (upgradingFromLegacyLayout) localStorage.removeItem(CHAT_DRAFTS_STORAGE_KEY)
   }
   if (typeof sessionStorage !== 'undefined') {
     for (const key of LEGACY_STORAGE_KEYS) sessionStorage.removeItem(key)
@@ -102,18 +137,24 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   const ready = ref(false)
   const workbench = shallowRef<WorkbenchState>(createEmptyWorkbenchState())
+  const loadedBotId = ref<string | null>(null)
   const panelDragging = ref(false)
   const fileDirty = ref<Record<string, boolean>>({})
-  const saveHandlers = new Map<string, () => Promise<boolean>>()
+  const saveHandlers = new Map<string, { botId: string, handler: () => Promise<boolean> }>()
   const closeQueue = ref<string[]>([])
 
-  let loadedBotId: string | null = null
   let suppressPersist = false
   // Set when restore ran while mobile so phone cold-starts never overwrite a desktop snapshot.
   let mobileColdStart = false
-  let draftChatQueued = false
+  let pendingDragPersist = false
   const deletedSessionIdsByBot = new Map<string, Set<string>>()
-  const chatActivationExplicitOverrides = new Map<string, boolean>()
+
+  /** Mounted + bot-aligned guard: prevents pre-flush cross-bot writes while watch(currentBotId) is pending. */
+  function activeBotId(): string | null {
+    if (!ready.value) return null
+    const bid = (currentBotId.value ?? '').trim()
+    return bid && loadedBotId.value === bid ? bid : null
+  }
 
   function ensureBotRecord(botId: string | null | undefined): BotWorkbenchRecord | null {
     const bid = (botId ?? '').trim()
@@ -124,13 +165,18 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       storage.value = { ...storage.value, [bid]: fresh }
       return fresh
     }
+    const { max } = maxCountersInState(existing.workbench)
+    const terminalCounter = Math.max(safeCounter(existing.terminalCounter), max.terminal)
+    const browserCounter = Math.max(safeCounter(existing.browserCounter), max.browser)
+    const scheduleCounter = Math.max(safeCounter(existing.scheduleCounter), max.schedule)
+    const chatCounter = Math.max(safeCounter(existing.chatCounter), max.chat)
     if (
-      typeof existing.terminalCounter !== 'number'
-      || typeof existing.browserCounter !== 'number'
-      || typeof existing.scheduleCounter !== 'number'
-      || typeof existing.chatCounter !== 'number'
+      terminalCounter !== existing.terminalCounter
+      || browserCounter !== existing.browserCounter
+      || scheduleCounter !== existing.scheduleCounter
+      || chatCounter !== existing.chatCounter
     ) {
-      const normalized = { ...emptyBotRecord(), ...existing }
+      const normalized = { ...emptyBotRecord(), ...existing, terminalCounter, browserCounter, scheduleCounter, chatCounter }
       storage.value = { ...storage.value, [bid]: normalized }
       return normalized
     }
@@ -143,45 +189,47 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     storage.value = { ...storage.value, [botId]: { ...record, ...patch } }
   }
 
+  function allocateTabNumber(bid: string, kind: NumberedTabKind, activeState: WorkbenchState = workbench.value): number {
+    const record = ensureBotRecord(bid) ?? emptyBotRecord()
+    const key = COUNTER_KEY[kind]
+    const active = maxCountersInState(activeState)
+    const stored = maxCountersInState(record.workbench)
+    const preserveMobileCounters = isMobile.value || mobileColdStart
+
+    let next: number
+    if ((kind === 'terminal' || kind === 'browser') && !active.has[kind] && !(preserveMobileCounters && stored.has[kind])) {
+      next = 1
+    } else {
+      next = Math.max(safeCounter(record[key]), active.max[kind], stored.max[kind]) + 1
+      while (activeState.tabs[numberedTabId(kind, next)] || record.workbench?.tabs?.[numberedTabId(kind, next)]) {
+        next += 1
+      }
+    }
+    const recorded = preserveMobileCounters ? Math.max(safeCounter(record[key]), next) : next
+    patchBotRecord(bid, { [key]: recorded })
+    return next
+  }
+
   const activeGroup = computed(() => {
     if (!ready.value) return null
     return findGroup(workbench.value.root, workbench.value.activeGroupId)
       ?? listGroups(workbench.value.root)[0]
       ?? null
   })
-
   const activeGroupId = computed<string | null>(() => activeGroup.value?.id ?? null)
-
-  const activeId = computed<string | null>(() => {
-    if (!ready.value) return null
-    return activeGroup.value?.activeTabId ?? null
-  })
-
-  const activeTab = computed<WorkbenchTab | null>(() => {
-    const id = activeId.value
-    return id ? workbench.value.tabs[id] ?? null : null
-  })
-
-  const spatialFirstGroupId = computed<string | null>(() => {
-    if (!ready.value) return null
-    return findSpatialFirstGroupId(workbench.value.root)
-  })
-
-  const activePanelIsChat = computed(() => {
-    const tab = activeTab.value
-    return !tab || tab.target.kind === 'chat'
-  })
-
-  let pendingDragPersist = false
+  const activeId = computed<string | null>(() => (ready.value ? activeGroup.value?.activeTabId ?? null : null))
+  const activeTab = computed<WorkbenchTab | null>(() => (activeId.value ? workbench.value.tabs[activeId.value] ?? null : null))
+  const spatialFirstGroupId = computed<string | null>(() => (ready.value ? findSpatialFirstGroupId(workbench.value.root) : null))
+  const activePanelIsChat = computed(() => !activeTab.value || activeTab.value.target.kind === 'chat')
 
   function persistWorkbench() {
-    if (!ready.value || suppressPersist || !loadedBotId || isMobile.value || mobileColdStart) return
+    if (!ready.value || suppressPersist || !loadedBotId.value || isMobile.value || mobileColdStart) return
     if (panelDragging.value) {
       pendingDragPersist = true
       return
     }
     pendingDragPersist = false
-    patchBotRecord(loadedBotId, { workbench: workbench.value })
+    patchBotRecord(loadedBotId.value, { workbench: workbench.value })
   }
 
   watch(panelDragging, (dragging) => {
@@ -191,35 +239,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
   })
 
-  function setNextChatActivationExplicit(panelId: string, explicitSelection: boolean) {
-    chatActivationExplicitOverrides.set(panelId, explicitSelection)
-  }
-
-  function consumeNextChatActivationExplicit(panelId: string): boolean | null {
-    if (!chatActivationExplicitOverrides.has(panelId)) return null
-    const explicitSelection = chatActivationExplicitOverrides.get(panelId) === true
-    chatActivationExplicitOverrides.delete(panelId)
-    return explicitSelection
-  }
-
   function selectChatSession(sid: string, explicitSelection: boolean) {
-    if (explicitSelection) {
-      void chatStore.selectSession(sid)
-    } else {
-      void chatStore.selectSession(sid, { explicitSelection: false })
-    }
+    void (explicitSelection
+      ? chatStore.selectSession(sid)
+      : chatStore.selectSession(sid, { explicitSelection: false }))
   }
 
   function tabSessionId(tab: WorkbenchTab | undefined | null): string | null {
     if (!tab || tab.target.kind !== 'chat') return null
-    const sid = tab.target.sessionId?.trim()
-    return sid || null
+    return tab.target.sessionId?.trim() || null
   }
 
   function chatTabForSession(sid: string, state: WorkbenchState = workbench.value): WorkbenchTab | undefined {
-    return Object.values(state.tabs).find(
-      tab => tab.target.kind === 'chat' && tabSessionId(tab) === sid,
-    )
+    return Object.values(state.tabs).find(tab => tab.target.kind === 'chat' && tabSessionId(tab) === sid)
   }
 
   function isDeletedSessionForCurrentBot(sid: string | null): boolean {
@@ -230,21 +262,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return Boolean(deletedSessionIdsByBot.get(bid)?.has(sid))
   }
 
-  function activateChatSession(tab: WorkbenchTab, options?: { explicitSelection?: boolean }) {
+  function activateChatSession(tab: WorkbenchTab, explicitOverride?: boolean) {
     if (suppressPersist || tab.target.kind !== 'chat') return
-    const deletedSid = tabSessionId(tab)
-    if (deletedSid && isDeletedSessionForCurrentBot(deletedSid)) return
-    chatStore.focusChatView(tab.id)
-    const explicitOverride = consumeNextChatActivationExplicit(tab.id)
     const sid = tabSessionId(tab)
+    if (sid && isDeletedSessionForCurrentBot(sid)) return
+    chatStore.focusChatView(tab.id)
     if (sid) {
-      const explicitSelection = options?.explicitSelection
-        ?? explicitOverride
-        ?? tab.target.explicitSelection
-      selectChatSession(sid, explicitSelection)
+      selectChatSession(sid, explicitOverride ?? tab.target.explicitSelection)
     } else {
-      const explicitSelection = options?.explicitSelection
-        ?? explicitOverride
+      const explicitSelection = explicitOverride
         ?? (chatStore.hasExplicitSessionSelection === true || tab.target.explicitSelection === true)
       chatStore.selectDraft({ explicitSelection })
     }
@@ -264,67 +290,81 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function activeTabOfState(state: WorkbenchState): WorkbenchTab | null {
     const group = findGroup(state.root, state.activeGroupId) ?? listGroups(state.root)[0]
-    const id = group?.activeTabId
-    return id ? state.tabs[id] ?? null : null
+    return group?.activeTabId ? state.tabs[group.activeTabId] ?? null : null
   }
 
-  /**
-   * Single state-commit funnel: reconciles removed-tab side effects, terminal cache
-   * cleanup, chat selection mirroring, empty-workspace draft refill, and persistence.
-   */
-  function commitWorkbench(nextState: WorkbenchState) {
+  function buildEmptyWorkspaceFallbackState(
+    baseState: WorkbenchState,
+    bid: string,
+    opts?: { forceDraft?: boolean },
+  ): { state: WorkbenchState, explicitSelection: boolean } {
+    const explicitSelection = opts?.forceDraft ? false : chatStore.hasExplicitSessionSelection === true
+    const sid = opts?.forceDraft ? '' : (chatStore.sessionId ?? '').trim()
+    const id = `chat:${allocateTabNumber(bid, 'chat', baseState)}`
+    const tab: WorkbenchTab = {
+      id,
+      pinned: false,
+      target: {
+        kind: 'chat',
+        sessionId: sid && explicitSelection && !isDeletedSessionForCurrentBot(sid) ? sid : null,
+        explicitSelection,
+      },
+    }
+    return {
+      explicitSelection,
+      state: insertTab(baseState, tab, {
+        preview: true,
+        activate: true,
+        canReplacePreview: tabId => !fileDirty.value[tabId],
+      }),
+    }
+  }
+
+  /** Single state-commit funnel: cleans removed tabs, atomically refills empty workspaces, syncs chat, and persists. */
+  function commitWorkbench(nextState: WorkbenchState, explicitOverride?: boolean) {
     const prevState = workbench.value
     if (nextState === prevState) return
 
     const prevActive = activeTabOfState(prevState)
-    const removedTabs: WorkbenchTab[] = []
-    for (const [id, tab] of Object.entries(prevState.tabs)) {
-      if (!nextState.tabs[id]) removedTabs.push(tab)
-    }
+    const removedTabs = Object.values(prevState.tabs).filter(tab => !nextState.tabs[tab.id])
 
-    workbench.value = nextState
-    const nextActive = activeTabOfState(nextState)
+    const bid = (loadedBotId.value ?? '').trim()
+    const shouldRefillEmpty = ready.value && !suppressPersist && Boolean(bid) && Object.keys(nextState.tabs).length === 0
+    const hadRemovedChat = removedTabs.some(t => t.target.kind === 'chat')
+    const refill = shouldRefillEmpty
+      ? buildEmptyWorkspaceFallbackState(nextState, bid, { forceDraft: hadRemovedChat })
+      : null
+    const committedState = refill ? refill.state : nextState
+
+    workbench.value = committedState
+    const nextActive = activeTabOfState(committedState)
 
     for (const removed of removedTabs) {
       cleanupPanelState(removed.id)
-      if (removed.target.kind === 'terminal' && loadedBotId) {
-        const bid = loadedBotId
-        void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(bid, removed.id)))
+      if (removed.target.kind === 'terminal' && loadedBotId.value) {
+        const removedBid = loadedBotId.value
+        void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(removedBid, removed.id)))
       }
     }
 
-    const hadRemovedChat = removedTabs.some(t => t.target.kind === 'chat')
-    if (hadRemovedChat) {
-      const anyChatRemaining = Object.values(nextState.tabs).some(t => t.target.kind === 'chat')
+    if (hadRemovedChat && !suppressPersist) {
+      const anyChatRemaining = Object.values(committedState.tabs).some(t => t.target.kind === 'chat')
       if (!anyChatRemaining) {
         chatStore.selectDraft({ explicitSelection: false })
-      } else if (!suppressPersist) {
+      } else if (!shouldRefillEmpty) {
         const sid = (chatStore.sessionId ?? '').trim()
         const closedSelectedSid = removedTabs.some(t => tabSessionId(t) === sid)
-        if (
-          sid
-          && closedSelectedSid
-          && !chatTabForSession(sid, nextState)
-          && (!nextActive || nextActive.target.kind !== 'chat')
-        ) {
-          chatStore.resetToEmptyComposer({
-            clearPendingExternalAgent: false,
-            explicitSelection: false,
-            draftIntent: false,
-          })
+        if (sid && closedSelectedSid && !chatTabForSession(sid, committedState) && (!nextActive || nextActive.target.kind !== 'chat')) {
+          chatStore.resetToEmptyComposer({ clearPendingExternalAgent: false, explicitSelection: false, draftIntent: false })
         }
       }
     }
 
     if (nextActive && nextActive.id !== prevActive?.id && nextActive.target.kind === 'chat') {
-      activateChatSession(nextActive)
+      activateChatSession(nextActive, refill ? refill.explicitSelection : explicitOverride)
     }
-
+    if (shouldRefillEmpty) focusChatInputAfterEntry()
     persistWorkbench()
-
-    if (Object.keys(nextState.tabs).length === 0) {
-      ensureDraftChatPanel()
-    }
   }
 
   function hasCurrentPermission(permission: BotPermission): boolean {
@@ -349,21 +389,49 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function pruneDisallowedTabs() {
-    if (!ready.value) return
-    const perms = currentBot.value?.current_user_permissions
-    if (!perms || perms.length === 0) return
+    if (!ready.value || !currentBot.value) return
     let next = workbench.value
     for (const tab of Object.values(next.tabs)) {
-      if (!isTabAllowed(tab)) {
-        next = removeTab(next, tab.id)
-      }
+      if (!isTabAllowed(tab)) next = removeTab(next, tab.id)
     }
-    commitWorkbench(next)
+    if (next !== workbench.value) commitWorkbench(next)
+  }
+
+  function clearRuntimeState(opts?: { clearLoadedBot?: boolean, clearMobileColdStart?: boolean, clearSaveHandlers?: boolean }) {
+    cancelActiveWorkbenchDrag()
+    panelDragging.value = false
+    pendingDragPersist = false
+    if (opts?.clearMobileColdStart) mobileColdStart = false
+    if (opts?.clearLoadedBot) loadedBotId.value = null
+    if (opts?.clearSaveHandlers) saveHandlers.clear()
+    if (!ready.value && !opts?.clearSaveHandlers) return
+    suppressPersist = true
+    try {
+      workbench.value = createEmptyWorkbenchState()
+      fileDirty.value = {}
+      closeQueue.value = []
+    } finally {
+      suppressPersist = false
+    }
+  }
+
+  function finalizeRestoredWorkbench(bid: string) {
+    if (Object.keys(workbench.value.tabs).length === 0) {
+      const fallback = buildEmptyWorkspaceFallbackState(workbench.value, bid)
+      commitWorkbench(fallback.state, fallback.explicitSelection)
+    } else {
+      persistWorkbench()
+    }
+    syncDraftChatExplicitSelection()
+    alignSelectionWithDock()
+    focusChatInputAfterEntry()
   }
 
   function restoreForBot(botId: string) {
     if (!ready.value) return
-    let emptyAfterRestore = false
+    cancelActiveWorkbenchDrag()
+    panelDragging.value = false
+    pendingDragPersist = false
     suppressPersist = true
     try {
       const stored = storage.value[botId]?.workbench ?? null
@@ -371,6 +439,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         const parsed = parseWorkbenchState(stored)
         if (parsed) {
           workbench.value = parsed
+          ensureBotRecord(botId)
         } else {
           workbench.value = createEmptyWorkbenchState()
           patchBotRecord(botId, { workbench: null })
@@ -378,20 +447,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       } else {
         workbench.value = createEmptyWorkbenchState()
       }
-      loadedBotId = botId
+      loadedBotId.value = botId
       mobileColdStart = isMobile.value
       fileDirty.value = {}
       closeQueue.value = []
       pruneDisallowedTabs()
-      emptyAfterRestore = Object.keys(workbench.value.tabs).length === 0
+      reconcileDeletedChatPanels()
     } finally {
       suppressPersist = false
     }
-    if (!emptyAfterRestore) persistWorkbench()
-    if (emptyAfterRestore) ensureDraftChatPanel()
-    syncDraftChatExplicitSelection()
-    alignSelectionWithDock()
-    focusChatInputAfterEntry()
+    finalizeRestoredWorkbench(botId)
   }
 
   function mountWorkspace() {
@@ -400,21 +465,17 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (bid) {
       ensureBotRecord(bid)
       restoreForBot(bid)
-      reconcileDeletedChatPanels()
     }
   }
 
   function unmountWorkspace() {
     ready.value = false
-    loadedBotId = null
-    panelDragging.value = false
-    draftChatQueued = false
-    workbench.value = createEmptyWorkbenchState()
+    clearRuntimeState({ clearLoadedBot: true, clearMobileColdStart: true, clearSaveHandlers: true })
   }
 
   // ---- Focus management ----------------------------------------------------
 
-  const pendingChatInputFocus = ref<{ panelId: string; botId: string; sessionId: string | null } | null>(null)
+  const pendingChatInputFocus = ref<{ panelId: string, botId: string, sessionId: string | null } | null>(null)
   watch([activeId, currentBotId, () => selection.sessionId], () => { pendingChatInputFocus.value = null }, { flush: 'sync' })
 
   function requestChatInputFocus() {
@@ -425,11 +486,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function requestActiveChatInputFocus() {
     const tab = activeTab.value
     if (!tab || tab.target.kind !== 'chat' || !currentBotId.value) return
-    pendingChatInputFocus.value = {
-      panelId: tab.id,
-      botId: currentBotId.value,
-      sessionId: tab.target.sessionId,
-    }
+    pendingChatInputFocus.value = { panelId: tab.id, botId: currentBotId.value, sessionId: tab.target.sessionId }
   }
 
   let entryFocusRun = 0
@@ -448,6 +505,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // ponytail: bounded RAF polling waits for Radix/Reka popovers to release focus (ceiling ~2s at 60Hz);
+  // upgrade path: subscribe to a global overlay-closed bus if popovers ever need deterministic handoff.
   function afterOverlayReleasesFocus(
     overlay: HTMLElement,
     run: number,
@@ -484,29 +543,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function focusAdjacentTab(direction: -1 | 1): boolean {
     if (!ready.value) return false
-    const group = activeGroup.value
-    if (!group || group.tabIds.length < 2) return false
-    const idx = group.tabIds.indexOf(group.activeTabId ?? '')
+    const ids = isMobile.value
+      ? listGroups(workbench.value.root).flatMap(g => g.tabIds)
+      : (activeGroup.value?.tabIds ?? [])
+    if (ids.length < 2) return false
+    const idx = ids.indexOf((isMobile.value ? activeId.value : activeGroup.value?.activeTabId) ?? '')
     if (idx < 0) return false
-    const nextId = group.tabIds[(idx + direction + group.tabIds.length) % group.tabIds.length]
-    if (!nextId) return false
-    activateTab(nextId)
+    activateTab(ids[(idx + direction + ids.length) % ids.length]!)
     return true
-  }
-
-  function isPreviewTab(tabId: string): boolean {
-    const group = findGroupOfTab(workbench.value.root, tabId)
-    return group?.previewTabId === tabId
   }
 
   function keepOpenTab(tabId: string) {
     if (!ready.value) return
     commitWorkbench(treeKeepOpenTab(workbench.value, tabId))
-  }
-
-  // Retained method name for callers that promote a preview tab on first edit/send.
-  function pinPanel(tabId: string) {
-    keepOpenTab(tabId)
   }
 
   function pinTab(tabId: string) {
@@ -517,13 +566,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function unpinTab(tabId: string) {
     if (!ready.value) return
     commitWorkbench(setTabPinned(workbench.value, tabId, false))
-  }
-
-  function togglePinTab(tabId: string) {
-    if (!ready.value) return
-    const tab = workbench.value.tabs[tabId]
-    if (!tab) return
-    commitWorkbench(setTabPinned(workbench.value, tabId, !tab.pinned))
   }
 
   function setSplitRatio(splitId: string, ratio: number) {
@@ -542,58 +584,47 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     commitWorkbench(moveTabToGroup(workbench.value, tabId, targetGroupId, effectiveZone, insertIndex))
   }
 
+  function placeDroppedTab(tab: WorkbenchTab, targetGroupId: string, zone: WorkbenchDropZone, insertIndex?: number) {
+    if (zone !== 'center') {
+      commitWorkbench(splitGroupWithTab(workbench.value, targetGroupId, zone, tab, { preview: false, activate: true }))
+    } else {
+      let next = insertTab(workbench.value, tab, { groupId: targetGroupId, preview: false, activate: true })
+      if (typeof insertIndex === 'number') next = reorderTabInGroup(next, targetGroupId, tab.id, insertIndex)
+      commitWorkbench(next)
+    }
+  }
+
   function dropExternalItem(
     item: { kind: 'session', sessionId: string, title?: string } | { kind: 'file', filePath: string },
     targetGroupId: string,
     zone: WorkbenchDropZone,
     insertIndex?: number,
   ) {
-    if (!ready.value) return
+    const bid = activeBotId()
+    if (!bid) return
     const effectiveZone: WorkbenchDropZone = isMobile.value && zone !== 'center' ? 'center' : zone
 
     if (item.kind === 'session') {
       const sid = item.sessionId.trim()
-      const bid = (currentBotId.value ?? '').trim()
-      if (!sid || !bid || isDeletedSessionForCurrentBot(sid)) return
+      if (!sid || isDeletedSessionForCurrentBot(sid)) return
       focusChatInputAfterEntry()
-
       const existing = chatTabForSession(sid)
       if (existing && existing.target.kind === 'chat') {
-        const fallbackTitle = item.title?.trim() || undefined
-        let next = updateTabTarget(workbench.value, existing.id, t => t.kind === 'chat'
-          ? { ...t, explicitSelection: true, fallbackTitle: fallbackTitle ?? t.fallbackTitle }
-          : t)
-        next = treeKeepOpenTab(next, existing.id)
-        setNextChatActivationExplicit(existing.id, true)
-        next = moveTabToGroup(next, existing.id, targetGroupId, effectiveZone, insertIndex)
-        commitWorkbench(next)
-        selectChatSession(sid, true)
+        focusExistingSessionTab(existing, sid, {
+          fallbackTitle: item.title?.trim() || undefined,
+          explicitSelection: true,
+          keepOpen: true,
+          moveTo: { targetGroupId, zone: effectiveZone, insertIndex },
+        })
         return
       }
-
-      const id = nextChatPanelId(bid)
-      const tab: WorkbenchTab = {
-        id,
-        pinned: false,
-        target: {
-          kind: 'chat',
-          sessionId: sid,
-          explicitSelection: true,
-          fallbackTitle: item.title?.trim() || undefined,
-        },
-      }
-      setNextChatActivationExplicit(id, true)
-      if (targetGroupId === WORKBENCH_ROOT_DROP_ID && effectiveZone !== 'center') {
-        commitWorkbench(splitRootWithTab(workbench.value, effectiveZone, tab, { preview: false, activate: true }))
-      } else if (effectiveZone !== 'center') {
-        commitWorkbench(splitGroupWithTab(workbench.value, targetGroupId, effectiveZone, tab, { preview: false, activate: true }))
-      } else {
-        let next = insertTab(workbench.value, tab, { groupId: targetGroupId, preview: false, activate: true }).state
-        if (typeof insertIndex === 'number') {
-          next = reorderTabInGroup(next, targetGroupId, id, insertIndex)
-        }
-        commitWorkbench(next)
-      }
+      const id = `chat:${allocateTabNumber(bid, 'chat')}`
+      placeDroppedTab(
+        { id, pinned: false, target: { kind: 'chat', sessionId: sid, explicitSelection: true, fallbackTitle: item.title?.trim() || undefined } },
+        targetGroupId,
+        effectiveZone,
+        insertIndex,
+      )
       return
     }
 
@@ -604,86 +635,94 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (workbench.value.tabs[id]) {
       let next = treeKeepOpenTab(workbench.value, id)
       next = moveTabToGroup(next, id, targetGroupId, effectiveZone, insertIndex)
+      next = treeActivateTab(next, id)
       commitWorkbench(next)
       return
     }
+    placeDroppedTab({ id, pinned: false, target: { kind: 'file', filePath: path } }, targetGroupId, effectiveZone, insertIndex)
+  }
 
-    const tab: WorkbenchTab = { id, pinned: false, target: { kind: 'file', filePath: path } }
-    if (targetGroupId === WORKBENCH_ROOT_DROP_ID && effectiveZone !== 'center') {
-      commitWorkbench(splitRootWithTab(workbench.value, effectiveZone, tab, { preview: false, activate: true }))
-    } else if (effectiveZone !== 'center') {
-      commitWorkbench(splitGroupWithTab(workbench.value, targetGroupId, effectiveZone, tab, { preview: false, activate: true }))
-    } else {
-      let next = insertTab(workbench.value, tab, { groupId: targetGroupId, preview: false, activate: true }).state
-      if (typeof insertIndex === 'number') {
-        next = reorderTabInGroup(next, targetGroupId, id, insertIndex)
-      }
-      commitWorkbench(next)
-    }
+  function startExternalDrag(
+    event: PointerEvent,
+    item: { kind: 'session', sessionId: string, title?: string } | { kind: 'file', filePath: string },
+    title: string,
+  ) {
+    if (isMobile.value || !ready.value) return
+    startWorkbenchExternalPointerDrag({
+      event,
+      getTitle: () => title,
+      isMobile: () => isMobile.value,
+      getGroupTabIds: gid => findGroup(workbench.value.root, gid)?.tabIds ?? [],
+      isTabPinned: tid => Boolean(workbench.value.tabs[tid]?.pinned),
+      onDragStateChange: (dragging) => { panelDragging.value = dragging },
+      onCommitDrop: (targetGid, zone, idx) => dropExternalItem(item, targetGid, zone, idx),
+    })
   }
 
   function resolveTabTitle(tabId: string): string {
     const tab = workbench.value.tabs[tabId]
-    if (!tab) return tabId
-    return resolveWorkbenchTabTitle(tab.target, chatStore)
+    return tab ? resolveWorkbenchTabTitle(tab.target, chatStore) : tabId
   }
-
-  const ephemeralPanels = computed<Record<string, true>>(() => {
-    const out: Record<string, true> = {}
-    for (const g of listGroups(workbench.value.root)) {
-      if (g.previewTabId) out[g.previewTabId] = true
-    }
-    return out
-  })
 
   // ---- Chat & Session operations -------------------------------------------
 
-  function nextChatPanelId(bid: string): string {
-    const record = ensureBotRecord(bid)
-    const next = (record?.chatCounter ?? 0) + 1
-    patchBotRecord(bid, { chatCounter: next })
-    return `chat:${next}`
-  }
-
-  function openEphemeralTab(
+  function openTab(
     tab: WorkbenchTab,
-    opts?: { groupId?: string, activate?: boolean },
+    opts?: { preview?: boolean, groupId?: string, activate?: boolean, explicitOverride?: boolean },
   ): boolean {
-    if (!ready.value) return false
-    const existing = workbench.value.tabs[tab.id]
-    if (existing) {
-      if (opts?.activate !== false) activateTab(existing.id)
+    if (!activeBotId()) return false
+    const preview = opts?.preview ?? false
+    const activate = opts?.activate !== false
+    if (workbench.value.tabs[tab.id]) {
+      let next = preview ? workbench.value : treeKeepOpenTab(workbench.value, tab.id)
+      if (activate) next = treeActivateTab(next, tab.id)
+      commitWorkbench(next, opts?.explicitOverride)
       return true
     }
-    const { state } = insertTab(workbench.value, tab, {
+    const next = insertTab(workbench.value, tab, {
       groupId: opts?.groupId,
-      preview: true,
+      preview,
       activate: opts?.activate,
-      canReplacePreview: id => !fileDirty.value[id],
+      canReplacePreview: preview ? id => !fileDirty.value[id] : undefined,
     })
-    commitWorkbench(state)
+    commitWorkbench(next, opts?.explicitOverride)
     return true
   }
 
-  function openRegularTab(
-    tab: WorkbenchTab,
-    opts?: { groupId?: string, activate?: boolean },
-  ): boolean {
-    if (!ready.value) return false
-    const existing = workbench.value.tabs[tab.id]
-    if (existing) {
-      let next = treeKeepOpenTab(workbench.value, existing.id)
-      if (opts?.activate !== false) next = treeActivateTab(next, existing.id)
-      commitWorkbench(next)
-      return true
+  function focusExistingSessionTab(
+    existing: WorkbenchTab,
+    sid: string,
+    opts: {
+      fallbackTitle?: string
+      explicitSelection: boolean
+      keepOpen?: boolean
+      activate?: boolean
+      replaceTarget?: boolean
+      moveTo?: { targetGroupId: string, zone: WorkbenchDropZone, insertIndex?: number }
+    },
+  ) {
+    const activate = opts.activate !== false
+    const wasAlreadyActive = activeId.value === existing.id
+    let next = updateTabTarget(workbench.value, existing.id, t => t.kind === 'chat'
+      ? {
+          kind: 'chat',
+          sessionId: sid,
+          explicitSelection: opts.explicitSelection,
+          fallbackTitle: opts.replaceTarget ? opts.fallbackTitle : (opts.fallbackTitle ?? t.fallbackTitle),
+        }
+      : t)
+    if (opts.keepOpen) next = treeKeepOpenTab(next, existing.id)
+    if (opts.moveTo) {
+      next = moveTabToGroup(next, existing.id, opts.moveTo.targetGroupId, opts.moveTo.zone, opts.moveTo.insertIndex)
     }
-    const { state } = insertTab(workbench.value, tab, {
-      groupId: opts?.groupId,
-      preview: false,
-      activate: opts?.activate,
-    })
-    commitWorkbench(state)
-    return true
+    if (activate) {
+      next = treeActivateTab(next, existing.id)
+    }
+    commitWorkbench(next, opts.explicitSelection)
+    if (activate && wasAlreadyActive) {
+      chatStore.focusChatView(existing.id)
+      selectChatSession(sid, opts.explicitSelection)
+    }
   }
 
   function openSessionChat(opts: {
@@ -694,11 +733,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     groupLocal?: boolean
     activate?: boolean
   }) {
-    if (!ready.value) return
+    const bid = activeBotId()
     const sid = opts.sessionId.trim()
-    if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid || isDeletedSessionForCurrentBot(sid)) return
+    if (!bid || !sid || isDeletedSessionForCurrentBot(sid)) return
 
     const fallbackTitle = opts.title?.trim() || undefined
     const explicitSelection = opts.explicitSelection !== false
@@ -712,63 +749,27 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       : chatTabForSession(sid)
 
     if (existing && existing.target.kind === 'chat') {
-      let next = updateTabTarget(workbench.value, existing.id, t => t.kind === 'chat'
-        ? { ...t, explicitSelection, fallbackTitle: fallbackTitle ?? t.fallbackTitle }
-        : t)
-      if (!activate) {
-        commitWorkbench(next)
-        return
-      }
-      if (activeId.value === existing.id) {
-        commitWorkbench(next)
-        selectChatSession(sid, explicitSelection)
-        return
-      }
-      setNextChatActivationExplicit(existing.id, explicitSelection)
-      next = treeActivateTab(next, existing.id)
-      commitWorkbench(next)
+      focusExistingSessionTab(existing, sid, { fallbackTitle, explicitSelection, activate })
       return
     }
 
-    const targetGroup = findGroup(workbench.value.root, opts.groupId) ?? activeGroup.value
-    const reusableId = targetGroup?.previewTabId ?? null
-    const reusableTab = reusableId ? workbench.value.tabs[reusableId] : undefined
-    if (
-      reusableTab
-      && reusableTab.target.kind === 'chat'
-      && !isDeletedSessionForCurrentBot(tabSessionId(reusableTab))
-    ) {
-      let next = updateTabTarget(workbench.value, reusableTab.id, () => ({
-        kind: 'chat',
-        sessionId: sid,
-        explicitSelection,
-        fallbackTitle,
-      }))
-      if (!activate) {
-        commitWorkbench(next)
-        return
-      }
-      const wasAlreadyActive = activeId.value === reusableTab.id
-      setNextChatActivationExplicit(reusableTab.id, explicitSelection)
-      next = treeActivateTab(next, reusableTab.id)
-      commitWorkbench(next)
-      if (wasAlreadyActive) {
-        consumeNextChatActivationExplicit(reusableTab.id)
-        chatStore.focusChatView(reusableTab.id)
-        selectChatSession(sid, explicitSelection)
-      }
+    const explicitGroup = opts.groupId ? findGroup(workbench.value.root, opts.groupId) : undefined
+    const targetGroup = explicitGroup
+      ?? (isMobile.value
+        ? (activeGroup.value?.tabIds.some(id => workbench.value.tabs[id]?.target.kind === 'chat')
+            ? activeGroup.value
+            : listGroups(workbench.value.root).find(g => g.tabIds.some(id => workbench.value.tabs[id]?.target.kind === 'chat')) ?? activeGroup.value)
+        : activeGroup.value)
+    const reusableTab = targetGroup?.previewTabId ? workbench.value.tabs[targetGroup.previewTabId] : undefined
+    if (reusableTab && reusableTab.target.kind === 'chat' && !isDeletedSessionForCurrentBot(tabSessionId(reusableTab))) {
+      focusExistingSessionTab(reusableTab, sid, { fallbackTitle, explicitSelection, activate, replaceTarget: true })
       return
     }
 
-    const id = nextChatPanelId(bid)
-    if (activate) setNextChatActivationExplicit(id, explicitSelection)
-    openEphemeralTab(
-      {
-        id,
-        pinned: false,
-        target: { kind: 'chat', sessionId: sid, explicitSelection, fallbackTitle },
-      },
-      { groupId: opts.groupId, activate },
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: sid, explicitSelection, fallbackTitle } },
+      { preview: true, groupId: opts.groupId ?? targetGroup?.id, activate, explicitOverride: explicitSelection },
     )
   }
 
@@ -796,114 +797,77 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function openSessionChatPinned(opts: { sessionId: string, title?: string, groupId?: string }) {
-    if (!ready.value) return
+    const bid = activeBotId()
     const sid = opts.sessionId.trim()
-    if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid || isDeletedSessionForCurrentBot(sid)) return
+    if (!bid || !sid || isDeletedSessionForCurrentBot(sid)) return
     const fallbackTitle = opts.title?.trim() || undefined
     focusChatInputAfterEntry()
 
     const existing = chatTabForSession(sid)
     if (existing) {
-      let next = updateTabTarget(workbench.value, existing.id, t => t.kind === 'chat'
-        ? { ...t, fallbackTitle: fallbackTitle ?? t.fallbackTitle }
-        : t)
-      next = treeKeepOpenTab(next, existing.id)
-      next = treeActivateTab(next, existing.id)
-      commitWorkbench(next)
+      focusExistingSessionTab(existing, sid, { fallbackTitle, explicitSelection: true, keepOpen: true })
       return
     }
-
-    const id = nextChatPanelId(bid)
-    openRegularTab(
-      {
-        id,
-        pinned: false,
-        target: { kind: 'chat', sessionId: sid, explicitSelection: true, fallbackTitle },
-      },
-      { groupId: opts.groupId, activate: true },
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: sid, explicitSelection: true, fallbackTitle } },
+      { groupId: opts.groupId, activate: true, explicitOverride: true },
     )
   }
 
   function openSubagentSession(opts: { sessionId: string, title?: string }) {
-    if (!ready.value) return
+    const bid = activeBotId()
     const sid = opts.sessionId.trim()
-    if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid || isDeletedSessionForCurrentBot(sid)) return
+    if (!bid || !sid || isDeletedSessionForCurrentBot(sid)) return
     const fallbackTitle = opts.title?.trim() || undefined
 
     const existing = chatTabForSession(sid)
     if (existing) {
-      let next = updateTabTarget(workbench.value, existing.id, t => t.kind === 'chat'
-        ? { ...t, fallbackTitle: fallbackTitle ?? t.fallbackTitle }
-        : t)
-      next = treeKeepOpenTab(next, existing.id)
-      next = treeActivateTab(next, existing.id)
-      commitWorkbench(next)
+      focusExistingSessionTab(existing, sid, { fallbackTitle, explicitSelection: true, keepOpen: true })
       return
     }
-
-    if (isMobile.value) {
-      openSessionChatPinned({ sessionId: sid, title: opts.title })
-      return
-    }
-
     const primaryGroupId = findSpatialFirstGroupId(workbench.value.root)
     const primaryGroup = findGroup(workbench.value.root, primaryGroupId)
-    if (!primaryGroup || primaryGroup.tabIds.length === 0) {
+    if (isMobile.value || !primaryGroup || primaryGroup.tabIds.length === 0) {
       openSessionChatPinned({ sessionId: sid, title: opts.title })
       return
     }
-
-    const id = nextChatPanelId(bid)
-    const tab: WorkbenchTab = {
-      id,
-      pinned: false,
-      target: { kind: 'chat', sessionId: sid, explicitSelection: true, fallbackTitle },
-    }
-    const rightNeighborId = findAdjacentGroupId(workbench.value.root, primaryGroupId, 'right')
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    const tab: WorkbenchTab = { id, pinned: false, target: { kind: 'chat', sessionId: sid, explicitSelection: true, fallbackTitle } }
+    const rightNeighborId = findRightNeighborOfSpatialFirst(workbench.value.root)
     if (rightNeighborId) {
-      openRegularTab(tab, { groupId: rightNeighborId, activate: true })
+      openTab(tab, { groupId: rightNeighborId, activate: true, explicitOverride: true })
     } else {
-      commitWorkbench(splitGroupWithTab(workbench.value, primaryGroupId, 'right', tab, { preview: false, activate: true }))
+      commitWorkbench(splitGroupWithTab(workbench.value, primaryGroupId, 'right', tab, { preview: false, activate: true }), true)
     }
   }
 
   function openDraftChat(opts?: { title?: string, groupId?: string, explicitSelection?: boolean }) {
-    if (!ready.value) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = activeBotId()
     if (!bid) return
     focusChatInputAfterEntry()
 
     const candidateIds = opts?.groupId
-      ? findGroup(workbench.value.root, opts.groupId)?.tabIds ?? []
+      ? (findGroup(workbench.value.root, opts.groupId)?.tabIds ?? [])
       : Object.keys(workbench.value.tabs)
     const existingDraft = candidateIds
       .map(id => workbench.value.tabs[id])
       .find((t): t is WorkbenchTab => Boolean(t && t.target.kind === 'chat' && tabSessionId(t) === null))
 
+    const explicitSelection = opts?.explicitSelection === true
     if (existingDraft) {
-      const explicitSelection = opts?.explicitSelection === true
       if (activeId.value !== existingDraft.id) {
-        setNextChatActivationExplicit(existingDraft.id, explicitSelection)
-        activateTab(existingDraft.id)
+        commitWorkbench(treeActivateTab(workbench.value, existingDraft.id), explicitSelection)
+      } else {
+        chatStore.selectDraft({ explicitSelection })
       }
-      chatStore.selectDraft({ explicitSelection })
       return
     }
 
-    const id = nextChatPanelId(bid)
-    const explicitSelection = opts?.explicitSelection === true
-    setNextChatActivationExplicit(id, explicitSelection)
-    openEphemeralTab(
-      {
-        id,
-        pinned: false,
-        target: { kind: 'chat', sessionId: null, explicitSelection },
-      },
-      { groupId: opts?.groupId, activate: true },
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: null, explicitSelection } },
+      { preview: true, groupId: opts?.groupId, activate: true, explicitOverride: explicitSelection },
     )
   }
 
@@ -917,11 +881,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!active) return
     if (active.target.kind !== 'chat') {
       if (sid && !chatTabForSession(sid)) {
-        chatStore.resetToEmptyComposer({
-          clearPendingExternalAgent: false,
-          explicitSelection: false,
-          draftIntent: false,
-        })
+        chatStore.resetToEmptyComposer({ clearPendingExternalAgent: false, explicitSelection: false, draftIntent: false })
       }
       return
     }
@@ -929,30 +889,18 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     chatStore.focusChatView(active.id)
     const activeSid = tabSessionId(active)
     if (activeSid) {
-      if (activeSid === sid) return
-      selectChatSession(activeSid, false)
+      if (activeSid !== sid) selectChatSession(activeSid, false)
       return
     }
 
-    if (
-      sid
-      && explicitSelection
-      && !isDeletedSessionForCurrentBot(sid)
-      && !chatTabForSession(sid)
-    ) {
-      commitWorkbench(updateTabTarget(workbench.value, active.id, () => ({
-        kind: 'chat',
-        sessionId: sid,
-        explicitSelection,
-      })))
+    if (sid && explicitSelection && !isDeletedSessionForCurrentBot(sid) && !chatTabForSession(sid)) {
+      commitWorkbench(updateTabTarget(workbench.value, active.id, () => ({ kind: 'chat', sessionId: sid, explicitSelection })))
       selectChatSession(sid, explicitSelection)
       return
     }
 
     if (active.target.explicitSelection !== explicitSelection) {
-      commitWorkbench(updateTabTarget(workbench.value, active.id, t => t.kind === 'chat'
-        ? { ...t, explicitSelection }
-        : t))
+      commitWorkbench(updateTabTarget(workbench.value, active.id, t => (t.kind === 'chat' ? { ...t, explicitSelection } : t)))
     }
     chatStore.selectDraft({ explicitSelection })
   }
@@ -963,16 +911,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const active = activeTab.value
     if (!active || active.target.kind !== 'chat' || tabSessionId(active) !== null) return
     if (active.target.explicitSelection === explicitSelection) return
-    commitWorkbench(updateTabTarget(workbench.value, active.id, t => t.kind === 'chat'
-      ? { ...t, explicitSelection }
-      : t))
+    commitWorkbench(updateTabTarget(workbench.value, active.id, t => (t.kind === 'chat' ? { ...t, explicitSelection } : t)))
   }
 
   function reconcileDeletedChatPanels(targetBotId?: string | null) {
     if (!ready.value) return
-    const bid = (targetBotId ?? loadedBotId ?? currentBotId.value ?? '').trim()
-    if (!bid) return
-    if (!targetBotId && loadedBotId && loadedBotId !== bid) return
+    const bid = (targetBotId ?? loadedBotId.value ?? currentBotId.value ?? '').trim()
+    if (!bid || !loadedBotId.value || loadedBotId.value !== bid) return
     const deletedSessionIds = deletedSessionIdsByBot.get(bid)
     if (!deletedSessionIds || deletedSessionIds.size === 0) return
 
@@ -988,52 +933,26 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
       if (resetComposerScope && resetComposerScope === `${bid}:${tab.id}`) {
         const explicitSelection = chatStore.hasExplicitSessionSelection === true
-        next = updateTabTarget(next, tab.id, () => ({
-          kind: 'chat',
-          sessionId: null,
-          explicitSelection,
-        }))
+        next = updateTabTarget(next, tab.id, () => ({ kind: 'chat', sessionId: null, explicitSelection }))
         const owner = findGroupOfTab(next.root, tab.id)
         if (owner && !owner.previewTabId && !next.tabs[tab.id]?.pinned) {
           next = markPreviewTab(next, tab.id)
         }
-        if (activeTabOfState(next)?.id === tab.id) {
-          resetActiveToDraft = true
-        }
+        if (activeTabOfState(next)?.id === tab.id) resetActiveToDraft = true
         continue
       }
       next = removeTab(next, tab.id)
     }
 
     commitWorkbench(next)
-    if (resetActiveToDraft) {
+    if (resetActiveToDraft && !suppressPersist) {
       chatStore.selectDraft({ explicitSelection: chatStore.hasExplicitSessionSelection === true })
     }
   }
 
-  function ensureDraftChatPanel() {
-    if (!ready.value || suppressPersist || draftChatQueued) return
-    if (Object.keys(workbench.value.tabs).length > 0) return
-    if (!(currentBotId.value ?? '').trim()) return
-
-    draftChatQueued = true
-    void nextTick(() => {
-      draftChatQueued = false
-      if (!ready.value || suppressPersist || Object.keys(workbench.value.tabs).length > 0) return
-      if (!(currentBotId.value ?? '').trim()) return
-      const sid = (chatStore.sessionId ?? '').trim()
-      const explicitSelection = chatStore.hasExplicitSessionSelection === true
-      if (sid && explicitSelection && !isDeletedSessionForCurrentBot(sid)) {
-        openSessionChat({ sessionId: sid, explicitSelection })
-      } else {
-        openDraftChat({ explicitSelection })
-      }
-    })
-  }
-
   function activateChatPanel() {
-    const bid = (currentBotId.value ?? '').trim()
-    if (!ready.value || !bid || loadedBotId !== bid) return
+    const bid = activeBotId()
+    if (!bid) return
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
     const sid = (selection.sessionId ?? '').trim()
     if (sid && !isDeletedSessionForCurrentBot(sid)) {
@@ -1052,44 +971,31 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       activateTab(anyChat.id)
       return
     }
-    const id = nextChatPanelId(bid)
-    setNextChatActivationExplicit(id, explicitSelection)
-    openRegularTab({
-      id,
-      pinned: false,
-      target: { kind: 'chat', sessionId: null, explicitSelection },
-    })
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: null, explicitSelection } },
+      { explicitOverride: explicitSelection },
+    )
   }
 
   // ---- File, Preview, Asset, Terminal, Browser, Display, Schedule ----------
 
   function openFile(filePath: string): boolean {
-    if (!hasCurrentPermission('workspace_read') || !ready.value) return false
+    if (!hasCurrentPermission('workspace_read')) return false
     const path = (filePath ?? '').trim()
     if (!path) return false
-    return openEphemeralTab({
-      id: `file:${path}`,
-      pinned: false,
-      target: { kind: 'file', filePath: path },
-    })
+    return openTab({ id: `file:${path}`, pinned: false, target: { kind: 'file', filePath: path } }, { preview: true })
   }
 
   function openFilePinned(filePath: string, groupId?: string) {
-    if (!hasCurrentPermission('workspace_read') || !ready.value) return
+    if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
     if (!path) return
-    openRegularTab(
-      {
-        id: `file:${path}`,
-        pinned: false,
-        target: { kind: 'file', filePath: path },
-      },
-      { groupId, activate: true },
-    )
+    openTab({ id: `file:${path}`, pinned: false, target: { kind: 'file', filePath: path } }, { groupId, activate: true })
   }
 
   function openFileToSide(filePath: string, groupId?: string) {
-    if (!hasCurrentPermission('workspace_read') || !ready.value) return
+    if (!hasCurrentPermission('workspace_read') || !activeBotId()) return
     const path = (filePath ?? '').trim()
     if (!path) return
     if (isMobile.value) {
@@ -1098,15 +1004,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
     const id = `file:${path}`
     const anchor = findGroup(workbench.value.root, groupId) ?? activeGroup.value ?? listGroups(workbench.value.root)[0]!
-    const existing = workbench.value.tabs[id]
-    if (existing) {
+    if (workbench.value.tabs[id]) {
       let next = treeKeepOpenTab(workbench.value, id)
       const owner = findGroupOfTab(next.root, id)
-      if (owner && owner.tabIds.length > 1) {
-        next = moveTabToGroup(next, id, anchor.id, 'right')
-      } else {
-        next = treeActivateTab(next, id)
-      }
+      next = owner && owner.tabIds.length > 1
+        ? moveTabToGroup(next, id, anchor.id, 'right')
+        : treeActivateTab(next, id)
       commitWorkbench(next)
       return
     }
@@ -1119,8 +1022,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     ))
   }
 
-  function openPreview(filePath: string, _title?: string, groupId?: string) {
-    if (!hasCurrentPermission('workspace_read') || !ready.value) return
+  function openPreview(filePath: string, groupId?: string) {
+    if (!hasCurrentPermission('workspace_read') || !activeBotId()) return
     const path = (filePath ?? '').trim()
     if (!path) return
     const id = `preview:${path}`
@@ -1129,54 +1032,36 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       return
     }
     const existingEphemeralPreview = listGroups(workbench.value.root)
-      .map(g => g.previewTabId ? { group: g, tab: workbench.value.tabs[g.previewTabId] } : null)
+      .map(g => (g.previewTabId ? { group: g, tab: workbench.value.tabs[g.previewTabId] } : null))
       .find(item => item?.tab?.target.kind === 'preview')
-
-    const tab: WorkbenchTab = {
-      id,
-      pinned: false,
-      target: { kind: 'preview', filePath: path },
-    }
+    const tab: WorkbenchTab = { id, pinned: false, target: { kind: 'preview', filePath: path } }
     if (existingEphemeralPreview) {
-      openEphemeralTab(tab, { groupId: existingEphemeralPreview.group.id, activate: true })
+      openTab(tab, { preview: true, groupId: existingEphemeralPreview.group.id, activate: true })
       return
     }
     if (isMobile.value) {
-      openEphemeralTab(tab, { groupId, activate: true })
+      openTab(tab, { preview: true, groupId, activate: true })
       return
     }
-    const anchorId = groupId || activeGroup.value?.id
-    commitWorkbench(splitGroupWithTab(workbench.value, anchorId, 'right', tab, { preview: true, activate: true }))
+    commitWorkbench(splitGroupWithTab(workbench.value, groupId || activeGroup.value?.id, 'right', tab, { preview: true, activate: true }))
   }
 
   function openAsset(args: OpenAssetPreviewArgs) {
-    if (!ready.value) return
     const key = (args.key ?? '').trim()
     if (!key) return
-    openEphemeralTab({
-      id: `asset:${key}`,
-      pinned: false,
-      target: {
-        kind: 'asset',
-        assetKey: key,
-        name: args.name || 'file',
-        botId: args.botId,
-        contentHash: args.contentHash,
-        src: args.src,
+    openTab(
+      {
+        id: `asset:${key}`,
+        pinned: false,
+        target: { kind: 'asset', assetKey: key, name: args.name || 'file', botId: args.botId, contentHash: args.contentHash, src: args.src },
       },
-    })
-  }
-
-  function nextTabNumber(kind: 'terminal' | 'browser', counter: number): number {
-    const anyOpen = Object.values(workbench.value.tabs).some(t => t.target.kind === kind)
-    return anyOpen ? counter + 1 : 1
+      { preview: true },
+    )
   }
 
   function openTerminal(groupId?: string) {
-    if (!hasCurrentPermission('workspace_exec') || !ready.value) return
-    const bid = (currentBotId.value ?? '').trim()
-    const record = ensureBotRecord(bid)
-    if (!record) return
+    const bid = activeBotId()
+    if (!bid || !hasCurrentPermission('workspace_exec')) return
     if (isMobile.value) {
       const existing = Object.values(workbench.value.tabs).find(t => t.target.kind === 'terminal')
       if (existing) {
@@ -1184,36 +1069,22 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return
       }
     }
-    const next = nextTabNumber('terminal', record.terminalCounter)
-    patchBotRecord(bid, { terminalCounter: next })
-    openRegularTab(
-      {
-        id: `terminal:${next}`,
-        pinned: false,
-        target: { kind: 'terminal', instance: next },
-      },
-      { groupId, activate: true },
-    )
+    const next = allocateTabNumber(bid, 'terminal')
+    openTab({ id: `terminal:${next}`, pinned: false, target: { kind: 'terminal', instance: next } }, { groupId, activate: true })
   }
 
   function addBrowserPanel(address: string, customTitle: boolean, groupId?: string): boolean {
-    const bid = (currentBotId.value ?? '').trim()
-    const record = ensureBotRecord(bid)
-    if (!record || !ready.value) return false
-    const next = nextTabNumber('browser', record.browserCounter)
-    patchBotRecord(bid, { browserCounter: next })
-    return openRegularTab(
-      {
-        id: `browser:${next}`,
-        pinned: false,
-        target: { kind: 'browser', instance: next, address, customTitle },
-      },
+    const bid = activeBotId()
+    if (!bid) return false
+    const next = allocateTabNumber(bid, 'browser')
+    return openTab(
+      { id: `browser:${next}`, pinned: false, target: { kind: 'browser', instance: next, address, customTitle } },
       { groupId, activate: true },
     )
   }
 
   function openBrowser(groupId?: string) {
-    if (!hasCurrentPermission('manage') || !ready.value) return
+    if (!hasCurrentPermission('manage') || !activeBotId()) return
     if (isMobile.value) {
       const existing = Object.values(workbench.value.tabs).find(t => t.target.kind === 'browser')
       if (existing) {
@@ -1225,7 +1096,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function openBrowserAt(address: string, groupId?: string): boolean {
-    if (!hasCurrentPermission('manage') || !ready.value) return false
+    if (!hasCurrentPermission('manage') || !activeBotId()) return false
     let target: string
     try {
       target = parseBrowserAddress(address).display
@@ -1248,173 +1119,96 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function openDisplay(groupId?: string) {
-    if (!hasCurrentPermission('manage') || !ready.value) return
+    if (!hasCurrentPermission('manage') || !activeBotId()) return
     const existing = Object.values(workbench.value.tabs).filter(t => t.target.kind === 'display')
     if (existing.length > 0) {
       let next = treeActivateTab(workbench.value, existing[0]!.id)
-      for (const extra of existing.slice(1)) {
-        next = removeTab(next, extra.id)
-      }
+      for (const extra of existing.slice(1)) next = removeTab(next, extra.id)
       commitWorkbench(next)
       return
     }
-    openRegularTab(
-      {
-        id: DISPLAY_PANEL_ID,
-        pinned: false,
-        target: { kind: 'display' },
-      },
-      { groupId, activate: true },
-    )
+    openTab({ id: DISPLAY_PANEL_ID, pinned: false, target: { kind: 'display' } }, { groupId, activate: true })
   }
 
   function openSchedule(scheduleId?: string, title?: string, groupId?: string) {
-    if (!hasCurrentPermission('manage') || !ready.value) return
-    const bid = (currentBotId.value ?? '').trim()
-    const record = ensureBotRecord(bid)
-    if (!record) return
+    const bid = activeBotId()
+    if (!bid || !hasCurrentPermission('manage')) return
     const customTitle = title?.trim() || undefined
-    const panelId = scheduleId
-      ? `schedule:${scheduleId}`
-      : `schedule:new:${record.scheduleCounter + 1}`
-
-    if (workbench.value.tabs[panelId]) {
-      let next = updateTabTarget(workbench.value, panelId, t => t.kind === 'schedule'
-        ? { ...t, customTitle: customTitle ?? t.customTitle }
-        : t)
-      next = treeActivateTab(next, panelId)
-      commitWorkbench(next)
+    if (scheduleId) {
+      const panelId = `schedule:${scheduleId}`
+      if (workbench.value.tabs[panelId]) {
+        let next = updateTabTarget(workbench.value, panelId, t => (t.kind === 'schedule' ? { ...t, customTitle: customTitle ?? t.customTitle } : t))
+        next = treeActivateTab(next, panelId)
+        commitWorkbench(next)
+        return
+      }
+      openTab({ id: panelId, pinned: false, target: { kind: 'schedule', scheduleId, customTitle } }, { groupId, activate: true })
       return
     }
-
-    if (!scheduleId) {
-      patchBotRecord(bid, { scheduleCounter: record.scheduleCounter + 1 })
-    }
-    openRegularTab(
-      {
-        id: panelId,
-        pinned: false,
-        target: { kind: 'schedule', scheduleId, customTitle },
-      },
-      { groupId, activate: true },
-    )
+    const panelId = `schedule:new:${allocateTabNumber(bid, 'schedule')}`
+    openTab({ id: panelId, pinned: false, target: { kind: 'schedule', scheduleId: undefined, customTitle } }, { groupId, activate: true })
   }
 
   function uniqueSplitPanelId(baseId: string): string {
-    if (!workbench.value.tabs[baseId]) return baseId
+    const record = loadedBotId.value ? storage.value[loadedBotId.value] : undefined
+    const exists = (id: string) => Boolean(workbench.value.tabs[id] || record?.workbench?.tabs?.[id])
+    if (!exists(baseId)) return baseId
     let n = 2
-    while (workbench.value.tabs[`${baseId}~${n}`]) n += 1
+    while (exists(`${baseId}~${n}`)) n += 1
     return `${baseId}~${n}`
   }
 
   function splitGroup(groupId: string, direction: 'right' | 'below') {
-    if (!ready.value) return
+    const bid = activeBotId()
+    if (!bid) return
     const group = findGroup(workbench.value.root, groupId)
-    const sourceId = group?.activeTabId
-    const source = sourceId ? workbench.value.tabs[sourceId] : null
+    const source = group?.activeTabId ? workbench.value.tabs[group.activeTabId] : null
     if (!group || !source) return
 
     const splitDir: WorkbenchSplitDirection = direction === 'right' ? 'right' : 'bottom'
-
-    const placeCopy = (copy: WorkbenchTab, preview = false) => {
+    const placeCopy = (copy: WorkbenchTab, preview = false, explicitOverride?: boolean) => {
       if (isMobile.value) {
-        const { state } = insertTab(workbench.value, copy, {
-          groupId: group.id,
-          preview,
-          activate: true,
-          canReplacePreview: id => !fileDirty.value[id],
-        })
-        commitWorkbench(state)
+        commitWorkbench(
+          insertTab(workbench.value, copy, {
+            groupId: group.id,
+            preview,
+            activate: true,
+            canReplacePreview: id => !fileDirty.value[id],
+          }),
+          explicitOverride,
+        )
       } else {
-        commitWorkbench(splitGroupWithTab(workbench.value, group.id, splitDir, copy, { preview, activate: true }))
+        commitWorkbench(splitGroupWithTab(workbench.value, group.id, splitDir, copy, { preview, activate: true }), explicitOverride)
       }
     }
 
     switch (source.target.kind) {
       case 'chat': {
-        const bid = (currentBotId.value ?? '').trim()
-        if (!bid) return
-        const id = nextChatPanelId(bid)
-        const explicitSelection = source.target.explicitSelection
-        setNextChatActivationExplicit(id, explicitSelection)
-        placeCopy(
-          {
-            id,
-            pinned: false,
-            target: {
-              kind: 'chat',
-              sessionId: source.target.sessionId,
-              explicitSelection,
-              fallbackTitle: source.target.fallbackTitle,
-            },
-          },
-          true,
-        )
+        const id = `chat:${allocateTabNumber(bid, 'chat')}`
+        placeCopy({ id, pinned: false, target: { ...source.target } }, true, source.target.explicitSelection)
         return
       }
       case 'terminal': {
         if (!hasCurrentPermission('workspace_exec')) return
-        const bid = (currentBotId.value ?? '').trim()
-        const record = ensureBotRecord(bid)
-        if (!record) return
-        const next = nextTabNumber('terminal', record.terminalCounter)
-        patchBotRecord(bid, { terminalCounter: next })
-        placeCopy({
-          id: `terminal:${next}`,
-          pinned: false,
-          target: { kind: 'terminal', instance: next },
-        })
+        const next = allocateTabNumber(bid, 'terminal')
+        placeCopy({ id: `terminal:${next}`, pinned: false, target: { kind: 'terminal', instance: next } })
         return
       }
       case 'browser': {
         if (!hasCurrentPermission('manage')) return
-        const bid = (currentBotId.value ?? '').trim()
-        const record = ensureBotRecord(bid)
-        if (!record) return
-        const next = nextTabNumber('browser', record.browserCounter)
-        patchBotRecord(bid, { browserCounter: next })
-        placeCopy({
-          id: `browser:${next}`,
-          pinned: false,
-          target: {
-            kind: 'browser',
-            instance: next,
-            address: source.target.address,
-            customTitle: source.target.customTitle,
-          },
-        })
+        const next = allocateTabNumber(bid, 'browser')
+        placeCopy({ id: `browser:${next}`, pinned: false, target: { ...source.target, instance: next } })
         return
       }
-      case 'display': {
-        if (!hasCurrentPermission('manage')) return
-        openDisplay(group.id)
+      case 'display':
+        if (hasCurrentPermission('manage')) openDisplay(group.id)
         return
-      }
       case 'file':
-      case 'preview': {
-        if (!hasCurrentPermission('workspace_read')) return
-        placeCopy({
-          id: uniqueSplitPanelId(source.id),
-          pinned: false,
-          target: { ...source.target },
-        })
-        return
-      }
-      case 'schedule': {
-        if (!hasCurrentPermission('manage')) return
-        placeCopy({
-          id: uniqueSplitPanelId(source.id),
-          pinned: false,
-          target: { ...source.target },
-        })
-        return
-      }
+      case 'preview':
+      case 'schedule':
       case 'asset': {
-        placeCopy({
-          id: uniqueSplitPanelId(source.id),
-          pinned: false,
-          target: { ...source.target },
-        })
+        if (!isTabAllowed(source)) return
+        placeCopy({ id: uniqueSplitPanelId(source.id), pinned: false, target: { ...source.target } })
       }
     }
   }
@@ -1423,10 +1217,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!ready.value || typeof title !== 'string') return
     const normalized = title.trim()
     if (!normalized) return
-    commitWorkbench(updateTabTarget(workbench.value, panelId, (t) => {
-      if (t.kind !== 'terminal' || t.shellTitle === normalized) return t
-      return { ...t, shellTitle: normalized }
-    }))
+    commitWorkbench(updateTabTarget(workbench.value, panelId, t => (
+      t.kind === 'terminal' && t.shellTitle !== normalized ? { ...t, shellTitle: normalized } : t
+    )))
   }
 
   function updateBrowserAddress(panelId: string, address: string) {
@@ -1434,28 +1227,23 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     commitWorkbench(updateTabTarget(workbench.value, panelId, (t) => {
       if (t.kind !== 'browser') return t
       const customTitle = address ? true : t.customTitle
-      if (t.address === address && t.customTitle === customTitle) return t
-      return { ...t, address, customTitle }
+      return t.address === address && t.customTitle === customTitle ? t : { ...t, address, customTitle }
     }))
   }
 
   function updateScheduleTitle(panelId: string, title: string) {
     if (!ready.value) return
-    const normalized = title.trim()
-    commitWorkbench(updateTabTarget(workbench.value, panelId, (t) => {
-      if (t.kind !== 'schedule') return t
-      const nextCustom = normalized || undefined
-      if (t.customTitle === nextCustom) return t
-      return { ...t, customTitle: nextCustom }
-    }))
+    const nextCustom = title.trim() || undefined
+    commitWorkbench(updateTabTarget(workbench.value, panelId, t => (
+      t.kind === 'schedule' && t.customTitle !== nextCustom ? { ...t, customTitle: nextCustom } : t
+    )))
   }
 
   // ---- Close & Unsaved-file confirmation queue -----------------------------
 
-  function shouldKeepLastDraftChat(id: string): boolean {
-    const ids = Object.keys(workbench.value.tabs)
-    if (ids.length !== 1) return false
-    const tab = workbench.value.tabs[id]
+  function shouldKeepLastDraftChat(id: string, state: WorkbenchState = workbench.value): boolean {
+    const ids = Object.keys(state.tabs)
+    const tab = ids.length === 1 ? state.tabs[id] : undefined
     return Boolean(tab && tab.target.kind === 'chat' && tabSessionId(tab) === null)
   }
 
@@ -1464,41 +1252,31 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     commitWorkbench(removeTab(workbench.value, id))
   }
 
-  function setFileDirty(panelId: string, dirty: boolean) {
+  function setFileDirty(panelId: string, dirty: boolean, botId?: string) {
+    const ownerBot = botId?.trim()
+    if (ownerBot && ownerBot !== loadedBotId.value) return
     if (Boolean(fileDirty.value[panelId]) === dirty) return
     const next = { ...fileDirty.value }
     if (dirty) next[panelId] = true
     else delete next[panelId]
     fileDirty.value = next
-    if (dirty && ready.value) {
-      keepOpenTab(panelId)
-    }
+    if (dirty && ready.value) keepOpenTab(panelId)
   }
 
-  function registerFileSaveHandler(panelId: string, handler: () => Promise<boolean>) {
-    saveHandlers.set(panelId, handler)
+  function registerFileSaveHandler(panelId: string, handler: () => Promise<boolean>, botId?: string) {
+    saveHandlers.set(panelId, { botId: (botId ?? loadedBotId.value ?? '').trim(), handler })
   }
 
-  function unregisterFileSaveHandler(panelId: string) {
-    saveHandlers.delete(panelId)
+  function unregisterFileSaveHandler(panelId: string, handler?: () => Promise<boolean>) {
+    const current = saveHandlers.get(panelId)
+    if (current && (!handler || current.handler === handler)) saveHandlers.delete(panelId)
   }
 
-  const dirtyFileCount = computed(
-    () => Object.values(fileDirty.value).filter(Boolean).length,
-  )
-
-  function tabDialogLabel(id: string): string {
-    const tab = workbench.value.tabs[id]
-    if (!tab) return id
-    if (tab.target.kind === 'file' || tab.target.kind === 'preview') {
-      return workbenchFileBaseName(tab.target.filePath)
-    }
-    return resolveTabTitle(id)
-  }
+  const dirtyFileCount = computed(() => Object.values(fileDirty.value).filter(Boolean).length)
 
   const pendingClose = computed<{ panelId: string, title: string } | null>(() => {
     const id = closeQueue.value[0]
-    return id ? { panelId: id, title: tabDialogLabel(id) } : null
+    return id ? { panelId: id, title: resolveTabTitle(id) } : null
   })
 
   function requestCloseTab(id: string) {
@@ -1507,54 +1285,45 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       closeTab(id)
       return
     }
-    if (!closeQueue.value.includes(id)) {
-      closeQueue.value = [...closeQueue.value, id]
-    }
+    if (!closeQueue.value.includes(id)) closeQueue.value = [...closeQueue.value, id]
   }
 
   function requestCloseTabs(ids: string[]) {
     if (!ready.value) return
-    const queued = [...closeQueue.value]
+    const toQueue: string[] = []
     let next = workbench.value
     for (const id of ids) {
       if (!next.tabs[id]) continue
       if (fileDirty.value[id]) {
-        if (!queued.includes(id)) queued.push(id)
-      } else {
-        const remainingIds = Object.keys(next.tabs)
-        const soleDraft = remainingIds.length === 1
-          && next.tabs[id]?.target.kind === 'chat'
-          && tabSessionId(next.tabs[id]) === null
-        if (!soleDraft) {
-          next = removeTab(next, id)
-        }
+        if (!toQueue.includes(id)) toQueue.push(id)
+      } else if (!shouldKeepLastDraftChat(id, next)) {
+        next = removeTab(next, id)
       }
     }
     commitWorkbench(next)
-    closeQueue.value = queued
+    if (toQueue.length > 0) {
+      const merged = [...closeQueue.value]
+      for (const id of toQueue) {
+        if (workbench.value.tabs[id] && !merged.includes(id)) merged.push(id)
+      }
+      closeQueue.value = merged
+    }
   }
 
   function closeOtherTabs(groupId: string, keepTabId: string) {
     const group = findGroup(workbench.value.root, groupId)
-    if (!group) return
-    const targets = group.tabIds.filter(id => id !== keepTabId && !workbench.value.tabs[id]?.pinned)
-    requestCloseTabs(targets)
+    if (group) requestCloseTabs(group.tabIds.filter(id => id !== keepTabId && !workbench.value.tabs[id]?.pinned))
   }
 
   function closeTabsToRight(groupId: string, fromTabId: string) {
     const group = findGroup(workbench.value.root, groupId)
-    if (!group) return
-    const idx = group.tabIds.indexOf(fromTabId)
-    if (idx < 0) return
-    const targets = group.tabIds.slice(idx + 1).filter(id => !workbench.value.tabs[id]?.pinned)
-    requestCloseTabs(targets)
+    const idx = group ? group.tabIds.indexOf(fromTabId) : -1
+    if (group && idx >= 0) requestCloseTabs(group.tabIds.slice(idx + 1).filter(id => !workbench.value.tabs[id]?.pinned))
   }
 
   function closeAllTabsInGroup(groupId: string) {
     const group = findGroup(workbench.value.root, groupId)
-    if (!group) return
-    const targets = group.tabIds.filter(id => !workbench.value.tabs[id]?.pinned)
-    requestCloseTabs(targets)
+    if (group) requestCloseTabs(group.tabIds.filter(id => !workbench.value.tabs[id]?.pinned))
   }
 
   async function resolvePendingClose(action: 'save' | 'discard' | 'cancel') {
@@ -1565,8 +1334,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       return
     }
     if (action === 'save') {
-      const handler = saveHandlers.get(id)
-      const ok = handler ? await handler() : true
+      const botAtStart = loadedBotId.value
+      const entry = saveHandlers.get(id)
+      if (entry && entry.botId && botAtStart && entry.botId !== botAtStart) {
+        closeQueue.value = closeQueue.value.filter(q => q !== id)
+        return
+      }
+      const ok = entry ? await entry.handler() : true
+      if (!ready.value || loadedBotId.value !== botAtStart || closeQueue.value[0] !== id) return
       if (ok) closeTab(id)
     } else {
       closeTab(id)
@@ -1577,34 +1352,28 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // ---- Sidebar & shell preferences -----------------------------------------
 
   const sidebarView = useLocalStorage<SidebarView>('workspace-sidebar-view', 'sessions')
-  const sidebarOpen = useLocalStorage('workspace-sidebar-open', true)
   const sidebarWidth = useLocalStorage('workspace-sidebar-width', 256)
   const workbenchOpen = useLocalStorage('workspace-workbench-open', true)
   const mobileNavOpen = ref(false)
+  const pendingFilesPath = ref<string | null>(null)
 
   function openMobileNav() { mobileNavOpen.value = true }
   function closeMobileNav() { mobileNavOpen.value = false }
-  function setWorkbench(open: boolean) { workbenchOpen.value = open }
+  function toggleWorkbench() { workbenchOpen.value = !workbenchOpen.value }
 
   function selectSidebarView(view: SidebarView) {
     if (view === 'files' && !hasCurrentPermission('workspace_read')) return
     sidebarView.value = view
-    sidebarOpen.value = true
-    setWorkbench(true)
+    workbenchOpen.value = true
   }
 
-  function toggleWorkbench() { setWorkbench(!workbenchOpen.value) }
-  function showWorkbench() { setWorkbench(true) }
-  function hideWorkbench() { setWorkbench(false) }
-
-  const pendingFilesPath = ref<string | null>(null)
   function openFilesAt(path: string) {
     if (!hasCurrentPermission('workspace_read')) return
-    setWorkbench(true)
+    workbenchOpen.value = true
     sidebarView.value = 'files'
-    sidebarOpen.value = true
     pendingFilesPath.value = (path ?? '').trim() || null
   }
+
   function consumePendingFilesPath(): string | null {
     const path = pendingFilesPath.value
     pendingFilesPath.value = null
@@ -1619,33 +1388,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const next = { ...storage.value }
     delete next[bid]
     storage.value = next
-    if (loadedBotId === bid && ready.value) {
-      suppressPersist = true
-      try {
-        workbench.value = createEmptyWorkbenchState()
-        fileDirty.value = {}
-        closeQueue.value = []
-      } finally {
-        suppressPersist = false
-      }
-    }
+    if (loadedBotId.value === bid && ready.value) clearRuntimeState()
     void nextTick(() => clearTerminalSnapshotsForBot(bid))
   }
 
   function resetAll() {
     storage.value = {}
     pendingFilesPath.value = null
-    if (ready.value) {
-      suppressPersist = true
-      try {
-        workbench.value = createEmptyWorkbenchState()
-        fileDirty.value = {}
-        closeQueue.value = []
-      } finally {
-        suppressPersist = false
-      }
-    }
-    loadedBotId = null
+    clearRuntimeState({ clearLoadedBot: true, clearMobileColdStart: true })
     void nextTick(() => clearTerminalSnapshots())
   }
 
@@ -1654,20 +1404,64 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(currentBotId, (bid) => {
     const next = (bid ?? '').trim()
     if (!next) {
-      loadedBotId = null
+      clearRuntimeState({ clearLoadedBot: true, clearMobileColdStart: true })
       return
     }
     ensureBotRecord(next)
-    if (ready.value && loadedBotId !== next) {
+    if (ready.value && loadedBotId.value !== next) {
       restoreForBot(next)
-      reconcileDeletedChatPanels()
     }
   }, { immediate: true })
 
+  // ponytail: mobile cold-start avoids overwriting persisted desktop splits by staying in-memory until widen,
+  // then appending non-duplicate mobile-opened tabs onto the saved desktop snapshot. Upgrade path: split mobile
+  // vs desktop storage keys if users ever want independent phone layouts persisted across reloads.
   watch(isMobile, (mobile) => {
-    if (!mobile) {
-      mobileNavOpen.value = false
+    if (mobile) return
+    mobileNavOpen.value = false
+    if (!mobileColdStart) {
+      persistWorkbench()
+      return
     }
+    mobileColdStart = false
+    const bid = loadedBotId.value
+    if (!ready.value || !bid) return
+    const parsed = parseWorkbenchState(storage.value[bid]?.workbench ?? null)
+    if (!parsed) {
+      persistWorkbench()
+      return
+    }
+    const currentTabs = Object.values(workbench.value.tabs)
+    const isPureColdStartDraft = currentTabs.length === 1 && currentTabs[0]?.target.kind === 'chat' && tabSessionId(currentTabs[0]) === null
+    let merged = parsed
+    let preferredActiveTabId: string | null = null
+    if (!isPureColdStartDraft) {
+      const currentActiveId = activeId.value
+      for (const tab of currentTabs) {
+        if (tab.target.kind === 'chat' && tabSessionId(tab) === null) continue
+        const existingMatch = merged.tabs[tab.id]
+          ?? (tab.target.kind === 'chat' && tabSessionId(tab) ? chatTabForSession(tabSessionId(tab)!, merged) : undefined)
+          ?? (tab.target.kind === 'display' ? Object.values(merged.tabs).find(t => t.target.kind === 'display') : undefined)
+        if (existingMatch) {
+          if (currentActiveId === tab.id) preferredActiveTabId = existingMatch.id
+          continue
+        }
+        merged = insertTab(merged, tab, { preview: false, activate: currentActiveId === tab.id })
+        if (currentActiveId === tab.id) preferredActiveTabId = tab.id
+      }
+      if (preferredActiveTabId && merged.tabs[preferredActiveTabId]) {
+        merged = treeActivateTab(merged, preferredActiveTabId)
+      }
+    }
+    suppressPersist = true
+    try {
+      workbench.value = merged
+      pruneDisallowedTabs()
+      reconcileDeletedChatPanels()
+    } finally {
+      suppressPersist = false
+    }
+    finalizeRestoredWorkbench(bid)
   })
 
   watch(
@@ -1676,48 +1470,35 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   )
 
   watch(() => chatStore.draftPromoted, (sig) => {
-    if (!sig || !ready.value) return
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid || sig.botId !== bid) return
+    const bid = activeBotId()
+    if (!sig || !bid || sig.botId !== bid) return
     const tab = workbench.value.tabs[sig.viewId]
-    if (!tab || tab.target.kind !== 'chat') return
-    const currentSid = tabSessionId(tab)
-    if (currentSid && currentSid !== sig.sessionId) return
-    if (currentSid !== sig.sessionId) {
-      commitWorkbench(updateTabTarget(workbench.value, tab.id, t => t.kind === 'chat'
-        ? { ...t, sessionId: sig.sessionId }
-        : t))
-    }
+    if (!tab || tab.target.kind !== 'chat' || tabSessionId(tab)) return
+    commitWorkbench(updateTabTarget(workbench.value, tab.id, t => (t.kind === 'chat' ? { ...t, sessionId: sig.sessionId } : t)))
   }, { flush: 'sync' })
 
   watch(() => chatStore.userSentInSession, (sig) => {
-    if (!sig || !ready.value) return
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid || sig.botId !== bid) return
+    const bid = activeBotId()
+    if (!sig || !bid || sig.botId !== bid) return
     const tab = workbench.value.tabs[sig.viewId]
     if (!tab || tab.target.kind !== 'chat') return
     const currentSid = tabSessionId(tab)
     let next = workbench.value
     if (sig.wasDraft) {
       if (currentSid && currentSid !== sig.id) return
-      next = updateTabTarget(next, tab.id, t => t.kind === 'chat'
-        ? { ...t, sessionId: sig.id }
-        : t)
+      next = updateTabTarget(next, tab.id, t => (t.kind === 'chat' ? { ...t, sessionId: sig.id } : t))
     } else if (currentSid !== sig.id) {
       return
     }
-    next = treeKeepOpenTab(next, tab.id)
-    commitWorkbench(next)
+    commitWorkbench(treeKeepOpenTab(next, tab.id))
   })
 
   watch(() => chatStore.draftViewRequested, (request) => {
-    if (!request || !ready.value) return
-    const bid = (currentBotId.value ?? '').trim()
-    if (request.botId !== bid) return
+    const bid = activeBotId()
+    if (!request || !bid || request.botId !== bid) return
     const tab = workbench.value.tabs[request.viewId]
     const group = findGroupOfTab(workbench.value.root, request.viewId)
-    if (!tab || !group || tab.target.kind !== 'chat') return
-    if (tabSessionId(tab) !== request.expectedSessionId) return
+    if (!tab || !group || tab.target.kind !== 'chat' || tabSessionId(tab) !== request.expectedSessionId) return
 
     const activate = request.activate && activeId.value === tab.id
     if (group.previewTabId === tab.id) {
@@ -1729,28 +1510,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       })))
       return
     }
-
-    const id = nextChatPanelId(bid)
-    const draftRequest = { ...request, viewId: id }
-    if (activate) setNextChatActivationExplicit(id, request.explicitSelection)
-    if (!openEphemeralTab(
-      {
-        id,
-        pinned: false,
-        target: { kind: 'chat', sessionId: null, explicitSelection: request.explicitSelection },
-      },
-      { groupId: group.id, activate },
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    if (!openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: null, explicitSelection: request.explicitSelection } },
+      { preview: true, groupId: group.id, activate, explicitOverride: request.explicitSelection },
     )) return
-    chatStore.applyDraftViewRequest(draftRequest, activate)
+    chatStore.applyDraftViewRequest({ ...request, viewId: id }, activate)
   }, { flush: 'sync' })
 
   watch(() => chatStore.forkedSessionRequested, (request) => {
-    if (!request || !ready.value) return
-    const bid = (currentBotId.value ?? '').trim()
-    if (request.botId !== bid) return
+    const bid = activeBotId()
+    if (!request || !bid || request.botId !== bid) return
     const tab = workbench.value.tabs[request.viewId]
-    if (!tab || tab.target.kind !== 'chat') return
-    if (tabSessionId(tab) !== request.expectedSessionId) return
+    if (!tab || tab.target.kind !== 'chat' || tabSessionId(tab) !== request.expectedSessionId) return
     openSessionChatFromView({
       viewId: request.viewId,
       sessionId: request.sessionId,
@@ -1775,12 +1547,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   })
 
   watch(() => chatStore.loadingChats, (loading) => {
-    if (loading) return
-    alignSelectionWithDock()
+    if (!loading) alignSelectionWithDock()
   })
 
   return {
     ready,
+    loadedBotId,
     workbench,
     activeGroupId,
     activeId,
@@ -1793,17 +1565,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     mobileNavOpen,
     panelDragging,
     fileDirty,
-    ephemeralPanels,
-    isPreviewTab,
     keepOpenTab,
-    pinPanel,
     pinTab,
     unpinTab,
-    togglePinTab,
     dirtyFileCount,
     pendingClose,
     sidebarView,
-    sidebarOpen,
     workbenchOpen,
     sidebarWidth,
     pendingFilesPath,
@@ -1815,11 +1582,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     reorderTab,
     moveTab,
     dropExternalItem,
+    startExternalDrag,
     resolveTabTitle,
     selectSidebarView,
     toggleWorkbench,
-    showWorkbench,
-    hideWorkbench,
     openMobileNav,
     closeMobileNav,
     activateChatPanel,
@@ -1855,6 +1621,5 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     updateTerminalTitle,
     updateScheduleTitle,
     resetBot,
-    resetAll,
   }
 })

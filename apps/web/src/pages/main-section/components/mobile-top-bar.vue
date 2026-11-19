@@ -67,7 +67,7 @@
             {{ t('chat.tabBarToolkit.openDesktop') }}
           </DropdownMenuItem>
           <template v-if="!activePanelIsChat">
-            <DropdownMenuSeparator v-if="canWorkspaceExec || canManage" />
+            <DropdownMenuSeparator v-if="currentBotId || canWorkspaceExec || canManage" />
             <DropdownMenuItem @select="closeActivePanel">
               <X class="mr-2 size-3.5" />
               {{ t('chat.topBar.closePanel') }}

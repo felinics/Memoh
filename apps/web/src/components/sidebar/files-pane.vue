@@ -420,7 +420,10 @@ const refreshKey = ref(0)
 const revealPath = ref<string | null>(null)
 const activePath = computed(() => {
   const id = activeId.value
-  return id && id.startsWith('file:') ? id.slice('file:'.length) : null
+  if (!id) return null
+  const tab = workspaceTabs.workbench?.tabs?.[id]
+  if (tab?.target.kind === 'file') return tab.target.filePath
+  return id.startsWith('file:') ? id.slice('file:'.length) : null
 })
 
 const uploadInputRef = ref<HTMLInputElement>()

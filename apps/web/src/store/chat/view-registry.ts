@@ -304,11 +304,13 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return { view, activatedSession, deactivatedSession }
   }
 
-  function unbindPanel(panelId: string): ChatViewEntry | null {
+  function unbindPanel(panelId: string, expectedBotId?: string): ChatViewEntry | null {
     const id = normalize(panelId)
     const key = panelKeys.get(id)
     const view = key ? views.get(key) : undefined
     if (!view) return null
+    const expected = normalize(expectedBotId)
+    if (expected && view.botId !== expected) return null
     const deactivated = removePanelFromView(id, view)
     prune()
     return deactivated

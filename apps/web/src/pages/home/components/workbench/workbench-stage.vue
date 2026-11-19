@@ -6,9 +6,10 @@
     <div
       v-for="tab in orderedTabs"
       v-show="isTabVisible(tab.id)"
-      :key="tab.id"
+      :key="`${stageBotId}:${tab.id}`"
       tabindex="-1"
-      class="pointer-events-auto absolute isolate overflow-hidden outline-none"
+      class="pointer-events-auto absolute isolate overflow-hidden bg-surface-editor outline-none"
+      :class="fullscreenTabId === tab.id ? 'z-(--z-top)' : undefined"
       :data-workbench-panel-id="tab.id"
       :data-workbench-active-panel="store.activeId === tab.id ? 'true' : undefined"
       :style="panelBoxStyle(tab.id)"
@@ -16,6 +17,7 @@
     >
       <ViewChat
         v-if="tab.target.kind === 'chat'"
+        :bot-id="stageBotId"
         :tab-id="tab.id"
         :session-id="tab.target.sessionId"
         :visible="isTabVisible(tab.id)"
@@ -24,6 +26,7 @@
 
       <LazyFileView
         v-else-if="tab.target.kind === 'file'"
+        :bot-id="stageBotId"
         :tab-id="tab.id"
         :file-path="tab.target.filePath"
         :visible="isTabVisible(tab.id)"
@@ -31,6 +34,7 @@
 
       <LazyPreviewView
         v-else-if="tab.target.kind === 'preview'"
+        :bot-id="stageBotId"
         :file-path="tab.target.filePath"
         :visible="isTabVisible(tab.id)"
       />
@@ -44,56 +48,35 @@
         :visible="isTabVisible(tab.id)"
       />
 
-      <div
-        v-else-if="tab.target.kind === 'terminal'"
-        class="relative flex h-full w-full flex-col"
-      >
-        <div class="min-h-0 flex-1">
-          <LazyTerminalPane
-            v-if="revealedTabs[tab.id] && currentBotId"
-            :key="`terminal-pane:${currentBotId}:${tab.id}`"
-            :bot-id="currentBotId"
-            :tab-id="tab.id"
-            :active="isTabVisible(tab.id)"
-          />
-        </div>
-      </div>
+      <LazyTerminalPane
+        v-else-if="tab.target.kind === 'terminal' && revealedTerminalIds.has(tab.id)"
+        :bot-id="stageBotId"
+        :tab-id="tab.id"
+        :active="isTabVisible(tab.id)"
+      />
 
-      <div
+      <LazyBrowserPane
         v-else-if="tab.target.kind === 'browser'"
-        class="relative flex h-full w-full flex-col"
-      >
-        <div class="min-h-0 flex-1">
-          <LazyBrowserPane
-            v-if="currentBotId"
-            :bot-id="currentBotId"
-            :tab-id="tab.id"
-            :address="tab.target.address"
-            :active="isTabVisible(tab.id)"
-          />
-        </div>
-      </div>
+        :bot-id="stageBotId"
+        :tab-id="tab.id"
+        :address="tab.target.address"
+        :active="isTabVisible(tab.id)"
+      />
 
-      <div
+      <LazyDisplayPane
         v-else-if="tab.target.kind === 'display'"
-        class="relative flex h-full w-full flex-col"
-      >
-        <div class="min-h-0 flex-1">
-          <LazyDisplayPane
-            v-if="currentBotId"
-            :key="currentBotId"
-            :bot-id="currentBotId"
-            :tab-id="tab.id"
-            :title="store.resolveTabTitle(tab.id)"
-            :active="isTabVisible(tab.id) && isChatRoute"
-            @close="store.closeTab(tab.id)"
-            @snapshot="handleDisplaySnapshot"
-          />
-        </div>
-      </div>
+        :bot-id="stageBotId"
+        :tab-id="tab.id"
+        :title="store.resolveTabTitle(tab.id)"
+        :active="isTabVisible(tab.id) && isChatRoute"
+        @close="store.closeTab(tab.id)"
+        @snapshot="handleDisplaySnapshot"
+        @fullscreen-change="onDisplayFullscreenChange(tab.id, $event)"
+      />
 
       <LazyScheduleView
         v-else-if="tab.target.kind === 'schedule'"
+        :bot-id="stageBotId"
         :tab-id="tab.id"
         :schedule-id="tab.target.scheduleId"
         :visible="isTabVisible(tab.id)"
@@ -112,40 +95,31 @@ import {
   onMounted,
   provide,
   ref,
+  shallowRef,
   watch,
   type AsyncComponentLoader,
 } from 'vue'
 import { useRoute } from 'vue-router'
-import { storeToRefs } from 'pinia'
-import { useChatStore } from '@/store/chat-list'
 import { useDisplaySnapshotsStore } from '@/store/display-snapshots'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { prefetchLater, whenNetworkQuiet } from '@/lib/idle-prefetch'
 import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import { listGroups } from '@/workbench/tree'
-import type { WorkbenchTab } from '@/workbench/types'
+import type { WorkbenchNode, WorkbenchTab } from '@/workbench/types'
 import ViewChat from './view-chat.vue'
-import WorkbenchPanelLoading from './workbench-panel-loading.vue'
-import { retryPanelLoadKey } from './workbench-panel-load-state.vue'
+import WorkbenchPanelLoadState, { retryPanelLoadKey } from './workbench-panel-load-state.vue'
 import { PanelLoadFailed } from './lazy-panel-content'
-
-const props = defineProps<{
-  slotMap: Map<string, HTMLElement>
-  slotVersion: number
-}>()
 
 const route = useRoute()
 const store = useWorkspaceTabsStore()
-const chatStore = useChatStore()
 const displaySnapshots = useDisplaySnapshotsStore()
-const { currentBotId } = storeToRefs(chatStore)
 
 const isChatRoute = computed(() => route.name === 'home' || route.name === 'bot')
 
 function lazyPanel<T extends AsyncComponentLoader>(loader: T) {
   const AsyncComp = defineAsyncComponent({
     loader,
-    loadingComponent: WorkbenchPanelLoading,
+    loadingComponent: WorkbenchPanelLoadState,
     errorComponent: PanelLoadFailed,
   })
   return defineComponent({
@@ -178,12 +152,16 @@ const LazyScheduleView = lazyPanel(panelLoaders.schedule)
 
 const stageEl = ref<HTMLElement | null>(null)
 const slotRects = ref<Record<string, { left: number, top: number, width: number, height: number }>>({})
-const revealedTabs = ref<Record<string, true>>({})
+const revealedTerminalIds = shallowRef(new Set<string>())
+const fullscreenTabId = ref<string | null>(null)
+
+const stageBotId = computed(() => (store.loadedBotId ?? '').trim())
 
 // Stable sort by tab.id keeps DOM child order invariant across split drags and tab reorders.
-const orderedTabs = computed<WorkbenchTab[]>(() =>
-  Object.values(store.workbench.tabs).sort((a, b) => a.id.localeCompare(b.id)),
-)
+const orderedTabs = computed<WorkbenchTab[]>(() => {
+  if (!stageBotId.value) return []
+  return Object.values(store.workbench.tabs).sort((a, b) => a.id.localeCompare(b.id))
+})
 
 const visibleTabGroupMap = computed(() => {
   const map = new Map<string, string>()
@@ -205,27 +183,55 @@ function isTabVisible(tabId: string): boolean {
   return visibleTabGroupMap.value.has(tabId)
 }
 
+function treeLayoutKey(node: WorkbenchNode): string {
+  return node.kind === 'group' ? node.id : `${node.id}(${node.axis}:${treeLayoutKey(node.first)},${treeLayoutKey(node.second)})`
+}
+const layoutShapeKey = computed(() => treeLayoutKey(store.workbench.root))
+
 watch(
-  visibleTabGroupMap,
-  (map) => {
-    let changed = false
-    const next = { ...revealedTabs.value }
-    for (const tabId of map.keys()) {
-      if (!next[tabId]) {
-        next[tabId] = true
-        changed = true
+  [stageBotId, visibleTabGroupMap],
+  ([botId, map], prev) => {
+    const botChanged = prev !== undefined && botId !== prev[0]
+    const prevSet = botChanged ? new Set<string>() : revealedTerminalIds.value
+    const next = new Set<string>()
+    let changed = botChanged && revealedTerminalIds.value.size > 0
+    if (botId) {
+      for (const tabId of prevSet) {
+        if (store.workbench.tabs[tabId]?.target.kind === 'terminal') next.add(tabId)
+        else changed = true
       }
-    }
-    for (const existingId of Object.keys(next)) {
-      if (!store.workbench.tabs[existingId]) {
-        delete next[existingId]
-        changed = true
+      for (const tabId of map.keys()) {
+        if (store.workbench.tabs[tabId]?.target.kind === 'terminal' && !next.has(tabId)) {
+          next.add(tabId)
+          changed = true
+        }
       }
+    } else if (revealedTerminalIds.value.size > 0) {
+      changed = true
     }
-    if (changed) revealedTabs.value = next
+    if (changed) revealedTerminalIds.value = next
   },
   { immediate: true },
 )
+
+watch(
+  [stageBotId, isChatRoute, visibleTabGroupMap],
+  ([_bid, chatRoute]) => {
+    const activeFullscreenId = fullscreenTabId.value
+    if (!activeFullscreenId) return
+    if (!chatRoute || !isTabVisible(activeFullscreenId) || !store.workbench.tabs[activeFullscreenId]) {
+      fullscreenTabId.value = null
+    }
+  },
+)
+
+function onDisplayFullscreenChange(tabId: string, active: boolean) {
+  if (active) {
+    fullscreenTabId.value = tabId
+  } else if (fullscreenTabId.value === tabId) {
+    fullscreenTabId.value = null
+  }
+}
 
 function panelBoxStyle(tabId: string): Record<string, string> {
   if (store.isMobile) {
@@ -251,25 +257,33 @@ function onPanelPointerDown(tabId: string) {
 }
 
 function handleDisplaySnapshot(payload: { tabId: string, sessionId?: string, dataUrl: string }) {
-  const botId = currentBotId.value
-  if (!botId) return
-  displaySnapshots.upsert(botId, payload)
+  if (!stageBotId.value) return
+  displaySnapshots.upsert(stageBotId.value, payload)
 }
 
 let resizeObserver: ResizeObserver | null = null
+
+function queryGroupSlots(): HTMLElement[] {
+  const container = stageEl.value?.parentElement
+  if (!container) return []
+  return Array.from(container.querySelectorAll<HTMLElement>('[data-workbench-slot-group-id]:not([data-workbench-empty-slot="true"])'))
+}
 
 function syncSlotRects() {
   const root = stageEl.value
   if (!root || store.isMobile) return
   const rootRect = root.getBoundingClientRect()
+  if (rootRect.width <= 0 && rootRect.height <= 0) return
+  // MainSection mounts with a CSS scale-[1.15] login/onboarding entry transition that does not re-fire ResizeObserver when it settles.
   const scaleX = root.clientWidth > 0 ? rootRect.width / root.clientWidth : 1
   const scaleY = root.clientHeight > 0 ? rootRect.height / root.clientHeight : 1
   const sx = scaleX > 0 ? scaleX : 1
   const sy = scaleY > 0 ? scaleY : 1
 
   const next: Record<string, { left: number, top: number, width: number, height: number }> = {}
-  for (const [groupId, slotEl] of props.slotMap.entries()) {
-    if (!slotEl.isConnected) continue
+  for (const slotEl of queryGroupSlots()) {
+    const groupId = slotEl.dataset.workbenchSlotGroupId
+    if (!groupId || !slotEl.isConnected) continue
     const sr = slotEl.getBoundingClientRect()
     next[groupId] = {
       left: Math.round(((sr.left - rootRect.left) / sx) * 2) / 2,
@@ -285,14 +299,14 @@ function rebuildObservations() {
   if (!resizeObserver) return
   resizeObserver.disconnect()
   if (stageEl.value) resizeObserver.observe(stageEl.value)
-  for (const slotEl of props.slotMap.values()) {
-    if (slotEl.isConnected) resizeObserver.observe(slotEl)
+  for (const slotEl of queryGroupSlots()) {
+    resizeObserver.observe(slotEl)
   }
   syncSlotRects()
 }
 
 watch(
-  [() => props.slotVersion, () => store.workbench.root.id, () => store.isMobile],
+  [layoutShapeKey, () => store.isMobile, () => orderedTabs.value.length > 0],
   () => rebuildObservations(),
   { flush: 'post' },
 )

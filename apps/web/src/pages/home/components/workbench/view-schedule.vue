@@ -1,7 +1,7 @@
 <template>
   <div class="h-full w-full overflow-y-auto bg-surface-editor">
     <section
-      v-if="hasActivated && currentBotId"
+      v-if="hasActivated && effectiveBotId"
       class="mx-auto max-w-2xl px-6 py-8"
     >
       <header class="mb-6 px-2">
@@ -19,7 +19,7 @@
 
       <ScheduleEditor
         v-else
-        :bot-id="currentBotId"
+        :bot-id="effectiveBotId"
         :mode="scheduleId ? 'edit' : 'create'"
         :schedule="schedule"
         @cancel="workspaceTabs.closeTab(tabId)"
@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { ConfirmDeleteDialog, InlineLoadingRow, toast } from '@felinic/ui'
@@ -66,6 +66,7 @@ import { lazyPanelContent } from './lazy-panel-content'
 const ScheduleEditor = lazyPanelContent(() => import('@/pages/bots/components/schedule-editor.vue').then(m => m.default))
 
 const props = defineProps<{
+  botId?: string
   tabId: string
   scheduleId?: string
   visible: boolean
@@ -75,6 +76,7 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { currentBotId } = storeToRefs(chatStore)
+const effectiveBotId = computed(() => (props.botId ?? currentBotId.value ?? '').trim())
 
 const hasActivated = ref(props.visible)
 watch(() => props.visible, (isVisible) => {
@@ -85,14 +87,23 @@ const schedule = ref<ScheduleSchedule | null>(null)
 const isLoading = ref(false)
 const deleteTarget = ref<ScheduleSchedule | null>(null)
 const isDeleting = ref(false)
+let fetchSeq = 0
+let unmounted = false
+
+onBeforeUnmount(() => {
+  unmounted = true
+})
 
 async function fetchSchedule() {
-  if (!hasActivated.value) return
-  const botId = currentBotId.value
+  if (!hasActivated.value || unmounted) return
+  const seq = ++fetchSeq
+  const botId = effectiveBotId.value
   const id = props.scheduleId
   if (!botId || !id) {
     schedule.value = null
-    workspaceTabs.updateScheduleTitle(props.tabId, '')
+    if (workspaceTabs.loadedBotId === botId) {
+      workspaceTabs.updateScheduleTitle(props.tabId, '')
+    }
     return
   }
   isLoading.value = true
@@ -101,14 +112,22 @@ async function fetchSchedule() {
       path: { bot_id: botId, id },
       throwOnError: true,
     })
+    if (unmounted || seq !== fetchSeq || effectiveBotId.value !== botId || props.scheduleId !== id) return
     schedule.value = data ?? null
-    workspaceTabs.updateScheduleTitle(props.tabId, schedule.value?.name?.trim() ?? '')
+    if (workspaceTabs.loadedBotId === botId) {
+      workspaceTabs.updateScheduleTitle(props.tabId, schedule.value?.name?.trim() ?? '')
+    }
   } catch (error) {
+    if (unmounted || seq !== fetchSeq || effectiveBotId.value !== botId || props.scheduleId !== id) return
     schedule.value = null
-    workspaceTabs.updateScheduleTitle(props.tabId, '')
+    if (workspaceTabs.loadedBotId === botId) {
+      workspaceTabs.updateScheduleTitle(props.tabId, '')
+    }
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.loadFailed')))
   } finally {
-    isLoading.value = false
+    if (seq === fetchSeq) {
+      isLoading.value = false
+    }
   }
 }
 
@@ -123,7 +142,7 @@ function handleDelete(item: ScheduleSchedule) {
 
 async function confirmDelete() {
   const item = deleteTarget.value
-  const botId = currentBotId.value
+  const botId = effectiveBotId.value
   if (!item?.id || !botId) return
   isDeleting.value = true
   try {
@@ -132,7 +151,9 @@ async function confirmDelete() {
       throwOnError: true,
     })
     toast.success(t('bots.schedule.deleteSuccess'))
-    workspaceTabs.closeTab(props.tabId)
+    if (!unmounted && workspaceTabs.loadedBotId === botId) {
+      workspaceTabs.closeTab(props.tabId)
+    }
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.deleteFailed')))
   } finally {
@@ -141,7 +162,7 @@ async function confirmDelete() {
   }
 }
 
-watch([hasActivated, currentBotId, () => props.scheduleId], ([activated]) => {
+watch([hasActivated, effectiveBotId, () => props.scheduleId], ([activated]) => {
   if (activated) void fetchSchedule()
 }, { immediate: true })
 </script>

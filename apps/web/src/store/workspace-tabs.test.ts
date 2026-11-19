@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { nextTick, ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
 import { DISPLAY_PANEL_ID, useWorkspaceTabsStore } from './workspace-tabs'
 import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 import { registerWorkbenchCommands } from '@/pages/home/commands/workbench-commands'
-import { createEmptyWorkbenchState, findAdjacentGroupId, findGroupOfTab, insertTab, listGroups, splitGroupWithTab } from '@/workbench/tree'
+import { createEmptyWorkbenchState, findGroupOfTab, findRightNeighborOfSpatialFirst, insertTab, listGroups, splitGroupWithTab } from '@/workbench/tree'
 import i18n, { prepareLocale } from '@/i18n'
 
 const terminalCacheMocks = vi.hoisted(() => {
@@ -238,7 +238,7 @@ describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
     store.openFile('/data/a.ts')
     expect(store.workbench.tabs['chat:1']).toBeUndefined()
     expect(store.activeId).toBe('file:/data/a.ts')
-    expect(store.isPreviewTab('file:/data/a.ts')).toBe(true)
+    expect(findGroupOfTab(store.workbench.root, 'file:/data/a.ts')?.previewTabId).toBe('file:/data/a.ts')
 
     // Another single-click file replaces file:/data/a.ts in place.
     store.openFile('/data/b.ts')
@@ -247,7 +247,7 @@ describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
 
     // Double-click keepOpen promotes b.ts -> next preview c.ts opens beside it.
     store.keepOpenTab('file:/data/b.ts')
-    expect(store.isPreviewTab('file:/data/b.ts')).toBe(false)
+    expect(findGroupOfTab(store.workbench.root, 'file:/data/b.ts')?.previewTabId).toBeNull()
     store.openFile('/data/c.ts')
     expect(store.workbench.tabs['file:/data/b.ts']).toBeDefined()
     expect(store.workbench.tabs['file:/data/c.ts']).toBeDefined()
@@ -265,11 +265,10 @@ describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
     store.mountWorkspace()
     await flushTicks()
 
-    const primaryGroupId = store.spatialFirstGroupId!
     store.openSubagentSession({ sessionId: 'sub-1', title: 'Researcher' })
     expect(listGroups(store.workbench.root)).toHaveLength(2)
 
-    const rightGroupId = findAdjacentGroupId(store.workbench.root, primaryGroupId, 'right')
+    const rightGroupId = findRightNeighborOfSpatialFirst(store.workbench.root)
     expect(rightGroupId).toBeTruthy()
     expect(findGroupOfTab(store.workbench.root, store.activeId!)?.id).toBe(rightGroupId)
 
@@ -296,7 +295,7 @@ describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
 
     chatStoreMock.userSentInSession.value = { id: 's-left', botId: 'bot-1', viewId: leftId, wasDraft: false, seq: 1 }
     await flushTicks()
-    expect(store.isPreviewTab(leftId)).toBe(false)
+    expect(findGroupOfTab(store.workbench.root, leftId)?.previewTabId).not.toBe(leftId)
 
     // Focus right split, then resolve a delayed Fork requested from leftId -> opens in left group without stealing right focus.
     store.activateTab(rightId)
@@ -497,7 +496,7 @@ describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
 
     it('cold-starts cleanly on phone without overwriting persisted desktop layout and reuses single terminal/browser', async () => {
       let seeded = createEmptyWorkbenchState()
-      seeded = insertTab(seeded, { id: 'file:/data/desk.ts', pinned: false, target: { kind: 'file', filePath: '/data/desk.ts' } }).state
+      seeded = insertTab(seeded, { id: 'file:/data/desk.ts', pinned: false, target: { kind: 'file', filePath: '/data/desk.ts' } })
       seeded = splitGroupWithTab(seeded, listGroups(seeded.root)[0]!.id, 'right', {
         id: 'file:/data/side.ts',
         pinned: false,
@@ -528,6 +527,289 @@ describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
       // Desktop layout seed in storage remains untouched.
       const saved = JSON.parse(sessionStorage.getItem('memoh:workbench:v1')!)
       expect(saved['bot-1'].workbench).toEqual(seeded)
+    })
+
+    it('restores saved desktop split layout and merges mobile-opened tabs on mobile -> desktop widen', async () => {
+      let seeded = createEmptyWorkbenchState()
+      seeded = insertTab(seeded, { id: 'file:/data/desk.ts', pinned: false, target: { kind: 'file', filePath: '/data/desk.ts' } })
+      seeded = splitGroupWithTab(seeded, listGroups(seeded.root)[0]!.id, 'right', {
+        id: 'file:/data/side.ts',
+        pinned: false,
+        target: { kind: 'file', filePath: '/data/side.ts' },
+      })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-1': { workbench: seeded, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      }))
+
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Open a terminal while cold-started on phone, then widen back to desktop.
+      store.openTerminal()
+      expect(store.workbench.tabs['terminal:1']).toBeDefined()
+
+      mobileBreakpoint.setMobile(false)
+      await flushTicks()
+
+      expect(listGroups(store.workbench.root)).toHaveLength(2)
+      expect(store.workbench.tabs['file:/data/desk.ts']).toBeDefined()
+      expect(store.workbench.tabs['file:/data/side.ts']).toBeDefined()
+      expect(store.workbench.tabs['terminal:1']).toBeDefined()
+
+      // Persistence is now active on desktop again.
+      store.openFilePinned('/data/after-widen.ts')
+      await flushTicks()
+      const saved = JSON.parse(sessionStorage.getItem('memoh:workbench:v1')!)
+      expect(saved['bot-1'].workbench.tabs['file:/data/after-widen.ts']).toBeDefined()
+    })
+
+    it('prevents mobile panel actions from regressing desktop counters or colliding on return to desktop', async () => {
+      let seeded = createEmptyWorkbenchState('g1')
+      seeded = insertTab(seeded, { id: 'terminal:2', pinned: false, target: { kind: 'terminal', instance: 2 } }, { groupId: 'g1' })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-1': { workbench: seeded, terminalCounter: 2, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      }))
+
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      store.openTerminal()
+      expect(store.workbench.tabs['terminal:3']).toBeDefined()
+
+      // Widening back preserves both terminal:2 and terminal:3, and splitting terminal:2 creates terminal:4 instead of a no-op.
+      mobileBreakpoint.setMobile(false)
+      await flushTicks()
+
+      expect(store.workbench.tabs['terminal:2']).toBeDefined()
+      expect(store.workbench.tabs['terminal:3']).toBeDefined()
+      const ownerGroup = findGroupOfTab(store.workbench.root, 'terminal:2')!
+      store.activateTab('terminal:2')
+      store.splitGroup(ownerGroup.id, 'right')
+      expect(listGroups(store.workbench.root).length).toBeGreaterThanOrEqual(2)
+      expect(store.workbench.tabs['terminal:4']).toBeDefined()
+    })
+
+    it('cycles mobile tabs across preserved desktop groups and targets chat group for session opens', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      const chatId = store.activeId!
+      store.openFileToSide('/data/side.ts')
+      expect(listGroups(store.workbench.root)).toHaveLength(2)
+      expect(store.activeId).toBe('file:/data/side.ts')
+
+      mobileBreakpoint.setMobile(true)
+      await flushTicks()
+
+      // Even though active group holds file:/data/side.ts alone, focusAdjacentTab cycles across groups on mobile.
+      expect(store.focusAdjacentTab(1)).toBe(true)
+      expect(store.activeId).toBe(chatId)
+      expect(store.focusAdjacentTab(-1)).toBe(true)
+      expect(store.activeId).toBe('file:/data/side.ts')
+
+      // Selecting a session while focused on a file group on mobile routes to the chat group instead of evicting the file.
+      store.openSessionChat({ sessionId: 's-mobile', title: 'Mobile Chat' })
+      expect(store.workbench.tabs['file:/data/side.ts']).toBeDefined()
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-mobile')).toBe(true)
+    })
+  })
+
+  describe('concurrency, bot isolation & synchronous draft refill', () => {
+    it('keeps a fallback tab synchronously when closing the last open file tab', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Capture every reactive workbench commit to verify tabs never drop to zero.
+      const observedCounts: number[] = []
+      const stop = watch(
+        () => store.workbench,
+        (wb) => { observedCounts.push(Object.keys(wb.tabs).length) },
+        { flush: 'sync' },
+      )
+
+      store.openFile('/data/only.ts')
+      store.closeTab('file:/data/only.ts')
+      stop()
+
+      expect(observedCounts.every(count => count > 0)).toBe(true)
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat')).toBe(true)
+    })
+
+    it('clears workbench and loadedBotId when currentBotId becomes null and clears stale drafts on legacy upgrade', async () => {
+      localStorage.setItem('workspace-layout', '{"legacy":true}')
+      localStorage.setItem('chat-input-drafts', JSON.stringify({ 'bot-1:chat:1': 'stale' }))
+      const store = useWorkspaceTabsStore()
+      expect(localStorage.getItem('chat-input-drafts')).toBeNull()
+
+      store.mountWorkspace()
+      await flushTicks()
+      expect(store.loadedBotId).toBe('bot-1')
+
+      useChatSelectionStore().setBot(null)
+      await flushTicks()
+      expect(store.loadedBotId).toBeNull()
+      expect(Object.keys(store.workbench.tabs)).toHaveLength(0)
+    })
+
+    it('aborts in-flight save-and-close if cancelled or switched to another bot before save resolves', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      store.openFilePinned('/data/slow.ts')
+      store.setFileDirty('file:/data/slow.ts', true, 'bot-1')
+
+      let resolveSave!: (ok: boolean) => void
+      const saveHandler = vi.fn(() => new Promise<boolean>((resolve) => { resolveSave = resolve }))
+      store.registerFileSaveHandler('file:/data/slow.ts', saveHandler, 'bot-1')
+      store.requestCloseTab('file:/data/slow.ts')
+      expect(store.pendingClose?.panelId).toBe('file:/data/slow.ts')
+
+      const closingPromise = store.resolvePendingClose('save')
+      await store.resolvePendingClose('cancel')
+      resolveSave(true)
+      await closingPromise
+
+      expect(store.workbench.tabs['file:/data/slow.ts']).toBeDefined()
+    })
+
+    it('ignores stale bot dirty calls and mismatched unregisterFileSaveHandler calls', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      store.openFilePinned('/data/shared.ts')
+      store.setFileDirty('file:/data/shared.ts', true, 'bot-other')
+      expect(store.fileDirty['file:/data/shared.ts']).toBeUndefined()
+
+      const oldHandler = vi.fn(async () => false)
+      const newHandler = vi.fn(async () => true)
+      store.registerFileSaveHandler('file:/data/shared.ts', newHandler, 'bot-1')
+      store.unregisterFileSaveHandler('file:/data/shared.ts', oldHandler)
+
+      store.setFileDirty('file:/data/shared.ts', true, 'bot-1')
+      store.requestCloseTab('file:/data/shared.ts')
+      await store.resolvePendingClose('save')
+      expect(newHandler).toHaveBeenCalledOnce()
+      expect(oldHandler).not.toHaveBeenCalled()
+      expect(store.workbench.tabs['file:/data/shared.ts']).toBeUndefined()
+    })
+
+    it('blocks cross-bot mutations before pre-flush switch completes, ignores other-bot deletions, promotes explicitSelection on pinned open, and does not re-queue cleaned tabs', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Non-explicit session tab promoted to explicit when opened pinned
+      store.openSessionChat({ sessionId: 's-non-exp', explicitSelection: false })
+      expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
+      store.openSessionChatPinned({ sessionId: 's-non-exp' })
+      expect(chatStoreMock.hasExplicitSessionSelection).toBe(true)
+
+      // Deleting a session belonging to another bot must not touch bot-1's tabs
+      chatStoreMock.deletedSession.value = { id: 's-non-exp', botId: 'bot-other', seq: 99 }
+      await flushTicks()
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-non-exp')).toBe(true)
+
+      // Queued dirty tab that becomes clean before requestCloseTabs must not stay in closeQueue
+      store.openFilePinned('/data/cleaned.ts')
+      store.setFileDirty('file:/data/cleaned.ts', true, 'bot-1')
+      store.requestCloseTab('file:/data/cleaned.ts')
+      expect(store.pendingClose?.panelId).toBe('file:/data/cleaned.ts')
+      store.setFileDirty('file:/data/cleaned.ts', false, 'bot-1')
+      store.requestCloseTabs(['file:/data/cleaned.ts'])
+      expect(store.workbench.tabs['file:/data/cleaned.ts']).toBeUndefined()
+      expect(store.pendingClose).toBeNull()
+
+      // Pre-flush bot switch divergence: synchronous mutations for bot-2 must not corrupt bot-1
+      useChatSelectionStore().setBot('bot-without-layout')
+      store.openTerminal()
+      store.openSessionChat({ sessionId: 's-leaked' })
+      expect(store.workbench.tabs['terminal:1']).toBeUndefined()
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-leaked')).toBe(false)
+      await flushTicks()
+      expect(store.loadedBotId).toBe('bot-without-layout')
+    })
+
+    it('reconciles previously deleted sessions before alignSelectionWithDock selects them on bot switch, and clears pendingDragPersist on resetBot', async () => {
+      // Seed bot-2 with a stored chat tab pointing at a session that gets deleted while bot-1 is active.
+      let bot2Wb = createEmptyWorkbenchState('g1')
+      bot2Wb = insertTab(bot2Wb, { id: 'chat:1', pinned: false, target: { kind: 'chat', sessionId: 's-deleted', explicitSelection: true } })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-2': { workbench: bot2Wb, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 1 },
+      }))
+
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Record deletion for bot-2 while still on bot-1.
+      chatStoreMock.deletedSession.value = { id: 's-deleted', botId: 'bot-2', seq: 1 }
+      await flushTicks()
+      chatStoreMock.selectSession.mockClear()
+
+      // Switch to bot-2 -> deleted session tab must be removed BEFORE alignSelectionWithDock runs.
+      useChatSelectionStore().setBot('bot-2')
+      await flushTicks()
+      expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s-deleted', expect.anything())
+      expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s-deleted')
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-deleted')).toBe(false)
+
+      // Mid-drag resetBot must clear pendingDragPersist so ending the drag does not write back a record.
+      store.panelDragging = true
+      store.openFilePinned('/data/dragged.ts')
+      store.resetBot('bot-2')
+      await flushTicks()
+      const savedAfterReset = JSON.parse(sessionStorage.getItem('memoh:workbench:v1') || '{}')
+      expect(savedAfterReset['bot-2']).toBeUndefined()
+    })
+
+    it('preserves explicit chatStore.sessionId when restore reconciles deleted tabs, and activates already-open tab dropped onto its own single-tab group split edge', async () => {
+      // Seed bot-2 with only a deleted chat tab while chatStore explicitly points at a valid session.
+      let bot2Wb = createEmptyWorkbenchState('g1')
+      bot2Wb = insertTab(bot2Wb, { id: 'chat:1', pinned: false, target: { kind: 'chat', sessionId: 's-deleted', explicitSelection: true } })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-2': { workbench: bot2Wb, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 1 },
+      }))
+
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      chatStoreMock.deletedSession.value = { id: 's-deleted', botId: 'bot-2', seq: 1 }
+      await flushTicks()
+
+      // Switch to bot-2 with an explicit valid session already chosen on chatStore.
+      chatStoreMock.sessionId = 's-valid'
+      chatStoreMock.hasExplicitSessionSelection = true
+      useChatSelectionStore().setBot('bot-2')
+      await flushTicks()
+
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-valid')).toBe(true)
+      expect(chatStoreMock.sessionId).toBe('s-valid')
+
+      // External drop of an already-open tab onto its own inactive single-tab group's right split edge must still activate & select it.
+      useChatSelectionStore().setBot('bot-1')
+      await flushTicks()
+      store.openSessionChatPinned({ sessionId: 's-valid' })
+      store.openFileToSide('/data/side.ts')
+      const groups = listGroups(store.workbench.root)
+      expect(groups).toHaveLength(2)
+      const chatGroup = groups.find(g => g.tabIds.some(id => store.workbench.tabs[id]?.target.kind === 'chat'))!
+      const fileGroup = groups.find(g => g.id !== chatGroup.id)!
+      store.activateGroup(fileGroup.id)
+      expect(store.activeGroupId).toBe(fileGroup.id)
+
+      chatStoreMock.selectSession.mockClear()
+      store.dropExternalItem({ kind: 'session', sessionId: 's-valid' }, chatGroup.id, 'right')
+      expect(store.activeGroupId).toBe(chatGroup.id)
+      expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s-valid')
     })
   })
 })

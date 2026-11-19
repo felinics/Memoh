@@ -250,8 +250,6 @@ import { SessionSelectionKey } from './session-selection'
 import { useUnreadStore } from '@/store/unread'
 import { useUserStore } from '@/store/user'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { findGroup } from '@/workbench/tree'
-import { startWorkbenchExternalPointerDrag } from '@/workbench/drag'
 import { canHoldUnread } from '@/utils/session-attention'
 import AttentionDot from './attention-dot.vue'
 import { SessionBotAgentsKey } from './session-bot-agents'
@@ -311,22 +309,13 @@ function onMiddleClick() {
 function onRowPointerDown(event: PointerEvent) {
   if (selecting.value || event.button !== 0) return
   if ((event.target as HTMLElement | null)?.closest('[data-slot="sidebar-session-overlay"]')) return
-  const store = useWorkspaceTabsStore()
-  if (store.isMobile) return
   const rawTitle = (props.session.title ?? '').trim()
   const chipTitle = rawTitle || displayLabel.value || t('chat.untitledSession')
-  startWorkbenchExternalPointerDrag({
+  useWorkspaceTabsStore().startExternalDrag(
     event,
-    dragId: `ext:session:${props.session.id}`,
-    getTitle: () => chipTitle,
-    isMobile: () => store.isMobile,
-    getGroupTabIds: gid => findGroup(store.workbench.root, gid)?.tabIds ?? [],
-    isTabPinned: tid => Boolean(store.workbench.tabs[tid]?.pinned),
-    onDragStateChange: (dragging) => { store.panelDragging = dragging },
-    onCommitDrop: (targetGid, zone, idx) => {
-      store.dropExternalItem({ kind: 'session', sessionId: props.session.id, title: rawTitle }, targetGid, zone, idx)
-    },
-  })
+    { kind: 'session', sessionId: props.session.id, title: rawTitle },
+    chipTitle,
+  )
 }
 
 function startSelection() {

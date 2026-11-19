@@ -6,9 +6,9 @@ import {
   activateTab,
   clampSplitRatioForSize,
   createEmptyWorkbenchState,
-  findAdjacentGroupId,
   findGroup,
   findGroupOfTab,
+  findRightNeighborOfSpatialFirst,
   findSpatialFirstGroupId,
   insertTab,
   keepOpenTab,
@@ -20,9 +20,52 @@ import {
   setSplitRatio,
   setTabPinned,
   splitGroupWithTab,
-  validateWorkbenchState,
 } from './tree'
-import type { WorkbenchDropZone, WorkbenchSplitDirection, WorkbenchState, WorkbenchTab } from './types'
+import type { WorkbenchDropZone, WorkbenchNode, WorkbenchSplitDirection, WorkbenchState, WorkbenchTab } from './types'
+
+function validateWorkbenchState(state: WorkbenchState): { ok: true } | { ok: false, reason: string } {
+  const seenNodeIds = new Set<string>()
+  const seenTabIds = new Set<string>()
+  const groupIds = new Set<string>()
+
+  const walk = (node: WorkbenchNode): string | null => {
+    if (seenNodeIds.has(node.id)) return `duplicate node id ${node.id}`
+    seenNodeIds.add(node.id)
+    if (node.kind === 'split') {
+      if (!Number.isFinite(node.ratio) || node.ratio <= 0 || node.ratio >= 1) return `invalid ratio on ${node.id}`
+      return walk(node.first) ?? walk(node.second)
+    }
+    groupIds.add(node.id)
+    if (state.root.kind === 'split' && node.tabIds.length === 0) return `empty group ${node.id} inside split`
+    let seenUnpinned = false
+    for (const tid of node.tabIds) {
+      if (seenTabIds.has(tid)) return `tab ${tid} appears in multiple groups`
+      seenTabIds.add(tid)
+      const tab = state.tabs[tid]
+      if (!tab) return `group ${node.id} references missing tab ${tid}`
+      if (tab.pinned && seenUnpinned) return `pinned tab ${tid} appears after unpinned tab in ${node.id}`
+      if (!tab.pinned) seenUnpinned = true
+    }
+    if (node.tabIds.length === 0) {
+      if (node.activeTabId !== null || node.previewTabId !== null) return `empty group ${node.id} has non-null active/preview`
+    } else {
+      if (!node.activeTabId || !node.tabIds.includes(node.activeTabId)) return `invalid activeTabId on ${node.id}`
+      if (node.previewTabId !== null) {
+        if (!node.tabIds.includes(node.previewTabId)) return `invalid previewTabId on ${node.id}`
+        if (state.tabs[node.previewTabId]?.pinned) return `previewTabId ${node.previewTabId} cannot be pinned`
+      }
+    }
+    return null
+  }
+
+  const err = walk(state.root)
+  if (err) return { ok: false, reason: err }
+  if (!groupIds.has(state.activeGroupId)) return { ok: false, reason: `activeGroupId ${state.activeGroupId} not in tree` }
+  for (const tid of Object.keys(state.tabs)) {
+    if (!seenTabIds.has(tid)) return { ok: false, reason: `orphaned tab ${tid} in tabs map` }
+  }
+  return { ok: true }
+}
 
 function makeFileTab(name: string, pinned = false): WorkbenchTab {
   return {
@@ -35,14 +78,12 @@ function makeFileTab(name: string, pinned = false): WorkbenchTab {
 describe('workbench binary split & tab tree', () => {
   it('replaces single-slot preview tab in place and keeps open on double-click promotion', () => {
     let state = createEmptyWorkbenchState()
-    state = insertTab(state, makeFileTab('a.ts'), { preview: true }).state
+    state = insertTab(state, makeFileTab('a.ts'), { preview: true })
     const g1 = listGroups(state.root)[0]!
     expect(g1.previewTabId).toBe('file:/data/a.ts')
     expect(g1.tabIds).toEqual(['file:/data/a.ts'])
 
-    const replaced = insertTab(state, makeFileTab('b.ts'), { preview: true })
-    state = replaced.state
-    expect(replaced.replacedTabId).toBe('file:/data/a.ts')
+    state = insertTab(state, makeFileTab('b.ts'), { preview: true })
     expect(state.tabs['file:/data/a.ts']).toBeUndefined()
     expect(listGroups(state.root)[0]!.tabIds).toEqual(['file:/data/b.ts'])
     expect(listGroups(state.root)[0]!.previewTabId).toBe('file:/data/b.ts')
@@ -50,7 +91,7 @@ describe('workbench binary split & tab tree', () => {
     // Promote b.ts -> next preview c.ts appends beside b.ts instead of evicting it.
     state = keepOpenTab(state, 'file:/data/b.ts')
     expect(listGroups(state.root)[0]!.previewTabId).toBeNull()
-    state = insertTab(state, makeFileTab('c.ts'), { preview: true }).state
+    state = insertTab(state, makeFileTab('c.ts'), { preview: true })
     expect(listGroups(state.root)[0]!.tabIds).toEqual(['file:/data/b.ts', 'file:/data/c.ts'])
     expect(listGroups(state.root)[0]!.previewTabId).toBe('file:/data/c.ts')
     expect(validateWorkbenchState(state)).toEqual({ ok: true })
@@ -58,8 +99,8 @@ describe('workbench binary split & tab tree', () => {
 
   it('maintains pinned tabs in the leading segment and clears preview when pinned', () => {
     let state = createEmptyWorkbenchState()
-    state = insertTab(state, makeFileTab('one.ts')).state
-    state = insertTab(state, makeFileTab('two.ts'), { preview: true }).state
+    state = insertTab(state, makeFileTab('one.ts'))
+    state = insertTab(state, makeFileTab('two.ts'), { preview: true })
     state = setTabPinned(state, 'file:/data/two.ts', true)
 
     const group = listGroups(state.root)[0]!
@@ -67,7 +108,7 @@ describe('workbench binary split & tab tree', () => {
     expect(group.previewTabId).toBeNull()
 
     // Reordering an unpinned tab cannot cross into the pinned prefix.
-    state = insertTab(state, makeFileTab('three.ts')).state
+    state = insertTab(state, makeFileTab('three.ts'))
     state = reorderTabInGroup(state, group.id, 'file:/data/three.ts', 0)
     expect(listGroups(state.root)[0]!.tabIds).toEqual([
       'file:/data/two.ts',
@@ -77,29 +118,32 @@ describe('workbench binary split & tab tree', () => {
     expect(validateWorkbenchState(state)).toEqual({ ok: true })
   })
 
-  it('tracks spatial top-left first group and right-adjacent group across splits and collapses', () => {
+  it('tracks spatial top-left first group and its right neighbor across splits and collapses', () => {
     let state = createEmptyWorkbenchState('left-group')
-    state = insertTab(state, makeFileTab('left.ts')).state
-    state = splitGroupWithTab(state, 'left-group', 'right', makeFileTab('right.ts'))
+    state = insertTab(state, makeFileTab('left.ts'))
+    expect(findRightNeighborOfSpatialFirst(state.root)).toBeNull()
 
+    state = splitGroupWithTab(state, 'left-group', 'right', makeFileTab('right.ts'))
     const rightGroup = findGroupOfTab(state.root, 'file:/data/right.ts')!
     expect(findSpatialFirstGroupId(state.root)).toBe('left-group')
-    expect(findAdjacentGroupId(state.root, 'left-group', 'right')).toBe(rightGroup.id)
-    expect(findAdjacentGroupId(state.root, rightGroup.id, 'left')).toBe('left-group')
+    expect(findRightNeighborOfSpatialFirst(state.root)).toBe(rightGroup.id)
 
-    // Splitting to the LEFT of left-group makes the new group the spatial top-left first group.
+    // Splitting to the LEFT of left-group makes the new group spatial-first, with left-group as its right neighbor.
     state = splitGroupWithTab(state, 'left-group', 'left', makeFileTab('far-left.ts'))
     const farLeftGroup = findGroupOfTab(state.root, 'file:/data/far-left.ts')!
     expect(findSpatialFirstGroupId(state.root)).toBe(farLeftGroup.id)
+    expect(findRightNeighborOfSpatialFirst(state.root)).toBe('left-group')
 
     // Closing far-left collapses its split and restores left-group as spatial first.
     state = removeTab(state, 'file:/data/far-left.ts')
     expect(findSpatialFirstGroupId(state.root)).toBe('left-group')
+    expect(findRightNeighborOfSpatialFirst(state.root)).toBe(rightGroup.id)
 
     // Closing left-group collapses root back to rightGroup alone.
     state = removeTab(state, 'file:/data/left.ts')
     expect(state.root.kind).toBe('group')
     expect(findSpatialFirstGroupId(state.root)).toBe(rightGroup.id)
+    expect(findRightNeighborOfSpatialFirst(state.root)).toBeNull()
     expect(validateWorkbenchState(state)).toEqual({ ok: true })
   })
 
@@ -115,10 +159,28 @@ describe('workbench binary split & tab tree', () => {
     expect(parseWorkbenchState({ version: 2 })).toBeNull()
 
     let state = createEmptyWorkbenchState()
-    state = insertTab(state, makeFileTab('a.ts')).state
+    state = insertTab(state, makeFileTab('a.ts'))
     state = splitGroupWithTab(state, listGroups(state.root)[0]!.id, 'right', makeFileTab('b.ts'))
     const roundTripped = parseWorkbenchState(JSON.parse(JSON.stringify(state)))
     expect(roundTripped).toEqual(state)
+
+    // Duplicate tabId across two groups in corrupted storage must be deduplicated cleanly.
+    const corrupted = {
+      version: 1,
+      activeGroupId: 'g1',
+      root: {
+        kind: 'split',
+        id: 's1',
+        axis: 'row',
+        ratio: 0.5,
+        first: { kind: 'group', id: 'g1', tabIds: ['file:/data/a.ts'], activeTabId: 'file:/data/a.ts', previewTabId: null },
+        second: { kind: 'group', id: 'g2', tabIds: ['file:/data/a.ts'], activeTabId: 'file:/data/a.ts', previewTabId: null },
+      },
+      tabs: { 'file:/data/a.ts': makeFileTab('a.ts') },
+    }
+    const sanitized = parseWorkbenchState(corrupted)
+    expect(sanitized).not.toBeNull()
+    expect(validateWorkbenchState(sanitized!)).toEqual({ ok: true })
   })
 
   it('preserves all structural invariants across 200 seeds × 40 randomized operations', () => {
@@ -155,7 +217,7 @@ describe('workbench binary split & tab tree', () => {
             state,
             makeFileTab(`f-${seed}-${counter}.ts`, pinned),
             { groupId: targetGroup.id, preview, activate: rand() < 0.8 },
-          ).state
+          )
         } else if (op === 1) {
           state = keepOpenTab(state, pick(tabIds))
         } else if (op === 2) {
@@ -198,5 +260,28 @@ describe('workbench binary split & tab tree', () => {
         expect(findGroup(state.root, findSpatialFirstGroupId(state.root))).not.toBeNull()
       }
     }
+  })
+
+  it('aligns same-group center drops with visual pre-removal slot indices', () => {
+    let state = createEmptyWorkbenchState('g1')
+    state = insertTab(state, makeFileTab('a.ts'))
+    state = insertTab(state, makeFileTab('b.ts'))
+    state = insertTab(state, makeFileTab('c.ts'))
+
+    // Visually [a, b, c]: dropping `a` before `c` (slot boundary 2) places `a` between `b` and `c`.
+    const movedBeforeC = moveTabToGroup(state, 'file:/data/a.ts', 'g1', 'center', 2)
+    expect(listGroups(movedBeforeC.root)[0]!.tabIds).toEqual([
+      'file:/data/b.ts',
+      'file:/data/a.ts',
+      'file:/data/c.ts',
+    ])
+
+    // Dropping `a` after `c` (slot boundary 3) places `a` at the end.
+    const movedToEnd = moveTabToGroup(state, 'file:/data/a.ts', 'g1', 'center', 3)
+    expect(listGroups(movedToEnd.root)[0]!.tabIds).toEqual([
+      'file:/data/b.ts',
+      'file:/data/c.ts',
+      'file:/data/a.ts',
+    ])
   })
 })

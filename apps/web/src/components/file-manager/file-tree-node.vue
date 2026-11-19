@@ -28,8 +28,6 @@ import { directoryEntriesFingerprint, isArchiveFile, sortDirsFirst } from './uti
 import { resolveFileIcon } from './file-icon'
 import { FileTreeKey } from './file-tree-context'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { findGroup } from '@/workbench/tree'
-import { startWorkbenchExternalPointerDrag } from '@/workbench/drag'
 import {
   treeGlyphSlotClass,
   treeIndentClass,
@@ -100,22 +98,9 @@ function onRowMiddleClick() {
 
 function onRowPointerDown(event: PointerEvent) {
   if (selectionMode.value || props.entry.isDir || !path.value || event.button !== 0) return
-  const store = useWorkspaceTabsStore()
-  if (store.isMobile) return
   const filePath = path.value
   const label = props.entry.name ?? filePath.slice(filePath.lastIndexOf('/') + 1)
-  startWorkbenchExternalPointerDrag({
-    event,
-    dragId: `ext:file:${filePath}`,
-    getTitle: () => label,
-    isMobile: () => store.isMobile,
-    getGroupTabIds: gid => findGroup(store.workbench.root, gid)?.tabIds ?? [],
-    isTabPinned: tid => Boolean(store.workbench.tabs[tid]?.pinned),
-    onDragStateChange: (dragging) => { store.panelDragging = dragging },
-    onCommitDrop: (targetGid, zone, idx) => {
-      store.dropExternalItem({ kind: 'file', filePath }, targetGid, zone, idx)
-    },
-  })
+  useWorkspaceTabsStore().startExternalDrag(event, { kind: 'file', filePath }, label)
 }
 
 // Re-fetch an expanded folder's children when the workspace changes.

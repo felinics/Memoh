@@ -102,6 +102,7 @@
     width 200ms cubic-bezier(0.22, 1, 0.36, 1),
     min-width 200ms cubic-bezier(0.22, 1, 0.36, 1),
     max-width 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 120ms ease-out;
 }
 
@@ -109,7 +110,21 @@
   --wb-curr-max-w: var(--tab-lock-w);
   flex: 0 0 var(--tab-lock-w);
   min-width: var(--tab-lock-w);
-  transition: opacity 120ms ease-out;
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease-out;
+}
+
+.workbench-tab[data-dragging-rail="true"] {
+  /* ui-allow-z: dragged tab glides directly over sibling tabs along its own strip */
+  z-index: 4;
+  transform: translate3d(var(--wb-drag-x, 0px), 0, 0);
+  transition: none;
+  will-change: transform;
+}
+
+.workbench-tab[data-dragging-detached="true"] {
+  opacity: 0.4;
 }
 
 /* Content hit box:
@@ -293,10 +308,7 @@
 }
 
 .workbench-tab-action.is-dot,
-.workbench-tab-action[data-close-resident="true"] {
-  opacity: 1;
-}
-
+.workbench-tab[data-group-active="true"]:not([data-tab-dirty="true"]) .workbench-tab-action:not(.is-dot),
 .workbench-tab[data-hover-locked="true"] .workbench-tab-action:not(.is-dot) {
   opacity: 1;
 }

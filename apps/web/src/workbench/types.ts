@@ -82,19 +82,10 @@ export type WorkbenchNode = WorkbenchGroupNode | WorkbenchSplitNode
 
 export type WorkbenchSplitDirection = 'left' | 'right' | 'top' | 'bottom'
 export type WorkbenchDropZone = WorkbenchSplitDirection | 'center'
-export type WorkbenchAdjacentDirection = 'left' | 'right' | 'above' | 'below'
 
 export interface WorkbenchState {
   version: 1
   root: WorkbenchNode
   activeGroupId: string
   tabs: Record<string, WorkbenchTab>
-}
-
-export interface WorkbenchNormalizedRect {
-  groupId: string
-  x: number
-  y: number
-  w: number
-  h: number
 }

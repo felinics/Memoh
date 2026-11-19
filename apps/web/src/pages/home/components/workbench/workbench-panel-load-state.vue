@@ -1,13 +1,15 @@
 <template>
-  <!-- The loading / failed states of code that is downloaded on demand: a whole
-       panel (workbench-panel-loading wraps this in the panel frame) or the heavy
-       body inside a panel that already has its frame (lazyPanelContent). Retry
-       downloads the code again in place, without reloading the page, since
-       other open panels may hold unsaved edits. Retry can't recover a chunk
-       that a deployment has removed since this page loaded; reloading the page
-       does, so it is offered too, but only once no file has unsaved edits: a
-       reload would drop them without the save/discard prompt. -->
-  <PanePlaceholder v-if="failed">
+  <!-- The loading / failed states of lazily downloaded panels and heavy panel
+       bodies (lazyPanelContent). Retry downloads the code again in place,
+       without reloading the page, since other open panels may hold unsaved
+       edits. Retry can't recover a chunk that a deployment has removed since
+       this page loaded; reloading the page does, so it is offered too, but only
+       once no file has unsaved edits: a reload would drop them without the
+       save/discard prompt. -->
+  <PanePlaceholder
+    v-if="failed"
+    class="h-full w-full bg-surface-editor"
+  >
     {{ t('common.loadFailed') }}
     <template #action>
       <div class="flex flex-col items-center gap-2">
@@ -38,6 +40,7 @@
   <PanePlaceholder
     v-else
     loading
+    class="h-full w-full bg-surface-editor"
   >
     {{ t('common.loading') }}
   </PanePlaceholder>

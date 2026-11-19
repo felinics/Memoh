@@ -1,4 +1,49 @@
 <template>
+  <DefineTabMenu v-slot="{ tab }">
+    <ContextMenuContent class="w-48">
+      <ContextMenuItem
+        v-if="!tab.pinned && group.previewTabId === tab.id"
+        @select="store.keepOpenTab(tab.id)"
+      >
+        {{ t('chat.tabMenu.keepOpen') }}
+      </ContextMenuItem>
+      <ContextMenuItem @select="tab.pinned ? store.unpinTab(tab.id) : store.pinTab(tab.id)">
+        {{ tab.pinned ? t('chat.tabMenu.unpin') : t('chat.tabMenu.pin') }}
+      </ContextMenuItem>
+      <template v-if="!isMobile">
+        <ContextMenuSeparator />
+        <ContextMenuItem @select="activateAndSplit(tab.id, 'right')">
+          {{ t('chat.tabBarToolkit.splitRight') }}
+        </ContextMenuItem>
+        <ContextMenuItem @select="activateAndSplit(tab.id, 'below')">
+          {{ t('chat.tabBarToolkit.splitDown') }}
+        </ContextMenuItem>
+      </template>
+      <ContextMenuSeparator />
+      <ContextMenuItem @select="store.requestCloseTab(tab.id)">
+        {{ t('chat.tabMenu.close') }}
+      </ContextMenuItem>
+      <ContextMenuItem
+        :disabled="!hasClosableOthers(tab.id)"
+        @select="store.closeOtherTabs(group.id, tab.id)"
+      >
+        {{ t('chat.tabMenu.closeOthers') }}
+      </ContextMenuItem>
+      <ContextMenuItem
+        :disabled="!hasClosableRight(tab.id)"
+        @select="store.closeTabsToRight(group.id, tab.id)"
+      >
+        {{ t('chat.tabMenu.closeToRight') }}
+      </ContextMenuItem>
+      <ContextMenuItem
+        :disabled="unpinnedTabs.length === 0"
+        @select="store.closeAllTabsInGroup(group.id)"
+      >
+        {{ t('chat.tabMenu.closeAll') }}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  </DefineTabMenu>
+
   <header
     class="workbench-header flex w-full shrink-0 items-center overflow-hidden"
     :data-workbench-header-group-id="group.id"
@@ -9,60 +54,7 @@
     @pointerenter="cancelUnlockWidth"
   >
     <!-- Spatial top-left group navigation & macOS traffic-light gutter -->
-    <div
-      v-if="isSpatialFirstGroup && !isMobile"
-      data-workbench-prefix-nav
-      class="flex h-full shrink-0 items-center gap-0.5 pr-0 transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
-      :class="[
-        shouldReserveTrafficLight ? 'pl-22' : 'pl-2',
-        panelDragging ? '[-webkit-app-region:no-drag]' : '[-webkit-app-region:drag]',
-      ]"
-    >
-      <Button
-        variant="ghost"
-        tone="muted"
-        size="icon-sm"
-        shape="circle"
-        class="size-7 [-webkit-app-region:no-drag]"
-        :title="workbenchOpen ? t('chat.topBar.hideWorkbench') : t('chat.topBar.showWorkbench')"
-        :aria-label="workbenchOpen ? t('chat.topBar.hideWorkbench') : t('chat.topBar.showWorkbench')"
-        :aria-pressed="workbenchOpen"
-        @click.stop="store.toggleWorkbench()"
-      >
-        <SidebarCloseIcon
-          v-if="workbenchOpen"
-          class="size-4"
-        />
-        <SidebarOpenIcon
-          v-else
-          class="size-4"
-        />
-      </Button>
-      <Button
-        variant="ghost"
-        tone="muted"
-        size="icon-sm"
-        shape="circle"
-        class="size-7 [-webkit-app-region:no-drag]"
-        :title="t('chat.topBar.goBack')"
-        :aria-label="t('chat.topBar.goBack')"
-        @click.stop="router.go(-1)"
-      >
-        <BackIcon class="size-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        tone="muted"
-        size="icon-sm"
-        shape="circle"
-        class="size-7 [-webkit-app-region:no-drag]"
-        :title="t('chat.topBar.goForward')"
-        :aria-label="t('chat.topBar.goForward')"
-        @click.stop="router.go(1)"
-      >
-        <ForwardIcon class="size-4" />
-      </Button>
-    </div>
+    <WorkbenchPrefixNav v-if="isSpatialFirstGroup && !isMobile" />
 
     <!-- Non-scrolling left pinned tabs segment -->
     <div
@@ -82,8 +74,9 @@
           :key="tab.id"
           class="workbench-tab workbench-tab-pinned group/tab z-[1] flex"
           :data-workbench-tab-id="tab.id"
-          :data-tab-pinned="true"
           :data-group-active="group.activeTabId === tab.id ? 'true' : undefined"
+          :data-dragging-rail="isRailDragged(tab.id) ? 'true' : undefined"
+          :data-dragging-detached="isDetachedDragged(tab.id) ? 'true' : undefined"
         >
           <ContextMenu>
             <ContextMenuTrigger as-child>
@@ -122,42 +115,7 @@
                 />
               </div>
             </ContextMenuTrigger>
-            <ContextMenuContent class="w-48">
-              <ContextMenuItem @select="store.unpinTab(tab.id)">
-                {{ t('chat.tabMenu.unpin') }}
-              </ContextMenuItem>
-              <template v-if="!isMobile">
-                <ContextMenuSeparator />
-                <ContextMenuItem @select="activateAndSplit(tab.id, 'right')">
-                  {{ t('chat.tabBarToolkit.splitRight') }}
-                </ContextMenuItem>
-                <ContextMenuItem @select="activateAndSplit(tab.id, 'below')">
-                  {{ t('chat.tabBarToolkit.splitDown') }}
-                </ContextMenuItem>
-              </template>
-              <ContextMenuSeparator />
-              <ContextMenuItem @select="store.requestCloseTab(tab.id)">
-                {{ t('chat.tabMenu.close') }}
-              </ContextMenuItem>
-              <ContextMenuItem
-                :disabled="!hasClosableOthers(tab.id)"
-                @select="store.closeOtherTabs(group.id, tab.id)"
-              >
-                {{ t('chat.tabMenu.closeOthers') }}
-              </ContextMenuItem>
-              <ContextMenuItem
-                :disabled="!hasClosableRight(tab.id)"
-                @select="store.closeTabsToRight(group.id, tab.id)"
-              >
-                {{ t('chat.tabMenu.closeToRight') }}
-              </ContextMenuItem>
-              <ContextMenuItem
-                :disabled="unpinnedTabs.length === 0"
-                @select="store.closeAllTabsInGroup(group.id)"
-              >
-                {{ t('chat.tabMenu.closeAll') }}
-              </ContextMenuItem>
-            </ContextMenuContent>
+            <ReuseTabMenu :tab="tab" />
           </ContextMenu>
         </div>
       </TransitionGroup>
@@ -188,11 +146,12 @@
           :key="tab.id"
           class="workbench-tab group/tab z-[1] flex"
           :data-workbench-tab-id="tab.id"
-          :data-tab-preview="store.isPreviewTab(tab.id) ? 'true' : undefined"
           :data-tab-dirty="store.fileDirty[tab.id] ? 'true' : undefined"
           :data-hover-locked="hoverLockedTabId === tab.id ? 'true' : undefined"
           :data-close-hover-locked="closeHoverLockedTabId === tab.id ? 'true' : undefined"
           :data-group-active="group.activeTabId === tab.id ? 'true' : undefined"
+          :data-dragging-rail="isRailDragged(tab.id) ? 'true' : undefined"
+          :data-dragging-detached="isDetachedDragged(tab.id) ? 'true' : undefined"
         >
           <ContextMenu>
             <ContextMenuTrigger as-child>
@@ -221,7 +180,6 @@
                 />
                 <!-- ui-allow-z: tab-local label above active crown/foot -->
                 <span
-                  data-workbench-tab-label
                   class="workbench-tab-title relative z-[1] min-w-0 flex-1 overflow-hidden text-label leading-[1.3] whitespace-nowrap transition-colors"
                   :class="group.activeTabId === tab.id ? 'text-foreground' : 'text-muted-foreground'"
                 >{{ store.resolveTabTitle(tab.id) }}</span>
@@ -230,7 +188,6 @@
                 <!-- ui-allow-z: tab-local indicator above label -->
                 <div
                   v-if="store.fileDirty[tab.id]"
-                  data-workbench-dirty-dot
                   class="workbench-tab-action is-dot pointer-events-none absolute z-[2] flex items-center"
                 >
                   <span class="flex size-5 items-center justify-center">
@@ -243,10 +200,7 @@
 
                 <!-- Zero-background close button -->
                 <!-- ui-allow-z: tab-local close control above label and dot -->
-                <div
-                  class="workbench-tab-action pointer-events-none absolute z-[2] flex items-center"
-                  :data-close-resident="showResidentClose(tab.id) ? 'true' : undefined"
-                >
+                <div class="workbench-tab-action pointer-events-none absolute z-[2] flex items-center">
                   <Button
                     variant="ghost"
                     tone="muted"
@@ -265,48 +219,7 @@
                 </div>
               </div>
             </ContextMenuTrigger>
-            <ContextMenuContent class="w-48">
-              <ContextMenuItem
-                v-if="store.isPreviewTab(tab.id)"
-                @select="store.keepOpenTab(tab.id)"
-              >
-                {{ t('chat.tabMenu.keepOpen') }}
-              </ContextMenuItem>
-              <ContextMenuItem @select="store.pinTab(tab.id)">
-                {{ t('chat.tabMenu.pin') }}
-              </ContextMenuItem>
-              <template v-if="!isMobile">
-                <ContextMenuSeparator />
-                <ContextMenuItem @select="activateAndSplit(tab.id, 'right')">
-                  {{ t('chat.tabBarToolkit.splitRight') }}
-                </ContextMenuItem>
-                <ContextMenuItem @select="activateAndSplit(tab.id, 'below')">
-                  {{ t('chat.tabBarToolkit.splitDown') }}
-                </ContextMenuItem>
-              </template>
-              <ContextMenuSeparator />
-              <ContextMenuItem @select="store.requestCloseTab(tab.id)">
-                {{ t('chat.tabMenu.close') }}
-              </ContextMenuItem>
-              <ContextMenuItem
-                :disabled="!hasClosableOthers(tab.id)"
-                @select="store.closeOtherTabs(group.id, tab.id)"
-              >
-                {{ t('chat.tabMenu.closeOthers') }}
-              </ContextMenuItem>
-              <ContextMenuItem
-                :disabled="!hasClosableRight(tab.id)"
-                @select="store.closeTabsToRight(group.id, tab.id)"
-              >
-                {{ t('chat.tabMenu.closeToRight') }}
-              </ContextMenuItem>
-              <ContextMenuItem
-                :disabled="unpinnedTabs.length === 0"
-                @select="store.closeAllTabsInGroup(group.id)"
-              >
-                {{ t('chat.tabMenu.closeAll') }}
-              </ContextMenuItem>
-            </ContextMenuContent>
+            <ReuseTabMenu :tab="tab" />
           </ContextMenu>
         </div>
       </TransitionGroup>
@@ -315,7 +228,6 @@
     <!-- "+" action menu hugging the end of the tab strip -->
     <div
       v-if="hasAnyAddAction"
-      data-workbench-add-actions
       class="workbench-add-actions flex h-full shrink-0 items-center [-webkit-app-region:no-drag]"
     >
       <DropdownMenu>
@@ -381,23 +293,38 @@
       class="h-full min-w-4 flex-1"
       :class="panelDragging ? '[-webkit-app-region:no-drag]' : '[-webkit-app-region:drag]'"
     />
+
+    <!-- Right-aligned group action: open Markdown/HTML preview to the side -->
+    <div
+      v-if="previewFilePath"
+      class="flex h-full shrink-0 items-center pr-2 [-webkit-app-region:no-drag]"
+    >
+      <Button
+        variant="ghost"
+        tone="muted"
+        size="icon-sm"
+        shape="circle"
+        class="size-7 shrink-0 p-0"
+        :title="t('chat.openPreviewToSide')"
+        :aria-label="t('chat.openPreviewToSide')"
+        @click.stop="store.openPreview(previewFilePath, group.id)"
+      >
+        <Columns2 class="size-3.5" />
+      </Button>
+    </div>
   </header>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { createReusableTemplate } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessageCircle, Pin, X } from 'lucide-vue-next'
+import { Columns2, MessageCircle, Pin, X } from 'lucide-vue-next'
 import {
   AddIcon,
-  BackIcon,
   BrowserIcon,
   ComputerIcon,
-  ForwardIcon,
-  SidebarCloseIcon,
-  SidebarOpenIcon,
   SplitDownIcon,
   SplitRightIcon,
   TerminalIcon,
@@ -415,22 +342,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@felinic/ui'
+import { isHtmlFile, isMarkdownFile } from '@/components/file-manager/utils'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import { hasBotPermission } from '@/utils/bot-permissions'
+import { workbenchFileBaseName } from '@/workbench/titles'
 import { findGroup } from '@/workbench/tree'
-import { startWorkbenchTabPointerGesture } from '@/workbench/drag'
+import { activeWorkbenchDrag, startWorkbenchTabPointerGesture } from '@/workbench/drag'
 import type { WorkbenchGroupNode, WorkbenchTab } from '@/workbench/types'
+import WorkbenchPrefixNav from './workbench-prefix-nav.vue'
 
 const props = defineProps<{
   group: WorkbenchGroupNode
 }>()
 
+const [DefineTabMenu, ReuseTabMenu] = createReusableTemplate<{ tab: WorkbenchTab }>({ inheritAttrs: false })
+
 const { t } = useI18n()
-const router = useRouter()
 const store = useWorkspaceTabsStore()
-const { workbenchOpen, isMobile, panelDragging } = storeToRefs(store)
+const { isMobile, panelDragging } = storeToRefs(store)
 const chatStore = useChatStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
 
@@ -450,16 +380,23 @@ function syncScrollEdges() {
   scrollFadeRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
 }
 
-const macTrafficReserve = useMacTrafficReserve()
 const isSpatialFirstGroup = computed(() => props.group.id === store.spatialFirstGroupId)
-const shouldReserveTrafficLight = computed(() => macTrafficReserve.value && !workbenchOpen.value)
 
 const currentBot = computed(() =>
   bots.value.find(bot => bot.id === currentBotId.value) ?? null,
 )
 const currentPermissions = computed(() => currentBot.value?.current_user_permissions ?? [])
+const canWorkspaceRead = computed(() => hasBotPermission(currentPermissions.value, 'workspace_read'))
 const canWorkspaceExec = computed(() => hasBotPermission(currentPermissions.value, 'workspace_exec'))
 const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
+
+const previewFilePath = computed<string | null>(() => {
+  if (!canWorkspaceRead.value || !props.group.activeTabId) return null
+  const tab = store.workbench.tabs[props.group.activeTabId]
+  if (!tab || tab.target.kind !== 'file') return null
+  const name = workbenchFileBaseName(tab.target.filePath)
+  return isMarkdownFile(name) || isHtmlFile(name) ? tab.target.filePath : null
+})
 
 const hasAnyAddAction = computed(() =>
   Boolean(currentBotId.value) || canWorkspaceExec.value || canManage.value || (Boolean(props.group.activeTabId) && !isMobile.value),
@@ -474,14 +411,9 @@ const groupTabs = computed<WorkbenchTab[]>(() =>
 const pinnedTabs = computed(() => groupTabs.value.filter(tab => tab.pinned))
 const unpinnedTabs = computed(() => groupTabs.value.filter(tab => !tab.pinned))
 const isLastRegularTabActive = computed(() => {
-  const last = unpinnedTabs.value.at(-1)
+  const last = unpinnedTabs.value.at(-1) ?? pinnedTabs.value.at(-1)
   return Boolean(last && props.group.activeTabId === last.id)
 })
-
-function showResidentClose(tabId: string): boolean {
-  if (store.fileDirty[tabId]) return false
-  return props.group.activeTabId === tabId || hoverLockedTabId.value === tabId
-}
 
 function hasClosableOthers(tabId: string): boolean {
   return props.group.tabIds.some(id => id !== tabId && !store.workbench.tabs[id]?.pinned)
@@ -592,9 +524,10 @@ onBeforeUnmount(() => {
 function onCloseTab(event: MouseEvent, tabId: string, pinned: boolean, fromCloseButton: boolean) {
   if (!pinned && !store.fileDirty[tabId] && unpinnedTabs.value.length >= 1) {
     const idx = unpinnedTabs.value.findIndex(t => t.id === tabId)
-    const fallbackEl = scrollerEl.value?.querySelector<HTMLElement>(
-      `[data-workbench-tab-id="${CSS.escape(tabId)}"]`,
-    )
+    const fallbackEl = scrollerEl.value
+      ? Array.from(scrollerEl.value.querySelectorAll<HTMLElement>('[data-workbench-tab-id]'))
+          .find(el => el.dataset.workbenchTabId === tabId) ?? null
+      : null
     const tabEl = (event.currentTarget as HTMLElement | null)?.closest<HTMLElement>('[data-workbench-tab-id]') ?? fallbackEl
     if (tabEl) {
       cancelUnlockWidth()
@@ -648,6 +581,15 @@ function onScrollerWheel(event: WheelEvent) {
     event.preventDefault()
     el.scrollLeft += event.deltaY
   }
+}
+
+function isRailDragged(tabId: string): boolean {
+  const rail = activeWorkbenchDrag.value?.railTab
+  return Boolean(rail && rail.groupId === props.group.id && rail.tabId === tabId)
+}
+
+function isDetachedDragged(tabId: string): boolean {
+  return activeWorkbenchDrag.value?.detachedTabId === tabId
 }
 
 function onTabPointerDown(event: PointerEvent, tab: WorkbenchTab) {

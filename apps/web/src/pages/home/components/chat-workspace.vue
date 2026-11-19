@@ -9,31 +9,40 @@
       v-show="!store.isMobile && hasAnyTabs"
       :key="store.workbench.root.id"
       :node="store.workbench.root"
-      @slot-mounted="onSlotMounted"
-      @slot-unmounted="onSlotUnmounted"
     />
 
     <!-- Empty workspace placeholder -->
     <div
       v-if="!hasAnyTabs"
-      class="flex-1 bg-background"
+      class="flex flex-1 flex-col bg-background"
     >
-      <PanePlaceholder :title="t('chat.workspaceEmpty')">
-        {{ t('chat.workspaceEmptyHint') }}
-      </PanePlaceholder>
+      <header
+        v-if="!store.isMobile"
+        data-workbench-empty-header
+        class="workbench-header flex w-full shrink-0 items-center overflow-hidden"
+        :class="store.panelDragging ? '[-webkit-app-region:no-drag]' : '[-webkit-app-region:drag]'"
+      >
+        <WorkbenchPrefixNav />
+      </header>
+      <div
+        class="min-h-0 flex-1"
+        :data-workbench-slot-group-id="store.workbench.root.kind === 'group' ? store.workbench.root.id : undefined"
+        data-workbench-empty-slot="true"
+      >
+        <PanePlaceholder :title="t('chat.workspaceEmpty')">
+          {{ t('chat.workspaceEmptyHint') }}
+        </PanePlaceholder>
+      </div>
     </div>
 
     <!-- Single flat keep-alive panel stage -->
-    <WorkbenchStage
-      v-show="hasAnyTabs"
-      :slot-map="slotMap"
-      :slot-version="slotVersion"
-    />
+    <WorkbenchStage v-show="hasAnyTabs" />
 
     <!-- Transparent pointer shield during tab drag or sash resize so iframes never steal events -->
     <div
       v-if="store.panelDragging"
       class="absolute inset-0 z-(--z-overlay)"
+      @contextmenu.prevent
     />
 
     <!-- Drop zone preview & floating drag chip -->
@@ -47,7 +56,7 @@
     <div
       v-if="dragChipStyle && activeDrag"
       data-workbench-drag-chip
-      class="pointer-events-none fixed z-(--z-top) max-w-52 truncate rounded-md border border-border bg-popover px-2.5 py-1 text-label text-popover-foreground shadow-[var(--shadow-md)]"
+      class="pointer-events-none fixed left-0 top-0 z-(--z-top) max-w-52 truncate rounded-md border border-border bg-popover px-2.5 py-1 text-label text-popover-foreground shadow-[var(--shadow-md)] will-change-transform"
       :style="dragChipStyle"
     >
       {{ activeDrag.title }}
@@ -109,7 +118,8 @@ import '@/styles/workbench.css'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { openAssetPreviewKey, openInFileManagerKey } from '../composables/useFileManagerProvider'
 import { normalizeFileManagerPath } from './file-manager-path'
-import { activeWorkbenchDrag } from '@/workbench/drag'
+import { activeWorkbenchDrag, cancelActiveWorkbenchDrag } from '@/workbench/drag'
+import WorkbenchPrefixNav from './workbench/workbench-prefix-nav.vue'
 import WorkbenchTree from './workbench/workbench-tree.vue'
 import WorkbenchStage from './workbench/workbench-stage.vue'
 
@@ -119,30 +129,16 @@ const { pendingClose } = storeToRefs(store)
 const activeDrag = activeWorkbenchDrag
 
 const rootEl = ref<HTMLElement | null>(null)
-const slotMap = new Map<string, HTMLElement>()
-const slotVersion = ref(0)
 const savingClose = ref(false)
 
 const hasAnyTabs = computed(() => Object.keys(store.workbench.tabs).length > 0)
-
-function onSlotMounted(payload: { groupId: string, el: HTMLElement }) {
-  slotMap.set(payload.groupId, payload.el)
-  slotVersion.value += 1
-}
-
-function onSlotUnmounted(payload: { groupId: string, el: HTMLElement | null }) {
-  const current = slotMap.get(payload.groupId)
-  if (current && (!payload.el || current === payload.el)) {
-    slotMap.delete(payload.groupId)
-    slotVersion.value += 1
-  }
-}
 
 const dropPreviewStyle = computed<Record<string, string> | null>(() => {
   const target = activeDrag.value?.target
   const root = rootEl.value
   if (!target || !root) return null
   const rr = root.getBoundingClientRect()
+  // Unscale viewport coords in case an ancestor (e.g. MainSection entry transition) applies CSS scale.
   const scaleX = root.clientWidth > 0 ? rr.width / root.clientWidth : 1
   const scaleY = root.clientHeight > 0 ? rr.height / root.clientHeight : 1
   const sx = scaleX > 0 ? scaleX : 1
@@ -157,10 +153,9 @@ const dropPreviewStyle = computed<Record<string, string> | null>(() => {
 
 const dragChipStyle = computed<Record<string, string> | null>(() => {
   const drag = activeDrag.value
-  if (!drag) return null
+  if (!drag || drag.railTab) return null
   return {
-    left: `${drag.clientX + 8}px`,
-    top: `${drag.clientY + 8}px`,
+    transform: `translate3d(${drag.clientX + 8}px, ${drag.clientY + 8}px, 0)`,
   }
 })
 
@@ -202,7 +197,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  slotMap.clear()
+  cancelActiveWorkbenchDrag()
   store.unmountWorkspace()
 })
 </script>

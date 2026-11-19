@@ -1,77 +1,75 @@
 <template>
-  <div class="relative flex h-full w-full flex-col bg-surface-editor">
-    <div class="min-h-0 flex-1">
-      <!-- A restored background tab loads nothing until it is first shown. -->
-      <PanePlaceholder
-        v-if="loading || !hasActivated"
-        loading
+  <div class="h-full w-full bg-surface-editor">
+    <!-- A restored background tab loads nothing until it is first shown. -->
+    <PanePlaceholder
+      v-if="loading || !hasActivated"
+      loading
+    >
+      {{ t('common.loading') }}
+    </PanePlaceholder>
+
+    <MonacoEditor
+      v-else-if="isText && oversizedMaxBytes === null && !loadFailed"
+      v-model="content"
+      :filename="name"
+      :active="visible"
+      readonly
+      class="h-full"
+    />
+
+    <div
+      v-else-if="isImage && renderUrl"
+      class="flex h-full items-center justify-center overflow-auto bg-muted p-4"
+    >
+      <img
+        :src="renderUrl"
+        :alt="name"
+        class="max-h-full max-w-full rounded-md object-contain"
       >
-        {{ t('common.loading') }}
-      </PanePlaceholder>
-
-      <MonacoEditor
-        v-else-if="isText && oversizedMaxBytes === null && !loadFailed"
-        v-model="content"
-        :filename="name"
-        :active="visible"
-        readonly
-        class="h-full"
-      />
-
-      <div
-        v-else-if="isImage && renderUrl"
-        class="flex h-full items-center justify-center overflow-auto bg-muted p-4"
-      >
-        <img
-          :src="renderUrl"
-          :alt="name"
-          class="max-h-full max-w-full rounded-md object-contain"
-        >
-      </div>
-
-      <DocumentPreview
-        v-else-if="documentKind && documentBlob"
-        :key="assetIdentityKey"
-        :blob="documentBlob"
-        :kind="documentKind"
-        :filename="name"
-        :active="visible"
-      >
-        <template
-          v-if="renderUrl"
-          #action
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            @click="handleDownload"
-          >
-            <Download class="mr-1.5 size-3" />
-            {{ t('bots.files.download') }}
-          </Button>
-        </template>
-      </DocumentPreview>
-
-      <PanePlaceholder v-else>
-        <template #icon>
-          <File class="size-12 opacity-30" />
-        </template>
-        {{ oversizedMaxBytes !== null ? t('bots.files.previewTooLarge', { size: formatFileSize(oversizedMaxBytes) }) : loadFailed ? t('bots.files.previewFailed') : t('bots.files.previewNotAvailable') }}
-        <template
-          v-if="renderUrl"
-          #action
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            @click="handleDownload"
-          >
-            <Download class="mr-1.5 size-3" />
-            {{ t('bots.files.download') }}
-          </Button>
-        </template>
-      </PanePlaceholder>
     </div>
+
+    <DocumentPreview
+      v-else-if="documentKind && documentBlob"
+      :key="assetIdentityKey"
+      :blob="documentBlob"
+      :kind="documentKind"
+      :filename="name"
+      :active="visible"
+    >
+      <template
+        v-if="renderUrl"
+        #action
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          @click="handleDownload"
+        >
+          <Download class="mr-1.5 size-3" />
+          {{ t('bots.files.download') }}
+        </Button>
+      </template>
+    </DocumentPreview>
+
+    <PanePlaceholder v-else>
+      <template #icon>
+        <File class="size-12 opacity-30" />
+      </template>
+      {{ oversizedMaxBytes !== null ? t('bots.files.previewTooLarge', { size: formatFileSize(oversizedMaxBytes) }) : loadFailed ? t('bots.files.previewFailed') : t('bots.files.previewNotAvailable') }}
+      <template
+        v-if="renderUrl"
+        #action
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          @click="handleDownload"
+        >
+          <Download class="mr-1.5 size-3" />
+          {{ t('bots.files.download') }}
+        </Button>
+      </template>
+    </PanePlaceholder>
   </div>
 </template>
 

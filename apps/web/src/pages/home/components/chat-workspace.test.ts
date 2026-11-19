@@ -8,17 +8,20 @@ const initialState = insertTab(
   insertTab(
     createEmptyWorkbenchState(),
     { id: 'file:/data/AGENTS.md', pinned: false, target: { kind: 'file', filePath: '/data/AGENTS.md' } },
-  ).state,
+  ),
   { id: 'preview:/data/AGENTS.md', pinned: false, target: { kind: 'preview', filePath: '/data/AGENTS.md' } },
-).state
+)
 
 const workspaceStore = {
   workbench: initialState,
+  loadedBotId: 'bot-1',
   isMobile: false,
   panelDragging: false,
+  workbenchOpen: true,
   pendingClose: ref(null),
   mountWorkspace: vi.fn(),
   unmountWorkspace: vi.fn(),
+  toggleWorkbench: vi.fn(),
   openSessionChat: vi.fn(),
   openDraftChat: vi.fn(),
   openFilePinned: vi.fn(),
@@ -29,6 +32,21 @@ const workspaceStore = {
 
 vi.mock('@/store/workspace-tabs', () => ({
   useWorkspaceTabsStore: () => workspaceStore,
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ go: vi.fn() }),
+}))
+
+vi.mock('@/composables/useMacTrafficReserve', () => ({
+  useMacTrafficReserve: () => ref(false),
+}))
+
+vi.mock('@memohai/icon/ui', () => ({
+  BackIcon: 'span',
+  ForwardIcon: 'span',
+  SidebarCloseIcon: 'span',
+  SidebarOpenIcon: 'span',
 }))
 
 vi.mock('@felinic/ui', () => ({
@@ -49,7 +67,6 @@ vi.mock('vue-i18n', () => ({
 vi.mock('./workbench/workbench-tree.vue', () => ({
   default: defineComponent({
     props: ['node'],
-    emits: ['slotMounted', 'slotUnmounted'],
     setup() {
       const openFile = inject(openInFileManagerKey)!
       return () => h('div', [
@@ -62,7 +79,6 @@ vi.mock('./workbench/workbench-tree.vue', () => ({
 
 vi.mock('./workbench/workbench-stage.vue', () => ({
   default: defineComponent({
-    props: ['slotMap', 'slotVersion'],
     setup: () => () => h('div'),
   }),
 }))
@@ -71,8 +87,11 @@ describe('chat workspace initialization', () => {
   let root: HTMLElement | null = null
 
   afterEach(() => {
+    workspaceStore.workbench = initialState
+    workspaceStore.isMobile = false
     workspaceStore.mountWorkspace.mockClear()
     workspaceStore.unmountWorkspace.mockClear()
+    workspaceStore.toggleWorkbench.mockClear()
     workspaceStore.openSessionChat.mockClear()
     workspaceStore.openDraftChat.mockClear()
     workspaceStore.openFilePinned.mockClear()
@@ -101,5 +120,21 @@ describe('chat workspace initialization', () => {
 
     app.unmount()
     expect(workspaceStore.unmountWorkspace).toHaveBeenCalledOnce()
+  })
+
+  it('keeps top prefix navigation and window drag strip accessible when desktop workspace has zero tabs', async () => {
+    workspaceStore.workbench = createEmptyWorkbenchState()
+    const ChatWorkspace = (await import('./chat-workspace.vue')).default
+    root = document.createElement('div')
+    document.body.appendChild(root)
+
+    const app = createApp(ChatWorkspace)
+    app.mount(root)
+    await nextTick()
+
+    expect(root.querySelector('[data-workbench-empty-header]')).not.toBeNull()
+    expect(root.querySelector('[data-workbench-prefix-nav]')).not.toBeNull()
+
+    app.unmount()
   })
 })
