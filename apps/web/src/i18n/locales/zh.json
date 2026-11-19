@@ -1921,7 +1921,8 @@
     "sourcePreviewFailedDescription": "暂时无法预览该服务商的模型",
     "importFromCatalog": "从 models.dev 目录导入",
     "importFromEndpoint": "从服务商接口拉取",
-    "importFromCatalogHint": "新增目录中缺少的模型并设为停用。已有模型的上下文、最大输出与推理档位按目录更新；已开启的能力不会被移除，推理预算、默认值与回传字段在仍适用时保留。启用状态保持不变，描述为空时用目录描述补上。",
+    "importFromCatalogHint": "添加新模型并更新已有参数，新模型默认停用，现有设置会保留",
+    "importFromEndpointHint": "适合补充目录里未收录的模型，新模型默认停用，现有设置会保留",
     "clientType": "客户端类型",
     "clientTypePlaceholder": "选择客户端类型",
     "typeRequired": "请选择类型",
@@ -2004,7 +2005,7 @@
     "reasoningBudgetRange": "预算下限不能大于上限",
     "refreshFailed": "刷新模型目录失败",
     "refreshConfirmHint": "获取此账号当前可用的最新模型，并从模型选择器中移除已不可用的模型",
-    "importConfirmHint": "获取并导入该服务商当前可用的模型",
+    "importConfirmHint": "拉取该服务商当前可用的模型，新增的模型默认停用",
     "showingCount": "显示 {count} / {total}",
     "catalogStale": "模型目录暂时无法更新，已使用缓存的模型信息"
   },
