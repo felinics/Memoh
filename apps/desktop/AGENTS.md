@@ -34,6 +34,8 @@ apps/desktop/
 ├── package.json
 ├── scripts/
 │   ├── build.mjs                  # env + signing + electron-vite + electron-builder
+│   ├── ensure-electron.mjs        # prepare:electron binary check
+│   ├── notarize-dmg.mjs           # macOS DMG notarization
 │   └── build-icons.mjs            # checked-in app/tray icon generator
 ├── src/
 │   ├── main/index.ts              # Electron main process and IPC handlers
@@ -109,18 +111,26 @@ behavior. Keep it small and typed in both `src/preload/index.ts` and
 Current Desktop IPC includes:
 
 - `desktop:server-status`
+- `desktop:probe-server`
+- `desktop:connect-server`
 - `desktop:runtime-state`
+- `desktop:runtime-state-changed`
 - `desktop:configure-runtime`
 - `desktop:set-runtime-paused`
 - `desktop:updates:get-info`
 - `desktop:updates:get-state`
 - `desktop:updates:check`
-- `desktop:updates:download`
 - `desktop:updates:install`
+- `desktop:updates:set-auto-update`
 - `desktop:updates:state-changed`
 - `desktop:set-menu-accelerators`
 - `desktop:open-external-url`
-- `desktop:broadcast-invalidate`
+- `desktop:load-remote-icon`
+- `desktop:notify`
+- `desktop:set-badge-count`
+- `desktop:set-tray-bots`
+- `desktop:is-fullscreen`
+- `desktop:fullscreen-changed`
 - `window:close-self`
 - `window:ignore-menu-shortcuts`
 
