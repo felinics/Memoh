@@ -2592,7 +2592,6 @@
       "reserved": "该名称为保留字"
     },
     "avatarUrl": "头像链接",
-    "avatar": "头像",
     "avatarUrlPlaceholder": "输入头像图片地址",
     "timezone": "时区",
     "timezonePlaceholder": "例如 Asia/Shanghai",

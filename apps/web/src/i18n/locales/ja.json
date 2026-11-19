@@ -2592,7 +2592,6 @@
       "reserved": "この名前は予約されています"
     },
     "avatarUrl": "アバターURL",
-    "avatar": "アバター",
     "avatarUrlPlaceholder": "アバター画像を入力してくださいURL",
     "timezone": "タイムゾーン",
     "timezonePlaceholder": "例: America/New_York",

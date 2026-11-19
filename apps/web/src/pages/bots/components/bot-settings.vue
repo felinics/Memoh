@@ -7,46 +7,6 @@
       <!-- Bot identity and timezone -->
       <SettingsSection>
         <SettingsRow
-          :label="$t('bots.avatar')"
-          stack="sm"
-        >
-          <div class="flex items-center gap-3">
-            <Avatar class="size-10 shrink-0 rounded-full">
-              <AvatarImage
-                v-if="bot?.avatar_url"
-                :src="bot.avatar_url"
-                :alt="bot.display_name || form.name || botId"
-              />
-              <AvatarFallback>
-                {{ avatarFallback }}
-              </AvatarFallback>
-            </Avatar>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              :disabled="!bot"
-              @click="avatarDialogOpen = true"
-            >
-              {{ $t('common.edit') }}
-            </Button>
-          </div>
-        </SettingsRow>
-        <SettingsRow
-          :label="$t('bots.displayName')"
-          stack="sm"
-        >
-          <div class="w-full sm:w-52">
-            <Input
-              v-model="form.display_name"
-              data-testid="bot-display-name-input"
-              type="text"
-              class="h-9"
-              :placeholder="$t('bots.displayNamePlaceholder')"
-            />
-          </div>
-        </SettingsRow>
-        <SettingsRow
           :label="$t('bots.name')"
           stack="sm"
         >
@@ -150,36 +110,22 @@
         @delete="handleDeleteBot"
       />
     </div>
-
-    <AvatarEditDialog
-      v-model:open="avatarDialogOpen"
-      v-model:avatar-url="avatarUrlModel"
-      :fallback-text="avatarFallback"
-    />
   </PageShell>
 </template>
 
 <script setup lang="ts">
 import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-  Button,
   Input,
-  PageShell,
-  SettingsRow,
-  SettingsSection,
-  toast,
 } from '@felinic/ui'
 import { Check, X, LoaderCircle } from 'lucide-vue-next'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { reactive, ref, computed, watch, onMounted, onActivated, nextTick } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
+import { PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { emptyTimezoneValue } from '@/utils/timezones'
-import AvatarEditDialog from './avatar-edit-dialog.vue'
 import SettingsInteractionCard from './settings-interaction-card.vue'
 import SettingsContextCard from './settings-context-card.vue'
 import SettingsMultimediaCard from './settings-multimedia-card.vue'
@@ -188,8 +134,6 @@ import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { getBots, putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
 import { useBotQuery } from '@/composables/api/useBot'
-import { useAvatarInitials } from '@/composables/useAvatarInitials'
-import { registerBotBreadcrumbName } from '@/lib/bot-breadcrumb'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
@@ -403,7 +347,6 @@ type SettingsForm = SettingsSettings & {
   chat_acp_project_mode: string
   default_bot_agent_id: string
   timezone: string
-  display_name: string
   name: string
 }
 
@@ -424,7 +367,6 @@ const DEFAULT_SETTINGS_FORM: SettingsForm = {
   timezone: '',
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
-  display_name: '',
   name: '',
 }
 
@@ -491,19 +433,10 @@ type NameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'res
 const nameStatus = ref<NameStatus>('idle')
 let currentBotId = props.botId
 
-const avatarDialogOpen = ref(false)
-const avatarUrlModel = ref('')
-const avatarFallback = useAvatarInitials(() => bot.value?.display_name || form.name || botIdRef.value || '')
-
 watch(bot, (val) => {
   // Same per-field guard as the settings hydration above: a refetch landing
   // while the user has an unsaved edit must not clobber it — for the name
   // that means in-progress typing, for the timezone an in-flight save.
-  const serverDisplayName = val?.display_name ?? ''
-  if (form.display_name.trim() === synced.display_name) {
-    form.display_name = serverDisplayName
-  }
-  synced.display_name = serverDisplayName
   const serverName = val?.name ?? ''
   if (form.name.trim() === synced.name) {
     form.name = serverName
@@ -515,29 +448,7 @@ watch(bot, (val) => {
     form.timezone = serverTimezone
   }
   synced.timezone = serverTimezone
-  avatarUrlModel.value = val?.avatar_url || ''
 }, { immediate: true })
-
-watch(avatarUrlModel, async (nextUrl) => {
-  const targetBotId = currentBotId
-  if (!bot.value || !targetBotId) return
-  const current = (bot.value.avatar_url || '').trim()
-  if (nextUrl.trim() === current) return
-  try {
-    await putBotsById({
-      path: { id: targetBotId },
-      body: { avatar_url: nextUrl.trim() || undefined },
-      throwOnError: true,
-    })
-    queryCache.invalidateQueries({ key: getBotsQueryKey() })
-    queryCache.invalidateQueries({ key: ['bot'] })
-    void chatStore.refreshBots().catch(() => {})
-    toast.success(t('bots.avatarUpdateSuccess'))
-  } catch (error) {
-    avatarUrlModel.value = current
-    toast.error(resolveApiErrorMessage(error, t('bots.avatarUpdateFailed')))
-  }
-})
 
 const hasNameChange = computed(() => form.name.trim() !== synced.name)
 
@@ -654,29 +565,6 @@ function buildJobs(changed: (keyof SettingsForm)[]): AutosaveJob<SettingsForm>[]
     })
   }
 
-  if (keys.has('display_name')) {
-    const targetDisplayName = form.display_name.trim()
-    if (targetDisplayName) {
-      jobs.push({
-        payload: { display_name: form.display_name },
-        rollback: false,
-        isCurrent,
-        save: async () => {
-          await putBotsById({
-            path: { id: targetBotId },
-            body: { display_name: targetDisplayName },
-            throwOnError: true,
-          })
-          registerBotBreadcrumbName(targetBotId, targetDisplayName)
-          const routeBot = String(route.params.botName ?? '').trim()
-          if (routeBot) registerBotBreadcrumbName(routeBot, targetDisplayName)
-        },
-        onSaved: () => recordSavedKeys(targetBotId, ['display_name']),
-        onError: (error) => toast.error(resolveApiErrorMessage(error, t('bots.renameFailed'))),
-      })
-    }
-  }
-
   // The name job is gated on the availability check and never rolls back: the
   // draft must survive a failure so the user can fix it — the inline status
   // carries the error instead.
@@ -734,7 +622,7 @@ function onDrained() {
   drainedFieldsByBot.clear()
   for (const [targetBotId, savedKeys] of batches) {
     const saved = [...savedKeys]
-    if (saved.some((key) => key !== 'name' && key !== 'display_name' && key !== 'timezone')) {
+    if (saved.some((key) => key !== 'name' && key !== 'timezone')) {
       if (currentBotId === targetBotId) {
         const patch = patchFromAutosavedFields(savedKeys)
         if (Object.keys(patch).length > 0) {
@@ -747,7 +635,7 @@ function onDrained() {
       }
       void queryCache.invalidateQueries({ key: ['bot-settings', targetBotId] })
     }
-    if (savedKeys.has('name') || savedKeys.has('display_name') || savedKeys.has('timezone')) {
+    if (savedKeys.has('name') || savedKeys.has('timezone')) {
       queryCache.invalidateQueries({ key: ['bot', targetBotId] })
     }
     // Schedule views read the bot's effective timezone from its settings.
@@ -756,7 +644,7 @@ function onDrained() {
     }
     // The sidebar lists bots by name; nothing else on this page is visible
     // there, so the expensive full-list refetch only fires for renames.
-    if (savedKeys.has('name') || savedKeys.has('display_name')) {
+    if (savedKeys.has('name')) {
       queryCache.invalidateQueries({ key: getBotsQueryKey() })
       void chatStore.refreshBots().catch(() => {})
     }
@@ -774,7 +662,6 @@ watch(botIdRef, (nextBotId) => {
   // Flush any pending diff against the previous bot before rebinding `form` and
   // `synced` to clean defaults for `nextBotId`.
   scheduleSync()
-  avatarDialogOpen.value = false
   currentBotId = nextBotId
   Object.assign(form, DEFAULT_SETTINGS_FORM)
   Object.assign(synced, DEFAULT_SETTINGS_FORM)

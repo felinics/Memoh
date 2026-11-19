@@ -2592,7 +2592,6 @@
       "reserved": "This name is reserved"
     },
     "avatarUrl": "Avatar URL",
-    "avatar": "Avatar",
     "avatarUrlPlaceholder": "Enter avatar image URL",
     "timezone": "Timezone",
     "timezonePlaceholder": "e.g. America/New_York",
