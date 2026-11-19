@@ -338,14 +338,17 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "test provider")
 	}
 	if resp.Cause != nil {
-		// The response carries only the code; this event is where the cause
-		// is kept.
+		// The response carries only the catalog code and allowlisted args;
+		// this event is where the cause is kept.
 		failure := probeError(resp.Cause, resp.Status == providers.TestStatusAuthError)
 		result := errlog.Event(ctx, "provider.test", failure, errlog.Options{})
 		h.logger.LogAttrs(ctx, result.Level, "provider test failed", append([]slog.Attr{
 			slog.String("provider_id", id), slog.String("status", string(resp.Status)),
 		}, result.Attrs()...)...)
 		resp.Code = string(apperror.CodeOf(failure))
+		if args := apperror.ArgsOf(failure); len(args) > 0 {
+			resp.Args = args
+		}
 	}
 
 	return c.JSON(http.StatusOK, resp)

@@ -3,6 +3,7 @@ package view
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"regexp"
 	"strconv"
 	"strings"
@@ -564,20 +565,29 @@ func persistedHistoryErrorCode(meta map[string]any) string {
 // persistedHistoryErrorArgs are the string args stored beside a failure's
 // code. A row written before args were stored has none.
 func persistedHistoryErrorArgs(meta map[string]any) map[string]string {
-	stored, _ := meta[messagepkg.HistoryErrorArgsMetadataKey].(map[string]any)
-	if len(stored) == 0 {
-		return nil
-	}
-	args := make(map[string]string, len(stored))
-	for key, value := range stored {
-		if text, ok := value.(string); ok {
-			args[key] = text
+	switch stored := meta[messagepkg.HistoryErrorArgsMetadataKey].(type) {
+	case map[string]string:
+		if len(stored) == 0 {
+			return nil
 		}
-	}
-	if len(args) == 0 {
+		return maps.Clone(stored)
+	case map[string]any:
+		if len(stored) == 0 {
+			return nil
+		}
+		args := make(map[string]string, len(stored))
+		for key, value := range stored {
+			if text, ok := value.(string); ok {
+				args[key] = text
+			}
+		}
+		if len(args) == 0 {
+			return nil
+		}
+		return args
+	default:
 		return nil
 	}
-	return args
 }
 
 func persistedHistoryErrorDetail(meta map[string]any) string {

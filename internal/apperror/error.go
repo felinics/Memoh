@@ -396,6 +396,10 @@ const (
 	CodeWorkspaceRestoreFailed                  Code = "workspace_restore_failed"
 )
 
+// ProviderErrorArgUpstream is the public argument key holding a redacted,
+// length-bounded summary of a non-authentication upstream provider *sdk.APIError.
+const ProviderErrorArgUpstream = "upstream"
+
 // Fault is who a failure is attributed to. The values are the fault values of
 // the error contract: the fault field of a Problem and the fault metadata of
 // an RPC ErrorInfo. A catalog entry may declare client, server or dependency;
@@ -1163,19 +1167,22 @@ var catalog = map[Code]Definition{
 		Fault:      FaultDependency,
 	},
 	CodeAgentProviderOverloaded: {
-		HTTPStatus: http.StatusServiceUnavailable,
-		Detail:     "The model provider is unavailable or overloaded right now. Please try again in a moment.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusServiceUnavailable,
+		Detail:      "The model provider is unavailable or overloaded right now. Please try again in a moment.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderRateLimited: {
-		HTTPStatus: http.StatusTooManyRequests,
-		Detail:     "The model provider rate limit was reached. Please wait a moment before sending again.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusTooManyRequests,
+		Detail:      "The model provider rate limit was reached. Please wait a moment before sending again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderQuotaExhausted: {
-		HTTPStatus: http.StatusPaymentRequired,
-		Detail:     "The model provider account has no remaining balance or quota.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusPaymentRequired,
+		Detail:      "The model provider account has no remaining balance or quota.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	// A provider's rejected key answers 502: a 401 would sign the Web client out.
 	CodeAgentProviderAuthFailed: {
@@ -1184,14 +1191,16 @@ var catalog = map[Code]Definition{
 		Fault:      FaultDependency,
 	},
 	CodeAgentProviderPermissionDenied: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The model provider denied access to this model or resource. Check that the provider account can use this model.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model provider denied access to this model or resource. Check that the provider account can use this model.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderRequestRejected: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The model provider rejected the request. Check the model settings, or try another model.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model provider rejected the request. Check the model settings, or try another model.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderUnreachable: {
 		HTTPStatus: http.StatusBadGateway,

@@ -189,4 +189,18 @@ describe('provider test connection states', () => {
     app.unmount()
     root.remove()
   })
+
+  it('shows sanitized args.upstream summary on non-auth probe failure', async () => {
+    const upstream = 'HTTP 429 · rate_limit_exceeded: Too many requests'
+    const { app, root } = await mountAndRunTest({
+      status: 'error',
+      reachable: true,
+      code: 'agent.provider_rate_limited',
+      args: { upstream },
+    })
+    expect(root.textContent).toContain('errors.agent.provider_rate_limited')
+    expect(root.textContent).toContain(upstream)
+    app.unmount()
+    root.remove()
+  })
 })

@@ -1377,7 +1377,11 @@ func sendWSRunFailure(ctx context.Context, writer *wsWriter, ref wsTurnRef, err 
 	if outcome.Cause == err { //nolint:errorlint // Identity: whether this error is the run's outcome.
 		// The run's record already names the failure, whatever has become of
 		// the stream since, so the frame is rendered without its caller.
-		frame, _ := server.NewStreamError(context.WithoutCancel(ctx), apperror.Wrap(runCode, err, nil), "")
+		var args map[string]string
+		if apperror.CodeOf(err) == runCode {
+			args = apperror.ArgsOf(err)
+		}
+		frame, _ := server.NewStreamError(context.WithoutCancel(ctx), apperror.Wrap(runCode, err, args), "")
 		writer.SendJSON(wsErrorEvent(ref, frame))
 		return
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -33,6 +34,7 @@ type terminalSnapshot struct {
 	aborted                 bool
 	visibleOutput           bool
 	failureCode             apperror.Code
+	failureArgs             map[string]string
 }
 
 // snapshotFailureCode is the code a failed turn's history marker records, or
@@ -50,6 +52,18 @@ func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
 		return ""
 	}
 	return historyFailureCode(code)
+}
+
+func snapshotFailureArgs(idleFired bool, cause error) map[string]string {
+	code := snapshotFailureCode(idleFired, cause)
+	if code == "" {
+		return nil
+	}
+	public := ExternalAgentError(cause)
+	if apperror.CodeOf(public) != code {
+		return nil
+	}
+	return apperror.ArgsOf(public)
 }
 
 // historyFailureCode is code when a failed turn's history records it, and empty
@@ -177,7 +191,7 @@ func agentStreamFailure(event native.StreamEvent) error {
 			return apperror.Wrap(code, event.Cause, event.Args)
 		}
 	}
-	return apperror.Wrap(nativeFailureCode(event.Cause), event.Cause, nil)
+	return apperror.Wrap(nativeFailureCode(event.Cause), event.Cause, providerFailureArgs(event.Cause))
 }
 
 // nativeFailureCode names the failure a native run ended with. A context the
@@ -443,6 +457,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					}
 					snap.visibleOutput = hasVisibleOutput
 					snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), outcome.cause)
+					snap.failureArgs = snapshotFailureArgs(idleCancel.DidFire(), outcome.cause)
 					lastSnapshot = snap
 					hasSnapshot = true
 					outcome.observeSnapshot(snap)
@@ -524,10 +539,10 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					slog.String("chat_id", streamReq.ChatID),
 				)
 			case hasSnapshot:
-				_ = s.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, lastSnapshot.reasoningTiming, toolCallCount, idleCancel.DidFire(), hasVisibleOutput, lastSnapshot.failureCode, lastSnapshot.internalFeedbackIndexes)
+				_ = s.persistPartialResult(streamCtx, streamReq, rc, lastSnapshot.sdkMessages, lastSnapshot.reasoningTiming, toolCallCount, idleCancel.DidFire(), hasVisibleOutput, lastSnapshot.failureCode, lastSnapshot.failureArgs, lastSnapshot.internalFeedbackIndexes)
 			default:
 				if code := snapshotFailureCode(idleCancel.DidFire(), outcome.cause); code != "" {
-					if _, storeErr := s.persistTurnFailure(context.WithoutCancel(streamCtx), streamReq, rc, code); storeErr != nil {
+					if _, storeErr := s.persistTurnFailure(context.WithoutCancel(streamCtx), streamReq, rc, code, snapshotFailureArgs(idleCancel.DidFire(), outcome.cause)); storeErr != nil {
 						s.logger.ErrorContext(ctx, "stream timeout persist failed", slog.Any("error", storeErr))
 					}
 				} else {
@@ -774,7 +789,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		// Forwarding the terminal event proposes the run's end, after which no
 		// step can be written, so a failed run's history is written first.
 		if event.IsTerminal() && stepCommitter != nil && !stored && !failureRecorded && !runOwnershipLost(ctx) {
-			failureRows = s.recordStepRunFailure(ctx, stepCommitter, uncommittedText.String(), wsFailureCode(req, outcome))
+			failureRows = s.recordStepRunFailure(ctx, stepCommitter, uncommittedText.String(), wsFailureCode(req, outcome), outcome.failureArgs())
 			failureRecorded = true
 		}
 
@@ -785,6 +800,7 @@ func (s *Service) streamChatWSResultWithHooks(
 				}
 				snap.visibleOutput = hasVisibleOutput
 				snap.failureCode = wsFailureCode(req, outcome)
+				snap.failureArgs = outcome.failureArgs()
 				lastSnapshot = snap
 				hasSnapshot = true
 				outcome.observeSnapshot(snap)
@@ -831,7 +847,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	// terminal event still writes its failure before its steps are finalized.
 	if !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
 		if !failureRecorded {
-			failureRows = s.recordStepRunFailure(ctx, stepCommitter, uncommittedText.String(), wsFailureCode(req, outcome))
+			failureRows = s.recordStepRunFailure(ctx, stepCommitter, uncommittedText.String(), wsFailureCode(req, outcome), outcome.failureArgs())
 		}
 		if storeErr := stepCommitter.finish(ctx); storeErr != nil {
 			outcome.recordCause(storeErr)
@@ -847,10 +863,10 @@ func (s *Service) streamChatWSResultWithHooks(
 				slog.String("chat_id", req.ChatID),
 			)
 		case hasSnapshot:
-			persistedMessages = s.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, lastSnapshot.reasoningTiming, toolCallCount, idleCancel.DidFire(), hasVisibleOutput, lastSnapshot.failureCode, lastSnapshot.internalFeedbackIndexes)
+			persistedMessages = s.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, lastSnapshot.reasoningTiming, toolCallCount, idleCancel.DidFire(), hasVisibleOutput, lastSnapshot.failureCode, lastSnapshot.failureArgs, lastSnapshot.internalFeedbackIndexes)
 		default:
 			if code := wsFailureCode(req, outcome); code != "" {
-				persisted, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, code)
+				persisted, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, code, outcome.failureArgs())
 				if storeErr != nil {
 					s.logger.ErrorContext(ctx, "ws failure persist failed", slog.Any("error", storeErr))
 				} else {
@@ -907,11 +923,11 @@ func (s *Service) streamChatWSResultWithHooks(
 // they complete, when the run failed with code (see wsFailureCode). A write
 // failure is logged: the run has already failed, and its outcome stays that
 // failure.
-func (s *Service) recordStepRunFailure(ctx context.Context, committer *agentStepCommitter, partialText string, code apperror.Code) []messagepkg.Message {
+func (s *Service) recordStepRunFailure(ctx context.Context, committer *agentStepCommitter, partialText string, code apperror.Code, args map[string]string) []messagepkg.Message {
 	if code == "" {
 		return nil
 	}
-	persisted, err := committer.recordFailure(ctx, partialText, code)
+	persisted, err := committer.recordFailure(ctx, partialText, code, args)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "ws step failure persist failed",
 			slog.String("code", string(code)),
@@ -932,7 +948,7 @@ func (s *Service) persistTerminalSnapshot(ctx context.Context, req ChatRequest, 
 func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatRequest, rc resolvedContext, snap terminalSnapshot) ([]messagepkg.Message, error) {
 	outputMessages := sdkMessagesWithOrigins(snap.sdkMessages, snap.internalFeedbackIndexes)
 	if snap.failureCode != "" && (!snap.visibleOutput || !hasPersistableAssistantOutput(outputMessages)) {
-		return s.persistTurnFailure(ctx, req, rc, snap.failureCode)
+		return s.persistTurnFailure(ctx, req, rc, snap.failureCode, snap.failureArgs)
 	}
 	if snap.aborted && !snap.visibleOutput {
 		s.logger.InfoContext(ctx, "skip persisting aborted terminal snapshot before visible output",
@@ -1007,6 +1023,7 @@ func (s *Service) persistPartialResult(
 	wasIdleTimeout bool,
 	hasVisibleOutput bool,
 	failureCode apperror.Code,
+	failureArgs map[string]string,
 	feedbackIndexes []int,
 ) []messagepkg.Message {
 	persistCtx := context.WithoutCancel(ctx)
@@ -1026,6 +1043,7 @@ func (s *Service) persistPartialResult(
 			aborted:                 !hasVisibleOutput,
 			visibleOutput:           hasVisibleOutput,
 			failureCode:             failureCode,
+			failureArgs:             failureArgs,
 		})
 		if err == nil {
 			s.logger.InfoContext(ctx, "persisted partial agent result",
@@ -1043,7 +1061,7 @@ func (s *Service) persistPartialResult(
 	}
 
 	if failureCode != "" {
-		persisted, err := s.persistTurnFailure(persistCtx, req, rc, failureCode)
+		persisted, err := s.persistTurnFailure(persistCtx, req, rc, failureCode, failureArgs)
 		if err == nil {
 			return persisted
 		}
@@ -1062,7 +1080,7 @@ func (s *Service) persistPartialResult(
 	return nil
 }
 
-func (s *Service) persistTurnFailure(ctx context.Context, req ChatRequest, rc resolvedContext, code apperror.Code) ([]messagepkg.Message, error) {
+func (s *Service) persistTurnFailure(ctx context.Context, req ChatRequest, rc resolvedContext, code apperror.Code, args map[string]string) ([]messagepkg.Message, error) {
 	if code == "" {
 		return nil, nil
 	}
@@ -1086,13 +1104,17 @@ func (s *Service) persistTurnFailure(ctx context.Context, req ChatRequest, rc re
 	if rc.model.ID != "" {
 		modelID = rc.model.ID
 	}
+	assistantMetadata := map[string]any{
+		messagepkg.AgentStepInterruptedMetadataKey: true,
+		messagepkg.HistoryErrorCodeMetadataKey:     string(code),
+	}
+	if len(args) > 0 {
+		assistantMetadata[messagepkg.HistoryErrorArgsMetadataKey] = maps.Clone(args)
+	}
 	persisted, err := s.storeRoundWithOptionsResult(ctx, storeReq, round, modelID, storeRoundOptions{
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex: map[int]map[string]any{
-			assistantIdx: {
-				messagepkg.AgentStepInterruptedMetadataKey: true,
-				messagepkg.HistoryErrorCodeMetadataKey:     string(code),
-			},
+			assistantIdx: assistantMetadata,
 		},
 		ContextLifecycle: rc.runConfig.ContextLifecycle,
 	})

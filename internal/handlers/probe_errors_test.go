@@ -121,7 +121,7 @@ func decodeProbeBody(t *testing.T, body string) map[string]any {
 		t.Fatalf("decode %q: %v", body, err)
 	}
 	for key := range fields {
-		if !slices.Contains([]string{"status", "reachable", "latency_ms", "code"}, key) {
+		if !slices.Contains([]string{"status", "reachable", "latency_ms", "code", "args"}, key) {
 			t.Fatalf("response field %q in %s is not part of the contract", key, body)
 		}
 	}
@@ -260,6 +260,95 @@ func TestProbeResponsesCarryNoUpstreamText(t *testing.T) {
 			}
 			if !strings.Contains(logs.String(), `"reason":"`+string(tc.wantCode)+`"`) {
 				t.Fatalf("log %s does not record the cause", logs.String())
+			}
+		})
+	}
+}
+
+func TestProbeResponsesIncludeSanitizedNonAuthUpstreamSummary(t *testing.T) {
+	t.Parallel()
+
+	const (
+		rawMessage  = "Model gpt-99 unavailable at https://user:secret@gw.example.com/v1?key=abc with Bearer tok_secret and sk-live-1234567890" //nolint:gosec // Synthetic test fixture verifying redaction.
+		echoedInput = "USER-INPUT-ECHOED-BY-UPSTREAM"
+	)
+
+	cases := []struct {
+		name       string
+		rejectPath string
+		httpStatus int
+		endpoint   func(logger *slog.Logger, queries probeQueries) (func(*echo.Echo), string)
+		wantCode   apperror.Code
+	}{
+		{
+			name:       "provider test rate limited",
+			rejectPath: "/models",
+			httpStatus: http.StatusTooManyRequests,
+			endpoint: func(logger *slog.Logger, queries probeQueries) (func(*echo.Echo), string) {
+				h := NewProvidersHandler(logger, providers.NewService(logger, queries, ""), nil, nil)
+				return h.Register, "/providers/" + queries.provider.ID.String() + "/test"
+			},
+			wantCode: apperror.CodeAgentProviderRateLimited,
+		},
+		{
+			name:       "model test rejected",
+			rejectPath: "/models/real-model",
+			httpStatus: http.StatusBadRequest,
+			endpoint: func(logger *slog.Logger, queries probeQueries) (func(*echo.Echo), string) {
+				h := NewModelsHandler(logger, models.NewService(logger, queries), nil)
+				return h.Register, "/models/" + queries.model.ID.String() + "/test"
+			},
+			wantCode: apperror.CodeAgentProviderRequestRejected,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.rejectPath {
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "real-model"}}})
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Request-Id", "req_probe_1")
+				w.WriteHeader(tc.httpStatus)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error": map[string]any{"message": rawMessage, "type": "invalid_request_error", "code": "model_not_found"},
+					"input": echoedInput,
+				})
+			}))
+			t.Cleanup(upstream.Close)
+
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			register, target := tc.endpoint(logger, newProbeQueries(upstream.URL))
+			status, body := serveProbe(t, register, target)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body %s)", status, body)
+			}
+			fields := decodeProbeBody(t, body)
+			if fields["code"] != string(tc.wantCode) {
+				t.Fatalf("code = %v, want %s (body %s)", fields["code"], tc.wantCode, body)
+			}
+			args, _ := fields["args"].(map[string]any)
+			upstreamSummary, _ := args["upstream"].(string)
+			for _, want := range []string{
+				"model_not_found",
+				"https://gw.example.com/v1",
+				"Bearer [redacted]",
+				"sk-[redacted]",
+				"Provider Request ID: req_probe_1",
+			} {
+				if !strings.Contains(upstreamSummary, want) {
+					t.Fatalf("args.upstream = %q, want substring %q", upstreamSummary, want)
+				}
+			}
+			for _, leaked := range []string{"user:secret", "key=abc", "tok_secret", "1234567890", echoedInput} {
+				if strings.Contains(body, leaked) {
+					t.Fatalf("body %s leaked %q", body, leaked)
+				}
 			}
 		})
 	}

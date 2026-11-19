@@ -64,6 +64,12 @@
         </span>
       </div>
       <p
+        v-if="testUpstreamError"
+        class="mt-1 select-text whitespace-pre-wrap break-words font-mono text-caption leading-relaxed text-muted-foreground"
+      >
+        {{ testUpstreamError }}
+      </p>
+      <p
         v-if="modelDescription"
         data-model-description
         class="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-body text-muted-foreground"
@@ -147,7 +153,7 @@ import { useQueryCache } from '@pinia/colada'
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getModelDescription } from '@/utils/model-description'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { withoutLegacyKeys } from '@/components/create-model/model-config'
 
 const props = withDefaults(defineProps<{
@@ -172,6 +178,7 @@ const queryCache = useQueryCache()
 const testLoading = ref(false)
 const testResult = ref<ModelsTestResponse | null>(null)
 const testError = ref('')
+const testUpstreamError = ref('')
 const enableLoading = ref(false)
 const enableOverride = ref<boolean | null>(null)
 
@@ -210,6 +217,7 @@ async function runTest() {
   testLoading.value = true
   testResult.value = null
   testError.value = ''
+  testUpstreamError.value = ''
   try {
     const { data } = await postModelsByIdTest({
       path: { id: props.model.id },
@@ -218,10 +226,14 @@ async function runTest() {
     testResult.value = data ?? null
     if (data && data.status !== 'ok') {
       testError.value = testFailureText(data)
+      const upstream = data.args?.upstream
+      testUpstreamError.value = typeof upstream === 'string' ? upstream.trim() : ''
     }
   } catch (err: unknown) {
     testResult.value = { status: 'error' }
     testError.value = resolveApiErrorMessage(err, t('models.testFailed'))
+    const upstream = parseMemohError(err)?.args?.upstream
+    testUpstreamError.value = typeof upstream === 'string' ? upstream.trim() : ''
   } finally {
     testLoading.value = false
   }

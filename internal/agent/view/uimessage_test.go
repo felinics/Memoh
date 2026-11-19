@@ -1074,6 +1074,14 @@ func TestConvertMessagesToUITurnsProjectsHistoryErrorCode(t *testing.T) {
 		},
 		want: []string{"error agent_dependency_missing dep_id=codex operation_in_progress=false"},
 	}, {
+		name:    "error args string map",
+		content: `{"role":"assistant","content":[]}`,
+		metadata: map[string]any{
+			messagepkg.HistoryErrorCodeMetadataKey: "agent.provider_request_rejected",
+			messagepkg.HistoryErrorArgsMetadataKey: map[string]string{"upstream": "HTTP 400: bad request"},
+		},
+		want: []string{"error agent.provider_request_rejected upstream=HTTP 400: bad request"},
+	}, {
 		name:    "no error code",
 		content: `{"role":"assistant","content":[{"type":"text","text":"done"}]}`,
 		want:    []string{"text done"},

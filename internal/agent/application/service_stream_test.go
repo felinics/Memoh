@@ -327,6 +327,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 		true,
 		"",
 		nil,
+		nil,
 	)
 
 	if len(messages.persisted) != 0 {
@@ -515,6 +516,7 @@ func TestPersistTurnFailureStartsRetryReplacementAtomically(t *testing.T) {
 		},
 		resolvedContext{},
 		apperror.CodeAgentResponseTimeout,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistTurnFailure returned error: %v", err)
@@ -550,6 +552,7 @@ func TestPersistPartialResultStoresTimeoutWithoutSnapshot(t *testing.T) {
 		true,
 		false,
 		apperror.CodeAgentResponseTimeout,
+		nil,
 		nil,
 	)
 	if len(persisted) == 0 || len(messages.persisted) != 2 {

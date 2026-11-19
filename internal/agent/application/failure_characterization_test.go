@@ -43,10 +43,11 @@ const (
 	charUnreachableDetail = "Memoh could not reach the model provider. Check the provider address and that the service is running."
 )
 
-// charProviderErr is a provider's answer as the SDK reports it; its message
-// and request id stay in the process.
+// charProviderErr is a provider's answer as the SDK reports it; its sanitized
+// non-auth summary surfaces in args.upstream while auth (401) responses keep
+// their text out of client responses.
 func charProviderErr(status int, kind sdk.ErrorKind) error {
-	return &sdk.APIError{Provider: "openai-completions", StatusCode: status, Kind: kind, Message: "SECRET provider message", RequestID: "req_SECRET"}
+	return &sdk.APIError{Provider: "openai-completions", StatusCode: status, Kind: kind, Message: "provider upstream message", RequestID: "req_provider"}
 }
 
 // charExhausted is the cause the native runtime ends a run with when every
@@ -105,7 +106,7 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 			event:       native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))},
 			code:        "agent.provider_overloaded",
 			historyCode: "agent.provider_overloaded",
-			public:      `{"type":"error","code":"agent.provider_overloaded","error":"` + charOverloadedDetail + `"}`,
+			public:      `{"type":"error","code":"agent.provider_overloaded","error":"` + charOverloadedDetail + `","args":{"upstream":"HTTP 503: provider upstream message\nProvider Request ID: req_provider"}}`,
 		},
 		{
 			name:        "retries exhausted on a rate limit",
@@ -118,7 +119,14 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 			event:       native.StreamEvent{Type: native.EventError, Cause: errs.WrapDependency(charProviderErr(400, sdk.KindUnknown), "model stream")},
 			code:        "agent.provider_request_rejected",
 			historyCode: "agent.provider_request_rejected",
-			public:      `{"type":"error","code":"agent.provider_request_rejected","error":"` + charRejectedDetail + `"}`,
+			public:      `{"type":"error","code":"agent.provider_request_rejected","error":"` + charRejectedDetail + `","args":{"upstream":"HTTP 400: provider upstream message\nProvider Request ID: req_provider"}}`,
+		},
+		{
+			name:        "authentication rejected keeps upstream text private",
+			event:       native.StreamEvent{Type: native.EventError, Cause: errs.WrapDependency(&sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "SECRET key sk-live-12345678", RequestID: "req_SECRET"}, "model stream")},
+			code:        "agent.provider_auth_failed",
+			historyCode: "agent.provider_auth_failed",
+			public:      `{"type":"error","code":"agent.provider_auth_failed","error":"The model provider rejected the credentials. Check the provider API key."}`,
 		},
 		{
 			name:        "key without access to the model",
@@ -266,7 +274,7 @@ func TestCharacterizeHistoryFailureMarker(t *testing.T) {
 		service := &Service{messageService: messages, logger: slog.New(slog.DiscardHandler)}
 		if _, err := service.persistTurnFailure(context.Background(),
 			ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "hello"},
-			resolvedContext{}, code); err != nil {
+			resolvedContext{}, code, nil); err != nil {
 			t.Fatalf("persistTurnFailure: %v", err)
 		}
 		if len(messages.persisted) != 2 || messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" {
@@ -276,9 +284,26 @@ func TestCharacterizeHistoryFailureMarker(t *testing.T) {
 		if metadata["agent_step_interrupted"] != true || metadata["error_code"] != string(code) {
 			t.Fatalf("assistant metadata = %#v, want interrupted with error_code %q", metadata, code)
 		}
+		if _, hasArgs := metadata[messagepkg.HistoryErrorArgsMetadataKey]; hasArgs {
+			t.Fatalf("assistant metadata = %#v, want no error_args when empty", metadata)
+		}
 		if _, hasError := metadata["error"]; hasError {
 			t.Fatalf("assistant metadata = %#v, native failure has no error text key", metadata)
 		}
+	}
+
+	messages := &recordingMessageService{}
+	service := &Service{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	if _, err := service.persistTurnFailure(context.Background(),
+		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "hello"},
+		resolvedContext{}, apperror.CodeAgentProviderRequestRejected, map[string]string{
+			apperror.ProviderErrorArgUpstream: "HTTP 400: bad request",
+		}); err != nil {
+		t.Fatalf("persistTurnFailure with args: %v", err)
+	}
+	storedArgs, _ := messages.persisted[1].Metadata[messagepkg.HistoryErrorArgsMetadataKey].(map[string]string)
+	if storedArgs[apperror.ProviderErrorArgUpstream] != "HTTP 400: bad request" {
+		t.Fatalf("error_args = %#v, want upstream summary", messages.persisted[1].Metadata)
 	}
 }
 
@@ -296,7 +321,7 @@ func TestCharacterizeHistoryPartialOutputDropsFailureCode_CurrentBehavior(t *tes
 		resolvedContext{},
 		[]sdk.Message{sdk.AssistantMessage("partial answer")},
 		nil, 0, false, true,
-		apperror.CodeAgentProviderOverloaded, nil)
+		apperror.CodeAgentProviderOverloaded, nil, nil)
 
 	if len(messages.persisted) != 2 {
 		t.Fatalf("persisted = %#v, want user + assistant", messages.persisted)
@@ -314,7 +339,7 @@ func TestCharacterizeHistoryPartialOutputDropsFailureCode_CurrentBehavior(t *tes
 		resolvedContext{},
 		[]sdk.Message{sdk.AssistantMessage("partial answer")},
 		nil, 0, false, false,
-		apperror.CodeAgentProviderOverloaded, nil)
+		apperror.CodeAgentProviderOverloaded, nil, nil)
 	if len(hidden.persisted) != 2 || hidden.persisted[1].Metadata["error_code"] != "agent.provider_overloaded" {
 		t.Fatalf("persisted without visible output = %#v, want failure marker", hidden.persisted)
 	}
@@ -417,7 +442,7 @@ func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 		`{"runtime_type":""}`,
 		`{"type":"agent_start"}`,
 		`{"type":"retry","attempt":1,"maxAttempt":3}`,
-		`{"type":"error","code":"agent.provider_overloaded","error":"` + charOverloadedDetail + `"}`,
+		`{"type":"error","code":"agent.provider_overloaded","error":"` + charOverloadedDetail + `","args":{"upstream":"HTTP 503: provider upstream message\nProvider Request ID: req_provider"}}`,
 		`{"type":"agent_abort","messages":[],"code":"agent.provider_overloaded"}`,
 		`{"type":"run_terminal","state":"failed","error_code":"agent.provider_overloaded"}`,
 	})

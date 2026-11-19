@@ -375,7 +375,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		return schedule.TriggerResult{}, streamErr
 	case streamErr != nil && !hasSnapshot:
 		if idle != nil && idle.DidFire() {
-			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(true, streamErr)); storeErr != nil {
+			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(true, streamErr), snapshotFailureArgs(true, streamErr)); storeErr != nil {
 				s.logger.ErrorContext(ctx, "triggered run timeout persist failed", slog.Any("error", storeErr))
 			}
 		}

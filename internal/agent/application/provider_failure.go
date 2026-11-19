@@ -7,7 +7,16 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/models"
 )
+
+func providerFailureArgs(err error) map[string]string {
+	summary := models.UpstreamErrorSummary(err)
+	if summary == "" {
+		return nil
+	}
+	return map[string]string{apperror.ProviderErrorArgUpstream: summary}
+}
 
 // providerFailureCode names the provider condition a run failure reports, or
 // returns an empty code when the failure does not identify one. modelCall
