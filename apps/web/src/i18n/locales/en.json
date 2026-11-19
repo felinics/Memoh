@@ -1921,7 +1921,8 @@
     "sourcePreviewFailedDescription": "This provider's models cannot be previewed right now.",
     "importFromCatalog": "Import from the models.dev catalog",
     "importFromEndpoint": "List the provider's endpoint",
-    "importFromCatalogHint": "Adds the catalog models you do not have, disabled. Existing models take the catalog's context, output limit and reasoning levels; capabilities that are on stay on, and your reasoning budget, defaults and replay field stay where they still apply. Whether a model is enabled stays as it is, and an empty description is filled from the catalog.",
+    "importFromCatalogHint": "Adds new models and updates specs for existing ones. New models start disabled, and your current settings stay unchanged.",
+    "importFromEndpointHint": "Useful for models not listed in the catalog. New models start disabled, and your current settings stay unchanged.",
     "clientType": "Client Type",
     "clientTypePlaceholder": "Select client type",
     "typeRequired": "Type is required",
@@ -2004,7 +2005,7 @@
     "reasoningBudgetRange": "The budget minimum must not exceed the maximum",
     "refreshFailed": "Failed to refresh the model catalog",
     "refreshConfirmHint": "Fetch the latest models available to this account and remove unavailable models from model pickers.",
-    "importConfirmHint": "Fetch and import the models currently available from this provider.",
+    "importConfirmHint": "Fetches available models from this provider. Any new models start disabled.",
     "showingCount": "Showing {count} of {total}",
     "catalogStale": "The model catalog could not be refreshed. Cached model information was used."
   },
