@@ -42,22 +42,3 @@ export function particleItemStyle(accent: AccentPair) {
     borderWidth: 0,
   }
 }
-
-export function readResolvedColor(
-  resolved: string,
-  canvas: CanvasRenderingContext2D | null,
-): string {
-  if (!resolved) return resolved
-  if (!canvas) return resolved
-  try {
-    canvas.clearRect(0, 0, 1, 1)
-    canvas.fillStyle = '#000'
-    canvas.fillStyle = resolved
-    canvas.fillRect(0, 0, 1, 1)
-    const [r = 0, g = 0, b = 0, a = 255] = canvas.getImageData(0, 0, 1, 1).data
-    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
-  }
-  catch {
-    return resolved
-  }
-}
