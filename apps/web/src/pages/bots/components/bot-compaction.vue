@@ -22,7 +22,7 @@ const props = defineProps<{
   botId: string
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // ---- Logs ----
 const isLoading = ref(false)
@@ -229,7 +229,7 @@ useVisiblePoll(
                             </Badge>
                           </td>
                           <td class="px-4 py-3 font-mono text-muted-foreground">
-                            {{ formatDateTime(log.started_at) }}
+                            {{ formatDateTime(log.started_at, { locale }) }}
                           </td>
                           <td class="px-4 py-3 font-mono text-muted-foreground">
                             {{ formatDuration(log.started_at, log.completed_at) }}

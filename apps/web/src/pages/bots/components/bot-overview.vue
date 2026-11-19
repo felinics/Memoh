@@ -319,7 +319,7 @@ use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent]
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const routeIdentifier = computed(() => route.params.botName as string)
 const checksOpen = ref(false)
@@ -511,7 +511,7 @@ const runtimeStatusLabel = computed(() => t(runtimeStatusLabelKey(runtimeStatusK
 
 const runtimeSampledAt = computed(() => {
   const ts = containerMetrics.value?.sampled_at
-  return ts ? formatDateTime(ts) : ''
+  return ts ? formatDateTime(ts, { locale: locale.value }) : ''
 })
 
 const cpuMetrics = computed(() => containerMetrics.value?.metrics?.cpu)

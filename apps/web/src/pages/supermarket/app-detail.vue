@@ -117,7 +117,8 @@
                     v-if="dep.summary && dependencyIconUrl(dep.summary)"
                     :src="dependencyIconUrl(dep.summary)"
                     alt=""
-                    class="size-5 object-contain"
+                    :class="['size-5 object-contain', shouldInvertDarkIcon(dependencyIconUrl(dep.summary)) && 'dark:invert']"
+                    @load="handleDarkIconLoad($event)"
                   >
                   <App
                     v-else
@@ -217,11 +218,13 @@
               v-if="pkg.homepage"
               :label="$t('supermarket.homepage')"
               :value="pkg.homepage"
+              :href="pkg.homepage"
             />
             <InfoItem
               v-if="pkg.repository"
               :label="$t('supermarket.repository')"
               :value="pkg.repository"
+              :href="pkg.repository"
             />
           </div>
         </section>
@@ -261,6 +264,7 @@ import {
 } from '@/composables/api/useApps'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { handleDarkIconLoad, shouldInvertDarkIcon } from '@/utils/dark-icon-contrast'
 import InfoItem from './components/info-item.vue'
 import InstallAppDialog from './components/install-app-dialog.vue'
 import MarketDetailHeader from './components/market-detail-header.vue'

@@ -155,7 +155,7 @@
         <DialogHeader>
           <DialogTitle>{{ $t('about.updatesSection') }}</DialogTitle>
           <DialogDescription>
-            {{ $t('about.currentVersion', { version: displayVersion || '—' }) }}
+            {{ $t('about.currentVersion', { version: formatVersionLabel(displayVersion) || '—' }) }}
           </DialogDescription>
         </DialogHeader>
         <DialogBody>
@@ -253,6 +253,7 @@ import {
 import { useDesktopUpdates } from '@/composables/useDesktopUpdates'
 import { SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatVersionLabel, normalizeVersion } from '@/utils/version'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'
@@ -287,9 +288,9 @@ const actionPending = ref(false)
 
 const capabilitiesStore = useCapabilitiesStore()
 const { serverVersion, commitHash } = storeToRefs(capabilitiesStore)
-const normalizedServerVersion = computed(() => (serverVersion.value ?? '').replace(/^v/i, ''))
+const normalizedServerVersion = computed(() => normalizeVersion(serverVersion.value))
 const displayVersion = computed(() => (
-  desktopUpdate.value?.currentVersion.replace(/^v/i, '')
+  normalizeVersion(desktopUpdate.value?.currentVersion)
   || normalizedServerVersion.value
 ))
 
@@ -306,18 +307,18 @@ const codeBlockTheme = computed(() => ({
 const updateLabel = computed(() => {
   if (desktopUpdates.value) {
     const state = desktopUpdate.value
-    if (!state) return t('about.currentVersion', { version: displayVersion.value || '—' })
+    if (!state) return t('about.currentVersion', { version: formatVersionLabel(displayVersion.value) || '—' })
     if (state.status === 'up-to-date') return t('about.upToDate')
     if (state.status === 'installing') return t('about.applyingUpdate')
     if (state.status === 'downloaded') return t('about.readyToRestart')
     if (state.status === 'downloading') return t('about.updatingVersion', { version: state.latestVersion || '—' })
     if (state.status === 'error') return t('about.desktopUpdateFailed')
     if (state.status === 'unavailable') return t('about.desktopUpdatesUnavailable')
-    return t('about.currentVersion', { version: state.currentVersion })
+    return t('about.currentVersion', { version: formatVersionLabel(state.currentVersion) || '—' })
   }
   if (update.hasUpdate) return t('about.newVersionTitle', { version: update.latestVersion })
   if (update.checked) return t('about.upToDate')
-  return t('about.currentVersion', { version: normalizedServerVersion.value || '—' })
+  return t('about.currentVersion', { version: formatVersionLabel(normalizedServerVersion.value) || '—' })
 })
 const updateDesc = computed(() => {
   if (desktopUpdates.value) {
@@ -336,8 +337,9 @@ const updateDesc = computed(() => {
   }
   if (update.hasUpdate) return t('about.newVersionDesc')
   if (update.checked) {
-    return normalizedServerVersion.value
-      ? t('about.currentVersion', { version: normalizedServerVersion.value })
+    const version = formatVersionLabel(normalizedServerVersion.value)
+    return version
+      ? t('about.currentVersion', { version })
       : ''
   }
   return t('about.checkHint')

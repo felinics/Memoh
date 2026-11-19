@@ -101,7 +101,10 @@
          middle-click closes without it. -->
     <div
       class="close-fade pointer-events-none absolute right-[var(--tab-close-edge)] z-[2] flex items-center pl-6 pr-0 group-hover/tab:opacity-100 focus-within:opacity-100"
-      :class="showResidentClose ? 'opacity-100' : 'opacity-0'"
+      :class="[
+        showResidentClose ? 'opacity-100' : 'opacity-0',
+        isVisible && 'is-active',
+      ]"
     >
       <!-- No own hover fill: the close affordance is read through the left→right
            fade (which already paints the chip's hover surface) plus the icon
@@ -474,6 +477,12 @@ function fmt(value: number) {
 .group\/tab:hover .close-fade,
 .group\/tab:focus-within .close-fade {
   transition: opacity var(--tab-hover-duration, 150ms) ease-out;
+}
+
+/* Active tabs already sit on opaque --surface-editor; stacking --surface-chrome
+ * underneath tinted the fade band grey instead of blending cleanly. */
+.close-fade.is-active {
+  background: linear-gradient(to right, transparent, var(--surface-editor) 1rem);
 }
 
 /* Dirty-dot slot: reuse close-fade for GEOMETRY ONLY, never its paint. The fade is

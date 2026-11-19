@@ -82,7 +82,8 @@
                     v-else-if="appDependencyIconUrl(app)"
                     :src="appDependencyIconUrl(app)"
                     alt=""
-                    class="size-5 object-contain"
+                    :class="['size-5 object-contain', shouldInvertDarkIcon(appDependencyIconUrl(app)) && 'dark:invert']"
+                    @load="handleDarkIconLoad($event)"
                   >
                   <SkillIcon v-else />
                 </div>
@@ -229,6 +230,7 @@ import { getBotsByBotIdApps, getSupermarketRegistriesByRegistryIdAppsByAppId, ty
 import { appDisplayDescription, appDisplayName, appKey, botAppsQueryKey } from '@/composables/api/useApps'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { handleDarkIconLoad, shouldInvertDarkIcon } from '@/utils/dark-icon-contrast'
 import SkillIcon from '@/pages/supermarket/components/skill-icon.vue'
 import InstallAppDialog from '@/pages/supermarket/components/install-app-dialog.vue'
 import SidebarPanelHeader from './panel-header.vue'
