@@ -57,7 +57,7 @@
                 </Avatar>
                 <button
                   type="button"
-                  class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                  class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
                   :title="$t('common.edit')"
                   :aria-label="$t('common.edit')"
                   @click="avatarDialogOpen = true"

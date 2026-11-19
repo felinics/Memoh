@@ -67,6 +67,7 @@
     "active": "启用",
     "inactive": "未启用",
     "loadFailed": "加载失败",
+    "unavailableOption": "不可用",
     "saveFailed": "保存失败",
     "networkError": "网络连接失败，请检查网络后重试",
     "createdAt": "创建时间",
