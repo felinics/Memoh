@@ -377,14 +377,17 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 		return errs.Wrap(err, "test model")
 	}
 	if resp.Cause != nil {
-		// The response carries only the code; this event is where the cause
-		// is kept.
+		// The response carries only the catalog code and allowlisted args;
+		// this event is where the cause is kept.
 		failure := probeError(resp.Cause, resp.Status == models.TestStatusAuthError)
 		result := errlog.Event(ctx, "model.test", failure, errlog.Options{})
 		h.logger.LogAttrs(ctx, result.Level, "model test failed", append([]slog.Attr{
 			slog.String("model_id", id), slog.String("status", string(resp.Status)),
 		}, result.Attrs()...)...)
 		resp.Code = string(apperror.CodeOf(failure))
+		if args := apperror.ArgsOf(failure); len(args) > 0 {
+			resp.Args = args
+		}
 	}
 
 	return c.JSON(http.StatusOK, resp)

@@ -3637,6 +3637,13 @@ export type ModelsReasoningReplay = {
 
 export type ModelsTestResponse = {
     /**
+     * Args are the catalog args attached to Code (such as upstream for
+     * non-authentication upstream rejections).
+     */
+    args?: {
+        [key: string]: string;
+    };
+    /**
      * Code is the error catalog code for why the test did not pass. It is
      * empty on success and when no catalog code describes the failure.
      */
@@ -3897,6 +3904,13 @@ export type ProvidersOAuthStatus = {
 };
 
 export type ProvidersTestResponse = {
+    /**
+     * Args are the catalog args attached to Code (such as upstream for
+     * non-authentication upstream rejections).
+     */
+    args?: {
+        [key: string]: string;
+    };
     /**
      * Code is the error catalog code for why the test did not pass. It is
      * empty on success and when no catalog code describes the failure.

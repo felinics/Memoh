@@ -81,6 +81,9 @@ type TestResponse struct {
 	// Code is the error catalog code for why the test did not pass. It is
 	// empty on success and when no catalog code describes the failure.
 	Code string `json:"code,omitempty"`
+	// Args are the catalog args attached to Code (such as upstream for
+	// non-authentication upstream rejections).
+	Args map[string]string `json:"args,omitempty"`
 	// Cause is why the test did not pass. It never leaves the process; the
 	// handler records it and derives Code from it.
 	Cause error `json:"-"`

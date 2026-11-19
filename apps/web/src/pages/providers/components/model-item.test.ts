@@ -154,6 +154,24 @@ describe('Provider model item', () => {
     expect(el.textContent).not.toContain('dial tcp')
   })
 
+  it('shows sanitized args.upstream inline below a rejected model test', async () => {
+    const upstream = 'HTTP 400 · model_not_found: Unknown model\nProvider Request ID: req_m1'
+    mocks.postTest.mockResolvedValue({
+      data: {
+        status: 'error',
+        reachable: true,
+        latency_ms: 25,
+        code: 'agent.provider_request_rejected',
+        args: { upstream },
+      },
+    })
+    const el = await mount()
+    await runTest(el)
+
+    expect(el.textContent).toContain('errors.agent.provider_request_rejected')
+    expect(el.textContent).toContain(upstream)
+  })
+
   it('shows the model description below the model metadata', async () => {
     const el = await mount('General-purpose model with vision and tool calling.')
 

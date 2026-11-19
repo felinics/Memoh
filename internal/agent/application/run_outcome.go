@@ -199,6 +199,10 @@ func (r *outcomeRecorder) failureCode() apperror.Code {
 	return r.defaultCode
 }
 
+func (r *outcomeRecorder) failureArgs() map[string]string {
+	return failureArgsForCode(r.failureCode(), r.cause)
+}
+
 // stampTerminal writes the run's failure code into a failed terminal event
 // before it is published. The session runtime proposes the run's durable
 // outcome from the terminal event, so the code the recorder classified is the

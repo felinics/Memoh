@@ -186,7 +186,7 @@ func (c *agentStepCommitter) bindContinuation(cfg *native.RunConfig) {
 		// carries whatever input the claim admitted, so the loop continues
 		// with the new input instead of restarting the run.
 		cfg.OnSteer = func(ctx context.Context, index int, record *step.Record) (native.StepDirective, error) {
-			return c.persist(ctx, index, record, stepSteered, "")
+			return c.persist(ctx, index, record, stepSteered, "", nil)
 		}
 	}
 }
@@ -228,17 +228,17 @@ const (
 )
 
 func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, record *step.Record) (native.StepDirective, error) {
-	return c.persist(ctx, stepIndex, record, stepCompleted, "")
+	return c.persist(ctx, stepIndex, record, stepCompleted, "", nil)
 }
 
 func (c *agentStepCommitter) interrupt(ctx context.Context, stepIndex int, record *step.Record) error {
-	_, err := c.persist(ctx, stepIndex, record, stepInterrupted, "")
+	_, err := c.persist(ctx, stepIndex, record, stepInterrupted, "", nil)
 	return err
 }
 
 // persist writes one step. failureCode, when set, names the failure that ended
 // the run on an interrupted step, and is recorded on its assistant rows.
-func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record *step.Record, mode stepCommitMode, failureCode apperror.Code) (native.StepDirective, error) {
+func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record *step.Record, mode stepCommitMode, failureCode apperror.Code, failureArgs map[string]string) (native.StepDirective, error) {
 	interrupted := mode != stepCompleted
 	if c == nil || record == nil {
 		return native.StepDirective{}, errors.New("agent step is missing")
@@ -299,6 +299,9 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 				opts.MessageMetadataByIndex[i] = map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true}
 				if failureCode != "" {
 					opts.MessageMetadataByIndex[i][messagepkg.HistoryErrorCodeMetadataKey] = string(failureCode)
+					if len(failureArgs) > 0 {
+						opts.MessageMetadataByIndex[i][messagepkg.HistoryErrorArgsMetadataKey] = maps.Clone(failureArgs)
+					}
 				}
 			}
 		}
@@ -596,7 +599,7 @@ func (c *agentStepCommitter) err() error {
 // assistant row through the same transaction, including a replacement's first
 // user clone and turn binding. A model call the runtime already checkpointed
 // is not written again.
-func (c *agentStepCommitter) recordFailure(ctx context.Context, partialText string, code apperror.Code) ([]messagepkg.Message, error) {
+func (c *agentStepCommitter) recordFailure(ctx context.Context, partialText string, code apperror.Code, args map[string]string) ([]messagepkg.Message, error) {
 	if c == nil || code == "" {
 		return nil, nil
 	}
@@ -608,7 +611,7 @@ func (c *agentStepCommitter) recordFailure(ctx context.Context, partialText stri
 		return nil, nil
 	}
 	record := &step.Record{Messages: toolexec.BuildStepMessages(partialText, nil, nil, nil, nil, nil)}
-	_, err := c.persist(ctx, stepIndex, record, stepInterrupted, code)
+	_, err := c.persist(ctx, stepIndex, record, stepInterrupted, code, args)
 	return nil, err
 }
 

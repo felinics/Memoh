@@ -71,7 +71,7 @@ func TestReplacementFailureWithoutTextUsesBoundInterruptedStep(t *testing.T) {
 			if committer == nil {
 				t.Fatal("missing replacement step committer")
 			}
-			if _, err := committer.recordFailure(ctx, "", apperror.CodeAgentProviderRequestRejected); err != nil {
+			if _, err := committer.recordFailure(ctx, "", apperror.CodeAgentProviderRequestRejected, nil); err != nil {
 				t.Fatalf("record failure: %v", err)
 			}
 			store := service.messageService.(*recordingStepPersister)
@@ -124,7 +124,7 @@ func testRetryStepMemoryUsesClonedRequest(t *testing.T, steered bool) {
 	}
 	nextStep := 0
 	if steered {
-		if _, err := committer.persist(ctx, 0, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("partial answer")}}, stepSteered, ""); err != nil {
+		if _, err := committer.persist(ctx, 0, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("partial answer")}}, stepSteered, "", nil); err != nil {
 			t.Fatalf("checkpoint replacement: %v", err)
 		}
 		nextStep++

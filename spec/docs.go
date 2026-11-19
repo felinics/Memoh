@@ -26370,6 +26370,13 @@ const docTemplate = `{
         "models.TestResponse": {
             "type": "object",
             "properties": {
+                "args": {
+                    "description": "Args are the catalog args attached to Code (such as upstream for\nnon-authentication upstream rejections).",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "code": {
                     "description": "Code is the error catalog code for why the test did not pass. It is\nempty on success and when no catalog code describes the failure.",
                     "type": "string"
@@ -27104,6 +27111,13 @@ const docTemplate = `{
         "providers.TestResponse": {
             "type": "object",
             "properties": {
+                "args": {
+                    "description": "Args are the catalog args attached to Code (such as upstream for\nnon-authentication upstream rejections).",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "code": {
                     "description": "Code is the error catalog code for why the test did not pass. It is\nempty on success and when no catalog code describes the failure.",
                     "type": "string"
