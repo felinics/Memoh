@@ -67,32 +67,61 @@ interface StoppedSend {
 export async function settleStoppedSend(
   deps: Pick<ChatSendDeps,
     | 'currentBotId' | 'sessionId' | 'transcriptForTarget' | 'refreshCurrentSession'
-    | 'removeTurnFromSession'
+    | 'removeTurnFromSession' | 'isSessionStreaming' | 'markSessionRead' | 'removeUnreadSession'
     | 'cleanupFailedDeferredSession' | 'rememberStartupSendFailure'>,
   send: StoppedSend,
 ): Promise<SendMessageResult | null> {
   const { botId, targetSessionId, assistantTurn, userTurn, options } = send
+  const turnId = (assistantTurn?.turnId || userTurn?.turnId || '').trim()
+  const existingTranscript = targetSessionId
+    ? deps.transcriptForTarget({ ...send.viewTarget, botId, sessionId: targetSessionId })
+    : null
+  const syncedAssistant = turnId
+    ? existingTranscript?.findTurnByTurnId(turnId, 'assistant')
+    : undefined
   // The server can answer a stop with an error frame, which leaves an error
   // block on the turn. That block is not model output, so it does not count.
-  const hasOutput = assistantTurn?.messages.some(block => block.type !== 'status' && block.type !== 'error')
-  if (!assistantTurn || !userTurn || hasOutput) return null
-  deps.removeTurnFromSession(botId, targetSessionId, assistantTurn)
-  deps.removeTurnFromSession(botId, targetSessionId, userTurn)
-  const turnId = assistantTurn.turnId?.trim() ?? ''
-  if (targetSessionId && turnId) {
+  const hasVisibleBlock = (blocks?: ChatAssistantTurn['messages']) =>
+    Boolean(blocks?.some(block => block.type !== 'status' && block.type !== 'error'))
+  const hasOutput = hasVisibleBlock(assistantTurn?.messages)
+    || (syncedAssistant?.role === 'assistant' && hasVisibleBlock(syncedAssistant.messages))
+  if (!assistantTurn || !userTurn || hasOutput) {
+    if (hasOutput && targetSessionId && (deps.sessionId.value ?? '').trim() === targetSessionId) {
+      deps.markSessionRead?.(targetSessionId)
+    }
+    return null
+  }
+  if (targetSessionId) {
     try {
       await deps.refreshCurrentSession(botId, targetSessionId)
       const transcript = deps.transcriptForTarget({ ...send.viewTarget, botId, sessionId: targetSessionId })
-      if (transcript.findTurnByTurnId(turnId, 'user')) return null
+      const keptUserTurn = turnId
+        ? Boolean(transcript.findTurnByTurnId(turnId, 'user'))
+        : (send.firstSend && transcript.messages.some(turn => turn.role === 'user'))
+      const stillStreaming = deps.isSessionStreaming?.(botId, targetSessionId) ?? false
+      if (keptUserTurn || stillStreaming) {
+        const synced = turnId ? transcript.findTurnByTurnId(turnId, 'assistant') : undefined
+        const hasPersistedAssistant = synced?.role === 'assistant' && hasVisibleBlock(synced.messages)
+        if (!hasPersistedAssistant && !stillStreaming) {
+          deps.removeTurnFromSession(botId, targetSessionId, assistantTurn)
+        }
+        if ((deps.sessionId.value ?? '').trim() === targetSessionId) {
+          deps.markSessionRead?.(targetSessionId)
+        }
+        return null
+      }
     } catch {
       // Without the history the outcome is unknown. Keeping the send avoids
       // handing back a draft the server may have run.
       return null
     }
   }
+  deps.removeTurnFromSession(botId, targetSessionId, assistantTurn)
+  deps.removeTurnFromSession(botId, targetSessionId, userTurn)
   const currentBotId = (deps.currentBotId.value ?? '').trim()
   const onSession = (deps.sessionId.value ?? '').trim() === targetSessionId
   if (send.firstSend && targetSessionId) {
+    deps.removeUnreadSession?.(targetSessionId)
     await deps.cleanupFailedDeferredSession(botId, targetSessionId, send.composerScope)
   }
   options.onTurnAppendAborted?.()

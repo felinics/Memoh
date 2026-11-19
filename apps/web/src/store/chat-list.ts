@@ -2,6 +2,7 @@ import { defineStore, storeToRefs } from 'pinia'
 import { computed, onScopeDispose } from 'vue'
 import { toast } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
+import { useUnreadStore } from '@/store/unread'
 import { useWorkdirsStore } from '@/store/workdirs'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -55,6 +56,7 @@ export type { ChatViewEntry, ChatViewTarget } from './chat/view-registry'
 
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
+  const unreadStore = useUnreadStore()
   const workdirsStore = useWorkdirsStore()
   const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
   const fsBeacon = createFsChangeBeacon({ currentBotId, sessionId })
@@ -256,10 +258,14 @@ export const useChatStore = defineStore('chat', () => {
     ensureWebSocket,
     sendWebSocketMessage,
     startSessionRuntime,
-    stopSessionRuntime,
+    stopSessionRuntime: stopRealtimeSessionRuntime,
     startBotSessionsActivityStream,
     stopStreams,
   } = realtime
+  const stopSessionRuntime = (botId?: string, sessionId?: string) => {
+    stopRealtimeSessionRuntime(botId, sessionId)
+    runtimeProjectionVersion.value += 1
+  }
   const {
     respondToolApproval,
     respondUserInput,
@@ -480,6 +486,7 @@ export const useChatStore = defineStore('chat', () => {
         .replaceHistoryView(turns, targetSessionId)
     },
     rescopeCommandToComposer: rescopeSessionCommandEventToComposer,
+    removeUnreadSession: targetSessionId => unreadStore.remove(targetSessionId),
     forkFailedMessage,
   })
 
@@ -540,6 +547,11 @@ export const useChatStore = defineStore('chat', () => {
     clearCommandEvent,
     chatReadOnlyFor,
     isChatViewStreaming,
+    isSessionStreaming,
+    markSessionRead: targetSessionId => {
+      void unreadStore.markRead(targetSessionId)
+    },
+    removeUnreadSession: targetSessionId => unreadStore.remove(targetSessionId),
     isChatViewCreatingSession,
     pendingExternalAgentStateFor,
     ensureChatViewSession,

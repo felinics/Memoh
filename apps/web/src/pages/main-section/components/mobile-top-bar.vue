@@ -67,7 +67,14 @@
             {{ t('chat.tabBarToolkit.openDesktop') }}
           </DropdownMenuItem>
           <template v-if="!activePanelIsChat">
-            <DropdownMenuSeparator v-if="canWorkspaceExec || canManage" />
+            <DropdownMenuSeparator v-if="currentBotId || canWorkspaceExec || canManage" />
+            <DropdownMenuItem
+              v-if="previewPath"
+              @select="openPreviewToSide"
+            >
+              <Eye class="mr-2 size-3.5" />
+              {{ t('chat.openPreviewToSide') }}
+            </DropdownMenuItem>
             <DropdownMenuItem @select="closeActivePanel">
               <X class="mr-2 size-3.5" />
               {{ t('chat.topBar.closePanel') }}
@@ -89,7 +96,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, Globe, Menu, MessageCircle, Monitor, Plus, Terminal, X } from 'lucide-vue-next'
+import { ChevronLeft, Eye, Globe, Menu, MessageCircle, Monitor, Plus, Terminal, X } from 'lucide-vue-next'
 import {
   Button,
   DropdownMenu,
@@ -105,6 +112,7 @@ import { useChatStore } from '@/store/chat-list'
 import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { isHtmlFile, isMarkdownFile } from '@/components/file-manager/utils'
 import { hasBotPermission } from '@/utils/bot-permissions'
 
 const { t } = useI18n()
@@ -120,11 +128,29 @@ const currentBot = computed(() =>
 )
 const currentPermissions = computed(() => currentBot.value?.current_user_permissions ?? [])
 // Same gates as the desktop tab-strip "+" menu (header-add-actions).
+const canWorkspaceRead = computed(() => hasBotPermission(currentPermissions.value, 'workspace_read'))
 const canWorkspaceExec = computed(() => hasBotPermission(currentPermissions.value, 'workspace_exec'))
 const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
 const hasAnyAction = computed(() =>
   !!currentBotId.value || canWorkspaceExec.value || canManage.value || !activePanelIsChat.value,
 )
+
+const previewPath = computed(() => {
+  if (!canWorkspaceRead.value) return null
+  const id = activeId.value
+  if (!id || !id.startsWith('file:')) return null
+  const path = id.slice('file:'.length)
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  return isMarkdownFile(name) || isHtmlFile(name) ? path : null
+})
+
+function openPreviewToSide() {
+  const path = previewPath.value
+  if (!path) return
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const panel = activeId.value ? api.value?.getPanel(activeId.value) : undefined
+  workspaceTabs.openPreview(path, t('chat.previewTab', { name }), panel?.group.id)
+}
 
 const leftLabel = computed(() =>
   activePanelIsChat.value ? t('chat.topBar.openNav') : t('common.back'),

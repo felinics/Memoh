@@ -296,5 +296,5 @@ export const useUnreadStore = defineStore('unread', () => {
     return () => listeners.delete(listener)
   }
 
-  return { entries, total, countByBot, inbox, inboxGroups, bySchedule, isUnread, kindOf, isFresh, start, stop, reset, markRead, markAllRead, markSessionsRead, markUnread, onAttention }
+  return { entries, total, countByBot, inbox, inboxGroups, bySchedule, isUnread, kindOf, isFresh, start, stop, reset, remove, markRead, markAllRead, markSessionsRead, markUnread, onAttention }
 })
