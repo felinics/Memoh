@@ -55,15 +55,7 @@ func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
 }
 
 func snapshotFailureArgs(idleFired bool, cause error) map[string]string {
-	code := snapshotFailureCode(idleFired, cause)
-	if code == "" {
-		return nil
-	}
-	public := ExternalAgentError(cause)
-	if apperror.CodeOf(public) != code {
-		return nil
-	}
-	return apperror.ArgsOf(public)
+	return failureArgsForCode(snapshotFailureCode(idleFired, cause), cause)
 }
 
 // historyFailureCode is code when a failed turn's history records it, and empty
@@ -188,10 +180,15 @@ func agentStreamFailure(event native.StreamEvent) error {
 	}
 	if code := apperror.Code(strings.TrimSpace(event.Code)); code != "" {
 		if _, ok := apperror.Lookup(code); ok {
-			return apperror.Wrap(code, event.Cause, event.Args)
+			args := event.Args
+			if len(args) == 0 && event.Cause != nil {
+				args = failureArgsForCode(code, event.Cause)
+			}
+			return apperror.Wrap(code, event.Cause, args)
 		}
 	}
-	return apperror.Wrap(nativeFailureCode(event.Cause), event.Cause, providerFailureArgs(event.Cause))
+	code := nativeFailureCode(event.Cause)
+	return apperror.Wrap(code, event.Cause, failureArgsForCode(code, event.Cause))
 }
 
 // nativeFailureCode names the failure a native run ended with. A context the
@@ -224,10 +221,8 @@ func agentFailureStreamEvent(cause error) native.StreamEvent {
 		Code:  string(code),
 		Error: definition.Detail,
 	}
-	if apperror.CodeOf(cause) == code {
-		if args := apperror.ArgsOf(cause); len(args) > 0 {
-			event.Args = args
-		}
+	if args := failureArgsForCode(code, cause); len(args) > 0 {
+		event.Args = args
 	}
 	return event
 }

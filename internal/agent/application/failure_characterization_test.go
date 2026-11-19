@@ -122,11 +122,11 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 			public:      `{"type":"error","code":"agent.provider_request_rejected","error":"` + charRejectedDetail + `","args":{"upstream":"HTTP 400: provider upstream message\nProvider Request ID: req_provider"}}`,
 		},
 		{
-			name:        "authentication rejected keeps upstream text private",
-			event:       native.StreamEvent{Type: native.EventError, Cause: errs.WrapDependency(&sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "SECRET key sk-live-12345678", RequestID: "req_SECRET"}, "model stream")},
+			name:        "authentication rejected passes upstream text verbatim",
+			event:       native.StreamEvent{Type: native.EventError, Cause: errs.WrapDependency(&sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "Incorrect API key: sk-live-ab12****89", RequestID: "req_auth"}, "model stream")},
 			code:        "agent.provider_auth_failed",
 			historyCode: "agent.provider_auth_failed",
-			public:      `{"type":"error","code":"agent.provider_auth_failed","error":"The model provider rejected the credentials. Check the provider API key."}`,
+			public:      `{"type":"error","code":"agent.provider_auth_failed","error":"The model provider rejected the credentials. Check the provider API key.","args":{"upstream":"HTTP 401: Incorrect API key: sk-live-ab12****89\nProvider Request ID: req_auth"}}`,
 		},
 		{
 			name:        "key without access to the model",
@@ -139,7 +139,7 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 			event:       native.StreamEvent{Type: native.EventError, Cause: charModelCallFailure(t, refused)},
 			code:        "agent.provider_unreachable",
 			historyCode: "agent.provider_unreachable",
-			public:      `{"type":"error","code":"agent.provider_unreachable","error":"` + charUnreachableDetail + `"}`,
+			public:      `{"type":"error","code":"agent.provider_unreachable","error":"` + charUnreachableDetail + `","args":{"upstream":"model call retries exhausted: model stream: Post \"http://127.0.0.1:1/v1/chat/completions\": dial tcp: connection refused"}}`,
 		},
 		{
 			// The request may have gone anywhere, so it names no provider.
@@ -147,14 +147,14 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 			event:       native.StreamEvent{Type: native.EventError, Cause: errs.Wrap(refused, "approval handler")},
 			code:        "agent.response_interrupted",
 			historyCode: "agent.response_interrupted",
-			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
+			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `","args":{"upstream":"approval handler: Post \"http://127.0.0.1:1/v1/chat/completions\": dial tcp: connection refused"}}`,
 		},
 		{
 			name:        "stream start failure",
-			event:       native.StreamEvent{Type: native.EventError, Cause: errors.New("stream start: SECRET dispatch failure")},
+			event:       native.StreamEvent{Type: native.EventError, Cause: errors.New("stream start: dispatch failure")},
 			code:        "agent.response_interrupted",
 			historyCode: "agent.response_interrupted",
-			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
+			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `","args":{"upstream":"stream start: dispatch failure"}}`,
 		},
 		{
 			name:        "status text without an APIError",
@@ -195,10 +195,10 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 		},
 		{
 			name:        "failed steer checkpoint",
-			event:       native.StreamEvent{Type: native.EventError, Cause: errs.Wrap(errors.New("SECRET ledger"), "checkpoint steered model call")},
+			event:       native.StreamEvent{Type: native.EventError, Cause: errs.Wrap(errors.New("ledger write failed"), "checkpoint steered model call")},
 			code:        "agent.response_interrupted",
 			historyCode: "agent.response_interrupted",
-			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
+			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `","args":{"upstream":"checkpoint steered model call: ledger write failed"}}`,
 		},
 		{
 			// A catalogued code on the event wins over its cause.
@@ -242,22 +242,22 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 	}
 }
 
-// Scenario 10: a failure cause without an apperror code gets a public event, but
-// only because agentFailureStreamEvent wraps it as an interruption.
+// Scenario 10: a failure cause without an apperror code gets a public event
+// wrapped as an interruption, carrying its detail in args.upstream in OSS.
 func TestCharacterizeFailureEventForNonAppErrorCause(t *testing.T) {
 	t.Parallel()
-	for _, cause := range []error{errors.New("SECRET provider response"), context.Canceled} {
+	for _, cause := range []error{errors.New("provider response failed"), context.Canceled} {
 		data, err := json.Marshal(agentFailureStreamEvent(cause))
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
-		if want := `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`; string(data) != want {
+		if want := `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `","args":{"upstream":"` + cause.Error() + `"}}`; string(data) != want {
 			t.Fatalf("failure event for %v = %s, want %s", cause, data, want)
 		}
 	}
 	// The history marker is not written for such a cause: snapshotFailureCode
 	// only accepts the codes it lists.
-	if got := snapshotFailureCode(false, errors.New("SECRET provider response")); got != "" {
+	if got := snapshotFailureCode(false, errors.New("provider response failed")); got != "" {
 		t.Fatalf("history failure code = %q, want none", got)
 	}
 	if got := snapshotFailureCode(true, errors.New("idle")); got != "agent.response_timeout" {
@@ -509,7 +509,7 @@ func TestCharacterizeDiscussFailureWithoutTerminalEvent(t *testing.T) {
 	assertStrings(t, "turn events", got.events, []string{
 		`{"runtime_type":""}`,
 		`{"type":"agent_start"}`,
-		`{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
+		`{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `","args":{"upstream":"stream start: SECRET dispatch failure"}}`,
 		`{"type":"run_terminal","state":"failed","error_code":"agent.response_interrupted"}`,
 	})
 	assertStrings(t, "turn errors", got.errs, []string{"agent.response_interrupted"})

@@ -119,8 +119,8 @@ func TestAgentResponseErrorCatalog(t *testing.T) {
 			if definition.HTTPStatus != test.status || definition.Detail != test.detail {
 				t.Fatalf("Lookup(%q) = %#v, want status %d and detail %q", test.code, definition, test.status, test.detail)
 			}
-			if len(definition.AllowedArgs) != 0 {
-				t.Fatalf("Lookup(%q).AllowedArgs = %#v, want none", test.code, definition.AllowedArgs)
+			if len(definition.AllowedArgs) != 1 || definition.AllowedArgs[0] != ProviderErrorArgUpstream {
+				t.Fatalf("Lookup(%q).AllowedArgs = %#v, want [%q]", test.code, definition.AllowedArgs, ProviderErrorArgUpstream)
 			}
 		})
 	}

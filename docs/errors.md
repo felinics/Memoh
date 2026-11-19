@@ -130,19 +130,19 @@ queries of URLs in it and bound its length. A failure inside Memoh on the way
 (reading the Agent's configuration, looking the workspace up) is not the
 agent's and stays internal.
 
-A second upstream text channel covers non-authentication responses from a model
-provider (`*sdk.APIError` mapped to `agent.provider_overloaded`,
-`agent.provider_rate_limited`, `agent.provider_quota_exhausted`,
-`agent.provider_permission_denied`, or `agent.provider_request_rejected`). On
-both chat runs and provider/model connectivity probes, `models.UpstreamErrorSummary`
-extracts a redacted, length-bounded summary (status code, upstream error code or
-type, upstream message with UTF-8 body fallback only when `Message` is empty,
-and `RequestID`) into `args.upstream` (`apperror.ProviderErrorArgUpstream`).
-Authentication failures (`HTTP 401`, `sdk.KindAuthentication`,
-`agent.provider_auth_failed`) and transport failures (`agent.provider_unreachable`)
-carry no upstream text. History persistence stores `error_args` alongside
-`error_code` so expanded error details survive page reloads, while IM channels
-continue to render localized copy for the error code alone.
+A second diagnostic detail channel covers model provider responses and internal
+runtime/transport failures in self-hosted Memoh (`agent.provider_*`,
+`agent.response_timeout`, `agent.response_interrupted`, `agent.tool_timeout`,
+`runtime_run_failed`, `runtime_prompt_failed`, and `internal`). On both chat
+runs and provider/model connectivity probes, `models.UpstreamErrorSummary`
+passes through verbatim, length-bounded details into `args.upstream`
+(`apperror.ProviderErrorArgUpstream`) without regex redaction: `*sdk.APIError`
+responses (including `HTTP 401`) format their status code, upstream error code
+or type, upstream message (with UTF-8 body fallback only when `Message` is
+empty), and `RequestID`; transport and internal errors pass through
+`err.Error()`. History persistence stores `error_args` alongside `error_code`
+so expanded error details survive page reloads, while IM channels continue to
+render localized copy for the error code alone.
 
 A runtime driver reports a failure as an `external.Failure` of one of three
 sorts: what the agent said (`FailureReported`), a sign-in

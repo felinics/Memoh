@@ -3,52 +3,44 @@ package models
 import (
 	"errors"
 	"fmt"
-	"net/http"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	sdk "github.com/felinics/twilight/sdk"
-
-	"github.com/felinics/memoh/internal/errs"
 )
 
 const maxUpstreamSummaryBytes = 2000
 
-var (
-	bearerTokenPattern = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+`)
-	secretTokenPattern = regexp.MustCompile(`\b(sk-|key-|rk-|pk-|AIza|gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{6,}`)
-)
-
-// UpstreamErrorSummary extracts a sanitized, bounded summary of an upstream
-// *sdk.APIError for user-facing error diagnostics. Authentication responses
-// (HTTP 401 or sdk.KindAuthentication), transport errors, and synthetic errors
-// without diagnostic fields return an empty string.
+// UpstreamErrorSummary extracts a length-bounded verbatim diagnostic summary
+// for user-facing error details in self-hosted Memoh. Upstream *sdk.APIError
+// responses (including authentication errors) are formatted from their status,
+// code/type, message (with UTF-8 body fallback when Message is empty), and
+// provider request ID; synthetic *sdk.APIError values with no diagnostic fields
+// return an empty string. Transport and Memoh internal errors return err.Error().
 func UpstreamErrorSummary(err error) string {
+	if err == nil {
+		return ""
+	}
 	var apiErr *sdk.APIError
-	if !errors.As(err, &apiErr) || apiErr == nil {
-		return ""
-	}
-	if apiErr.StatusCode == http.StatusUnauthorized || apiErr.Kind == sdk.KindAuthentication {
-		return ""
-	}
-
-	label := upstreamErrorLabel(apiErr)
-	msg := upstreamErrorMessage(apiErr)
-	reqID := strings.TrimSpace(apiErr.RequestID)
-	if msg == "" && label == "" && reqID == "" {
-		return ""
-	}
-
-	summary := formatUpstreamHeader(apiErr.StatusCode, label, msg)
-	if reqID != "" {
-		if summary != "" {
-			summary += "\nProvider Request ID: " + reqID
-		} else {
-			summary = "Provider Request ID: " + reqID
+	if errors.As(err, &apiErr) && apiErr != nil {
+		label := upstreamErrorLabel(apiErr)
+		msg := upstreamErrorMessage(apiErr)
+		reqID := strings.TrimSpace(apiErr.RequestID)
+		if msg == "" && label == "" && reqID == "" {
+			return ""
 		}
+
+		summary := formatUpstreamHeader(apiErr.StatusCode, label, msg)
+		if reqID != "" {
+			if summary != "" {
+				summary += "\nProvider Request ID: " + reqID
+			} else {
+				summary = "Provider Request ID: " + reqID
+			}
+		}
+		return boundUpstreamSummary(summary)
 	}
-	return sanitizeUpstreamSummary(summary)
+	return boundUpstreamSummary(err.Error())
 }
 
 func upstreamErrorLabel(apiErr *sdk.APIError) string {
@@ -92,12 +84,10 @@ func formatUpstreamHeader(statusCode int, label, msg string) string {
 	}
 }
 
-func sanitizeUpstreamSummary(text string) string {
-	sanitized := errs.RedactURLs(strings.TrimSpace(text))
-	sanitized = bearerTokenPattern.ReplaceAllString(sanitized, "Bearer [redacted]")
-	sanitized = secretTokenPattern.ReplaceAllString(sanitized, "${1}[redacted]")
-	if len(sanitized) > maxUpstreamSummaryBytes {
-		sanitized = strings.ToValidUTF8(sanitized[:maxUpstreamSummaryBytes], "") + "…"
+func boundUpstreamSummary(text string) string {
+	bounded := strings.TrimSpace(text)
+	if len(bounded) > maxUpstreamSummaryBytes {
+		bounded = strings.ToValidUTF8(bounded[:maxUpstreamSummaryBytes], "") + "…"
 	}
-	return sanitized
+	return bounded
 }

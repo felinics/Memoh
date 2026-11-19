@@ -15,29 +15,37 @@ import (
 func TestUpstreamErrorSummary(t *testing.T) {
 	t.Parallel()
 
-	t.Run("non-APIError returns empty", func(t *testing.T) {
+	t.Run("nil error returns empty", func(t *testing.T) {
 		t.Parallel()
-		for _, err := range []error{
-			nil,
-			errors.New("plain error"),
-			&url.Error{Op: "Post", URL: "https://api.example.com/v1", Err: errors.New("connection refused")},
-		} {
-			if got := UpstreamErrorSummary(err); got != "" {
-				t.Fatalf("UpstreamErrorSummary(%v) = %q, want empty", err, got)
-			}
+		if got := UpstreamErrorSummary(nil); got != "" {
+			t.Fatalf("UpstreamErrorSummary(nil) = %q, want empty", got)
 		}
 	})
 
-	t.Run("401 and KindAuthentication always return empty", func(t *testing.T) {
+	t.Run("transport and internal errors pass through verbatim in OSS", func(t *testing.T) {
 		t.Parallel()
-		for _, err := range []error{
-			&sdk.APIError{StatusCode: http.StatusUnauthorized, Kind: sdk.KindUnknown, Code: "invalid_api_key", Message: "Incorrect API key: sk-live-secret"},
-			&sdk.APIError{StatusCode: http.StatusForbidden, Kind: sdk.KindAuthentication, Code: "auth_error", Message: "Bad key"},
-			&sdk.APIError{StatusCode: http.StatusBadRequest, Kind: sdk.KindAuthentication, Message: "Token expired", RequestID: "req_auth"},
-		} {
-			if got := UpstreamErrorSummary(err); got != "" {
-				t.Fatalf("UpstreamErrorSummary(%v) = %q, want empty", err, got)
-			}
+		plain := errors.New("db connection reset")
+		if got := UpstreamErrorSummary(plain); got != "db connection reset" {
+			t.Fatalf("UpstreamErrorSummary(%v) = %q, want %q", plain, got, "db connection reset")
+		}
+		urlErr := &url.Error{Op: "Post", URL: "https://api.example.com/v1", Err: errors.New("connection refused")}
+		if got, want := UpstreamErrorSummary(urlErr), urlErr.Error(); got != want {
+			t.Fatalf("UpstreamErrorSummary(%v) = %q, want %q", urlErr, got, want)
+		}
+	})
+
+	t.Run("401 and KindAuthentication pass through verbatim without redaction", func(t *testing.T) {
+		t.Parallel()
+		err := &sdk.APIError{
+			StatusCode: http.StatusUnauthorized,
+			Kind:       sdk.KindAuthentication,
+			Code:       "invalid_api_key",
+			Message:    "Incorrect API key provided: sk-live-ab12****yz89",
+			RequestID:  "req_auth",
+		}
+		want := "HTTP 401 · invalid_api_key: Incorrect API key provided: sk-live-ab12****yz89\nProvider Request ID: req_auth"
+		if got := UpstreamErrorSummary(err); got != want {
+			t.Fatalf("got %q, want %q", got, want)
 		}
 	})
 
@@ -93,24 +101,17 @@ func TestUpstreamErrorSummary(t *testing.T) {
 		}
 	})
 
-	t.Run("redacts URLs and common API tokens", func(t *testing.T) {
+	t.Run("preserves upstream text verbatim without regex redaction", func(t *testing.T) {
 		t.Parallel()
+		rawMsg := "Call to https://gw.example.com/v1/chat?model=gpt-5 rejected; trace=Bearer tok_abc_123, prefix=sk-proj-ab12****89"
 		err := &sdk.APIError{
 			StatusCode: http.StatusTooManyRequests,
 			Code:       "rate_limit_exceeded",
-			Message: "Call to https://user:secret@gw.example.com/v1/chat?api_key=xyz#frag rejected; " +
-				"auth=Bearer tok_secret_123, key1=sk-proj-abcdef123456, key2=AIzaSyAbcdefghijklmnop",
+			Message:    rawMsg,
 		}
-		got := UpstreamErrorSummary(err)
-		for _, leaked := range []string{"user:secret", "api_key=xyz", "#frag", "tok_secret_123", "abcdef123456", "SyAbcdefghijklmnop"} {
-			if strings.Contains(got, leaked) {
-				t.Fatalf("sanitized summary %q leaked %q", got, leaked)
-			}
-		}
-		for _, expected := range []string{"https://gw.example.com/v1/chat", "Bearer [redacted]", "sk-[redacted]", "AIza[redacted]"} {
-			if !strings.Contains(got, expected) {
-				t.Fatalf("sanitized summary %q missing expected redaction %q", got, expected)
-			}
+		want := "HTTP 429 · rate_limit_exceeded: " + rawMsg
+		if got := UpstreamErrorSummary(err); got != want {
+			t.Fatalf("got %q, want %q", got, want)
 		}
 	})
 

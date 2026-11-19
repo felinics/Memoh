@@ -396,8 +396,8 @@ const (
 	CodeWorkspaceRestoreFailed                  Code = "workspace_restore_failed"
 )
 
-// ProviderErrorArgUpstream is the public argument key holding a redacted,
-// length-bounded summary of a non-authentication upstream provider *sdk.APIError.
+// ProviderErrorArgUpstream is the public argument key holding a length-bounded
+// verbatim summary of an upstream provider or internal error detail.
 const ProviderErrorArgUpstream = "upstream"
 
 // Fault is who a failure is attributed to. The values are the fault values of
@@ -1122,8 +1122,12 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The conversation was deleted, but its running task could not be stopped. Refresh and try again.",
 	},
-	CodeSessionInterrupted:       {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server interrupted this run during shutdown. It can resume from saved progress after restart."},
-	CodeAgentToolTimeout:         {HTTPStatus: http.StatusGatewayTimeout, Detail: "The tool stopped reporting progress. Review its saved result before retrying."},
+	CodeSessionInterrupted: {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server interrupted this run during shutdown. It can resume from saved progress after restart."},
+	CodeAgentToolTimeout: {
+		HTTPStatus:  http.StatusGatewayTimeout,
+		Detail:      "The tool stopped reporting progress. Review its saved result before retrying.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+	},
 	CodeScheduleExecutionTimeout: {HTTPStatus: http.StatusGatewayTimeout, Detail: "This scheduled run reached its execution limit. Review its progress or increase the limit."},
 	CodeScheduleRunTargetConflict: {
 		HTTPStatus:  http.StatusBadRequest,
@@ -1157,14 +1161,16 @@ var catalog = map[Code]Definition{
 	// request Memoh refused. A content moderation refusal would be the one
 	// client fault.
 	CodeAgentResponseTimeout: {
-		HTTPStatus: http.StatusGatewayTimeout,
-		Detail:     "The model did not respond in time. Please try again.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusGatewayTimeout,
+		Detail:      "The model did not respond in time. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentResponseInterrupted: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The model response was interrupted. Please try again.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model response was interrupted. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderOverloaded: {
 		HTTPStatus:  http.StatusServiceUnavailable,
@@ -1186,9 +1192,10 @@ var catalog = map[Code]Definition{
 	},
 	// A provider's rejected key answers 502: a 401 would sign the Web client out.
 	CodeAgentProviderAuthFailed: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The model provider rejected the credentials. Check the provider API key.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model provider rejected the credentials. Check the provider API key.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderPermissionDenied: {
 		HTTPStatus:  http.StatusBadGateway,
@@ -1203,9 +1210,10 @@ var catalog = map[Code]Definition{
 		Fault:       FaultDependency,
 	},
 	CodeAgentProviderUnreachable: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "Memoh could not reach the model provider. Check the provider address and that the service is running.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "Memoh could not reach the model provider. Check the provider address and that the service is running.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeQueueSteerUnsupported: {
 		HTTPStatus: http.StatusConflict,
@@ -1276,7 +1284,11 @@ var catalog = map[Code]Definition{
 		Detail:     "Context lifecycle diagnostics could not be loaded. Please try again.",
 	},
 	// Returned when a failure has no public error of its own.
-	CodeInternal: {HTTPStatus: http.StatusInternalServerError, Detail: "Something went wrong on the server. Please try again."},
+	CodeInternal: {
+		HTTPStatus:  http.StatusInternalServerError,
+		Detail:      "Something went wrong on the server. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+	},
 	// 499 is the de facto status for a request the client canceled.
 	CodeCanceled:                      {HTTPStatus: 499, Detail: "The request was canceled."},
 	CodeHTTPBadRequest:                {HTTPStatus: http.StatusBadRequest, Detail: "The request is invalid."},
@@ -1371,8 +1383,17 @@ var catalog = map[Code]Definition{
 	CodeExternalAgentAccountUnbound:             {HTTPStatus: http.StatusForbidden, Detail: "Your chat account is not linked to a Memoh account, so it cannot use this bot's workspace. Link it from Profile, Connected Accounts, then try again.", AllowedArgs: []string{"link"}},
 	CodeExternalAgentContainerWorkspaceRequired: {HTTPStatus: http.StatusConflict, Detail: "This agent runtime needs a container workspace. Switch the bot to its container workspace, then try again."},
 	CodeAgentChatModelNotConfigured:             {HTTPStatus: http.StatusConflict, Detail: "No chat model is selected. Set a default chat model in Bot settings → General, then try again."},
-	CodeRuntimeRunFailed:                        {HTTPStatus: http.StatusInternalServerError, Detail: "The response could not be completed. Please try again."},
-	CodeRuntimePromptFailed:                     {HTTPStatus: http.StatusBadGateway, Detail: "The agent runtime could not complete this response. Please try again.", Fault: FaultDependency},
+	CodeRuntimeRunFailed: {
+		HTTPStatus:  http.StatusInternalServerError,
+		Detail:      "The response could not be completed. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+	},
+	CodeRuntimePromptFailed: {
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The agent runtime could not complete this response. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
+	},
 	// Reaper codes: the run was ended because its owner or live state disappeared.
 	CodeRuntimeOwnerLeaseExpired: {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server handling this response stopped responding, so the response was ended. Please try again."},
 	CodeRuntimeLiveBackendLost:   {HTTPStatus: http.StatusServiceUnavailable, Detail: "The live state of this response was lost, so the response was ended. Please try again."},

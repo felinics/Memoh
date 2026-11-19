@@ -3,6 +3,7 @@ package application
 import (
 	"errors"
 	"net/url"
+	"slices"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -16,6 +17,27 @@ func providerFailureArgs(err error) map[string]string {
 		return nil
 	}
 	return map[string]string{apperror.ProviderErrorArgUpstream: summary}
+}
+
+func failureArgsForCode(code apperror.Code, cause error) map[string]string {
+	if code == "" || cause == nil {
+		return nil
+	}
+	public := ExternalAgentError(cause)
+	if apperror.CodeOf(public) == code {
+		if args := apperror.ArgsOf(public); len(args) > 0 {
+			return args
+		}
+	}
+	definition, ok := apperror.Lookup(code)
+	if !ok || !slices.Contains(definition.AllowedArgs, apperror.ProviderErrorArgUpstream) {
+		return nil
+	}
+	raw := cause
+	if appErr, ok := apperror.As(cause); ok {
+		raw = appErr.Cause()
+	}
+	return providerFailureArgs(raw)
 }
 
 // providerFailureCode names the provider condition a run failure reports, or

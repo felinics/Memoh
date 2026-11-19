@@ -200,15 +200,7 @@ func (r *outcomeRecorder) failureCode() apperror.Code {
 }
 
 func (r *outcomeRecorder) failureArgs() map[string]string {
-	code := r.failureCode()
-	if code == "" {
-		return nil
-	}
-	public := ExternalAgentError(r.cause)
-	if apperror.CodeOf(public) != code {
-		return nil
-	}
-	return apperror.ArgsOf(public)
+	return failureArgsForCode(r.failureCode(), r.cause)
 }
 
 // stampTerminal writes the run's failure code into a failed terminal event

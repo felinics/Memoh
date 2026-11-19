@@ -142,8 +142,8 @@ func closedLocalURL(t *testing.T) string {
 }
 
 // A provider that refuses the connection is answered with the unreachable
-// code and nothing of the transport error; the cause goes to the log.
-func TestProviderTestAnswersUnreachableWithoutErrorText(t *testing.T) {
+// code and the transport error detail in args.upstream in self-hosted OSS.
+func TestProviderTestAnswersUnreachableWithErrorText(t *testing.T) {
 	t.Parallel()
 
 	baseURL := closedLocalURL(t)
@@ -160,23 +160,22 @@ func TestProviderTestAnswersUnreachableWithoutErrorText(t *testing.T) {
 	if fields["code"] != string(apperror.CodeAgentProviderUnreachable) || fields["status"] != string(providers.TestStatusError) || fields["reachable"] != false {
 		t.Fatalf("body = %s, want status error, reachable false, code %s", body, apperror.CodeAgentProviderUnreachable)
 	}
-	host := strings.TrimPrefix(baseURL, "http://")
-	for _, leaked := range []string{host, "refused", "dial", "request failed", "/models"} {
-		if strings.Contains(body, leaked) {
-			t.Fatalf("body %s contains %q", body, leaked)
-		}
+	args, _ := fields["args"].(map[string]any)
+	upstreamSummary, _ := args["upstream"].(string)
+	if !strings.Contains(upstreamSummary, "refused") {
+		t.Fatalf("args.upstream = %q, want transport error detail containing %q", upstreamSummary, "refused")
 	}
 	if !strings.Contains(logs.String(), `"reason":"agent.provider_unreachable"`) || !strings.Contains(logs.String(), "refused") {
 		t.Fatalf("log %s does not record the cause", logs.String())
 	}
 }
 
-// An upstream 401 whose body echoes secrets reaches the client only as a
-// code, on both test endpoints and on both steps of the model test. The body
-// is not logged either; only the SDK error text is. A 401 from the model
+// An upstream 401 passes through its formatted upstream error summary verbatim
+// in args.upstream (without leaking unreferenced fields like echoed input), on
+// both test endpoints and on both steps of the model test. A 401 from the model
 // check is an error, not auth_error (#1042), and its code does not blame the
 // credentials either.
-func TestProbeResponsesCarryNoUpstreamText(t *testing.T) {
+func TestProbeResponsesIncludeAuthUpstreamSummary(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -250,10 +249,14 @@ func TestProbeResponsesCarryNoUpstreamText(t *testing.T) {
 			if fields["code"] != string(tc.wantCode) || fields["status"] != tc.wantStatus || fields["reachable"] != true {
 				t.Fatalf("body = %s, want status %s, reachable true, code %s", body, tc.wantStatus, tc.wantCode)
 			}
-			for _, leaked := range []string{"sk-live", "Incorrect API key", "invalid_api_key", echoedInput} {
-				if strings.Contains(body, leaked) {
-					t.Fatalf("body %s contains %q", body, leaked)
-				}
+			args, _ := fields["args"].(map[string]any)
+			upstreamSummary, _ := args["upstream"].(string)
+			wantSummary := "HTTP 401 · invalid_api_key: " + upstreamMessage
+			if upstreamSummary != wantSummary {
+				t.Fatalf("args.upstream = %q, want %q", upstreamSummary, wantSummary)
+			}
+			if strings.Contains(body, echoedInput) {
+				t.Fatalf("body %s contains %q", body, echoedInput)
 			}
 			if strings.Contains(logs.String(), echoedInput) {
 				t.Fatalf("log %s contains the upstream body", logs.String())
@@ -265,11 +268,11 @@ func TestProbeResponsesCarryNoUpstreamText(t *testing.T) {
 	}
 }
 
-func TestProbeResponsesIncludeSanitizedNonAuthUpstreamSummary(t *testing.T) {
+func TestProbeResponsesIncludeVerbatimUpstreamSummary(t *testing.T) {
 	t.Parallel()
 
 	const (
-		rawMessage  = "Model gpt-99 unavailable at https://user:secret@gw.example.com/v1?key=abc with Bearer tok_secret and sk-live-1234567890" //nolint:gosec // Synthetic test fixture verifying redaction.
+		rawMessage  = "Model gpt-99 unavailable at https://gw.example.com/v1?region=us with prefix sk-live-ab12****89"
 		echoedInput = "USER-INPUT-ECHOED-BY-UPSTREAM"
 	)
 
@@ -336,19 +339,15 @@ func TestProbeResponsesIncludeSanitizedNonAuthUpstreamSummary(t *testing.T) {
 			upstreamSummary, _ := args["upstream"].(string)
 			for _, want := range []string{
 				"model_not_found",
-				"https://gw.example.com/v1",
-				"Bearer [redacted]",
-				"sk-[redacted]",
+				rawMessage,
 				"Provider Request ID: req_probe_1",
 			} {
 				if !strings.Contains(upstreamSummary, want) {
 					t.Fatalf("args.upstream = %q, want substring %q", upstreamSummary, want)
 				}
 			}
-			for _, leaked := range []string{"user:secret", "key=abc", "tok_secret", "1234567890", echoedInput} {
-				if strings.Contains(body, leaked) {
-					t.Fatalf("body %s leaked %q", body, leaked)
-				}
+			if strings.Contains(body, echoedInput) {
+				t.Fatalf("body %s leaked %q", body, echoedInput)
 			}
 		})
 	}
