@@ -29,6 +29,7 @@ acp_runtime_busy	409
 acp_runtime_owner_missing	409
 acp_runtime_start_failed	500
 agent.chat_model_not_configured	409
+agent.empty_response	502
 agent.provider_auth_failed	401
 agent.provider_overloaded	503
 agent.provider_permission_denied	502

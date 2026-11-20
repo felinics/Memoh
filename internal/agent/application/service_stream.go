@@ -206,6 +206,8 @@ func nativeFailureCode(cause error) apperror.Code {
 		return apperror.CodeContextProtectedOverflow
 	case errors.Is(cause, contextfrag.ErrBudgetUnsatisfied):
 		return budgetFailureCode(cause)
+	case errors.Is(cause, native.ErrEmptyResponse):
+		return apperror.CodeAgentEmptyResponse
 	}
 	if code := providerFailureCode(cause, native.IsModelCallFailure(cause)); code != "" {
 		return code

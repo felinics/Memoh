@@ -787,6 +787,7 @@ func (e *streamEngine) consumeStep(
 		stepFinishReason    sdk.FinishReason
 		stepRawFinishReason string
 		sawFinishStep       bool
+		sawFilePart         bool
 	)
 
 partLoop:
@@ -915,6 +916,7 @@ partLoop:
 			}
 
 		case *sdk.StreamFilePart:
+			sawFilePart = true
 			mediaType := p.File.MediaType
 			if mediaType == "" {
 				mediaType = "image/png"
@@ -1002,6 +1004,16 @@ partLoop:
 		Usage:                stepUsage,
 		ToolCalls:            stepToolCalls,
 		Response:             stepResponse,
+	}
+	if len(e.steps) == 0 && !stepHasOutput(result) && !sawFilePart {
+		e.agent.logger.WarnContext(e.streamCtx, "agent produced empty response (no text, no tool calls)",
+			emptyResponseLogAttrs(e.baseCfg.Identity.BotID, len(e.baseCfg.Messages), result)...,
+		)
+		e.endWithFailure(StreamEvent{
+			Type:  EventError,
+			Cause: fmt.Errorf("%w (finish_reason=%q, raw_finish_reason=%q)", ErrEmptyResponse, result.FinishReason, result.RawFinishReason),
+		})
+		return true, nil
 	}
 
 	// The tool batch's OnPart callback bridges approval, progress, result,

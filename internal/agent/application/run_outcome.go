@@ -40,6 +40,9 @@ func hasCatalogCode(err error) bool {
 // publicFailureCode is the catalogued code a cause carries, or the code
 // ExternalAgentError gives it. It is empty when the cause has neither.
 func publicFailureCode(cause error) apperror.Code {
+	if errors.Is(cause, native.ErrEmptyResponse) {
+		return apperror.CodeAgentEmptyResponse
+	}
 	public := ExternalAgentError(cause)
 	if !hasCatalogCode(public) {
 		return ""
