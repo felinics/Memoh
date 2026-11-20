@@ -154,9 +154,11 @@ func (t *stepThread) resetRefused() {
 var ErrEmptyResponse = errors.New("model returned empty response")
 
 func stepHasOutput(result sdk.ModelResult) bool {
-	return strings.TrimSpace(result.Text) != "" ||
-		len(result.ToolCalls) > 0 ||
-		len(result.ReasoningParts) > 0
+	if strings.TrimSpace(result.Text) != "" || len(result.ToolCalls) > 0 {
+		return true
+	}
+	reasoning := reasoningBlockCapture{parts: result.ReasoningParts}
+	return !reasoning.empty()
 }
 
 func emptyResponseLogAttrs(botID string, inputMessages int, result sdk.ModelResult) []any {

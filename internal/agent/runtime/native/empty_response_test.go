@@ -81,3 +81,26 @@ func TestAgentGenerateFailsOnEmptyFirstStep(t *testing.T) {
 		t.Fatalf("Generate() err = %v, want ErrEmptyResponse", err)
 	}
 }
+
+func TestStepHasOutputRequiresReasoningPayload(t *testing.T) {
+	t.Parallel()
+
+	if stepHasOutput(sdk.ModelResult{
+		ReasoningParts: []sdk.ReasoningPart{{ID: "r-1"}},
+	}) {
+		t.Fatal("stepHasOutput() = true for empty reasoning placeholder, want false")
+	}
+	if !stepHasOutput(sdk.ModelResult{
+		ReasoningParts: []sdk.ReasoningPart{{ID: "r-1", Text: "thinking"}},
+	}) {
+		t.Fatal("stepHasOutput() = false for reasoning text, want true")
+	}
+	if !stepHasOutput(sdk.ModelResult{
+		ReasoningParts: []sdk.ReasoningPart{{
+			ID:               "r-1",
+			ProviderMetadata: sdk.ProviderMetadata{"anthropic": map[string]string{"signature": "sig"}},
+		}},
+	}) {
+		t.Fatal("stepHasOutput() = false for reasoning provider metadata, want true")
+	}
+}
