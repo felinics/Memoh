@@ -5,10 +5,15 @@ import type { IncomingMessage, RequestOptions } from 'node:http'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { loadRemoteIcon } from './remote-icon'
 
-const mocks = vi.hoisted(() => ({ lookup: vi.fn(), get: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  lookup: vi.fn(),
+  get: vi.fn(),
+  HttpAgent: vi.fn(),
+  HttpsAgent: vi.fn(),
+}))
 vi.mock('node:dns', () => ({ lookup: mocks.lookup }))
-vi.mock('node:http', () => ({ get: mocks.get }))
-vi.mock('node:https', () => ({ get: mocks.get }))
+vi.mock('node:http', () => ({ get: mocks.get, Agent: mocks.HttpAgent }))
+vi.mock('node:https', () => ({ get: mocks.get, Agent: mocks.HttpsAgent }))
 
 function response(body: string | Buffer = '<svg/>', headers: IncomingMessage['headers'] = { 'content-type': 'image/svg+xml' }, statusCode = 200) {
   return Object.assign(Readable.from([Buffer.from(body)]), { headers, statusCode }) as unknown as IncomingMessage
@@ -43,12 +48,12 @@ beforeEach(() => {
 })
 afterEach(() => vi.useRealTimers())
 
-it('returns public image bytes using a fresh connection without authenticated headers', async () => {
+it('returns public image bytes using a stateless keep-alive pool without authenticated headers', async () => {
   expect(await loadRemoteIcon('https://example.com/icon.svg')).toBe('data:image/svg+xml;base64,PHN2Zy8+')
   expect(mocks.get.mock.calls[0]![0].hostname).toBe('example.com')
   expect(mocks.get.mock.calls[0]![1]).toEqual({
-    agent: false, lookup: expect.any(Function), signal: expect.any(AbortSignal),
-    headers: { 'Accept-Encoding': 'identity' },
+    agent: expect.any(Object), lookup: expect.any(Function), signal: expect.any(AbortSignal),
+    headers: { 'Accept-Encoding': 'gzip, deflate, br' },
   })
   expect(connect).toHaveBeenCalledWith([{ address: '93.184.216.34', family: 4 }])
   expect(mocks.lookup).toHaveBeenCalledTimes(1)

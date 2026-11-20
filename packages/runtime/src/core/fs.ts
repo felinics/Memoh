@@ -31,11 +31,20 @@ import { HostPathResolver } from './paths'
 const binaryProbeBytes = 8 * 1024
 const readMaxLines = 2_000
 const listMaxEntries = 200
+const defaultRecursiveMaxEntries = 100_000
 const readResponseMaxBytes = 16 * 1024 * 1024 - 1_024
 export const rawChunkSize = 64 * 1024
 
+export interface WorkspaceFileServiceOptions {
+  defaultMaxRecursiveEntries?: number
+}
+
 export class WorkspaceFileService {
-  constructor(readonly paths: HostPathResolver) {}
+  private readonly defaultMaxRecursiveEntries: number
+
+  constructor(readonly paths: HostPathResolver, options: WorkspaceFileServiceOptions = {}) {
+    this.defaultMaxRecursiveEntries = options.defaultMaxRecursiveEntries ?? defaultRecursiveMaxEntries
+  }
 
   async readFile(request: ReadFileRequest): Promise<{ content: string, total_lines: number, binary: boolean }> {
     const requested = requiredPath(request.path)
@@ -113,17 +122,23 @@ export class WorkspaceFileService {
     return {}
   }
 
-  async listDir(request: ListDirRequest): Promise<{
+  async listDir(request: ListDirRequest, signal?: AbortSignal): Promise<{
     entries: FileEntry[]
     total_count: number
     truncated: boolean
   }> {
+    if (signal?.aborted) {
+      throw rpcError(status.CANCELLED, 'request cancelled')
+    }
     const requested = request.path?.trim() || '.'
     const directory = await this.paths.resolve(requested, { requireDirectory: true })
     await this.paths.revalidate(directory, { requireDirectory: true })
+    const maxEntries = request.recursive
+      ? ((request.max_entries ?? 0) > 0 ? request.max_entries! : this.defaultMaxRecursiveEntries)
+      : ((request.max_entries ?? 0) > 0 ? request.max_entries! : 0)
     let entries = request.recursive
-      ? await this.walk(directory)
-      : await this.readDirectory(directory)
+      ? await this.walk(directory, maxEntries, signal)
+      : await this.readDirectory(directory, maxEntries, signal)
 
     const threshold = request.collapse_threshold ?? 0
     if (request.recursive && threshold > 0) {
@@ -223,7 +238,7 @@ export class WorkspaceFileService {
     })
   }
 
-  private async readDirectory(directory: string): Promise<FileEntry[]> {
+  private async readDirectory(directory: string, maxEntries: number, signal?: AbortSignal): Promise<FileEntry[]> {
     let children
     try {
       children = await readdir(directory, { withFileTypes: true })
@@ -233,20 +248,31 @@ export class WorkspaceFileService {
     children.sort((left, right) => compareGoFilenames(left.name, right.name))
     const entries: FileEntry[] = []
     for (const child of children) {
+      if (signal?.aborted) {
+        throw rpcError(status.CANCELLED, 'request cancelled')
+      }
       const target = join(directory, child.name)
+      let info: Stats
       try {
-        const info = await lstat(target)
-        entries.push(fileEntry(child.name, info))
+        info = await lstat(target)
       } catch {
         // Match filepath.WalkDir's best-effort behavior for entries that vanish.
+        continue
       }
+      if (maxEntries > 0 && entries.length >= maxEntries) {
+        throw rpcError(status.RESOURCE_EXHAUSTED, `directory listing exceeds ${maxEntries} entries`)
+      }
+      entries.push(fileEntry(child.name, info))
     }
     return entries
   }
 
-  private async walk(directory: string): Promise<FileEntry[]> {
+  private async walk(directory: string, maxEntries: number, signal?: AbortSignal): Promise<FileEntry[]> {
     const entries: FileEntry[] = []
     const visit = async (current: string): Promise<void> => {
+      if (signal?.aborted) {
+        throw rpcError(status.CANCELLED, 'request cancelled')
+      }
       let children
       try {
         children = await readdir(current, { withFileTypes: true })
@@ -255,17 +281,24 @@ export class WorkspaceFileService {
       }
       children.sort((left, right) => compareGoFilenames(left.name, right.name))
       for (const child of children) {
+        if (signal?.aborted) {
+          throw rpcError(status.CANCELLED, 'request cancelled')
+        }
         const target = join(current, child.name)
+        let info: Stats
         try {
-          const info = await lstat(target)
-          const name = relative(directory, target).split(sep).join('/')
-          entries.push(fileEntry(name, info))
-          if (info.isDirectory() && !info.isSymbolicLink()) {
-            await this.paths.resolve(target, { requireDirectory: true })
-            await visit(target)
-          }
+          info = await lstat(target)
         } catch {
-          // A disappearing or unsafe entry is not traversed.
+          // A disappearing or unreadable entry is skipped without aborting the walk.
+          continue
+        }
+        if (maxEntries > 0 && entries.length >= maxEntries) {
+          throw rpcError(status.RESOURCE_EXHAUSTED, `recursive listing exceeds ${maxEntries} entries`)
+        }
+        const name = relative(directory, target).split(sep).join('/')
+        entries.push(fileEntry(name, info))
+        if (info.isDirectory() && !info.isSymbolicLink()) {
+          await visit(target)
         }
       }
     }
@@ -298,9 +331,23 @@ function fileEntry(path: string, info: Stats): FileEntry {
 }
 
 export function compareGoFilenames(left: string, right: string): number {
-  // os.ReadDir/filepath.WalkDir use Go string order. Go strings compare their
-  // UTF-8 bytes, whereas localeCompare() is locale/ICU dependent.
-  return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
+  if (left === right) return 0
+  // os.ReadDir/filepath.WalkDir compare UTF-8 bytes. For valid Unicode scalar
+  // values UTF-8 byte order equals codepoint order; lone surrogates fall back to
+  // exact Buffer encoding so WTF-16 edge cases stay bit-identical to Go strings.
+  let i = 0
+  let j = 0
+  while (i < left.length && j < right.length) {
+    const a = left.codePointAt(i)!
+    const b = right.codePointAt(j)!
+    if ((a >= 0xd800 && a <= 0xdfff) || (b >= 0xd800 && b <= 0xdfff)) {
+      return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
+    }
+    if (a !== b) return a < b ? -1 : 1
+    i += a > 0xffff ? 2 : 1
+    j += b > 0xffff ? 2 : 1
+  }
+  return i < left.length ? 1 : -1
 }
 
 export function formatTimestamp(value: Date): string {
