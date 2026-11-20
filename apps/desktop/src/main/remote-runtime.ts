@@ -68,6 +68,7 @@ export class DesktopRemoteRuntimeManager {
   private activeRun: Promise<void> | undefined
   private activeToken: object | undefined
   private pendingOperation: Promise<void> = Promise.resolve()
+  private mutatedSinceInit = false
 
   constructor(private readonly options: DesktopRemoteRuntimeManagerOptions) {
     this.createSession = options.createSession ?? ((config, sessionOptions) => (
@@ -93,9 +94,17 @@ export class DesktopRemoteRuntimeManager {
     return this.enqueue(() => this.restoreStored())
   }
 
+  restoreOnStartup(): Promise<DesktopRuntimeState> {
+    return this.enqueue(async () => {
+      if (this.mutatedSinceInit) return this.runtimeState()
+      return this.restoreStored()
+    })
+  }
+
   // Pausing stops the session without touching the credential, unlike
   // configure(null), which deletes it and lets the caller revoke the runtime.
   setPaused(paused: boolean): Promise<DesktopRuntimeState> {
+    this.mutatedSinceInit = true
     return this.enqueue(async () => {
       let stored: StoredRuntimeConfig
       try {
@@ -194,6 +203,7 @@ export class DesktopRemoteRuntimeManager {
   }
 
   configure(config: DesktopRuntimeConfig | null): Promise<DesktopRuntimeState> {
+    this.mutatedSinceInit = true
     const input = config ? { ...config } : null
     return this.enqueue(async () => {
       if (!input) {

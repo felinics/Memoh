@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns'
-import { get as httpGet } from 'node:http'
-import { get as httpsGet } from 'node:https'
+import { Agent as HttpAgent, get as httpGet } from 'node:http'
+import { Agent as HttpsAgent, get as httpsGet } from 'node:https'
 import { BlockList, isIP } from 'node:net'
 import { pipeline } from 'node:stream'
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib'
@@ -54,15 +54,19 @@ const publicLookup: NonNullable<RequestOptions['lookup']> = (hostname, options, 
   })
 }
 
+const httpAgent = new HttpAgent({ keepAlive: true, maxSockets: 6, timeout: 30_000 })
+const httpsAgent = new HttpsAgent({ keepAlive: true, maxSockets: 6, timeout: 30_000 })
+
 function requestIcon(url: URL, signal: AbortSignal): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
-    // A fresh Node connection has no Electron cookies, auth headers, proxy or
-    // pooled sockets; the original hostname still supplies Host and TLS SNI.
-    const request = (url.protocol === 'https:' ? httpsGet : httpGet)(url, {
-      agent: false,
+    // Dedicated Node agents keep-alive public TLS/TCP sockets without touching
+    // Electron's cookie jar, auth headers, or proxy; hostname still supplies Host/SNI.
+    const isHttps = url.protocol === 'https:'
+    const request = (isHttps ? httpsGet : httpGet)(url, {
+      agent: isHttps ? httpsAgent : httpAgent,
       lookup: publicLookup,
       signal,
-      headers: { 'Accept-Encoding': 'identity' },
+      headers: { 'Accept-Encoding': 'gzip, deflate, br' },
     }, resolve)
     request.on('error', reject)
   })

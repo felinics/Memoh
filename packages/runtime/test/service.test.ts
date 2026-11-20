@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +18,8 @@ import { loadSync } from '@grpc/proto-loader'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { grpcMessageLimit, startRuntimeGrpcServer, type RunningRuntimeGrpcServer } from '../src/service'
+import { compareGoFilenames, WorkspaceFileService } from '../src/core/fs'
+import { HostPathResolver } from '../src/core/paths'
 import type { ExecInput, ExecOutput, FileEntry, WriteRawChunk } from '../src/types'
 import { createGrpcWebSocketTestHarness, type GrpcWebSocketTestHarness } from './grpc-websocket-harness'
 
@@ -36,12 +38,12 @@ interface TestClient extends Client {
   }>): void
   WriteFile(request: { path: string, content: Buffer }, callback: UnaryCallback<Record<string, never>>): void
   WriteFile(request: { path: string, content: Buffer }, metadata: Metadata, callback: UnaryCallback<Record<string, never>>): void
-  ListDir(request: { path: string, recursive?: boolean }, callback: UnaryCallback<{
+  ListDir(request: { path: string, recursive?: boolean, max_entries?: number }, callback: UnaryCallback<{
     entries: FileEntry[]
     total_count: number
     truncated: boolean
   }>): void
-  ListDir(request: { path: string, recursive?: boolean }, metadata: Metadata, callback: UnaryCallback<{
+  ListDir(request: { path: string, recursive?: boolean, max_entries?: number }, metadata: Metadata, callback: UnaryCallback<{
     entries: FileEntry[]
     total_count: number
     truncated: boolean
@@ -213,6 +215,43 @@ setInterval(() => {}, 1_000)
 
   it('accepts an empty WriteRaw stream without workspace metadata', async () => {
     await expect(emptyWriteRaw(new Metadata())).resolves.toEqual({ bytes_written: '0' })
+  })
+
+  it('bounds ListDir traversal with max_entries and supports AbortSignal cancellation', async () => {
+    await mkdir(join(root, 'scan/nested'), { recursive: true })
+    await writeFile(join(root, 'scan/a.txt'), 'a')
+    await writeFile(join(root, 'scan/b.txt'), 'b')
+    await writeFile(join(root, 'scan/nested/c.txt'), 'c')
+
+    const flatWithin = await unary(client.ListDir.bind(client), { path: '/data/scan', max_entries: 3 })
+    expect(flatWithin.entries).toHaveLength(3)
+    await expect(unary(client.ListDir.bind(client), { path: '/data/scan', max_entries: 2 }))
+      .rejects.toMatchObject({ code: status.RESOURCE_EXHAUSTED })
+
+    const recWithin = await unary(client.ListDir.bind(client), { path: '/data/scan', recursive: true, max_entries: 4 })
+    expect(recWithin.entries).toHaveLength(4)
+    await expect(unary(client.ListDir.bind(client), { path: '/data/scan', recursive: true, max_entries: 3 }))
+      .rejects.toMatchObject({ code: status.RESOURCE_EXHAUSTED })
+
+    const paths = await HostPathResolver.create(root)
+    const files = new WorkspaceFileService(paths, { defaultMaxRecursiveEntries: 3 })
+    await expect(files.listDir({ path: '/data/scan', recursive: true }))
+      .rejects.toMatchObject({ code: status.RESOURCE_EXHAUSTED })
+
+    const controller = new AbortController()
+    controller.abort()
+    await expect(files.listDir({ path: '/data/scan', recursive: true }, controller.signal))
+      .rejects.toMatchObject({ code: status.CANCELLED })
+  })
+
+  it('compares filenames in UTF-8 codepoint order including surrogates and supplementary planes', () => {
+    const samples = ['', 'a', 'b', 'a\u0000', 'B', '中文', '😀', '😃', '𐐷', '檔案', '\uD800']
+    for (const left of samples) {
+      for (const right of samples) {
+        const expected = Math.sign(Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8')))
+        expect(Math.sign(compareGoFilenames(left, right))).toBe(expected)
+      }
+    }
   })
 
 })

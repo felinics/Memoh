@@ -2,6 +2,7 @@ import { loadRemoteIcon } from './remote-icon'
 import {
   app,
   Menu,
+  nativeTheme,
   Notification,
   shell,
   BrowserWindow,
@@ -36,6 +37,7 @@ import {
 import { maybePromptAppleSiliconBuild } from './arch-check'
 import { installMainProcessErrorHandlers } from './main-process-errors'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
+import { createUtilityRuntimeSession } from './runtime-utility-session'
 import {
   assertTrustedIpcSender,
   isAllowedMainFramePermissionCheck,
@@ -118,6 +120,7 @@ let appTray: Tray | null = null
 let trayUpdateVersion: string | null = null
 let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
+let profileBaseUrlCache: string | null = null
 let sessionBaseUrlOverride = ''
 let remoteRuntimeManager: DesktopRemoteRuntimeManager | null = null
 let quitCleanupFinished = false
@@ -210,16 +213,22 @@ function desktopProfilePath(): string {
 }
 
 function readProfileBaseUrl(): string {
+  if (profileBaseUrlCache !== null) return profileBaseUrlCache
   const path = desktopProfilePath()
-  if (!existsSync(path)) return ''
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { baseUrl?: unknown }
-    if (typeof parsed.baseUrl !== 'string' || !parsed.baseUrl.trim()) return ''
-    return normalizeBaseUrl(parsed.baseUrl)
-  } catch (error) {
-    console.error('failed to read remote desktop profile', error)
+  if (!existsSync(path)) {
+    profileBaseUrlCache = ''
     return ''
   }
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { baseUrl?: unknown }
+    profileBaseUrlCache = typeof parsed.baseUrl === 'string' && parsed.baseUrl.trim()
+      ? normalizeBaseUrl(parsed.baseUrl)
+      : ''
+  } catch (error) {
+    console.error('failed to read remote desktop profile', error)
+    profileBaseUrlCache = ''
+  }
+  return profileBaseUrlCache
 }
 
 function writeProfileBaseUrl(baseUrl: string): void {
@@ -227,6 +236,7 @@ function writeProfileBaseUrl(baseUrl: string): void {
   const path = desktopProfilePath()
   writeFileSync(path, `${JSON.stringify({ baseUrl }, null, 2)}\n`, { mode: 0o600 })
   chmodSync(path, 0o600)
+  profileBaseUrlCache = normalizeBaseUrl(baseUrl)
 }
 
 function getDesktopApiBaseUrl(): string {
@@ -593,6 +603,7 @@ function createChatWindow(): BrowserWindow {
   const window = new BrowserWindow({
     ...rememberedWindowOptions(CHAT_DEFAULTS),
     ...macWindowChromeOptions(process.platform, 'memoh-chat'),
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#060606' : '#faf8f7',
     show: false,
     // Electron's auto-hide mode lets a single Alt press reveal the menu.
     autoHideMenuBar: process.platform !== 'win32',
@@ -806,6 +817,7 @@ app.whenReady().then(async () => {
     currentServerUrl: getDesktopApiBaseUrl,
     workspaceBase: homedir(),
     deviceName: hostname(),
+    createSession: createUtilityRuntimeSession,
     encryption: {
       isAvailable: () => safeStorage.isEncryptionAvailable(),
       encrypt: value => safeStorage.encryptString(value),
@@ -821,9 +833,6 @@ app.whenReady().then(async () => {
       }
     }
   })
-  await remoteRuntimeManager.restore()
-
-  createAppTray()
 
   ipcMain.handle('window:close-self', (event) => {
     assertTrustedRenderer(event)
@@ -907,7 +916,11 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('desktop:set-tray-bots', (event, payload: unknown) => {
     assertTrustedRenderer(event)
-    trayBots = normalizeTrayBots(payload)
+    const next = normalizeTrayBots(payload)
+    const unchanged = next.length === trayBots.length
+      && next.every((bot, idx) => bot.id === trayBots[idx]!.id && bot.displayName === trayBots[idx]!.displayName)
+    if (unchanged) return
+    trayBots = next
     setTrayMenu()
   })
   registerDesktopUpdates({
@@ -934,10 +947,21 @@ app.whenReady().then(async () => {
     },
   })
 
-  if (!await recoverDesktopUpdate()) ensureChatWindow()
+  if (await recoverDesktopUpdate()) return
+
+  ensureChatWindow()
 
   app.on('activate', () => {
     revealChatWindow()
+  })
+
+  // Defer keychain decryption and tray icon resizing until after window creation
+  // has started renderer loading.
+  setImmediate(() => {
+    createAppTray()
+    void remoteRuntimeManager?.restoreOnStartup().catch((error) => {
+      console.warn('failed to restore desktop runtime on startup', error)
+    })
   })
 
   await rebuildAppMenu()

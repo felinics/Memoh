@@ -24,6 +24,7 @@ export interface ListDirRequest {
   offset?: number
   limit?: number
   collapse_threshold?: number
+  max_entries?: number
 }
 
 export interface StatRequest {
