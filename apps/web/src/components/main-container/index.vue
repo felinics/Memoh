@@ -1,6 +1,6 @@
 <template>
-  <main class="flex flex-col flex-1 min-w-0 overflow-hidden bg-background">
-    <section class="flex-1 min-h-0 overflow-hidden">
+  <main class="flex flex-col flex-1 min-w-0 min-h-0 overflow-clip bg-background">
+    <section class="flex-1 min-h-0 min-w-0 overflow-clip">
       <!-- Render the chat home directly instead of via a child <router-view>.
            main-section is now a persistent shell mounted in App.vue (shown/
            hidden with v-show as the route changes), so chat never sits in a

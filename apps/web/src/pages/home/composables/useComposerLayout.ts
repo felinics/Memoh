@@ -30,7 +30,7 @@ export function useComposerLayout() {
   const composerInnerWidth = ref(0)
 
   function focusTextarea() {
-    textareaEl.value?.focus()
+    textareaEl.value?.focus({ preventScroll: true })
   }
 
   function recomputeComposerFit() {

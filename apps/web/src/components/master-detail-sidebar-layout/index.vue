@@ -13,14 +13,14 @@
         :class="desktopShell ? 'w-(--desktop-sidebar-width)!' : flush ? 'w-60!' : 'w-48! lg:w-52! xl:w-60!'"
       >
         <SidebarContent
-          class="overflow-hidden h-full flex flex-col"
+          class="overflow-clip h-full min-h-0 flex flex-col"
           :class="flush ? 'p-0' : 'p-2 pb-4 pt-4'"
         >
           <!-- Default: a nested card shell (box-in-box) for pages that sit to the
                right of the settings nav. flush: this layout IS the primary nav, so
                it goes edge-to-edge with a right divider, matching SettingsSidebar. -->
           <div
-            class="flex-1 flex flex-col overflow-hidden min-h-0"
+            class="flex-1 flex flex-col overflow-clip min-h-0 min-w-0"
             :class="flush
               ? 'workspace-divider-r bg-sidebar'
               : 'border border-border-soft bg-muted/10 rounded-lg'"
@@ -51,8 +51,8 @@
         </SidebarContent>
       </Sidebar>
 
-      <SidebarInset class="min-w-0 overflow-hidden">
-        <section class="flex-1 min-w-0 relative min-h-0 overflow-hidden">
+      <SidebarInset class="min-w-0 min-h-0 overflow-clip">
+        <section class="flex-1 min-w-0 relative min-h-0 overflow-clip">
           <slot name="detail" />
         </section>
       </SidebarInset>
