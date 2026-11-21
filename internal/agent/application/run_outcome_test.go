@@ -19,6 +19,7 @@ func TestClassifyRunFailure(t *testing.T) {
 		want  apperror.Code
 	}{
 		{name: "catalogued code", cause: apperror.New(apperror.CodeAgentProviderOverloaded, nil), want: apperror.CodeAgentProviderOverloaded},
+		{name: "empty native response", cause: fmt.Errorf("%w (finish_reason=%q)", native.ErrEmptyResponse, "stop"), want: apperror.CodeAgentEmptyResponse},
 		{name: "catalogued code under a wrap", cause: fmt.Errorf("stream: %w", apperror.New(apperror.CodeAgentResponseTimeout, nil)), want: apperror.CodeAgentResponseTimeout},
 		{name: "code outside the catalog", cause: apperror.New("not.catalogued", nil), want: apperror.CodeAgentResponseInterrupted},
 		{name: "plain error", cause: errors.New("connection reset"), want: apperror.CodeAgentResponseInterrupted},

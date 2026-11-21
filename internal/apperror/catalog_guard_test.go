@@ -332,6 +332,7 @@ var declaredFaults = map[Code]Fault{
 	CodeAgentProviderRequestRejected:       FaultDependency,
 	CodeAgentProviderUnreachable:           FaultDependency,
 	CodeAgentResponseInterrupted:           FaultDependency,
+	CodeAgentEmptyResponse:                 FaultDependency,
 	CodeAgentResponseTimeout:               FaultDependency,
 	CodeRuntimePromptFailed:                FaultDependency,
 	CodeExternalRuntimeSessionResumeFailed: FaultDependency,

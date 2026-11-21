@@ -62,6 +62,11 @@ func TestAgentStreamFailureConversion(t *testing.T) {
 			code:  apperror.CodeContextProtectedOverflow,
 		},
 		{
+			name:  "empty model response",
+			event: native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("%w (finish_reason=%q, raw_finish_reason=%q)", native.ErrEmptyResponse, "stop", "stop")},
+			code:  apperror.CodeAgentEmptyResponse,
+		},
+		{
 			name:  "runtime failure",
 			event: native.StreamEvent{Type: native.EventError, Cause: errors.New("checkpoint steered model call: SECRET")},
 			code:  apperror.CodeAgentResponseInterrupted,

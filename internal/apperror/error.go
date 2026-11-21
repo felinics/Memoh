@@ -185,6 +185,7 @@ const (
 	CodeScheduleSessionModeUnsupported           Code = "schedule.session_mode_unsupported"
 	CodeScheduleNotFound                         Code = "schedule.not_found"
 	CodeAgentResponseInterrupted                 Code = "agent.response_interrupted"
+	CodeAgentEmptyResponse                       Code = "agent.empty_response"
 	CodeAgentProviderOverloaded                  Code = "agent.provider_overloaded"
 	CodeAgentProviderRateLimited                 Code = "agent.provider_rate_limited"
 	CodeAgentProviderQuotaExhausted              Code = "agent.provider_quota_exhausted"
@@ -1169,6 +1170,12 @@ var catalog = map[Code]Definition{
 	CodeAgentResponseInterrupted: {
 		HTTPStatus:  http.StatusBadGateway,
 		Detail:      "The model response was interrupted. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
+	},
+	CodeAgentEmptyResponse: {
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model returned an empty response. Please try again.",
 		AllowedArgs: []string{ProviderErrorArgUpstream},
 		Fault:       FaultDependency,
 	},
