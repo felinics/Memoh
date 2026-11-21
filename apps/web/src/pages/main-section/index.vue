@@ -5,7 +5,7 @@
   >
     <!-- PUSH/PULL. The sidebar (a flex sibling) slides out left and the dock,
          flex-1, grows to fill the freed space — content shifts rather than being
-         covered. dockview relays out per frame (no gating) to keep panels matched
+         covered. The workbench relays out per frame to keep panels matched
          the whole way. -->
     <!-- This row is also the BASE file-drop zone: files dragged anywhere that
          no region zone claims (e.g. the sidebar on a non-Files view) go to the

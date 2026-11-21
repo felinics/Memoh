@@ -1410,7 +1410,10 @@ import {
 } from '@/utils/runtime-slash-commands'
 
 const props = withDefaults(defineProps<{
-  // Stable dockview panel id (e.g. `chat:3`). Used for per-tab composer drafts and
+  // Pin this pane to a specific bot when hosted by WorkbenchStage so cross-bot
+  // switches or KeepAlive deactivation cannot leak or overwrite drafts across bots.
+  botId?: string
+  // Stable workbench tab id (e.g. `chat:3`). Used for per-tab composer drafts and
   // the keep-alive key — it does NOT change when a draft acquires a real session.
   tabId?: string
   // The session this pane renders (null = unsaved draft). Decoupled from tabId so
@@ -1419,6 +1422,7 @@ const props = withDefaults(defineProps<{
   visible?: boolean
   active?: boolean
 }>(), {
+  botId: undefined,
   tabId: 'chat',
   sessionId: null,
   visible: true,
@@ -1462,11 +1466,14 @@ const agentChanging = ref(false)
 const acpConfigChangeScope = ref('')
 
 const {
-  currentBotId,
+  currentBotId: storeCurrentBotId,
   bots,
   loadingChats,
   hasExplicitSessionSelection,
 } = storeToRefs(chatStore)
+const currentBotId = computed<string | null>(() => (
+  props.botId !== undefined ? (props.botId.trim() || null) : storeCurrentBotId.value
+))
 const { composerSendKey } = storeToRefs(useSettingsStore())
 
 const isActive = computed(() => props.active !== false)

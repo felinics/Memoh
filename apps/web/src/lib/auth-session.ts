@@ -23,8 +23,8 @@ const USER_SCOPED_STORAGE_KEYS = [
   'pinned-bot-ids',
   'bot-order',
   'workspace-working-workdir',
-  // Was 'workspace-tabs' — a long-dead key. The live dockview layout key is
-  // 'workspace-layout'; logout never actually cleared it before this fix.
+  // Clear both the current workbench snapshot key and the retired layout key.
+  'memoh:workbench:v1',
   'workspace-layout',
   // Cross-reload query-cache snapshot (lib/query-cache-persistence.ts) —
   // without this the next account would see the previous one's catalog data.

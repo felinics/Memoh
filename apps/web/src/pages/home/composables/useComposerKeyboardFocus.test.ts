@@ -106,7 +106,7 @@ describe('composer keyboard focus', () => {
     expect(document.activeElement).toBe(document.body)
   })
 
-  it('waits for the Dockview container to become visible', async () => {
+  it('waits for the workbench container to become visible', async () => {
     const view = mountComposer()
     view.host.style.visibility = 'hidden'
     view.mounted.value = true

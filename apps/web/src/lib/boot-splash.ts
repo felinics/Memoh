@@ -21,8 +21,8 @@ const MARK_SETTLED_MS = 380
 //
 // They run as a view transition, whose animations (the boot-entering rules in
 // index.html) play on snapshots of the page. The app must not be scaled
-// itself: dockview sizes its panels from their on-screen boxes, so a panel
-// measured while #app was scaled stayed 15% too large until the next resize.
+// itself: panel slots measured from on-screen boxes while #app was scaled
+// stayed 15% too large until the next resize.
 //
 // Without view transitions only the splash fades out, over SPLASH_EXIT_MS
 // (the is-leaving rules in index.html); the app's entry is skipped.

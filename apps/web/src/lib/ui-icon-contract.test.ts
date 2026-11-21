@@ -27,8 +27,7 @@ describe('shared UI icon contract', () => {
     const files = [
       '../pages/home/components/chat-pane.vue',
       '../pages/home/components/composer-continue-on.vue',
-      '../pages/home/components/dockview/header-add-actions.vue',
-      '../pages/home/components/dockview/prefix-header-actions.vue',
+      '../pages/home/components/workbench/workbench-tab-bar.vue',
     ]
     const names = new Set(Object.keys(icons))
     for (const file of files) {

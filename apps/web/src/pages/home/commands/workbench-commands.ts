@@ -8,11 +8,11 @@ export function registerWorkbenchCommands(registry: KeyboardCommandRegistry, sto
     if (store.isMobile) store.openMobileNav()
   }
   const split = (direction: 'right' | 'below') => {
-    const groupId = store.api?.activeGroup?.id
+    const groupId = store.activeGroupId
     if (groupId) store.splitGroup(groupId, direction)
   }
   const actions: Array<[AppKeyboardCommand, () => void]> = [
-    [appKeyboardCommands.newChatSession, () => store.openDraftChat({ groupId: store.api?.activeGroup?.id })],
+    [appKeyboardCommands.newChatSession, () => store.openDraftChat({ groupId: store.activeGroupId ?? undefined })],
     [appKeyboardCommands.showSessions, () => sidebar('sessions')],
     [appKeyboardCommands.showFiles, () => sidebar('files')],
     [appKeyboardCommands.showSchedule, () => sidebar('schedule')],

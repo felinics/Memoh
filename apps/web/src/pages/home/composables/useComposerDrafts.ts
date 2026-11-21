@@ -2,7 +2,7 @@ import { computed, watch, type Ref } from 'vue'
 import { useStorage } from '@vueuse/core'
 
 // Per-tab composer drafts, persisted in localStorage so unsent text survives
-// reloads. The draft key is bot + dockview tab id — NOT the session id — so a
+// reloads. The draft key is bot + workbench tab id — NOT the session id — so a
 // draft→real session promotion keeps the same draft slot (the tab id is the
 // stable identity across that transition).
 

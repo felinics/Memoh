@@ -1,0 +1,480 @@
+/* Memoh Workbench Chrome & Split Layout
+ * Two-plane surface & optical alignment contract:
+ * - Header strip (2.5rem = 40px) has a 1px bottom hairline at y = 39..40, making the usable chrome
+ *   band y = 0..39 (optical centerline y = 19.5px).
+ * - Active crown starts at --wb-inset-top (5px) with 8px top & outward bottom fillets (--wb-tab-radius).
+ * - Hover pill spans y = 6..33 (top: 6px, bottom: 7px -> 6px clear above the y = 39..40 hairline,
+ *   centered at y = 19.5px) and 6px horizontal inset (--wb-hover-inset-x) so adjacent active 8px fillets
+ *   nest concentrically with a uniform ~6px negative-space channel all around the bend.
+ * - Scroller carries --wb-edge-pad (fillet - stroke = 7px) so outer active fillets never clip;
+ *   :first-child hover pill compensates by (hover-inset-x - edge-pad) so outer corner insets stay 6/6/6px.
+ * - Close 20x20 circle sits 3.5px inside the 27px-tall hover pill (--wb-tab-close-edge = 9.5px), making
+ *   the circle concentrically nested (3.5/3.5/3.5px) AND placing the Lucide X ink 14.2px from the active
+ *   wall to mirror the 14px left label padding (--wb-pad-inline).
+ */
+
+.workbench-root {
+  --wb-header-height: 2.5rem;
+  --wb-stroke-width: var(--workspace-tab-strip-width, var(--workspace-tab-stroke-width, 1px));
+  --wb-inset-top: 0.21875rem;
+  --wb-hover-inset-x: 0.25rem;
+  --wb-hover-top: 0.3125rem;
+  --wb-hover-bottom: 0.34375rem;
+  --wb-tab-radius: var(--radius-md);
+  --wb-tab-fillet: var(--radius-sm);
+  --wb-tab-hover-radius: var(--radius-sm);
+  --wb-edge-pad: calc(var(--wb-tab-fillet) - var(--wb-stroke-width));
+  --wb-tab-rest-width: 10.9375rem;
+  --wb-tab-min-width: 6rem;
+  --wb-tab-pinned-width: 5.75rem;
+  --wb-text-gutter: 0.5rem;
+  --wb-pad-inline: calc(var(--wb-hover-inset-x) + var(--wb-text-gutter));
+  --wb-tab-close-btn: 1.25rem;
+  --wb-tab-close-glyph: 0.875rem;
+  --wb-tab-close-edge: calc(
+    var(--wb-hover-inset-x) + (var(--wb-header-height) - var(--wb-hover-top) - var(--wb-hover-bottom) - var(--wb-tab-close-btn)) / 2
+  );
+  --wb-close-clear: calc(var(--wb-tab-close-edge) + var(--wb-tab-close-btn) + 0.375rem - var(--wb-pad-inline));
+  --wb-stroke: var(--workspace-tab-strip-color);
+  --wb-tab-outline: var(--workspace-tab-outline-color);
+  --wb-drop-line: color-mix(in oklab, var(--brand) 60%, var(--surface-chrome));
+  --wb-drop-scrim: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.dark .workbench-root {
+  /* Pre-composite translucent border over --surface-chrome so overlapping strokes never brighten. */
+  --wb-stroke: color-mix(in oklab, var(--foreground) 9%, var(--surface-chrome));
+  --wb-tab-outline: var(--wb-stroke);
+}
+
+.workbench-header {
+  height: var(--wb-header-height);
+  background: var(--surface-chrome);
+  box-shadow: inset 0 calc(-1 * var(--wb-stroke-width)) 0 0 var(--wb-stroke);
+  user-select: none;
+}
+
+.workbench-tab-scroller {
+  padding-inline: var(--wb-edge-pad);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.workbench-tab-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.workbench-tab-scroller[data-fade-left="true"]:not([data-fade-right="true"]) {
+  mask-image: linear-gradient(to right, transparent, #000 1.25rem);
+}
+
+.workbench-tab-scroller[data-fade-right="true"]:not([data-fade-left="true"]) {
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
+}
+
+.workbench-tab-scroller[data-fade-left="true"][data-fade-right="true"] {
+  mask-image: linear-gradient(to right, transparent, #000 1.25rem, #000 calc(100% - 1.25rem), transparent);
+}
+
+.workbench-tab-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  transition: padding-right 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workbench-tab-scroller[data-width-locked="true"] .workbench-tab-track {
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
+/* Regular unpinned tab sizing + Chrome consecutive-close width lock */
+.workbench-tab {
+  --wb-curr-max-w: var(--wb-tab-rest-width);
+  position: relative;
+  height: 100%;
+  flex: 0 1 var(--wb-curr-max-w);
+  width: var(--wb-curr-max-w);
+  min-width: min(var(--wb-tab-min-width), var(--wb-curr-max-w));
+  max-width: var(--wb-curr-max-w);
+  cursor: default;
+  transition:
+    flex-basis 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-width 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    max-width 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease-out;
+}
+
+.workbench-tab-scroller[data-width-locked="true"] .workbench-tab:not(.workbench-tab-pinned) {
+  --wb-curr-max-w: var(--tab-lock-w);
+  flex: 0 0 var(--tab-lock-w);
+  min-width: var(--tab-lock-w);
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease-out;
+}
+
+/* Content hit box:
+ * Matches the hover pill's vertical bounds (5px top, 5.5px bottom) so label and
+ * 20x20 close button share the exact vertical center of the pill.
+ */
+.workbench-tab-hit {
+  padding-top: var(--wb-hover-top);
+  padding-bottom: var(--wb-hover-bottom);
+  padding-left: var(--wb-pad-inline);
+  padding-right: var(--wb-pad-inline);
+}
+
+.workbench-tab-hit:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  border-radius: var(--wb-tab-hover-radius);
+}
+
+.workbench-header:not(:has([data-workbench-prefix-nav], [data-workbench-pinned-zone])) .workbench-tab:first-child:not(.workbench-tab-pinned) .workbench-tab-hit {
+  padding-left: 0.625rem;
+}
+
+.workbench-tab.workbench-tab-pinned {
+  flex: 0 0 var(--wb-tab-pinned-width);
+  min-width: var(--wb-tab-pinned-width);
+  max-width: var(--wb-tab-pinned-width);
+}
+
+.workbench-tab[data-group-active="true"] {
+  /* ui-allow-z: local tab paint order above inactive sibling tabs and strip bottom hairline */
+  z-index: 2;
+}
+
+.workbench-tab[data-dragging-rail="true"] {
+  /* ui-allow-z: dragged tab glides directly over active and sibling tabs along its own strip */
+  z-index: 4;
+  transform: translate3d(var(--wb-drag-x, 0px), 0, 0);
+  transition: none;
+  will-change: transform;
+}
+
+.workbench-tab[data-dragging-detached="true"] {
+  opacity: 0.4;
+}
+
+/* Inactive tab floating hover pill:
+ * Uniform 4-corner rounded chip inset by --wb-hover-inset-x (4px) horizontally and 5px/4.5px
+ * vertically, forming a uniform concentric negative-space channel around adjacent active fillets.
+ * On :first-child, scroller --wb-edge-pad (5px) already provides the outer left moat, so both
+ * the hover pill and active crown start at left: 0 (5px from split divider, matching top: 5px).
+ */
+.workbench-tab:not([data-group-active="true"])::before {
+  content: "";
+  position: absolute;
+  top: var(--wb-hover-top);
+  right: var(--wb-hover-inset-x);
+  bottom: var(--wb-hover-bottom);
+  left: var(--wb-hover-inset-x);
+  border-radius: var(--wb-tab-hover-radius);
+  background: transparent;
+  pointer-events: none;
+}
+
+.workbench-header:not(:has([data-workbench-prefix-nav], [data-workbench-pinned-zone])) .workbench-tab:first-child:not(.workbench-tab-pinned):not([data-group-active="true"])::before {
+  left: 0.03125rem;
+}
+
+.workbench-tab:not([data-group-active="true"])[data-hover-locked="true"]::before {
+  background: var(--surface-chrome-hover);
+}
+
+@media (hover: hover) {
+  .workbench-tab:not([data-group-active="true"]):hover::before {
+    background: var(--surface-chrome-hover);
+  }
+}
+
+/* Inter-tab short vertical seam divider on the y = 20px optical centerline. */
+.workbench-tab::after {
+  content: "";
+  position: absolute;
+  left: calc(-0.5 * var(--wb-stroke-width));
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--wb-stroke-width);
+  height: var(--wb-tab-close-glyph);
+  background: var(--wb-stroke);
+  pointer-events: none;
+}
+
+.workbench-tab:first-child::after,
+.workbench-tab.wb-tab-leave-active::after,
+.workbench-tab.wb-tab-leave-active:first-child + .workbench-tab::after,
+.workbench-tab[data-group-active="true"]::after,
+.workbench-tab[data-group-active="true"] + .workbench-tab::after,
+.workbench-tab[data-group-active="true"] + .workbench-tab.wb-tab-leave-active + .workbench-tab::after {
+  background: transparent;
+}
+
+/* Action-bar ("+") lead seam: pulls back by --wb-edge-pad so left:0 lands on the exact right edge
+ * of the last tab (matching inter-tab ::after seams).
+ */
+.workbench-add-actions {
+  position: relative;
+  margin-left: calc(-1 * var(--wb-edge-pad));
+  padding-left: 0.4375rem;
+  padding-right: 0.375rem;
+}
+
+.workbench-add-actions::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--wb-stroke-width);
+  height: var(--wb-tab-close-glyph);
+  background: var(--wb-stroke);
+  pointer-events: none;
+}
+
+.workbench-header[data-last-tab-active="true"] .workbench-add-actions::before {
+  background: transparent;
+}
+
+/* Pure CSS two-plane connected active tab */
+.workbench-tab-crown {
+  position: absolute;
+  top: var(--wb-inset-top);
+  right: 0;
+  bottom: calc(var(--wb-tab-fillet) - var(--wb-stroke-width));
+  left: 0;
+  border-radius: var(--wb-tab-radius) var(--wb-tab-radius) 0 0;
+  background: var(--surface-editor);
+  border-top: var(--wb-stroke-width) solid var(--wb-tab-outline);
+  border-left: var(--wb-stroke-width) solid var(--wb-tab-outline);
+  border-right: var(--wb-stroke-width) solid var(--wb-tab-outline);
+  pointer-events: none;
+}
+
+.workbench-tab-foot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: calc(var(--wb-tab-fillet) - var(--wb-stroke-width));
+  background: var(--surface-editor);
+  pointer-events: none;
+}
+
+.workbench-tab-foot::before,
+.workbench-tab-foot::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: var(--wb-tab-fillet);
+  height: var(--wb-tab-fillet);
+  border-bottom: var(--wb-stroke-width) solid var(--wb-tab-outline);
+  clip-path: inset(0);
+  pointer-events: none;
+}
+
+.workbench-tab-foot::before {
+  left: calc(-1 * var(--wb-tab-fillet) + var(--wb-stroke-width));
+  border-right: var(--wb-stroke-width) solid var(--wb-tab-outline);
+  border-bottom-right-radius: var(--wb-tab-fillet);
+  box-shadow: var(--wb-tab-fillet) var(--wb-tab-fillet) 0 var(--wb-tab-fillet) var(--surface-editor);
+}
+
+.workbench-tab-foot::after {
+  right: calc(-1 * var(--wb-tab-fillet) + var(--wb-stroke-width));
+  border-left: var(--wb-stroke-width) solid var(--wb-tab-outline);
+  border-bottom-left-radius: var(--wb-tab-fillet);
+  box-shadow: calc(-1 * var(--wb-tab-fillet)) var(--wb-tab-fillet) 0 var(--wb-tab-fillet) var(--surface-editor);
+}
+
+/* Native alpha-masked title + concentric 20x20 close circle (equal top/bottom/right pill inset, 6px left fade moat) */
+.workbench-tab-title {
+  mask-image: linear-gradient(to right, #000 calc(100% - 0.5rem), transparent);
+}
+
+.workbench-tab[data-group-active="true"] .workbench-tab-title,
+.workbench-tab[data-tab-dirty="true"] .workbench-tab-title,
+.workbench-tab[data-hover-locked="true"] .workbench-tab-title,
+.workbench-tab:focus-within .workbench-tab-title {
+  mask-image: linear-gradient(
+    to right,
+    #000 max(0px, calc(100% - var(--wb-close-clear) - 0.875rem)),
+    transparent max(0px, calc(100% - var(--wb-close-clear)))
+  );
+}
+
+.workbench-tab-action {
+  top: var(--wb-hover-top);
+  bottom: var(--wb-hover-bottom);
+  right: var(--wb-tab-close-edge);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.workbench-tab-action.is-dot,
+.workbench-tab[data-group-active="true"]:not([data-tab-dirty="true"]) .workbench-tab-action:not(.is-dot),
+.workbench-tab[data-hover-locked="true"] .workbench-tab-action:not(.is-dot) {
+  opacity: 1;
+}
+
+.workbench-tab[data-group-active="true"] .workbench-tab-action:not(.is-dot),
+.workbench-tab[data-hover-locked="true"] .workbench-tab-action:not(.is-dot) {
+  pointer-events: auto;
+}
+
+.workbench-tab[data-hover-locked="true"] .workbench-tab-action.is-dot {
+  opacity: 0;
+}
+
+.workbench-tab[data-close-hover-locked="true"] [data-workbench-tab-close] {
+  color: var(--foreground);
+}
+
+.workbench-tab[data-close-hover-locked="true"] [data-workbench-tab-close]::before {
+  background-color: var(--btn-ghost-hover);
+}
+
+@media (hover: hover) {
+  .workbench-tab:hover .workbench-tab-title {
+    mask-image: linear-gradient(
+      to right,
+      #000 max(0px, calc(100% - var(--wb-close-clear) - 0.875rem)),
+      transparent max(0px, calc(100% - var(--wb-close-clear)))
+    );
+  }
+  .workbench-tab:hover .workbench-tab-action:not(.is-dot) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .workbench-tab:hover .workbench-tab-action.is-dot {
+    opacity: 0;
+  }
+}
+
+.workbench-tab:focus-within .workbench-tab-action:not(.is-dot) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.workbench-tab:focus-within .workbench-tab-action.is-dot {
+  opacity: 0;
+}
+
+/* Flow-coupled tab enter / leave / reorder transitions */
+.wb-tab-move {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Suppress Vue TransitionGroup FLIP while rail-drag drives sibling glides via WAAPI. */
+.workbench-tab.wb-tab-move-disabled {
+  transition: none;
+}
+
+.wb-tab-enter-from {
+  flex-basis: 0px !important;
+  width: 0px !important;
+  min-width: 0px !important;
+  max-width: 0px !important;
+  opacity: 0;
+}
+
+.wb-tab-enter-active {
+  transition:
+    flex-basis 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-width 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    max-width 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 130ms ease-out !important;
+}
+
+.wb-tab-leave-active {
+  flex: 0 0 var(--leave-w, 0px) !important;
+  width: var(--leave-w, 0px) !important;
+  min-width: 0px !important;
+  max-width: var(--leave-w, 0px) !important;
+  pointer-events: none !important;
+  transition:
+    flex-basis 155ms cubic-bezier(0.2, 0, 0, 1),
+    width 155ms cubic-bezier(0.2, 0, 0, 1),
+    max-width 155ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 55ms linear !important;
+}
+
+.wb-tab-leave-to {
+  flex-basis: 0px !important;
+  width: 0px !important;
+  max-width: 0px !important;
+  opacity: 0 !important;
+}
+
+/* Split sash divider & interactive handle */
+.workbench-sash {
+  position: relative;
+  flex: 0 0 auto;
+  /* ui-allow-z: local split-pane boundary handle above adjacent group headers */
+  z-index: 3;
+  touch-action: none;
+  background: var(--workspace-divider-color);
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.workbench-sash[data-axis="row"] {
+  width: var(--workspace-divider-width, 1px);
+  cursor: col-resize;
+}
+
+.workbench-sash[data-axis="col"] {
+  height: var(--workspace-divider-width, 1px);
+  cursor: row-resize;
+}
+
+.workbench-sash:hover,
+.workbench-sash[data-dragging="true"] {
+  background: var(--workspace-divider-active-color);
+}
+
+.workbench-sash::before {
+  content: "";
+  position: absolute;
+}
+
+.workbench-sash[data-axis="row"]::before {
+  top: 0;
+  bottom: 0;
+  left: -0.1875rem;
+  right: -0.1875rem;
+}
+
+.workbench-sash[data-axis="col"]::before {
+  left: 0;
+  right: 0;
+  top: -0.1875rem;
+  bottom: -0.1875rem;
+}
+
+/* Drop zone preview overlay */
+.workbench-drop-preview {
+  background: var(--wb-drop-scrim);
+  border: 1px solid var(--wb-drop-line);
+  border-radius: var(--radius-md);
+  transition:
+    left 130ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 130ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 130ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 130ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-tab-track,
+  .workbench-tab,
+  .wb-tab-move,
+  .wb-tab-enter-active,
+  .wb-tab-leave-active,
+  .workbench-drop-preview,
+  .workbench-sash {
+    transition-duration: 0ms !important;
+  }
+}

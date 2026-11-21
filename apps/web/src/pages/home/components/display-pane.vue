@@ -1,8 +1,8 @@
 <template>
   <div
     ref="rootRef"
-    class=" inset-0 flex flex-col z-(--z-raised) "
-    :class="isFullScroll?'fixed':'absolute'"
+    class="inset-0 flex flex-col"
+    :class="isFullScroll ? 'fixed z-(--z-top) bg-background' : 'absolute z-(--z-raised)'"
     @click="closeStatsMenu"
   >
     <Maximize
@@ -293,7 +293,18 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   snapshot: [payload: { tabId: string; sessionId?: string; dataUrl: string }]
+  fullscreenChange: [active: boolean]
 }>()
+
+watch(isFullScroll, (active) => {
+  emit('fullscreenChange', active)
+})
+
+watch(() => props.active, (active) => {
+  if (!active && isFullScroll.value) {
+    toggle(false)
+  }
+})
 
 const documentVisibility = useDocumentVisibility()
 const viewing = computed(() => !!props.active && documentVisibility.value === 'visible')
@@ -1021,6 +1032,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (isFullScroll.value) emit('fullscreenChange', false)
   window.removeEventListener('pointerdown', cancelTextInput, true)
   window.removeEventListener('blur', releaseKeyboard)
   releaseKeyboard()

@@ -1,97 +1,43 @@
 // @vitest-environment jsdom
-import { nextTick, reactive, ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
-import { useWorkspaceTabsStore } from './workspace-tabs'
+import { DISPLAY_PANEL_ID, useWorkspaceTabsStore } from './workspace-tabs'
 import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 import { registerWorkbenchCommands } from '@/pages/home/commands/workbench-commands'
-import { canDispatchKeyboardCommand } from '@/lib/keyboard-context'
-import { handleBrowserKeyboardShortcut } from '@/lib/browser-keyboard-shortcuts'
-import { selectWebBindings } from '@/lib/keyboard-bindings'
-import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
+import { createEmptyWorkbenchState, findGroupOfTab, findRightNeighborOfSpatialFirst, insertTab, listGroups, splitGroupWithTab } from '@/workbench/tree'
+import { activeWorkbenchDrag, startWorkbenchTabPointerGesture } from '@/workbench/drag'
+import i18n, { prepareLocale } from '@/i18n'
 
-vi.hoisted(() => {
+const terminalCacheMocks = vi.hoisted(() => {
   class MemoryStorage implements Storage {
     private readonly values = new Map<string, string>()
-
-    get length() {
-      return this.values.size
-    }
-
-    clear() {
-      this.values.clear()
-    }
-
-    getItem(key: string) {
-      return this.values.get(key) ?? null
-    }
-
-    key(index: number) {
-      return Array.from(this.values.keys())[index] ?? null
-    }
-
-    removeItem(key: string) {
-      this.values.delete(key)
-    }
-
-    setItem(key: string, value: string) {
-      this.values.set(key, String(value))
-    }
+    get length() { return this.values.size }
+    clear() { this.values.clear() }
+    getItem(key: string) { return this.values.get(key) ?? null }
+    key(index: number) { return Array.from(this.values.keys())[index] ?? null }
+    removeItem(key: string) { this.values.delete(key) }
+    setItem(key: string, value: string) { this.values.set(key, String(value)) }
   }
-
-  const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
-  const storage = new MemoryStorage()
-  // Keep real i18n active so terminal-title assertions catch missing or
-  // misspelled keys, while making the expected English fallback deterministic.
-  storage.setItem('language', 'en')
-  // Layout/selection now live in sessionStorage (per-Tab), so the store's
-  // restore path reads it, not localStorage. A separate instance mirrors the
-  // real browser split (two distinct areas under the same key names).
+  const local = new MemoryStorage()
   const session = new MemoryStorage()
-  Object.defineProperty(globalThis, 'localStorage', {
-    value: storage,
-    configurable: true,
-    writable: true,
-  })
-  Object.defineProperty(globalThis, 'sessionStorage', {
-    value: session,
-    configurable: true,
-    writable: true,
-  })
-  Object.defineProperty(globalThis, 'window', {
-    value: {
-      localStorage: storage,
-      sessionStorage: session,
-      addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
-        const set = listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>()
-        set.add(listener)
-        listeners.set(type, set)
-      },
-      removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
-        listeners.get(type)?.delete(listener)
-      },
-      dispatchEvent: (event: Event) => {
-        for (const listener of listeners.get(event.type) ?? []) {
-          if (typeof listener === 'function') {
-            listener.call(globalThis.window, event)
-          } else {
-            listener.handleEvent(event)
-          }
-        }
-        return true
-      },
-    },
-    configurable: true,
-    writable: true,
-  })
+  Object.defineProperty(globalThis, 'localStorage', { value: local, configurable: true, writable: true })
+  Object.defineProperty(globalThis, 'sessionStorage', { value: session, configurable: true, writable: true })
+  if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'localStorage', { value: local, configurable: true, writable: true })
+    Object.defineProperty(window, 'sessionStorage', { value: session, configurable: true, writable: true })
+  }
+  return {
+    clearTerminalSnapshots: vi.fn(),
+    clearTerminalSnapshotsForBot: vi.fn(),
+    deleteTerminalSnapshot: vi.fn(),
+    terminalCacheKey: (botId: string, panelId: string) => `${botId}::${panelId}`,
+  }
 })
 
-// Controllable matchMedia for the mobile breakpoint (useIsMobile). The window
-// mock above deliberately omits browser APIs until a test needs them; the
-// store reads the query once at setup and subscribes to 'change', so tests
-// drive both through setMobile. reset() runs between tests: a leaked
-// mobile=true would flip every store created afterwards.
+vi.mock('@/composables/useTerminalCache', () => terminalCacheMocks)
+
 const mobileBreakpoint = vi.hoisted(() => {
   const listeners = new Set<(event: { matches: boolean }) => void>()
   const state = { mobile: false }
@@ -128,11 +74,15 @@ const chatStoreMock = vi.hoisted(() => ({
   sessionId: null as string | null,
   hasExplicitSessionSelection: false,
   loadingChats: false,
+  tentativeIds: new Set<string>(),
   sessions: [] as Array<{ id: string, title?: string }>,
-  knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
-  createNewSession: vi.fn(async () => {}),
+  knownSessions: [] as Array<{ id: string, title?: string, type?: string, route_metadata?: Record<string, unknown> }>,
+  bots: [
+    { id: 'bot-1', current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'] },
+    { id: 'bot-without-layout', current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'] },
+    { id: 'bot-chat-only', current_user_permissions: ['chat'] },
+  ] as Array<{ id: string, current_user_permissions: string[] }>,
   deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>>,
-  pendingExternalAgentSessionInput: undefined as unknown as ReturnType<typeof ref<Record<string, unknown> | null>>,
   draftViewRequested: undefined as unknown as ReturnType<typeof ref<{
     botId: string
     viewId: string
@@ -187,2748 +137,844 @@ const chatStoreMock = vi.hoisted(() => ({
     chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
   }),
   knownSessionSummary: vi.fn((sessionId: string) =>
-    chatStoreMock.knownSessions.find(session => session.id === sessionId)
-    ?? chatStoreMock.sessions.find(session => session.id === sessionId)
+    chatStoreMock.knownSessions.find(s => s.id === sessionId)
+    ?? chatStoreMock.sessions.find(s => s.id === sessionId)
     ?? null,
   ),
+  isSessionTentative: vi.fn((sessionId: string) => chatStoreMock.tentativeIds.has(sessionId)),
 }))
 
 vi.mock('@/store/chat-list', () => ({
   useChatStore: () => ({
-    get sessionId() {
-      return chatStoreMock.sessionId
-    },
-    get hasExplicitSessionSelection() {
-      return chatStoreMock.hasExplicitSessionSelection
-    },
+    get sessionId() { return chatStoreMock.sessionId },
+    get hasExplicitSessionSelection() { return chatStoreMock.hasExplicitSessionSelection },
+    get loadingChats() { return chatStoreMock.loadingChats },
     sessions: chatStoreMock.sessions,
     knownSessions: chatStoreMock.knownSessions,
-    get loadingChats() {
-      return chatStoreMock.loadingChats
-    },
-    activeSession: null,
-    get userSentInSession() {
-      return chatStoreMock.userSentInSession.value
-    },
-    get draftPromoted() {
-      return chatStoreMock.draftPromoted.value
-    },
-    get pendingExternalAgentSessionInput() {
-      return chatStoreMock.pendingExternalAgentSessionInput.value
-    },
-    get draftViewRequested() {
-      return chatStoreMock.draftViewRequested.value
-    },
-    get forkedSessionRequested() {
-      return chatStoreMock.forkedSessionRequested.value
-    },
-    get deletedSession() {
-      return chatStoreMock.deletedSession.value
-    },
-    bots: [
-      {
-        id: 'bot-1',
-        current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'],
-      },
-      {
-        id: 'bot-without-layout',
-        current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'],
-      },
-      {
-        id: 'bot-chat-only',
-        current_user_permissions: ['chat'],
-      },
-    ],
-    isSessionStreaming: vi.fn(() => false),
-    isSessionTentative: vi.fn(() => false),
-    knownSessionSummary: chatStoreMock.knownSessionSummary,
-    createNewSession: chatStoreMock.createNewSession,
+    get bots() { return chatStoreMock.bots },
+    get userSentInSession() { return chatStoreMock.userSentInSession.value },
+    get draftPromoted() { return chatStoreMock.draftPromoted.value },
+    get draftViewRequested() { return chatStoreMock.draftViewRequested.value },
+    get forkedSessionRequested() { return chatStoreMock.forkedSessionRequested.value },
+    get deletedSession() { return chatStoreMock.deletedSession.value },
+    applyDraftViewRequest: chatStoreMock.applyDraftViewRequest,
     focusChatView: chatStoreMock.focusChatView,
     selectSession: chatStoreMock.selectSession,
     selectDraft: chatStoreMock.selectDraft,
     resetToEmptyComposer: chatStoreMock.resetToEmptyComposer,
-    applyDraftViewRequest: chatStoreMock.applyDraftViewRequest,
+    knownSessionSummary: chatStoreMock.knownSessionSummary,
+    isSessionTentative: chatStoreMock.isSessionTentative,
   }),
 }))
 
-interface FakePanel {
-  id: string
-  component: string
-  params: Record<string, unknown>
-  title: string
-  renderer?: string
-  group?: FakeGroup
-  api: {
-    setActive: () => void
-    close: () => void
-    setTitle: (title: string) => void
-    updateParameters: (params: Record<string, unknown>) => void
-    moveTo: (options: { group?: FakeGroup; position?: 'top' | 'bottom' | 'left' | 'right' | 'center' }) => void
-    readonly title: string
-  }
-}
-
-interface FakeGroup {
-  id: string
-  element: HTMLElement
-  // Mirrors DockviewGroupPanel.model: the store toggles header.hidden at
-  // runtime for the mobile single stack (runtime-only, never persisted).
-  model: { header: { hidden: boolean } }
-  api: {
-    getHeaderPosition: () => 'top' | 'bottom'
-    setHeaderPosition: ReturnType<typeof vi.fn>
-    setActivePanel: (panel: FakePanel) => void
-    setActive: () => void
-    setSize: ReturnType<typeof vi.fn>
-    moveTo: (options: { group?: FakeGroup, position?: 'top' | 'bottom' | 'left' | 'right' | 'center' }) => void
-  }
-  readonly panels: FakePanel[]
-  readonly activePanel: FakePanel | null
-}
-
-function createFakeDock() {
-  const panels: FakePanel[] = []
-  const groups: FakeGroup[] = []
-  const groupActivePanels = new Map<string, FakePanel | null>()
-  const groupPositions = new Map<string, { referenceGroup: string; direction: string }>()
-  const removeListeners: Array<(panel: FakePanel) => void> = []
-  // Drop-veto probes: the store subscribes veto handlers in registerApi; tests
-  // fire synthetic events through dock.emitWillShowOverlay / emitWillDrop.
-  interface FakeDropEvent {
-    position: string
-    group: FakeGroup
-    getData: () => { panelId?: string | null } | undefined
-    preventDefault: ReturnType<typeof vi.fn>
-  }
-  const willShowOverlayListeners: Array<(event: FakeDropEvent) => void> = []
-  const willDropListeners: Array<(event: FakeDropEvent) => void> = []
-  const collectDropListener = <T>(bucket: T[]) => (listener: T) => {
-    bucket.push(listener)
-    return {
-      dispose: () => {
-        const idx = bucket.indexOf(listener)
-        if (idx >= 0) bucket.splice(idx, 1)
-      },
-    }
-  }
-  // Mirror dockview v7's real onDidActivePanelChange payload: `{ panel, origin }`.
-  // The old fake used `{ activePanel }` (the v6 shape); that masked the v6→v7
-  // rename bug because the store read the same wrong field the fake emitted.
-  const activePanelListeners: Array<(event: { panel: FakePanel | undefined }) => void> = []
-  const layoutListeners: Array<() => void> = []
-  const closeVetoPanelIds = new Set<string>()
-  let activePanel: FakePanel | null = null
-  let nextGroupNumber = 1
-  const setActivePanel = (panel: FakePanel | null) => {
-    if (panel?.group) groupActivePanels.set(panel.group.id, panel)
-    if (activePanel === panel) return
-    activePanel = panel
-    activePanelListeners.forEach(listener => listener({ panel: panel ?? undefined }))
-  }
-  const noopDisposable = () => ({ dispose: () => {} })
-  const layoutDisposable = (listener: () => void) => {
-    layoutListeners.push(listener)
-    return {
-      dispose: () => {
-        const idx = layoutListeners.indexOf(listener)
-        if (idx >= 0) layoutListeners.splice(idx, 1)
-      },
-    }
-  }
-  const emitLayoutChange = () => {
-    queueMicrotask(() => {
-      layoutListeners.forEach(listener => listener())
-    })
-  }
-  const activePanelDisposable = (listener: (event: { panel: FakePanel | undefined }) => void) => {
-    activePanelListeners.push(listener)
-    return {
-      dispose: () => {
-        const idx = activePanelListeners.indexOf(listener)
-        if (idx >= 0) activePanelListeners.splice(idx, 1)
-      },
-    }
-  }
-  const removeDisposable = (listener: (panel: FakePanel) => void) => {
-    removeListeners.push(listener)
-    return {
-      dispose: () => {
-        const idx = removeListeners.indexOf(listener)
-        if (idx >= 0) removeListeners.splice(idx, 1)
-      },
-    }
-  }
-  const createGroup = (id = `group-${++nextGroupNumber}`): FakeGroup => {
-    const groupElement = {
-      classList: {
-        toggle: vi.fn(),
-      },
-    } as unknown as HTMLElement
-    const group: FakeGroup = {
-      id,
-      element: groupElement,
-      model: { header: { hidden: false } },
-      api: {
-        getHeaderPosition: () => 'top' as const,
-        setHeaderPosition: vi.fn(),
-        setActivePanel: (panel: FakePanel) => setActivePanel(panel),
-        setActive: () => setActivePanel(group.activePanel),
-        setSize: vi.fn(),
-        // A 'center' group move merges every panel into the target as tabs and
-        // dissolves the emptied source — the semantics the mobile breakpoint
-        // watcher relies on to collapse a multi-group desktop arrangement.
-        moveTo: (options: { group?: FakeGroup, position?: 'top' | 'bottom' | 'left' | 'right' | 'center' }) => {
-          const target = options.group ?? primaryGroup
-          for (const panel of panels.filter(p => p.group === group)) {
-            panel.group = target
-            groupActivePanels.set(target.id, panel)
-          }
-          if (group !== primaryGroup && group.panels.length === 0) {
-            const groupIndex = groups.indexOf(group)
-            if (groupIndex >= 0) groups.splice(groupIndex, 1)
-            groupActivePanels.delete(group.id)
-            groupPositions.delete(group.id)
-          }
-          emitLayoutChange()
-        },
-      },
-      get panels() {
-        return panels.filter(panel => panel.group === group)
-      },
-      get activePanel() {
-        return groupActivePanels.get(group.id) ?? group.panels[0] ?? null
-      },
-    }
-    groups.push(group)
-    return group
-  }
-  const primaryGroup = createGroup('group-1')
-
-  const dock = {
-    panels,
-    groups,
-    get activePanel() {
-      return activePanel
-    },
-    get activeGroup() {
-      return activePanel?.group ?? primaryGroup
-    },
-    onDidActivePanelChange: activePanelDisposable,
-    onDidLayoutChange: layoutDisposable,
-    onDidRemovePanel: removeDisposable,
-    onDidAddPanel: noopDisposable,
-    onDidMovePanel: noopDisposable,
-    onWillShowOverlay: collectDropListener(willShowOverlayListeners),
-    onWillDrop: collectDropListener(willDropListeners),
-    onWillDragPanel: noopDisposable,
-    onWillDragGroup: noopDisposable,
-    getGroup(id: string) {
-      return groups.find(group => group.id === id)
-    },
-    getPanel(id: string) {
-      return panels.find((p) => p.id === id)
-    },
-    adjacentGroupInDirection(group: FakeGroup, direction: 'left' | 'right' | 'above' | 'below') {
-      return groups.find((candidate) => {
-        const position = groupPositions.get(candidate.id)
-        return position?.referenceGroup === group.id && position.direction === direction
-      })
-    },
-    addPanel(options: {
-      id: string
-      component: string
-      title?: string
-      params?: Record<string, unknown>
-      renderer?: string
-      inactive?: boolean
-      position?: { referenceGroup: string; direction: string }
-    }) {
-      const referenceGroup = options.position
-        ? groups.find(group => group.id === options.position?.referenceGroup)
-        : undefined
-      const targetGroup = options.position?.direction === 'within'
-        ? referenceGroup ?? activePanel?.group ?? primaryGroup
-        : options.position
-          ? createGroup()
-          : activePanel?.group ?? primaryGroup
-      if (options.position && options.position.direction !== 'within') {
-        groupPositions.set(targetGroup.id, options.position)
-      }
-      const panel: FakePanel = {
-        id: options.id,
-        component: options.component,
-        params: { ...(options.params ?? {}) },
-        title: options.title ?? '',
-        renderer: options.renderer,
-        api: {
-          setActive: () => setActivePanel(panel),
-          close: () => {
-            if (closeVetoPanelIds.has(panel.id)) return
-            const ownerGroup = panel.group
-            const idx = panels.indexOf(panel)
-            if (idx >= 0) panels.splice(idx, 1)
-            const replacement = ownerGroup?.panels[0] ?? null
-            if (ownerGroup && groupActivePanels.get(ownerGroup.id) === panel) {
-              groupActivePanels.set(ownerGroup.id, replacement)
-            }
-            if (ownerGroup && ownerGroup !== primaryGroup && ownerGroup.panels.length === 0) {
-              const groupIndex = groups.indexOf(ownerGroup)
-              if (groupIndex >= 0) groups.splice(groupIndex, 1)
-              groupActivePanels.delete(ownerGroup.id)
-            }
-            removeListeners.forEach(listener => listener(panel))
-            if (activePanel === panel) setActivePanel(replacement ?? panels[0] ?? null)
-            emitLayoutChange()
-          },
-          setTitle: (title: string) => {
-            panel.title = title
-          },
-          updateParameters: (params: Record<string, unknown>) => {
-            Object.assign(panel.params, params)
-          },
-          moveTo: (options: { group?: FakeGroup; position?: 'top' | 'bottom' | 'left' | 'right' | 'center' }) => {
-            const sourceGroup = panel.group
-            const targetGroup = options.position === 'center'
-              ? options.group ?? sourceGroup
-              : createGroup()
-            if (!targetGroup) return
-            if (options.position && options.position !== 'center' && options.group) {
-              groupPositions.set(targetGroup.id, {
-                referenceGroup: options.group.id,
-                direction: options.position,
-              })
-            }
-            panel.group = targetGroup
-            groupActivePanels.set(targetGroup.id, panel)
-            if (sourceGroup && sourceGroup !== primaryGroup && sourceGroup.panels.length === 0) {
-              const groupIndex = groups.indexOf(sourceGroup)
-              if (groupIndex >= 0) groups.splice(groupIndex, 1)
-              groupActivePanels.delete(sourceGroup.id)
-              groupPositions.delete(sourceGroup.id)
-            }
-            setActivePanel(panel)
-            emitLayoutChange()
-          },
-          get title() {
-            return panel.title
-          },
-        },
-      }
-      panel.group = targetGroup
-      panels.push(panel)
-      if (!options.inactive) setActivePanel(panel)
-      emitLayoutChange()
-      return panel
-    },
-    clear() {
-      panels.splice(0, panels.length)
-      groups.splice(1, groups.length - 1)
-      groupActivePanels.clear()
-      groupPositions.clear()
-      setActivePanel(null)
-      emitLayoutChange()
-    },
-    vetoCloseUntilAllowed(id: string) {
-      closeVetoPanelIds.add(id)
-    },
-    allowClose(id: string) {
-      closeVetoPanelIds.delete(id)
-    },
-    emitWillShowOverlay(event: FakeDropEvent) {
-      willShowOverlayListeners.forEach(listener => listener(event))
-    },
-    emitWillDrop(event: FakeDropEvent) {
-      willDropListeners.forEach(listener => listener(event))
-    },
-    activePanelListenerCount() {
-      return activePanelListeners.length
-    },
-    toJSON() {
-      return {
-        grid: { root: { type: 'leaf', data: {} } },
-        panels: Object.fromEntries(panels.map(panel => [
-          panel.id,
-          {
-            id: panel.id,
-            contentComponent: panel.component,
-            title: panel.title,
-            params: { ...panel.params },
-          },
-        ])),
-      }
-    },
-    fromJSON(data?: {
-      grid?: {
-        root?: {
-          type: 'leaf' | 'branch'
-          data: unknown
-        }
-      }
-      panels?: Record<string, {
-        id?: string
-        contentComponent?: string
-        title?: string
-        params?: Record<string, unknown>
-      }>
-      activeGroup?: string
-    }) {
-      dock.clear()
-      type SerializedNode = {
-        type: 'leaf' | 'branch'
-        data: SerializedNode[] | { id?: string; views?: string[]; activeView?: string }
-      }
-      const leaves: Array<{ id?: string; views?: string[]; activeView?: string }> = []
-      const visit = (node?: SerializedNode) => {
-        if (!node) return
-        if (node.type === 'branch') {
-          for (const child of node.data as SerializedNode[]) visit(child)
-          return
-        }
-        leaves.push(node.data as { id?: string; views?: string[]; activeView?: string })
-      }
-      visit(data?.grid?.root as SerializedNode | undefined)
-
-      if (leaves.length === 0) {
-        leaves.push({ id: primaryGroup.id, views: Object.keys(data?.panels ?? {}) })
-      }
-      const serializedGroups = new Map<string, FakeGroup>()
-      leaves.forEach((leaf, index) => {
-        const group = index === 0 ? primaryGroup : createGroup()
-        if (leaf.id) serializedGroups.set(leaf.id, group)
-        for (const id of leaf.views ?? []) {
-          const panel = data?.panels?.[id]
-          if (!panel) continue
-          dock.addPanel({
-            id: panel.id ?? id,
-            component: panel.contentComponent ?? 'unknown',
-            title: panel.title,
-            params: panel.params,
-            inactive: true,
-            position: { referenceGroup: group.id, direction: 'within' },
-          })
-        }
-        const active = group.panels.find(panel => panel.id === leaf.activeView) ?? group.panels[0] ?? null
-        groupActivePanels.set(group.id, active)
-      })
-      const activeGroup = data?.activeGroup ? serializedGroups.get(data.activeGroup) : primaryGroup
-      setActivePanel(activeGroup?.activePanel ?? panels[0] ?? null)
-      for (const [id, panel] of Object.entries(data?.panels ?? {})) {
-        if (dock.getPanel(id)) continue
-        dock.addPanel({
-          id: panel.id ?? id,
-          component: panel.contentComponent ?? 'unknown',
-          title: panel.title,
-          params: panel.params,
-        })
-      }
-    },
-  }
-  return dock
-}
-
-async function flushDraftChatFallback() {
+async function flushTicks() {
   await nextTick()
-  await new Promise(resolve => setTimeout(resolve, 0))
+  await Promise.resolve()
+  await nextTick()
 }
 
-function persistedLayoutWithPanel(
-  id: string,
-  component: string,
-  params: Record<string, unknown>,
-  title = 'New Session',
-) {
-  return {
-    panels: {
-      [id]: {
-        id,
-        contentComponent: component,
-        title,
-        params,
-      },
-    },
-  }
-}
-
-describe('workspace layout store', () => {
-  afterEach(() => {
-    useWorkspaceTabsStore().releaseApi()
-  })
-
-  beforeEach(() => {
+describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
+  beforeEach(async () => {
+    await Promise.all([prepareLocale('en'), prepareLocale('zh'), prepareLocale('ja')])
+    i18n.global.locale.value = 'en'
     localStorage.clear()
-    window.localStorage.clear()
     sessionStorage.clear()
-    window.sessionStorage.clear()
-    chatStoreMock.createNewSession.mockClear()
-    chatStoreMock.focusChatView.mockClear()
-    chatStoreMock.selectSession.mockClear()
-    chatStoreMock.selectDraft.mockClear()
-    chatStoreMock.resetToEmptyComposer.mockClear()
-    chatStoreMock.applyDraftViewRequest.mockClear()
+    mobileBreakpoint.reset()
+    vi.clearAllMocks()
+
     chatStoreMock.sessionId = null
     chatStoreMock.hasExplicitSessionSelection = false
-    // Reactive like the real store's ref: the workspace aligns its selection
-    // when initialize() finishes loading.
-    const loadingChats = ref(false)
-    Object.defineProperty(chatStoreMock, 'loadingChats', {
-      configurable: true,
-      get: () => loadingChats.value,
-      set: (value: boolean) => { loadingChats.value = value },
-    })
+    chatStoreMock.loadingChats = false
+    chatStoreMock.tentativeIds.clear()
+    chatStoreMock.sessions.splice(0)
+    chatStoreMock.knownSessions.splice(0)
+    chatStoreMock.bots = [
+      { id: 'bot-1', current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'] },
+      { id: 'bot-without-layout', current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'] },
+      { id: 'bot-chat-only', current_user_permissions: ['chat'] },
+    ]
     chatStoreMock.deletedSession = ref(null)
-    chatStoreMock.pendingExternalAgentSessionInput = ref(null)
     chatStoreMock.draftViewRequested = ref(null)
     chatStoreMock.forkedSessionRequested = ref(null)
     chatStoreMock.userSentInSession = ref(null)
     chatStoreMock.draftPromoted = ref(null)
-    chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
-    chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
-    chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
-      chatStoreMock.knownSessions.find(session => session.id === sessionId)
-      ?? chatStoreMock.sessions.find(session => session.id === sessionId)
-      ?? null,
-    )
+
     setActivePinia(createPinia())
     useChatSelectionStore().setBot('bot-1')
-    chatStoreMock.selectSession.mockImplementation(async (sessionId: string, options?: { explicitSelection?: boolean }) => {
-      useChatSelectionStore().setSession(sessionId, options)
-      chatStoreMock.sessionId = sessionId
-      chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection !== false
-    })
-    chatStoreMock.selectDraft.mockImplementation((options?: { explicitSelection?: boolean }) => {
-      useChatSelectionStore().setSession(null, options)
-      chatStoreMock.sessionId = null
-      chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
-    })
-    chatStoreMock.resetToEmptyComposer.mockImplementation((options?: {
-      clearPendingExternalAgent?: boolean
-      explicitSelection?: boolean
-      draftIntent?: boolean
-    }) => {
-      useChatSelectionStore().setSession(null, { explicitSelection: options?.explicitSelection === true })
-      chatStoreMock.sessionId = null
-      chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
-    })
   })
 
-  function emitDeletedSession(id: string, botId = 'bot-1', composerScope?: string) {
-    const prevSeq = chatStoreMock.deletedSession.value?.seq ?? 0
-    chatStoreMock.deletedSession.value = { id, botId, seq: prevSeq + 1, composerScope }
-  }
-
-  function emitUserSentInSession(
-    id: string,
-    viewId: string,
-    wasDraft: boolean,
-    botId = 'bot-1',
-  ) {
-    const prevSeq = chatStoreMock.userSentInSession.value?.seq ?? 0
-    chatStoreMock.userSentInSession.value = {
-      id,
-      botId,
-      viewId,
-      wasDraft,
-      seq: prevSeq + 1,
-    }
-  }
-
-  it('keeps a non-chat tab active when the session list changes during a running turn', async () => {
-    // Background session-list refreshes and initialize() re-runs must not pull
-    // the user back to the chat tab of the selected session.
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    chatStoreMock.sessions.push({ id: 's1', title: 'One' })
-    chatStoreMock.sessionId = 's1'
-    chatStoreMock.hasExplicitSessionSelection = true
-    useChatSelectionStore().setSession('s1', { explicitSelection: true })
-    store.openSessionChat({ sessionId: 's1' })
-    await nextTick()
-    expect(store.openBrowserAt('http://localhost:5173/app')).toBe(true)
-    expect(dock.activePanel?.component).toBe('browser')
-
-    chatStoreMock.sessions.push({ id: 's2', title: 'Spawned' })
-    await nextTick()
-    expect(dock.activePanel?.component).toBe('browser')
-
-    chatStoreMock.loadingChats = true
-    await nextTick()
-    chatStoreMock.loadingChats = false
-    await nextTick()
-    expect(dock.activePanel?.component).toBe('browser')
-  })
-
-  it('repoints a promoted draft tab before the send that created its session resumes', async () => {
-    // The pane matches its send against its own session param when it appends
-    // the optimistic turn; that happens right after session creation returns.
-    // The tab must already point at the new session by then, or the send's
-    // scroll pin and turn entrance are dropped.
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openDraftChat({ title: 'Draft', explicitSelection: true })
-    const draft = dock.activePanel!
-    await nextTick()
-
-    chatStoreMock.sessions.push({ id: 'created-1', title: 'New' })
-    chatStoreMock.draftPromoted.value = { botId: 'bot-1', viewId: draft.id, sessionId: 'created-1', seq: 1 }
-    await Promise.resolve()
-
-    expect(draft.params.sessionId).toBe('created-1')
-    expect(dock.activePanel).toBe(draft)
-    expect(store.ephemeralPanels[draft.id]).toBe(true)
-  })
-
-  it('keeps a non-chat tab active when a first send promotes its draft to a session', async () => {
-    // Sending from a draft and switching to a file before the server creates
-    // the session: promotion repoints only the draft tab's content.
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openDraftChat({ title: 'Draft', explicitSelection: true })
-    const draft = dock.activePanel!
-    await nextTick()
-    store.openFilePinned('/data/AGENTS.md')
-    expect(dock.activePanel?.component).toBe('file')
-
-    chatStoreMock.sessions.push({ id: 'created-1', title: 'New' })
-    emitUserSentInSession('created-1', draft.id, true)
-    await nextTick()
-    await nextTick()
-
-    expect(draft.params.sessionId).toBe('created-1')
-    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(1)
-    expect(dock.activePanel?.component).toBe('file')
-  })
-
-  it('opens browser panels and updates their address', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openBrowser()
-
-    const panel = dock.getPanel('browser:1')
-    expect(panel).toBeTruthy()
-    expect(panel?.component).toBe('browser')
-    expect(panel?.params.address).toBe('localhost:5173/')
-
-    store.updateBrowserAddress('browser:1', 'localhost:3000/app')
-    expect(panel?.params.address).toBe('localhost:3000/app')
-    expect(panel?.title).toBe('localhost:3000/app')
-  })
-
-  it('cycles tabs within the focused group, wraps, and leaves other splits unchanged', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openFilePinned('/a.txt')
-    store.openFilePinned('/b.txt')
-    const first = dock.getPanel('file:/a.txt')!
-    const second = dock.getPanel('file:/b.txt')!
-    store.openFileToSide('/right.txt')
-    const right = dock.getPanel('file:/right.txt')!
-    first.api.setActive()
-    expect(store.focusAdjacentTab(1)).toBe(true)
-    expect(store.activeId).toBe(second.id)
-    expect(store.focusAdjacentTab(-1)).toBe(true)
-    expect(store.activeId).toBe(first.id)
-    const groupIds = first.group!.panels.map(panel => panel.id)
-    store.focusAdjacentTab(-1)
-    expect(store.activeId).toBe(groupIds.at(-1))
-    store.focusAdjacentTab(1)
-    expect(store.activeId).toBe(groupIds[0])
-    expect(right.group!.activePanel?.id).toBe(right.id)
-  })
-
-  it('does not navigate without a workspace', () => {
-    expect(useWorkspaceTabsStore().focusAdjacentTab(1)).toBe(false)
-  })
-
-  it('keeps unavailable file navigation and execution commands behind existing permissions', () => {
-    useChatSelectionStore().setBot('bot-chat-only')
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.selectSidebarView('schedule')
-    const registry = createKeyboardCommandRegistry()
-    const unregister = registerWorkbenchCommands(registry, store)
-    registry.dispatch(appKeyboardCommands.showFiles)
-    expect(store.sidebarView).toBe('schedule')
-    registry.dispatch(appKeyboardCommands.newTerminal)
-    registry.dispatch(appKeyboardCommands.newBrowser)
-    expect(dock.panels.filter(panel => panel.component === 'terminal' || panel.component === 'browser')).toHaveLength(0)
-    unregister()
-  })
-
-  it('routes workbench commands through the existing sidebar, session, split and creation operations', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    const registry = createKeyboardCommandRegistry()
-    const unregister = registerWorkbenchCommands(registry, store)
-    const views = [
-      [appKeyboardCommands.showSessions, 'sessions'], [appKeyboardCommands.showFiles, 'files'],
-      [appKeyboardCommands.showSchedule, 'schedule'], [appKeyboardCommands.showSupermarket, 'supermarket'],
-    ] as const
-    for (const [command, view] of views) {
-      registry.dispatch(command)
-      expect(store.sidebarView).toBe(view)
-      expect(store.workbenchOpen).toBe(true)
-    }
-    registry.dispatch(appKeyboardCommands.newTerminal)
-    expect(dock.getPanel('terminal:1')?.component).toBe('terminal')
-    registry.dispatch(appKeyboardCommands.newBrowser)
-    expect(dock.getPanel('browser:1')?.component).toBe('browser')
-    registry.dispatch(appKeyboardCommands.newChatSession)
-    expect(dock.activePanel?.component).toBe('chat')
-    expect(dock.activePanel?.params.sessionId).toBeNull()
-    const groupCount = dock.groups.length
-    registry.dispatch(appKeyboardCommands.splitWorkspaceRight)
-    expect(dock.groups).toHaveLength(groupCount + 1)
-    registry.dispatch(appKeyboardCommands.splitWorkspaceBelow)
-    expect(dock.groups).toHaveLength(groupCount + 2)
-    unregister()
-    expect(registry.dispatch(appKeyboardCommands.newTerminal)).toBe(false)
-  })
-
-  it('retains focus intent for the selected chat until its composer mounts', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openTerminal()
-    const registry = createKeyboardCommandRegistry()
-    const unregister = registerWorkbenchCommands(registry, store)
-    registry.dispatch(appKeyboardCommands.focusChatInput)
-    await nextTick()
-    expect(store.pendingChatInputFocus?.panelId).toBe(store.activeId)
-    expect(dock.getPanel(store.pendingChatInputFocus!.panelId)?.component).toBe('chat')
-    store.openTerminal()
-    expect(store.pendingChatInputFocus).toBeNull()
-    unregister()
-  })
-
-  it('focuses the chat the user is in rather than the first chat of another group', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    const registry = createKeyboardCommandRegistry()
-    const unregister = registerWorkbenchCommands(registry, store)
-    store.openDraftChat()
-    const first = store.activeId
-    store.openFileToSide('/right.txt')
-    registry.dispatch(appKeyboardCommands.newChatSession)
-    const second = store.activeId
-    expect(dock.getPanel(second!)?.component).toBe('chat')
-    expect(second).not.toBe(first)
-
-    registry.dispatch(appKeyboardCommands.focusChatInput)
-    await nextTick()
-    expect(store.activeId).toBe(second)
-    expect(store.pendingChatInputFocus?.panelId).toBe(second)
-    unregister()
-  })
-
-  it('opens a chat to focus when the dock is empty', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    const registry = createKeyboardCommandRegistry()
-    const unregister = registerWorkbenchCommands(registry, store)
-    expect(dock.panels).toHaveLength(0)
-
-    registry.dispatch(appKeyboardCommands.focusChatInput)
-    await nextTick()
-    expect(dock.getPanel(store.activeId!)?.component).toBe('chat')
-    expect(store.pendingChatInputFocus?.panelId).toBe(store.activeId)
-    unregister()
-  })
-
-  it('creates once from a shortcut, suppresses repeat, blocks settings and accepts a live rebind', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    let path = '/'
-    const registry = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, { name: path === '/' ? 'home' : 'keyboard', path }, {
-      querySelectorAll: () => [],
-    } as unknown as Document))
-    const unregister = registerWorkbenchCommands(registry, store)
-    const shortcuts = useKeyboardShortcutsStore()
-    const press = (key: string, modifiers: { ctrlKey?: boolean, shiftKey?: boolean }, repeat = false) => handleBrowserKeyboardShortcut(
-      { key, ctrlKey: false, metaKey: false, altKey: true, shiftKey: false, ...modifiers, repeat, preventDefault: vi.fn() },
-      registry, selectWebBindings(shortcuts.effectiveBindings), 'linux',
-    )
-    expect(press('X', { shiftKey: true })).toBe(true)
-    press('X', { shiftKey: true }, true)
-    expect(dock.getPanel('terminal:1')).toBeTruthy()
-    expect(dock.getPanel('terminal:2')).toBeUndefined()
-    path = '/settings/keyboard'
-    press('X', { shiftKey: true })
-    expect(dock.getPanel('terminal:2')).toBeUndefined()
-    path = '/'
-    expect(shortcuts.setBinding(appKeyboardCommands.newTerminal, 'Mod+Alt+z').kind).toBe('none')
-    expect(press('X', { shiftKey: true })).toBe(false)
-    expect(press('z', { ctrlKey: true })).toBe(true)
-    expect(dock.getPanel('terminal:2')).toBeTruthy()
-    unregister()
-  })
-
-  it('opens a browser tab at an address and focuses the existing one on the same URL', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    // First click normalizes the address and titles the tab with it.
-    expect(store.openBrowserAt('http://localhost:5173/app')).toBe(true)
-    const first = dock.getPanel('browser:1')
-    expect(first?.params.address).toBe('localhost:5173/app')
-    expect(first?.title).toBe('localhost:5173/app')
-
-    // A different path on the same port opens a second tab.
-    expect(store.openBrowserAt('127.0.0.1:5173/other')).toBe(true)
-    expect(dock.getPanel('browser:2')?.params.address).toBe('localhost:5173/other')
-
-    // The exact same URL (after normalization) focuses the existing tab.
-    expect(store.openBrowserAt('localhost:5173/app')).toBe(true)
-    expect(dock.panels.filter(p => p.component === 'browser')).toHaveLength(2)
-    expect(dock.activePanel?.id).toBe('browser:1')
-  })
-
-  it('refuses to open a browser tab for a non-local address', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    expect(store.openBrowserAt('https://example.com/')).toBe(false)
-    expect(dock.panels.filter(p => p.component === 'browser')).toHaveLength(0)
-  })
-
-  it('opens terminals in the requested group without creating a bottom split', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openDraftChat()
-    const left = dock.activePanel!.group!
-    store.splitGroup(left.id, 'right')
-    const right = dock.activePanel!.group!
-
-    store.openTerminal(left.id)
-    expect(dock.getPanel('terminal:1')?.group).toBe(left)
-    store.openTerminal(right.id)
-    expect(dock.getPanel('terminal:2')?.group).toBe(right)
-    store.openTerminal()
-    expect(dock.getPanel('terminal:3')?.group).toBe(right)
-    expect(dock.groups).toHaveLength(2)
-    expect(dock.getPanel('terminal:3')?.renderer).toBe('always')
-    expect(store.ephemeralPanels['terminal:3']).toBeUndefined()
-  })
-
-  it('opens ordinary tabs inside a terminal-only group and splits beside it', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openTerminal()
-    const group = dock.activePanel!.group!
-
-    store.openDisplay(group.id)
-    expect(dock.activePanel?.group).toBe(group)
-    store.openFilePinned('/data/example.txt', group.id)
-    expect(dock.activePanel?.group).toBe(group)
-    store.openDraftChat({ groupId: group.id })
-    expect(dock.activePanel?.group).toBe(group)
-    expect(dock.groups).toHaveLength(1)
-    expect(dock.getPanel('terminal:1')).toBeTruthy()
-
-    store.openFileToSide('/data/other.txt', group.id)
-    expect(dock.activePanel?.group).toBe(dock.adjacentGroupInDirection(group, 'right'))
-  })
-
-  it.each(['center', 'left', 'right', 'top', 'bottom'])(
-    'allows ordinary panels and whole groups to drop on a terminal at %s', (position) => {
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      store.openTerminal()
-      for (const panelId of ['chat:1', 'file:/data/example.txt', null]) {
-        const event = {
-          position,
-          group: dock.activePanel!.group!,
-          getData: () => ({ panelId }),
-          preventDefault: vi.fn(),
-        }
-        dock.emitWillShowOverlay(event)
-        dock.emitWillDrop(event)
-        expect(event.preventDefault).not.toHaveBeenCalled()
-      }
-    },
-  )
-
-  it('restores legacy terminal layouts without bottom headers or custom tabs', () => {
-    const terminal = { id: 'terminal:4', contentComponent: 'terminal', title: 'python', tabComponent: 'terminalTab' }
-    const group = { id: 'legacy', views: [terminal.id], activeView: terminal.id }
-    const layout = {
-      grid: { root: { type: 'branch', data: [
-        { type: 'leaf', size: 240, data: { ...group, headerPosition: 'bottom', hideHeader: true, locked: 'no-drop-target' } },
-      ] } },
-      panels: { [terminal.id]: terminal },
-      activeGroup: group.id,
-    }
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': { layout, terminalCounter: 4, ephemeralIds: [] },
-    }))
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    const restore = vi.spyOn(dock, 'fromJSON')
-    store.registerApi(dock as never)
-
-    expect(restore).toHaveBeenCalledWith({
-      ...layout,
-      grid: { root: { type: 'branch', data: [{ type: 'leaf', size: 240, data: group }] } },
-      panels: { [terminal.id]: { id: terminal.id, contentComponent: 'terminal', title: 'python' } },
-    })
-    expect(dock.activePanel?.title).toBe('python')
-    store.openTerminal()
-    expect(dock.getPanel('terminal:5')?.group).toBe(dock.getPanel(terminal.id)?.group)
-  })
-
-  it('keeps terminal ids monotonic per bot', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openTerminal()
-    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
-    store.openTerminal()
-    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
-    store.closeTab('terminal:1')
-    store.openTerminal()
-
-    expect(dock.getPanel('terminal:1')).toBeUndefined()
-    expect(dock.getPanel('terminal:2')).toBeTruthy()
-    expect(dock.getPanel('terminal:3')).toBeTruthy()
-  })
-
-it('restarts terminal numbering once every terminal is closed', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openTerminal()
-    store.openTerminal()
-    store.closeTab('terminal:1')
-    store.closeTab('terminal:2')
-    store.openTerminal()
-
-    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
-    expect(dock.getPanel('terminal:3')).toBeUndefined()
-  })
-
-  it('repairs legacy terminal titles when restoring a layout', async () => {
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: {
-          panels: {
-            'terminal:1': {
-              id: 'terminal:1',
-              contentComponent: 'terminal',
-              title: 'zsh',
-            },
-            'terminal:2': {
-              id: 'terminal:2',
-              contentComponent: 'terminal',
-              title: '',
-            },
-          },
-        },
-        terminalCounter: 2,
-        ephemeralIds: [],
-      },
-    }))
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
-    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
-  })
-
-  it('re-derives system tab titles persisted under another language', async () => {
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: {
-          panels: {
-            // Persisted while the UI ran under another locale ("New Chat" was a
-            // previous English draft label); draft titles are never user content.
-            'chat:1': {
-              id: 'chat:1',
-              contentComponent: 'chat',
-              title: 'New Chat',
-              params: { sessionId: null },
-            },
-            // Session tabs keep their title — only drafts are system-titled.
-            'chat:2': {
-              id: 'chat:2',
-              contentComponent: 'chat',
-              title: 'Issue Triage',
-              params: { sessionId: 'session-1' },
-            },
-            'schedule:new:1': {
-              id: 'schedule:new:1',
-              contentComponent: 'schedule',
-              title: '',
-              params: {},
-            },
-            // Saved-schedule tabs carry the schedule name; never re-derived.
-            'schedule:job-1': {
-              id: 'schedule:job-1',
-              contentComponent: 'schedule',
-              title: 'Nightly sync',
-              params: { scheduleId: 'job-1' },
-            },
-          },
-        },
-        scheduleCounter: 1,
-        ephemeralIds: [],
-      },
-    }))
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    expect(dock.getPanel('chat:1')?.title).toBe('New Session')
-    expect(dock.getPanel('chat:2')?.title).toBe('Issue Triage')
-    expect(dock.getPanel('schedule:new:1')?.title).toBe('Schedule')
-    expect(dock.getPanel('schedule:job-1')?.title).toBe('Nightly sync')
-  })
-
-  it('updates only the intended terminal title and ignores invalid or repeated events', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openTerminal()
-    store.openTerminal()
-
-    const first = dock.getPanel('terminal:1')!
-    const second = dock.getPanel('terminal:2')!
-    const setTitle = vi.spyOn(first.api, 'setTitle')
-
-    store.updateTerminalTitle(first.id, '  python  ')
-
-    expect(first.title).toBe('python')
-    expect(second.title).toBe('Terminal 2')
-    expect(setTitle).toHaveBeenCalledTimes(1)
-
-    store.updateTerminalTitle(first.id, 'python')
-    store.updateTerminalTitle(first.id, '   ')
-    store.updateTerminalTitle(first.id, null)
-
-    expect(first.title).toBe('python')
-    expect(setTitle).toHaveBeenCalledTimes(1)
-  })
-
-  it('starts a split terminal with its own fallback title', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openTerminal()
-
-    const first = dock.getPanel('terminal:1')!
-    store.updateTerminalTitle(first.id, 'node')
-    store.splitGroup(first.group!.id, 'right')
-
-    expect(first.title).toBe('node')
-    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
-  })
-
-  it('duplicates the active file into a split pane with a unique panel id', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openFile('/data/notes/todo.md')
-    store.splitGroup('group-1', 'right')
-
-    expect(dock.getPanel('file:/data/notes/todo.md')).toBeTruthy()
-    expect(dock.getPanel('file:/data/notes/todo.md~2')).toBeTruthy()
-    expect(dock.panels).toHaveLength(2)
-  })
-
-  it('focuses the single draft chat tab instead of duplicating it', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openDraftChat({ title: 'First' })
-    store.openTerminal()
-    store.openDraftChat({ title: 'Second' })
-
-    expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
-    expect(dock.activePanel?.component).toBe('chat')
-  })
-
-  it('keeps drafts group-scoped and promotes only the view that sent', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openDraftChat({ title: 'Left draft', groupId: 'group-1' })
-    const leftDraft = dock.activePanel!
-    store.splitGroup('group-1', 'right')
-    const rightDraft = dock.activePanel!
-
-    expect(rightDraft.id).not.toBe(leftDraft.id)
-    expect(rightDraft.group?.id).not.toBe(leftDraft.group?.id)
-    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(2)
-
-    // An explicit group focuses that group's own draft, even while another
-    // draft exists elsewhere in the dock.
-    store.openDraftChat({ groupId: leftDraft.group!.id })
-    expect(dock.activePanel?.id).toBe(leftDraft.id)
-
-    emitUserSentInSession('ignored-session', rightDraft.id, true, 'other-bot')
-    await nextTick()
-    expect(leftDraft.params.sessionId ?? null).toBeNull()
-    expect(rightDraft.params.sessionId ?? null).toBeNull()
-
-    // The signal points at the inactive right view. Promotion must not guess the
-    // active (left) draft.
-    emitUserSentInSession('right-session', rightDraft.id, true)
-    await nextTick()
-
-    expect(leftDraft.params.sessionId ?? null).toBeNull()
-    expect(rightDraft.params.sessionId).toBe('right-session')
-    expect(store.ephemeralPanels[leftDraft.id]).toBe(true)
-    expect(store.ephemeralPanels[rightDraft.id]).toBeUndefined()
-  })
-
-  it('keeps a non-explicit draft non-explicit after an explicit session was active', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Session 1', explicitSelection: true })
-    expect(chatStoreMock.hasExplicitSessionSelection).toBe(true)
-
-    store.openDraftChat({ title: 'New Session', explicitSelection: false })
-
-    expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: false })
-    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
-    expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
-  })
-
-  it('keeps the focused chat tab when the selection changes in the background', async () => {
-    const selection = useChatSelectionStore()
-    chatStoreMock.sessions.push({ id: 'a', title: 'A' }, { id: 'b', title: 'B' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChatPinned({ sessionId: 'a', title: 'A' })
-    store.openSessionChat({ sessionId: 'b', title: 'B' })
-    const tabB = dock.activePanel!
-    expect(tabB.params.sessionId).toBe('b')
-
-    chatStoreMock.sessionId = 'a'
-    chatStoreMock.hasExplicitSessionSelection = true
-    selection.setSession('a', { explicitSelection: true })
-    await nextTick()
-    chatStoreMock.sessionId = null
-    selection.setSession(null, { explicitSelection: true })
-    await nextTick()
-
-    expect(dock.activePanel).toBe(tabB)
-    expect(tabB.params.sessionId).toBe('b')
-  })
-
-  it('does not let restored draft panel params clear an explicit empty composer', async () => {
-    const staleLayout = persistedLayoutWithPanel(
-      'chat:bot-1:1',
-      'chat',
-      { sessionId: null, explicitSelection: false },
-    )
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: staleLayout,
-        ephemeralIds: ['chat:bot-1:1'],
-      },
-    }))
-    chatStoreMock.hasExplicitSessionSelection = true
-    useChatSelectionStore().setSession(null, { explicitSelection: true })
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: true })
-    expect(chatStoreMock.hasExplicitSessionSelection).toBe(true)
-  })
-
-  it('does not let a restored draft chat tab clear an explicitly selected session', async () => {
-    const staleLayout = persistedLayoutWithPanel(
-      'chat:bot-1:1',
-      'chat',
-      { sessionId: null, explicitSelection: false },
-    )
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: staleLayout,
-        ephemeralIds: ['chat:bot-1:1'],
-      },
-    }))
-    chatStoreMock.sessionId = 'history-session-1'
-    chatStoreMock.hasExplicitSessionSelection = true
-    useChatSelectionStore().setSession('history-session-1')
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
-    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('history-session-1')
-    expect(dock.activePanel?.params.sessionId).toBe('history-session-1')
-  })
-
-  it('keeps a restored session chat without adding a draft when selection is empty', async () => {
-    const restoredLayout = persistedLayoutWithPanel(
-      'chat:bot-1:1',
-      'chat',
-      { sessionId: 'session-1', explicitSelection: true },
-      'Session 1',
-    )
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: restoredLayout,
-        ephemeralIds: [],
-      },
-    }))
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    expect(dock.panels).toHaveLength(1)
-    expect(dock.activePanel?.params.sessionId).toBe('session-1')
-    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId == null)).toBe(false)
-    expect(chatStoreMock.focusChatView).toHaveBeenCalledWith('chat:bot-1:1')
-    // Recents follows chat-session-id — pull it onto the restored panel.
-    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('session-1', { explicitSelection: false })
-    expect(useChatSelectionStore().sessionId).toBe('session-1')
-  })
-
-  it('reconciles an auto-picked session to the restored chat panel without opening another tab', async () => {
-    const restoredLayout = persistedLayoutWithPanel(
-      'chat:bot-1:1',
-      'chat',
-      { sessionId: 'restored-session', explicitSelection: true },
-      'Restored',
-    )
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: restoredLayout,
-        ephemeralIds: [],
-      },
-    }))
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-    chatStoreMock.selectSession.mockClear()
-
-    // initialize() auto-picks a newer Untitled while the dock still shows the
-    // restored conversation — selection must snap back to the open panel.
-    chatStoreMock.loadingChats = true
-    await nextTick()
-    chatStoreMock.sessionId = 'untitled-latest'
-    chatStoreMock.hasExplicitSessionSelection = false
-    chatStoreMock.sessions.push(
-      { id: 'untitled-latest', title: '' },
-      { id: 'restored-session', title: 'Restored' },
-    )
-    useChatSelectionStore().setSession('untitled-latest', { explicitSelection: false })
-    chatStoreMock.loadingChats = false
-    await nextTick()
-    await flushDraftChatFallback()
-
-    expect(dock.panels).toHaveLength(1)
-    expect(dock.activePanel?.params.sessionId).toBe('restored-session')
-    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('restored-session', { explicitSelection: false })
-    expect(useChatSelectionStore().sessionId).toBe('restored-session')
-    expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
-  })
-
-  it('does not open a chat tab when initialize auto-picks a session over a restored file/preview workspace', async () => {
-    // Cold-start seed: File + Preview only (the user's Tab A layout). A new
-    // browser tab must restore that dock as-is — initialize()'s non-explicit
-    // auto-pick of the latest Untitled Session must NOT punch chat tabs in,
-    // and must not leave Recents highlighting a session that is not on screen.
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: {
-          panels: {
-            'file:/data/AGENTS.md': {
-              id: 'file:/data/AGENTS.md',
-              contentComponent: 'file',
-              title: 'AGENTS.md',
-              params: { filePath: '/data/AGENTS.md' },
-            },
-            'preview:/data/AGENTS.md': {
-              id: 'preview:/data/AGENTS.md',
-              contentComponent: 'preview',
-              title: 'Preview: AGENTS.md',
-              params: { filePath: '/data/AGENTS.md' },
-            },
-          },
-        },
-        ephemeralIds: ['file:/data/AGENTS.md', 'preview:/data/AGENTS.md'],
-      },
-    }))
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    expect(dock.panels.map(panel => panel.component).sort()).toEqual(['file', 'preview'])
-    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
-
-    // Simulate initialize() finishing: it writes the latest history item into
-    // selection with explicitSelection=false (see bootstrap.ts).
-    chatStoreMock.loadingChats = true
-    await nextTick()
-    chatStoreMock.sessionId = 'untitled-1'
-    chatStoreMock.hasExplicitSessionSelection = false
-    chatStoreMock.sessions.push({ id: 'untitled-1', title: '' })
-    useChatSelectionStore().setSession('untitled-1', { explicitSelection: false })
-    chatStoreMock.loadingChats = false
-    await nextTick()
-    await flushDraftChatFallback()
-
-    expect(dock.panels.map(panel => panel.component).sort()).toEqual(['file', 'preview'])
-    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
-    expect(chatStoreMock.resetToEmptyComposer).toHaveBeenCalledWith({
-      clearPendingExternalAgent: false,
-      explicitSelection: false,
-      draftIntent: false,
-    })
-    expect(chatStoreMock.sessionId).toBeNull()
-    expect(useChatSelectionStore().sessionId).toBeNull()
-    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
-  })
-
-  it('does not open a chat tab for a selection written over a restored file workspace', async () => {
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: {
-          panels: {
-            'file:/data/AGENTS.md': {
-              id: 'file:/data/AGENTS.md',
-              contentComponent: 'file',
-              title: 'AGENTS.md',
-              params: { filePath: '/data/AGENTS.md' },
-            },
-          },
-        },
-        ephemeralIds: [],
-      },
-    }))
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    chatStoreMock.sessionId = 'picked-1'
-    chatStoreMock.hasExplicitSessionSelection = true
-    chatStoreMock.sessions.push({ id: 'picked-1', title: 'Picked' })
-    useChatSelectionStore().setSession('picked-1', { explicitSelection: true })
-    await nextTick()
-
-    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
-    expect(dock.activePanel?.component).toBe('file')
-  })
-
-  it('does not promote a restored auto-selected native session into explicit selection while chats load', async () => {
-    const staleLayout = persistedLayoutWithPanel(
-      'chat:bot-1:1',
-      'chat',
-      { sessionId: 'native-session' },
-      'Native Session',
-    )
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: staleLayout,
-        ephemeralIds: ['chat:bot-1:1'],
-      },
-    }))
-    chatStoreMock.sessionId = 'native-session'
-    chatStoreMock.hasExplicitSessionSelection = false
-    chatStoreMock.loadingChats = true
-    useChatSelectionStore().setSession('native-session', { explicitSelection: false })
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    expect(chatStoreMock.selectSession).not.toHaveBeenCalled()
-    expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
-    expect(dock.activePanel?.params.sessionId).toBe('native-session')
-  })
-
-  it('opens one chat tab per session and reuses the ephemeral slot', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'S1' })
-    const firstId = dock.panels.find((p) => p.component === 'chat')!.id
-
-    // Same session: focus the existing tab, no new panel.
-    chatStoreMock.selectSession.mockClear()
-    store.openSessionChat({ sessionId: 's1', title: 'S1' })
-    expect(dock.panels.filter((p) => p.component === 'chat')).toHaveLength(1)
-    expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s1')
-
-    // Different session: repoint the group's ephemeral chat slot in place.
-    store.openSessionChat({ sessionId: 's2', title: 'S2' })
-    const chatPanels = dock.panels.filter((p) => p.component === 'chat')
-    expect(chatPanels).toHaveLength(1)
-    expect(chatPanels[0]!.id).toBe(firstId)
-    expect(chatPanels[0]!.params.sessionId).toBe('s2')
-  })
-
-  it('reuses an ephemeral chat tab even when its session is off the current page', () => {
-    chatStoreMock.sessions.push({ id: 's2', title: 'S2' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 'older-session', title: 'Older' })
-    const firstId = dock.panels.find((p) => p.component === 'chat')!.id
-
-    store.openSessionChat({ sessionId: 's2', title: 'S2' })
-
-    const chatPanels = dock.panels.filter((p) => p.component === 'chat')
-    expect(chatPanels).toHaveLength(1)
-    expect(chatPanels[0]!.id).toBe(firstId)
-    expect(chatPanels[0]!.params.sessionId).toBe('s2')
-  })
-
-  it('uses remembered hidden session summaries for subagent chat tabs', () => {
-    chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) => {
-      if (sessionId === 'subagent-1') {
-        return {
-          id: 'subagent-1',
-          title: 'Subagent task',
-          type: 'subagent',
-        }
-      }
-      return chatStoreMock.sessions.find(session => session.id === sessionId) ?? null
-    })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 'subagent-1' })
-
-    const chatPanel = dock.panels.find(panel => panel.component === 'chat')
-    expect(chatPanel?.params.sessionId).toBe('subagent-1')
-    expect(chatPanel?.title).toBe('Subagent task')
-  })
-
-  it('updates open hidden subagent tab titles when their summary is remembered later', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 'subagent-1', title: 'agent-a' })
-    const chatPanel = dock.panels.find(panel => panel.component === 'chat')!
-    expect(chatPanel.title).toBe('agent-a')
-
-    chatStoreMock.knownSessions.push({
-      id: 'subagent-1',
-      title: 'Fetched subagent task',
-      type: 'subagent',
-    })
-    await nextTick()
-
-    expect(dock.getPanel(chatPanel.id)?.title).toBe('Fetched subagent task')
-  })
-
-  it('opens the first subagent session in a right split and later ones as tabs beside it', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    // Anchor the primary region with the conversation tab.
-    store.openSessionChat({ sessionId: 'parent-1', title: 'Parent' })
-    const parentPanel = dock.panels.find(panel => panel.component === 'chat')!
-    const primaryGroupId = parentPanel.group!.id
-
-    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
-    const first = dock.panels.find(panel => panel.params.sessionId === 'subagent-1')!
-    expect(first.group!.id).not.toBe(primaryGroupId)
-
-    store.openSubagentSession({ sessionId: 'subagent-2', title: 'agent-b' })
-    const second = dock.panels.find(panel => panel.params.sessionId === 'subagent-2')!
-    // The region already exists: the second subagent joins it as a tab
-    // instead of expanding again.
-    expect(second.group!.id).toBe(first.group!.id)
-    expect(dock.groups.filter(group => group.id !== primaryGroupId)).toHaveLength(1)
-  })
-
-  it('focuses an already-open subagent tab instead of opening a duplicate', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 'parent-1', title: 'Parent' })
-    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
-    const panelCount = dock.panels.length
-
-    store.openSubagentSession({ sessionId: 'subagent-1', title: 'agent-a' })
-
-    expect(dock.panels.length).toBe(panelCount)
-    expect(dock.activePanel?.params.sessionId).toBe('subagent-1')
-  })
-
-  it('does not reconcile remembered hidden subagent chat tabs as deleted', async () => {
-    chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) => {
-      if (sessionId === 'subagent-1') {
-        return {
-          id: 'subagent-1',
-          title: 'Subagent task',
-          type: 'subagent',
-        }
-      }
-      return chatStoreMock.sessions.find(session => session.id === sessionId) ?? null
-    })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChat({ sessionId: 'subagent-1' })
-    const chatPanel = dock.panels.find(panel => panel.component === 'chat')!
-
-    chatStoreMock.sessions.push({ id: 'parent-1', title: 'Parent' })
-    await nextTick()
-
-    expect(dock.getPanel(chatPanel.id)?.params.sessionId).toBe('subagent-1')
-    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
-  })
-
-  it('closes the active deleted chat tab without opening a replacement session', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessions.push(
-      { id: 's1', title: 'Deleted session' },
-      { id: 's2', title: 'Next session' },
-    )
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
-    const chatPanel = dock.panels.find(panel => panel.component === 'chat')!
-
-    emitDeletedSession('s1')
-    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length, { id: 's2', title: 'Next session' })
-    chatStoreMock.sessionId = null
-    selection.setSession(null)
-    await flushDraftChatFallback()
-
-    expect(dock.getPanel(chatPanel.id)).toBeUndefined()
-    expect(dock.panels.some(panel => panel.params.sessionId === 's2')).toBe(false)
-    expect(dock.activePanel?.component).toBe('chat')
-    expect(dock.activePanel?.params.sessionId ?? null).toBeNull()
-  })
-
-  it('resets a failed deferred-session chat panel to draft when its composer scope matches', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessionId = null
-    chatStoreMock.sessions.push({ id: 's1', title: 'Created then failed' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Created then failed' })
-    const panel = dock.panels.find(panel => panel.component === 'chat')!
-    store.pinPanel(panel.id)
-
-    selection.setSession(null)
-    emitDeletedSession('s1', 'bot-1', `bot-1:${panel.id}`)
-    await nextTick()
-
-    expect(dock.getPanel(panel.id)).toBe(panel)
-    expect(panel.params.sessionId ?? null).toBeNull()
-    expect(panel.title).toBe('New Session')
-    expect(store.ephemeralPanels[panel.id]).toBe(true)
-    expect(chatStoreMock.selectDraft).toHaveBeenCalled()
-  })
-
-  it('lets the neighbor tab take over when the focused session is deleted', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessions.push(
-      { id: 's1', title: 'Deleted session' },
-      { id: 's2', title: 'Fallback session' },
-      { id: 's3', title: 'Neighbor session' },
-    )
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
-    const deletedPanel = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId === 's1')!
-    store.pinPanel(deletedPanel.id)
-    store.openSessionChat({ sessionId: 's3', title: 'Neighbor session' })
-    deletedPanel.api.setActive()
-    expect(selection.sessionId).toBe('s1')
-    chatStoreMock.selectSession.mockClear()
-
-    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length,
-      { id: 's2', title: 'Fallback session' },
-      { id: 's3', title: 'Neighbor session' },
-    )
-    emitDeletedSession('s1')
-    chatStoreMock.sessionId = null
-    selection.setSession(null)
-    await nextTick()
-    await nextTick()
-
-    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
-    expect(dock.activePanel?.params.sessionId).toBe('s3')
-    expect(selection.sessionId).toBe('s3')
-    expect(dock.panels.some(panel => panel.params.sessionId === 's2')).toBe(false)
-  })
-
-  it('drops the selection when its tab closes while a non-chat tab has focus', () => {
-    const selection = useChatSelectionStore()
-    chatStoreMock.sessions.push(
-      { id: 's1', title: 'Closed session' },
-      { id: 's2', title: 'Other session' },
-    )
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's2', title: 'Other session' })
-    store.pinPanel(dock.activePanel!.id)
-    store.openSessionChat({ sessionId: 's1', title: 'Closed session' })
-    const closing = dock.activePanel!
-    store.pinPanel(closing.id)
-    expect(selection.sessionId).toBe('s1')
-    store.openFile('/data/a.md')
-    expect(dock.activePanel?.component).toBe('file')
-    expect(selection.sessionId).toBe('s1')
-
-    closing.api.close()
-
-    expect(dock.activePanel?.component).toBe('file')
-    expect(dock.panels.some(panel => panel.params.sessionId === 's2')).toBe(true)
-    expect(selection.sessionId).toBeNull()
-  })
-
-  it('never selects a deleted session while its split copies close', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessions.push({ id: 's1', title: 'Deleted session' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
-    const original = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId === 's1')!
-    store.pinPanel(original.id)
-    store.splitGroup(original.group!.id, 'right')
-    const copy = dock.panels.find(panel => panel.component === 'chat' && panel.id !== original.id)!
-    expect(copy.params.sessionId).toBe('s1')
-    store.pinPanel(copy.id)
-    store.openFile('/data/a.md')
-    original.api.setActive()
-    chatStoreMock.selectSession.mockClear()
-
-    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length)
-    emitDeletedSession('s1')
-    chatStoreMock.sessionId = null
-    selection.setSession(null)
-    await nextTick()
-    await nextTick()
-
-    expect(dock.panels.some(panel => panel.params.sessionId === 's1')).toBe(false)
-    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1', expect.anything())
-    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1')
-    expect(selection.sessionId).toBeNull()
-  })
-
-  it('keeps open chat tabs when a paginated session list refresh drops their id', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessions.push(
-      { id: 's1', title: 'Open older session' },
-      { id: 's2', title: 'Other session' },
-    )
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Open older session' })
-    const openPanel = dock.panels.find(panel => panel.component === 'chat')!
-
-    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length,
-      { id: 's2', title: 'Other session' },
-      { id: 's3', title: 'Replacement page item' },
-    )
-    await nextTick()
-
-    expect(dock.getPanel(openPanel.id)?.params.sessionId).toBe('s1')
-    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
-  })
-
-  it('buffers deleted-session signals for inactive bots and applies them after switching back', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessions.push({ id: 's1', title: 'Deleted session' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
-    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
-
-    // chat-list selectBot clears the previous bot's session.
-    selection.setSession(null)
-    chatStoreMock.sessionId = null
-    selection.setBot('bot-without-layout')
-    emitDeletedSession('s1', 'bot-1')
-    await nextTick()
-    expect(dock.panels.some(panel => panel.params.sessionId === 's1')).toBe(false)
-
-    selection.setBot('bot-1')
-    await nextTick()
-    await nextTick()
-
-    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
-    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
-  })
-
-  it('keeps buffered delete reconciliation across dock api re-registration', async () => {
-    const selection = useChatSelectionStore()
-    selection.setSession('s1')
-    chatStoreMock.sessions.push({ id: 's1', title: 'Deleted session' })
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
-    const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
-
-    selection.setBot('bot-without-layout')
-    emitDeletedSession('s1', 'bot-1')
-    await nextTick()
-    store.releaseApi()
-    expect(dock.activePanelListenerCount()).toBe(0)
-
-    const nextDock = createFakeDock()
-    store.registerApi(nextDock as never)
-    selection.setBot('bot-1')
-    await nextTick()
-    await nextTick()
-
-    expect(nextDock.getPanel(deletedPanel.id)).toBeUndefined()
-    expect(nextDock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
-  })
-
-  it('does not reopen a tombstoned chat session from a stale caller', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    emitDeletedSession('s1', 'bot-1')
-    await nextTick()
-
-    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
-
-    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 's1')).toBe(false)
-    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1')
-  })
-
-  it('opens files into the ephemeral slot and replaces until pinned', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openFile('/data/a.md')
-    expect(store.ephemeralPanels['file:/data/a.md']).toBe(true)
-
-    // Another file replaces the ephemeral one in the same group.
-    store.openFile('/data/b.md')
-    expect(dock.getPanel('file:/data/a.md')).toBeUndefined()
-    expect(dock.getPanel('file:/data/b.md')).toBeTruthy()
-
-    // Pin b (mimics a first edit); opening c now keeps b.
-    store.pinPanel('file:/data/b.md')
-    expect(store.ephemeralPanels['file:/data/b.md']).toBeUndefined()
-    store.openFile('/data/c.md')
-    expect(dock.getPanel('file:/data/b.md')).toBeTruthy()
-    expect(dock.getPanel('file:/data/c.md')).toBeTruthy()
-  })
-
-  it('keeps the final draft chat tab open when it is closed', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openDraftChat({ title: 'Existing' })
-    const id = dock.panels.find((p) => p.component === 'chat')!.id
-    store.closeTab(id)
-
-    expect(dock.panels).toHaveLength(1)
-    expect(dock.getPanel(id)?.component).toBe('chat')
-  })
-
-  it('respawns a fresh draft when the last chat tab (a real session) is closed', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 's1', title: 'S1' })
-    const id = dock.panels.find((p) => p.component === 'chat')!.id
-
-    store.closeTab(id)
-    // Closing the last chat resets the global view to a draft so the respawn is a
-    // fresh New Session page, not the session that was just closed.
-    expect(chatStoreMock.selectDraft).toHaveBeenCalled()
-
-    await flushDraftChatFallback()
-    const chatPanels = dock.panels.filter((p) => p.component === 'chat')
-    expect(chatPanels).toHaveLength(1)
-    expect(chatPanels[0]!.params.sessionId ?? null).toBeNull()
-  })
-
-  it('opens a draft chat when a non-chat tab leaves the dock empty', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openTerminal()
-    store.closeTab('terminal:1')
-
-    await flushDraftChatFallback()
-
-    expect(dock.panels).toHaveLength(1)
-    const chat = dock.panels[0]!
-    expect(chat.component).toBe('chat')
-    expect(chat.params.sessionId ?? null).toBeNull()
-  })
-
-  it('opens a draft — not an auto-picked Untitled session — after closing a restored file/preview workspace', async () => {
-    // Cold-start tab: layout seeded from localStorage, initialize() wrote a
-    // non-explicit sessionId we refused to open. Closing the last file must
-    // refill New Session, not that stale Untitled pick.
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: {
-          panels: {
-            'file:/data/AGENTS.md': {
-              id: 'file:/data/AGENTS.md',
-              contentComponent: 'file',
-              title: 'AGENTS.md',
-              params: { filePath: '/data/AGENTS.md' },
-            },
-            'preview:/data/AGENTS.md': {
-              id: 'preview:/data/AGENTS.md',
-              contentComponent: 'preview',
-              title: 'Preview: AGENTS.md',
-              params: { filePath: '/data/AGENTS.md' },
-            },
-          },
-        },
-        ephemeralIds: ['file:/data/AGENTS.md', 'preview:/data/AGENTS.md'],
-      },
-    }))
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    chatStoreMock.sessionId = 'untitled-stale'
-    chatStoreMock.hasExplicitSessionSelection = false
-    chatStoreMock.sessions.push({ id: 'untitled-stale', title: '' })
-    useChatSelectionStore().setSession('untitled-stale', { explicitSelection: false })
-    await nextTick()
-
-    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
-
-    store.closeTab('preview:/data/AGENTS.md')
-    store.closeTab('file:/data/AGENTS.md')
-    await flushDraftChatFallback()
-
-    expect(dock.panels).toHaveLength(1)
-    const chat = dock.panels[0]!
-    expect(chat.component).toBe('chat')
-    expect(chat.params.sessionId ?? null).toBeNull()
-    expect(chat.title).toBe('New Session')
-  })
-
-  it('refills an explicitly selected session when the last non-chat tab closes', async () => {
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: {
-          panels: {
-            'file:/data/AGENTS.md': {
-              id: 'file:/data/AGENTS.md',
-              contentComponent: 'file',
-              title: 'AGENTS.md',
-              params: { filePath: '/data/AGENTS.md' },
-            },
-          },
-        },
-        ephemeralIds: [],
-      },
-    }))
-
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    await nextTick()
-
-    // Drive chatStore directly: an already-explicit selection whose chat tab is
-    // not open (e.g. replaced by a file). Closing the file should restore it.
-    chatStoreMock.sessionId = 'explicit-1'
-    chatStoreMock.hasExplicitSessionSelection = true
-    chatStoreMock.sessions.push({ id: 'explicit-1', title: 'Kept Session' })
-    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
-
-    store.closeTab('file:/data/AGENTS.md')
-    await flushDraftChatFallback()
-
-    const chat = dock.panels.find(panel => panel.component === 'chat')
-    expect(chat?.params.sessionId).toBe('explicit-1')
-    expect(chat?.title).toBe('Kept Session')
-  })
-
-  it('opens a draft chat when switching to a bot without a saved layout', async () => {
-    const selection = useChatSelectionStore()
-    selection.setBot(null)
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    expect(dock.panels).toHaveLength(0)
-
-    selection.setBot('bot-without-layout')
-    await flushDraftChatFallback()
-
-    expect(dock.panels).toHaveLength(1)
-    const chat = dock.panels[0]!
-    expect(chat.component).toBe('chat')
-    expect(chat.title).toBe('New Session')
-  })
-
-  it('splits a chat session into a second group and reuses the split preview in place', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({
-      sessionId: 's1',
-      title: 'Session',
-      explicitSelection: false,
-    })
-    const source = dock.panels.find(panel => panel.component === 'chat')!
-    store.splitGroup('group-1', 'right')
-
-    const split = dock.panels.find(panel => panel.component === 'chat' && panel.id !== source.id)!
-    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(2)
-    expect(split.params).toMatchObject({ sessionId: 's1', explicitSelection: false })
-    expect(split.title).toBe('Session')
-    expect(split.renderer).toBe('always')
-    expect(split.group?.id).not.toBe(source.group?.id)
-    expect(store.ephemeralPanels[split.id]).toBe(true)
-    expect(chatStoreMock.focusChatView).toHaveBeenLastCalledWith(split.id)
-
-    store.openSessionChat({
-      sessionId: 's2',
-      title: 'Other session',
-      groupId: split.group!.id,
-    })
-
-    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(2)
-    expect(dock.getPanel(source.id)?.params.sessionId).toBe('s1')
-    expect(dock.getPanel(split.id)?.params.sessionId).toBe('s2')
-    expect(dock.getPanel(split.id)?.title).toBe('Other session')
-  })
-
-  it('applies a late Draft request only to its originating split', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
-    const origin = dock.activePanel!
-    store.splitGroup(origin.group!.id, 'right')
-    const other = dock.activePanel!
-    store.openSessionChat({ sessionId: 'session-b', title: 'B', groupId: other.group!.id })
-    expect(dock.activePanel?.id).toBe(other.id)
-
-    const request = {
-      botId: 'bot-1',
-      viewId: origin.id,
-      expectedSessionId: 'session-a',
-      explicitSelection: true,
-      input: { agentId: 'codex' },
-      activate: true,
-      seq: 1,
-    }
-    chatStoreMock.draftViewRequested.value = request
-
-    expect(dock.getPanel(origin.id)?.params).toMatchObject({ sessionId: null, explicitSelection: true })
-    expect(dock.getPanel(origin.id)?.title).toBe('New Session')
-    expect(dock.getPanel(other.id)?.params.sessionId).toBe('session-b')
-    expect(dock.activePanel?.id).toBe(other.id)
-    expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledWith(request, false)
-  })
-
-  it('keeps a pinned Session and opens its requested Draft as a new preview', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChatPinned({ sessionId: 'session-a', title: 'A' })
-    const origin = dock.activePanel!
-
-    const request = {
-      botId: 'bot-1',
-      viewId: origin.id,
-      expectedSessionId: 'session-a',
-      explicitSelection: true,
-      input: { agentId: 'codex' },
-      activate: true,
-      seq: 1,
-    }
-    chatStoreMock.draftViewRequested.value = request
-
-    const draft = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId == null)!
-    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(2)
-    expect(origin.params.sessionId).toBe('session-a')
-    expect(store.ephemeralPanels[origin.id]).toBeUndefined()
-    expect(draft.group?.id).toBe(origin.group?.id)
-    expect(store.ephemeralPanels[draft.id]).toBe(true)
-    expect(dock.activePanel?.id).toBe(draft.id)
-    expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ ...request, viewId: draft.id }),
-      true,
-    )
-  })
-
-  it('does not focus a pinned Session Draft when its request resolves behind another split', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChatPinned({ sessionId: 'session-a', title: 'A' })
-    const origin = dock.activePanel!
-    store.splitGroup(origin.group!.id, 'right')
-    const other = dock.activePanel!
-    store.openSessionChat({ sessionId: 'session-b', title: 'B', groupId: other.group!.id })
-
-    chatStoreMock.draftViewRequested.value = {
-      botId: 'bot-1',
-      viewId: origin.id,
-      expectedSessionId: 'session-a',
-      explicitSelection: true,
-      input: null,
-      activate: true,
-      seq: 1,
-    }
-
-    const draft = origin.group!.panels.find(panel => panel.params.sessionId == null)!
-    expect(origin.params.sessionId).toBe('session-a')
-    expect(draft).toBeTruthy()
-    expect(store.ephemeralPanels[draft.id]).toBe(true)
-    expect(dock.activePanel?.id).toBe(other.id)
-    expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ viewId: draft.id, expectedSessionId: 'session-a' }),
-      false,
-    )
-  })
-
-  it('routes a late Fork to its originating preview without changing the focused split', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
-    const origin = dock.activePanel!
-    store.splitGroup(origin.group!.id, 'right')
-    const other = dock.activePanel!
-    store.openSessionChat({ sessionId: 'session-b', title: 'B', groupId: other.group!.id })
-
-    chatStoreMock.forkedSessionRequested.value = {
-      botId: 'bot-1',
-      viewId: origin.id,
-      expectedSessionId: 'session-a',
-      sessionId: 'fork-a',
-      title: 'Fork A',
-      explicitSelection: true,
-      activate: true,
-      seq: 1,
-    }
-
-    expect(origin.params.sessionId).toBe('fork-a')
-    expect(origin.title).toBe('Fork A')
-    expect(other.params.sessionId).toBe('session-b')
-    expect(dock.activePanel?.id).toBe(other.id)
-  })
-
-  it('keeps a pinned Fork source and opens the Fork in the same group', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChatPinned({ sessionId: 'session-a', title: 'A' })
-    const origin = dock.activePanel!
-
-    chatStoreMock.forkedSessionRequested.value = {
-      botId: 'bot-1',
-      viewId: origin.id,
-      expectedSessionId: 'session-a',
-      sessionId: 'fork-a',
-      title: 'Fork A',
-      explicitSelection: true,
-      activate: true,
-      seq: 1,
-    }
-
-    const fork = dock.panels.find(panel => panel.params.sessionId === 'fork-a')!
-    expect(origin.params.sessionId).toBe('session-a')
-    expect(fork.group?.id).toBe(origin.group?.id)
-    expect(store.ephemeralPanels[fork.id]).toBe(true)
-    expect(dock.activePanel?.id).toBe(fork.id)
-  })
-
-  it('ignores a Fork result after its origin has been rebound', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
-    const origin = dock.activePanel!
-    store.openSessionChat({ sessionId: 'session-c', title: 'C', groupId: origin.group!.id })
-
-    chatStoreMock.forkedSessionRequested.value = {
-      botId: 'bot-1',
-      viewId: origin.id,
-      expectedSessionId: 'session-a',
-      sessionId: 'fork-a',
-      title: 'Fork A',
-      explicitSelection: true,
-      activate: true,
-      seq: 1,
-    }
-
-    expect(origin.params.sessionId).toBe('session-c')
-    expect(dock.panels.some(panel => panel.params.sessionId === 'fork-a')).toBe(false)
-  })
-
-  it('routes a Fork only to the same-Session split where it was requested', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
-    const left = dock.activePanel!
-    store.splitGroup(left.group!.id, 'right')
-    const right = dock.activePanel!
-
-    chatStoreMock.forkedSessionRequested.value = {
-      botId: 'bot-1',
-      viewId: right.id,
-      expectedSessionId: 'session-a',
-      sessionId: 'fork-right',
-      title: 'Fork right',
-      explicitSelection: true,
-      activate: true,
-      seq: 1,
-    }
-
-    expect(left.params.sessionId).toBe('session-a')
-    expect(right.params.sessionId).toBe('fork-right')
-    expect(dock.activePanel?.id).toBe(right.id)
-  })
-
-  it('opens a related Session in the originating split instead of the focused split', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openSessionChat({ sessionId: 'session-a', title: 'A' })
-    const origin = dock.activePanel!
-    store.splitGroup(origin.group!.id, 'right')
-    const other = dock.activePanel!
-    store.openSessionChat({ sessionId: 'session-b', title: 'B', groupId: other.group!.id })
-
-    store.openSessionChatFromView({
-      viewId: origin.id,
-      sessionId: 'child-a',
-      title: 'Child A',
-      expectedSessionId: 'session-a',
-    })
-
-    expect(dock.getPanel(origin.id)?.params.sessionId).toBe('child-a')
-    expect(dock.getPanel(origin.id)?.title).toBe('Child A')
-    expect(dock.getPanel(other.id)?.params.sessionId).toBe('session-b')
-    expect(dock.activePanel?.id).toBe(origin.id)
-  })
-
-  it('restores two Chat panels without crossing their Session params', async () => {
-    localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': {
-        layout: {
-          grid: {
-            root: {
-              type: 'branch',
-              data: [
-                {
-                  type: 'leaf',
-                  size: 600,
-                  data: { id: 'left', views: ['chat:1'], activeView: 'chat:1' },
-                },
-                {
-                  type: 'leaf',
-                  size: 600,
-                  data: { id: 'right', views: ['chat:2'], activeView: 'chat:2' },
-                },
-              ],
-            },
-            width: 1200,
-            height: 800,
-            orientation: 'HORIZONTAL',
-          },
-          panels: {
-            'chat:1': {
-              id: 'chat:1',
-              contentComponent: 'chat',
-              title: 'A',
-              params: { sessionId: 'session-a', explicitSelection: true },
-            },
-            'chat:2': {
-              id: 'chat:2',
-              contentComponent: 'chat',
-              title: 'B',
-              params: { sessionId: 'session-b', explicitSelection: true },
-            },
-          },
-          activeGroup: 'left',
-        },
-        chatCounter: 2,
-        ephemeralIds: [],
-      },
-    }))
-    chatStoreMock.sessionId = 'session-a'
-    chatStoreMock.hasExplicitSessionSelection = true
-    useChatSelectionStore().setSession('session-a')
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-
-    store.registerApi(dock as never)
-    await nextTick()
-
-    expect(dock.getPanel('chat:1')?.params.sessionId).toBe('session-a')
-    expect(dock.getPanel('chat:2')?.params.sessionId).toBe('session-b')
-    expect(dock.getPanel('chat:1')?.group?.id).not.toBe(dock.getPanel('chat:2')?.group?.id)
-    expect(chatStoreMock.focusChatView).toHaveBeenLastCalledWith('chat:1')
-  })
-
-  it('opens multiple schedule panels and focuses an existing schedule', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSchedule('schedule-a', 'Morning')
-    store.openSchedule('schedule-b', 'Evening')
-    store.openSchedule('schedule-a', 'Morning renamed')
-
-    expect(dock.panels.filter((p) => p.component === 'schedule')).toHaveLength(2)
-    expect(dock.activePanel?.id).toBe('schedule:schedule-a')
-    expect(dock.getPanel('schedule:schedule-a')?.title).toBe('Morning renamed')
-  })
-
-  it('tracks file dirty state without mangling the tab title', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openFile('/data/notes/todo.md')
-    const panel = dock.getPanel('file:/data/notes/todo.md')
-    expect(panel?.title).toBe('todo.md')
-
-    store.setFileDirty('file:/data/notes/todo.md', true)
-    expect(store.fileDirty['file:/data/notes/todo.md']).toBe(true)
-    expect(store.dirtyFileCount).toBe(1)
-    // Title stays the clean base name — the dot is now a tab-rendered affordance.
-    expect(panel?.title).toBe('todo.md')
-
-    store.setFileDirty('file:/data/notes/todo.md', false)
-    expect(store.fileDirty['file:/data/notes/todo.md']).toBeUndefined()
-    expect(store.dirtyFileCount).toBe(0)
-  })
-
-  it('queues a dirty tab for confirmation instead of closing it', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openFile('/data/a.md')
-    store.setFileDirty('file:/data/a.md', true)
-
-    // A dirty close is blocked; the tab is queued for the confirm dialog.
-    store.requestCloseTab('file:/data/a.md')
-    expect(dock.getPanel('file:/data/a.md')).toBeTruthy()
-    expect(store.pendingClose?.panelId).toBe('file:/data/a.md')
-    expect(store.pendingClose?.title).toBe('a.md')
-
-    // Discard closes it and clears the queue.
-    await store.resolvePendingClose('discard')
-    expect(dock.getPanel('file:/data/a.md')).toBeUndefined()
-    expect(store.pendingClose).toBeNull()
-  })
-
-  it('saves a dirty tab via its handler before closing', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openFile('/data/b.md')
-    store.setFileDirty('file:/data/b.md', true)
-    const save = vi.fn(async () => true)
-    store.registerFileSaveHandler('file:/data/b.md', save)
-
-    store.requestCloseTab('file:/data/b.md')
-    await store.resolvePendingClose('save')
-
-    expect(save).toHaveBeenCalledOnce()
-    expect(dock.getPanel('file:/data/b.md')).toBeUndefined()
-  })
-
-  it('keeps a dirty tab open when its save fails', async () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openFile('/data/c.md')
-    store.setFileDirty('file:/data/c.md', true)
-    store.registerFileSaveHandler('file:/data/c.md', async () => false)
-
-    store.requestCloseTab('file:/data/c.md')
-    await store.resolvePendingClose('save')
-
-    // Save failed → tab stays, but it leaves the queue so the dialog dismisses.
-    expect(dock.getPanel('file:/data/c.md')).toBeTruthy()
-    expect(store.pendingClose).toBeNull()
+  afterEach(() => {
+    mobileBreakpoint.reset()
   })
 
-  it('switches the active view and keeps the sidebar open', () => {
+  it('drops retired local/session storage keys on startup and does not navigate when unmounted', () => {
+    localStorage.setItem('workspace-tabs', '{"legacy":true}')
+    localStorage.setItem('workspace-panes', '{"legacy":true}')
+    localStorage.setItem('workspace-layout', '{"legacy":true}')
     const store = useWorkspaceTabsStore()
-
-    store.sidebarView = 'sessions'
-    store.sidebarOpen = true
-
-    store.selectSidebarView('files')
-    expect(store.sidebarView).toBe('files')
-    expect(store.sidebarOpen).toBe(true)
-
-    // Re-selecting the active view keeps the sidebar open instead of toggling it closed.
-    store.selectSidebarView('files')
-    expect(store.sidebarView).toBe('files')
-    expect(store.sidebarOpen).toBe(true)
-  })
-
-  it('keeps activity panel collapse separate from whole workbench collapse', () => {
-    const store = useWorkspaceTabsStore()
-
-    store.sidebarView = 'sessions'
-    store.sidebarOpen = true
-    store.workbenchOpen = true
-
-    store.toggleWorkbench()
-    expect(store.workbenchOpen).toBe(false)
-    expect(store.sidebarOpen).toBe(true)
-
-    store.selectSidebarView('files')
-    expect(store.workbenchOpen).toBe(true)
-    expect(store.sidebarOpen).toBe(true)
-    expect(store.sidebarView).toBe('files')
-
-    store.hideWorkbench()
-    expect(store.workbenchOpen).toBe(false)
-
-    store.showWorkbench()
-    expect(store.workbenchOpen).toBe(true)
-  })
-
-  it('drops legacy persisted tab models', () => {
-    localStorage.setItem('workspace-tabs', '{"bot-1":{"tabs":[]}}')
-    localStorage.setItem('workspace-panes', '{"bot-1":{"panes":[]}}')
-    useWorkspaceTabsStore()
     expect(localStorage.getItem('workspace-tabs')).toBeNull()
     expect(localStorage.getItem('workspace-panes')).toBeNull()
+    expect(localStorage.getItem('workspace-layout')).toBeNull()
+    expect(store.focusAdjacentTab(1)).toBe(false)
+    expect(store.activeId).toBeNull()
   })
 
-  // The mobile single-stack constraint (useIsMobile): below 768px the dock is
-  // one group with a hidden tab strip, splits are vetoed or degraded to tabs,
-  // and the persisted desktop layout is neither restored nor overwritten.
-  // mobileBreakpoint simulates the media query; reset between tests so a
-  // mobile state can never leak into the desktop suite.
-  describe('mobile single-stack constraint', () => {
-    afterEach(() => {
-      mobileBreakpoint.reset()
+  it('spawns a default draft chat on cold start and prevents closing the sole draft chat', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
+
+    expect(store.activeId).toBe('chat:1')
+    expect(store.resolveTabTitle('chat:1')).toBe('New Session')
+    store.closeTab('chat:1')
+    expect(store.workbench.tabs['chat:1']).toBeDefined()
+  })
+
+  it('replaces preview chat/file tabs in place, promotes on edit/send/keepOpen, and protects pinned tabs from Close All', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
+
+    // Single-click file replaces the initial preview draft chat in place.
+    store.openFile('/data/a.ts')
+    expect(store.workbench.tabs['chat:1']).toBeUndefined()
+    expect(store.activeId).toBe('file:/data/a.ts')
+    expect(findGroupOfTab(store.workbench.root, 'file:/data/a.ts')?.previewTabId).toBe('file:/data/a.ts')
+
+    // Another single-click file replaces file:/data/a.ts in place.
+    store.openFile('/data/b.ts')
+    expect(store.workbench.tabs['file:/data/a.ts']).toBeUndefined()
+    expect(store.activeId).toBe('file:/data/b.ts')
+
+    // Double-click keepOpen promotes b.ts -> next preview c.ts opens beside it.
+    store.keepOpenTab('file:/data/b.ts')
+    expect(findGroupOfTab(store.workbench.root, 'file:/data/b.ts')?.previewTabId).toBeNull()
+    store.openFile('/data/c.ts')
+    expect(store.workbench.tabs['file:/data/b.ts']).toBeDefined()
+    expect(store.workbench.tabs['file:/data/c.ts']).toBeDefined()
+
+    // Pin b.ts -> moves to front and survives closeAllTabsInGroup.
+    store.pinTab('file:/data/b.ts')
+    const groupId = store.activeGroupId!
+    store.closeAllTabsInGroup(groupId)
+    expect(store.workbench.tabs['file:/data/b.ts']).toBeDefined()
+    expect(store.workbench.tabs['file:/data/c.ts']).toBeUndefined()
+  })
+
+  it('splits subagent sessions to the right of the primary pane and aggregates subsequent subagents into that right group', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
+
+    store.openSubagentSession({ sessionId: 'sub-1', title: 'Researcher' })
+    expect(listGroups(store.workbench.root)).toHaveLength(2)
+
+    const rightGroupId = findRightNeighborOfSpatialFirst(store.workbench.root)
+    expect(rightGroupId).toBeTruthy()
+    expect(findGroupOfTab(store.workbench.root, store.activeId!)?.id).toBe(rightGroupId)
+
+    store.openSubagentSession({ sessionId: 'sub-2', title: 'Verifier' })
+    expect(listGroups(store.workbench.root)).toHaveLength(2)
+    expect(findGroupOfTab(store.workbench.root, store.activeId!)?.id).toBe(rightGroupId)
+  })
+
+  it('handles draftPromoted, userSentInSession, delayed /new draftViewRequested, and forkedSessionRequested in the originating split', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
+
+    // Split chat to right so we have two chat views: chat:1 (left) and chat:2 (right).
+    store.splitGroup(store.activeGroupId!, 'right')
+    const leftId = 'chat:1'
+    const rightId = 'chat:2'
+    expect(store.workbench.tabs[leftId]).toBeDefined()
+    expect(store.workbench.tabs[rightId]).toBeDefined()
+
+    // Promote left draft to s-left and send message -> left becomes non-preview.
+    chatStoreMock.draftPromoted.value = { botId: 'bot-1', viewId: leftId, sessionId: 's-left', seq: 1 }
+    expect(store.workbench.tabs[leftId]?.target).toMatchObject({ kind: 'chat', sessionId: 's-left' })
+
+    chatStoreMock.userSentInSession.value = { id: 's-left', botId: 'bot-1', viewId: leftId, wasDraft: false, seq: 1 }
+    await flushTicks()
+    expect(findGroupOfTab(store.workbench.root, leftId)?.previewTabId).not.toBe(leftId)
+
+    // Focus right split, then resolve a delayed Fork requested from leftId -> opens in left group without stealing right focus.
+    store.activateTab(rightId)
+    const leftGroupId = findGroupOfTab(store.workbench.root, leftId)!.id
+    chatStoreMock.forkedSessionRequested.value = {
+      botId: 'bot-1',
+      viewId: leftId,
+      expectedSessionId: 's-left',
+      sessionId: 's-forked',
+      title: 'Forked Chat',
+      explicitSelection: true,
+      activate: false,
+      seq: 1,
+    }
+    const forkedTab = Object.values(store.workbench.tabs).find(
+      t => t.target.kind === 'chat' && t.target.sessionId === 's-forked',
+    )
+    expect(forkedTab).toBeDefined()
+    expect(findGroupOfTab(store.workbench.root, forkedTab!.id)?.id).toBe(leftGroupId)
+    expect(store.activeId).toBe(rightId)
+
+    // Delayed `/new` on pinned leftId spawns a draft in leftGroupId and calls applyDraftViewRequest with new viewId.
+    chatStoreMock.draftViewRequested.value = {
+      botId: 'bot-1',
+      viewId: leftId,
+      expectedSessionId: 's-left',
+      explicitSelection: false,
+      input: null,
+      activate: false,
+      seq: 1,
+    }
+    expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledOnce()
+  })
+
+  it('reconciles deleted sessions by closing tabs or resetting matching composerScope to draft', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
+
+    store.openSessionChatPinned({ sessionId: 's-del-1', title: 'Delete Me' })
+    store.openSessionChatPinned({ sessionId: 's-del-2', title: 'Reset Me' })
+    const resetTab = Object.values(store.workbench.tabs).find(
+      t => t.target.kind === 'chat' && t.target.sessionId === 's-del-2',
+    )!
+
+    chatStoreMock.deletedSession.value = { id: 's-del-1', botId: 'bot-1', seq: 1 }
+    await flushTicks()
+    expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-del-1')).toBe(false)
+
+    chatStoreMock.deletedSession.value = {
+      id: 's-del-2',
+      botId: 'bot-1',
+      seq: 2,
+      composerScope: `bot-1:${resetTab.id}`,
+    }
+    await flushTicks()
+    expect(store.workbench.tabs[resetTab.id]?.target).toMatchObject({ kind: 'chat', sessionId: null })
+  })
+
+  it('numbers terminals/browsers, resets numbering to 1 once all close, deduplicates browser URLs, and keeps display singleton', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
+
+    store.openTerminal()
+    store.openTerminal()
+    expect(store.resolveTabTitle('terminal:1')).toBe('Terminal 1')
+    expect(store.resolveTabTitle('terminal:2')).toBe('Terminal 2')
+
+    store.closeTab('terminal:1')
+    await flushTicks()
+    expect(terminalCacheMocks.deleteTerminalSnapshot).toHaveBeenCalledWith('bot-1::terminal:1')
+
+    store.openTerminal()
+    expect(store.workbench.tabs['terminal:3']).toBeDefined()
+
+    // Close all terminals -> counter restarts at 1.
+    store.closeTab('terminal:2')
+    store.closeTab('terminal:3')
+    store.openTerminal()
+    expect(store.workbench.tabs['terminal:1']).toBeDefined()
+
+    // Browser URL deduplication.
+    expect(store.openBrowserAt('http://localhost:3000/app')).toBe(true)
+    const firstBrowserId = store.activeId!
+    store.openTerminal()
+    expect(store.openBrowserAt('localhost:3000/app')).toBe(true)
+    expect(store.activeId).toBe(firstBrowserId)
+
+    // Singleton display.
+    store.openDisplay()
+    store.openDisplay()
+    expect(Object.keys(store.workbench.tabs).filter(id => id.startsWith('display:'))).toEqual([DISPLAY_PANEL_ID])
+  })
+
+  it('prunes disallowed tabs when bot permissions drop', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
+
+    store.openFilePinned('/data/secret.ts')
+    store.openTerminal()
+    store.openBrowser()
+    expect(store.workbench.tabs['file:/data/secret.ts']).toBeDefined()
+    expect(store.workbench.tabs['terminal:1']).toBeDefined()
+    expect(store.workbench.tabs['browser:1']).toBeDefined()
+
+    useChatSelectionStore().setBot('bot-chat-only')
+    await flushTicks()
+    expect(store.workbench.tabs['file:/data/secret.ts']).toBeUndefined()
+    expect(store.workbench.tabs['terminal:1']).toBeUndefined()
+    expect(store.workbench.tabs['browser:1']).toBeUndefined()
+  })
+
+  it('queues dirty files for confirmation, aborts batch on cancel, and keeps tab open on save failure', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
+
+    store.openFilePinned('/data/one.ts')
+    store.openFilePinned('/data/two.ts')
+    store.openFilePinned('/data/clean.ts')
+    store.setFileDirty('file:/data/one.ts', true)
+    store.setFileDirty('file:/data/two.ts', true)
+    expect(store.dirtyFileCount).toBe(2)
+
+    store.requestCloseTabs(['file:/data/one.ts', 'file:/data/two.ts', 'file:/data/clean.ts'])
+    // Clean tab closes immediately; dirty ones queue in order.
+    expect(store.workbench.tabs['file:/data/clean.ts']).toBeUndefined()
+    expect(store.pendingClose).toEqual({ panelId: 'file:/data/one.ts', title: 'one.ts' })
+
+    // Cancel aborts entire pending queue.
+    await store.resolvePendingClose('cancel')
+    expect(store.pendingClose).toBeNull()
+    expect(store.workbench.tabs['file:/data/one.ts']).toBeDefined()
+    expect(store.workbench.tabs['file:/data/two.ts']).toBeDefined()
+
+    // Save failure keeps tab open, save success closes tab.
+    store.registerFileSaveHandler('file:/data/one.ts', async () => false)
+    store.registerFileSaveHandler('file:/data/two.ts', async () => {
+      store.setFileDirty('file:/data/two.ts', false)
+      return true
     })
+    store.requestCloseTabs(['file:/data/one.ts', 'file:/data/two.ts'])
+    await store.resolvePendingClose('save')
+    expect(store.workbench.tabs['file:/data/one.ts']).toBeDefined()
+    expect(store.pendingClose?.panelId).toBe('file:/data/two.ts')
+    await store.resolvePendingClose('save')
+    expect(store.workbench.tabs['file:/data/two.ts']).toBeUndefined()
+  })
 
-    it('ignores the persisted desktop layout and cold-starts a single hidden-header group', async () => {
-      mobileBreakpoint.setMobile(true)
-      const storedLayout = persistedLayoutWithPanel(
-        'file:1',
-        'file',
-        { filePath: '/data/a.ts' },
-        'a.ts',
-      )
-      const storedJson = JSON.stringify({ 'bot-1': { layout: storedLayout, ephemeralIds: [] } })
-      localStorage.setItem('workspace-layout', storedJson)
+  it('cycles adjacent tabs and dispatches workbench keyboard shortcuts', async () => {
+    const store = useWorkspaceTabsStore()
+    store.mountWorkspace()
+    await flushTicks()
 
+    store.openFilePinned('/a.txt')
+    store.openFilePinned('/b.txt')
+    const registry = createKeyboardCommandRegistry()
+    const dispose = registerWorkbenchCommands(registry, store)
+
+    store.activateTab('file:/a.txt')
+    registry.dispatch(appKeyboardCommands.nextWorkspaceTab)
+    expect(store.activeId).toBe('file:/b.txt')
+    registry.dispatch(appKeyboardCommands.previousWorkspaceTab)
+    expect(store.activeId).toBe('file:/a.txt')
+
+    registry.dispatch(appKeyboardCommands.splitWorkspaceRight)
+    expect(listGroups(store.workbench.root)).toHaveLength(2)
+
+    dispose()
+  })
+
+  describe('mobile projection & cold-start isolation', () => {
+    it('preserves multi-column desktop split tree non-destructively across desktop -> mobile -> desktop resize', async () => {
       const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
+      store.mountWorkspace()
+      await flushTicks()
 
-      // The desktop tree is NOT deserialized: no file panel, one group, and
-      // the draft fallback owns the stack.
-      expect(dock.getPanel('file:1')).toBeUndefined()
-      expect(dock.groups).toHaveLength(1)
-      expect(dock.panels).toHaveLength(1)
-      expect(dock.panels[0]!.component).toBe('chat')
-      expect(dock.groups[0]!.model.header.hidden).toBe(true)
-      // The stored LAYOUT tree is untouched: mobile never restores it and
-      // never serializes over it. Per-bot counters living in the same record
-      // (chatCounter for the draft spawn) may still tick — they number new
-      // panels, they are not the desktop arrangement.
-      const written = JSON.parse(localStorage.getItem('workspace-layout')!)
-      expect(written['bot-1'].layout).toEqual(storedLayout)
-    })
+      store.openFilePinned('/data/left.ts')
+      store.openFileToSide('/data/right.ts')
+      expect(listGroups(store.workbench.root)).toHaveLength(2)
+      expect(store.workbench.root.kind).toBe('split')
+      store.setSplitRatio(store.workbench.root.id, 0.38)
 
-    it('opens mobile navigation for sidebar shortcuts it can show and ignores Supermarket', async () => {
+      // Narrow to mobile (< 768px): splits remain preserved in state while UI projects single active tab.
       mobileBreakpoint.setMobile(true)
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
-      const registry = createKeyboardCommandRegistry()
-      const unregister = registerWorkbenchCommands(registry, store)
+      await flushTicks()
+      expect(store.isMobile).toBe(true)
+      expect(listGroups(store.workbench.root)).toHaveLength(2)
 
-      registry.dispatch(appKeyboardCommands.showSchedule)
-      expect(store.sidebarView).toBe('schedule')
-      expect(store.mobileNavOpen).toBe(true)
-      store.closeMobileNav()
-      registry.dispatch(appKeyboardCommands.showSupermarket)
-      expect(store.sidebarView).toBe('schedule')
-      expect(store.mobileNavOpen).toBe(false)
-      unregister()
-    })
-
-    it('keeps programmatic opens inside the single group instead of splitting', async () => {
-      mobileBreakpoint.setMobile(true)
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
-
-      store.openTerminal()
-      expect(dock.getPanel('terminal:1')).toBeTruthy()
-      expect(dock.groups).toHaveLength(1)
-
-      store.openFile('/data/notes/todo.md')
-      store.splitGroup('group-1', 'right')
-      expect(dock.getPanel('file:/data/notes/todo.md~2')).toBeTruthy()
-      expect(dock.groups).toHaveLength(1)
-      expect(dock.groups[0]!.panels.map(panel => panel.id).sort()).toEqual([
-        'file:/data/notes/todo.md',
-        'file:/data/notes/todo.md~2',
-        'terminal:1',
-        ...dock.panels.filter(panel => panel.component === 'chat').map(panel => panel.id),
-      ].sort())
-    })
-
-    it('merges groups and hides the tab strip on entry, restores the strip on exit', async () => {
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      store.openFile('/data/notes/todo.md')
-      store.splitGroup('group-1', 'right')
-      expect(dock.groups).toHaveLength(2)
-
-      mobileBreakpoint.setMobile(true)
-      await nextTick()
-      expect(dock.groups).toHaveLength(1)
-      expect(dock.groups[0]!.model.header.hidden).toBe(true)
-
+      // Widen back to desktop (>= 768px): exact two-column split and 0.38 ratio remain intact.
       mobileBreakpoint.setMobile(false)
-      await nextTick()
-      expect(dock.groups[0]!.model.header.hidden).toBe(false)
+      await flushTicks()
+      expect(listGroups(store.workbench.root)).toHaveLength(2)
+      expect(store.workbench.root.kind === 'split' && store.workbench.root.ratio).toBeCloseTo(0.38, 5)
     })
 
-    it('vetoes drop overlays and drops that would split off a new group', () => {
-      mobileBreakpoint.setMobile(true)
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-
-      const overlay = {
-        position: 'right',
-        group: dock.groups[0]!,
-        getData: () => undefined,
-        preventDefault: vi.fn(),
-      }
-      dock.emitWillShowOverlay(overlay)
-      expect(overlay.preventDefault).toHaveBeenCalled()
-
-      const drop = {
-        position: 'below',
-        group: dock.groups[0]!,
-        getData: () => undefined,
-        preventDefault: vi.fn(),
-      }
-      dock.emitWillDrop(drop)
-      expect(drop.preventDefault).toHaveBeenCalled()
-
-      // A center drop merges as a tab — the only arrangement mobile allows.
-      const center = {
-        position: 'center',
-        group: dock.groups[0]!,
-        getData: () => undefined,
-        preventDefault: vi.fn(),
-      }
-      dock.emitWillShowOverlay(center)
-      expect(center.preventDefault).not.toHaveBeenCalled()
-    })
-
-    it('never serializes the mobile stack over the desktop layout snapshot', async () => {
-      mobileBreakpoint.setMobile(true)
-      const storedLayout = persistedLayoutWithPanel(
-        'chat:bot-1:7',
-        'chat',
-        { sessionId: null, explicitSelection: true },
-        'Old Session',
-      )
-      const storedJson = JSON.stringify({ 'bot-1': { layout: storedLayout, ephemeralIds: [] } })
-      localStorage.setItem('workspace-layout', storedJson)
-
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
-      store.openTerminal()
-      await nextTick()
-
-      // The mobile stack (draft chat + terminal) must NOT be serialized over
-      // the desktop snapshot: the layout tree round-trips untouched. The
-      // terminalCounter bump sharing the record is expected — it numbers the
-      // new panel, it does not reshape the desktop arrangement.
-      const written = JSON.parse(localStorage.getItem('workspace-layout')!)
-      expect(written['bot-1'].layout).toEqual(storedLayout)
-    })
-
-    it('keeps the desktop snapshot sealed after leaving mobile until the next desktop restore', async () => {
-      const storedLayout = persistedLayoutWithPanel(
-        'chat:bot-1:7',
-        'chat',
-        { sessionId: null, explicitSelection: true },
-        'Old Session',
-      )
-      localStorage.setItem('workspace-layout', JSON.stringify({
-        'bot-1': { layout: storedLayout, ephemeralIds: [] },
+    it('cold-starts cleanly on phone without overwriting persisted desktop layout and reuses single terminal/browser', async () => {
+      let seeded = createEmptyWorkbenchState()
+      seeded = insertTab(seeded, { id: 'file:/data/desk.ts', pinned: false, target: { kind: 'file', filePath: '/data/desk.ts' } })
+      seeded = splitGroupWithTab(seeded, listGroups(seeded.root)[0]!.id, 'right', {
+        id: 'file:/data/side.ts',
+        pinned: false,
+        target: { kind: 'file', filePath: '/data/side.ts' },
+      })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-1': { workbench: seeded, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
       }))
 
-      // Start on DESKTOP so the snapshot is deserialized with persistence
-      // live; the restore round-trips it back into storage. That
-      // round-tripped form (not the seed above) is the baseline — the exit
-      // path must leave exactly it untouched.
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
-      const desktopPersistedLayout = JSON.parse(localStorage.getItem('workspace-layout')!)['bot-1'].layout
-
-      // Enter mobile and open a terminal: the stack diverges from the
-      // snapshot (persist blocked by isMobile).
       mobileBreakpoint.setMobile(true)
-      await nextTick()
-      store.openTerminal()
-      await nextTick()
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
 
-      // Exit mobile: only the tab strip comes back — the dock is STILL the
-      // merged stack, so the isMobile guard no longer covers it. Any layout
-      // change in this window (here a file open; in the wild a tab
-      // activation or an async panel title) must not serialize the merged
-      // stack over the desktop snapshot.
+      expect(store.workbench.tabs['file:/data/desk.ts']).toBeUndefined()
+      expect(listGroups(store.workbench.root)).toHaveLength(1)
+
+      // Repeated terminal & browser opens on mobile reuse the existing tab rather than leaking unreachable shells.
+      store.openTerminal()
+      store.openTerminal()
+      expect(Object.keys(store.workbench.tabs).filter(k => k.startsWith('terminal:'))).toEqual(['terminal:1'])
+
+      store.openBrowser()
+      store.activateChatPanel()
+      store.openBrowser()
+      expect(Object.keys(store.workbench.tabs).filter(k => k.startsWith('browser:'))).toEqual(['browser:1'])
+
+      // Desktop layout seed in storage remains untouched.
+      const saved = JSON.parse(sessionStorage.getItem('memoh:workbench:v1')!)
+      expect(saved['bot-1'].workbench).toEqual(seeded)
+    })
+
+    it('restores saved desktop split layout and merges mobile-opened tabs on mobile -> desktop widen', async () => {
+      let seeded = createEmptyWorkbenchState()
+      seeded = insertTab(seeded, { id: 'file:/data/desk.ts', pinned: false, target: { kind: 'file', filePath: '/data/desk.ts' } })
+      seeded = splitGroupWithTab(seeded, listGroups(seeded.root)[0]!.id, 'right', {
+        id: 'file:/data/side.ts',
+        pinned: false,
+        target: { kind: 'file', filePath: '/data/side.ts' },
+      })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-1': { workbench: seeded, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      }))
+
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Open a terminal while cold-started on phone, then widen back to desktop.
+      store.openTerminal()
+      expect(store.workbench.tabs['terminal:1']).toBeDefined()
+
       mobileBreakpoint.setMobile(false)
-      await nextTick()
-      store.openFile('/data/notes/todo.md')
-      await flushDraftChatFallback()
+      await flushTicks()
 
-      const written = JSON.parse(localStorage.getItem('workspace-layout')!)
-      expect(written['bot-1'].layout).toEqual(desktopPersistedLayout)
+      expect(listGroups(store.workbench.root)).toHaveLength(2)
+      expect(store.workbench.tabs['file:/data/desk.ts']).toBeDefined()
+      expect(store.workbench.tabs['file:/data/side.ts']).toBeDefined()
+      expect(store.workbench.tabs['terminal:1']).toBeDefined()
+
+      // Persistence is now active on desktop again.
+      store.openFilePinned('/data/after-widen.ts')
+      await flushTicks()
+      const saved = JSON.parse(sessionStorage.getItem('memoh:workbench:v1')!)
+      expect(saved['bot-1'].workbench.tabs['file:/data/after-widen.ts']).toBeDefined()
     })
 
-    it.each(['file', 'preview', 'terminal', 'browser'] as const)(
-      'returns to chat from a %s-only stack without replacing its panel',
-      async (component) => {
-        mobileBreakpoint.setMobile(true)
-        const store = useWorkspaceTabsStore()
-        const dock = createFakeDock()
-        store.registerApi(dock as never)
-        await flushDraftChatFallback()
-        store.openFile('/data/return.md') // Replaces the ephemeral draft chat.
-        const file = dock.getPanel('file:/data/return.md')!
-        if (component !== 'file') {
-          if (component === 'preview') store.openPreview('/data/return.md')
-          if (component === 'terminal') store.openTerminal()
-          if (component === 'browser') store.openBrowser()
-          file.api.close()
-        }
-        await flushDraftChatFallback()
-        expect(dock.panels).toHaveLength(1)
-        const original = dock.activePanel!
-        expect(original.component).toBe(component)
-        // Explicit navigation must not inherit the empty-dock restore guard.
-        store.activateChatPanel()
-        store.activateChatPanel()
-        await flushDraftChatFallback()
-        expect(dock.activePanel?.component).toBe('chat')
-        expect(dock.getPanel(original.id)).toBe(original)
-        expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(1)
-        // Opening another file must not immediately evict the recovered chat.
-        store.openFile('/data/another.md')
-        store.activateChatPanel()
-        expect(dock.activePanel?.component).toBe('chat')
-        expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(1)
-      },
-    )
+    it('prevents mobile panel actions from regressing desktop counters or colliding on return to desktop', async () => {
+      let seeded = createEmptyWorkbenchState('g1')
+      seeded = insertTab(seeded, { id: 'terminal:2', pinned: false, target: { kind: 'terminal', instance: 2 } }, { groupId: 'g1' })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-1': { workbench: seeded, terminalCounter: 2, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      }))
 
-    it('returns to chat while retaining dirty files', async () => {
       mobileBreakpoint.setMobile(true)
       const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
-      store.openFile('/data/dirty.md')
-      store.setFileDirty('file:/data/dirty.md', true)
-      const file = dock.getPanel('file:/data/dirty.md')!
-      store.activateChatPanel()
-      await flushDraftChatFallback()
-      expect(dock.activePanel?.component).toBe('chat')
-      expect(dock.getPanel(file.id)).toBe(file)
-      expect(store.fileDirty[file.id]).toBe(true)
+      store.mountWorkspace()
+      await flushTicks()
+
+      store.openTerminal()
+      expect(store.workbench.tabs['terminal:3']).toBeDefined()
+
+      // Widening back preserves both terminal:2 and terminal:3, and splitting terminal:2 creates terminal:4 instead of a no-op.
+      mobileBreakpoint.setMobile(false)
+      await flushTicks()
+
+      expect(store.workbench.tabs['terminal:2']).toBeDefined()
+      expect(store.workbench.tabs['terminal:3']).toBeDefined()
+      const ownerGroup = findGroupOfTab(store.workbench.root, 'terminal:2')!
+      store.activateTab('terminal:2')
+      store.splitGroup(ownerGroup.id, 'right')
+      expect(listGroups(store.workbench.root).length).toBeGreaterThanOrEqual(2)
+      expect(store.workbench.tabs['terminal:4']).toBeDefined()
+    })
+
+    it('cycles mobile tabs across preserved desktop groups and targets chat group for session opens', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      const chatId = store.activeId!
+      store.openFileToSide('/data/side.ts')
+      expect(listGroups(store.workbench.root)).toHaveLength(2)
+      expect(store.activeId).toBe('file:/data/side.ts')
+
+      mobileBreakpoint.setMobile(true)
+      await flushTicks()
+
+      // Even though active group holds file:/data/side.ts alone, focusAdjacentTab cycles across groups on mobile.
+      expect(store.focusAdjacentTab(1)).toBe(true)
+      expect(store.activeId).toBe(chatId)
+      expect(store.focusAdjacentTab(-1)).toBe(true)
+      expect(store.activeId).toBe('file:/data/side.ts')
+
+      // Selecting a session while focused on a file group on mobile routes to the chat group instead of evicting the file.
+      store.openSessionChat({ sessionId: 's-mobile', title: 'Mobile Chat' })
+      expect(store.workbench.tabs['file:/data/side.ts']).toBeDefined()
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-mobile')).toBe(true)
+    })
+  })
+
+  describe('concurrency, bot isolation & synchronous draft refill', () => {
+    it('keeps a fallback tab synchronously when closing the last open file tab', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Capture every reactive workbench commit to verify tabs never drop to zero.
+      const observedCounts: number[] = []
+      const stop = watch(
+        () => store.workbench,
+        (wb) => { observedCounts.push(Object.keys(wb.tabs).length) },
+        { flush: 'sync' },
+      )
+
+      store.openFile('/data/only.ts')
+      store.closeTab('file:/data/only.ts')
+      stop()
+
+      expect(observedCounts.every(count => count > 0)).toBe(true)
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat')).toBe(true)
+    })
+
+    it('clears workbench and loadedBotId when currentBotId becomes null and clears stale drafts on legacy upgrade', async () => {
+      localStorage.setItem('workspace-layout', '{"legacy":true}')
+      localStorage.setItem('chat-input-drafts', JSON.stringify({ 'bot-1:chat:1': 'stale' }))
+      const store = useWorkspaceTabsStore()
+      expect(localStorage.getItem('chat-input-drafts')).toBeNull()
+
+      store.mountWorkspace()
+      await flushTicks()
+      expect(store.loadedBotId).toBe('bot-1')
+
+      useChatSelectionStore().setBot(null)
+      await flushTicks()
+      expect(store.loadedBotId).toBeNull()
+      expect(Object.keys(store.workbench.tabs)).toHaveLength(0)
+    })
+
+    it('aborts in-flight save-and-close if cancelled or switched to another bot before save resolves', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      store.openFilePinned('/data/slow.ts')
+      store.setFileDirty('file:/data/slow.ts', true, 'bot-1')
+
+      let resolveSave!: (ok: boolean) => void
+      const saveHandler = vi.fn(() => new Promise<boolean>((resolve) => { resolveSave = resolve }))
+      store.registerFileSaveHandler('file:/data/slow.ts', saveHandler, 'bot-1')
+      store.requestCloseTab('file:/data/slow.ts')
+      expect(store.pendingClose?.panelId).toBe('file:/data/slow.ts')
+
+      const closingPromise = store.resolvePendingClose('save')
+      await store.resolvePendingClose('cancel')
+      resolveSave(true)
+      await closingPromise
+
+      expect(store.workbench.tabs['file:/data/slow.ts']).toBeDefined()
+    })
+
+    it('ignores stale bot dirty calls and mismatched unregisterFileSaveHandler calls', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      store.openFilePinned('/data/shared.ts')
+      store.setFileDirty('file:/data/shared.ts', true, 'bot-other')
+      expect(store.fileDirty['file:/data/shared.ts']).toBeUndefined()
+
+      const oldHandler = vi.fn(async () => false)
+      const newHandler = vi.fn(async () => true)
+      store.registerFileSaveHandler('file:/data/shared.ts', newHandler, 'bot-1')
+      store.unregisterFileSaveHandler('file:/data/shared.ts', oldHandler)
+
+      store.setFileDirty('file:/data/shared.ts', true, 'bot-1')
+      store.requestCloseTab('file:/data/shared.ts')
+      await store.resolvePendingClose('save')
+      expect(newHandler).toHaveBeenCalledOnce()
+      expect(oldHandler).not.toHaveBeenCalled()
+      expect(store.workbench.tabs['file:/data/shared.ts']).toBeUndefined()
+    })
+
+    it('blocks cross-bot mutations before pre-flush switch completes, ignores other-bot deletions, promotes explicitSelection on pinned open, and does not re-queue cleaned tabs', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Non-explicit session tab promoted to explicit when opened pinned
+      store.openSessionChat({ sessionId: 's-non-exp', explicitSelection: false })
+      expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
+      store.openSessionChatPinned({ sessionId: 's-non-exp' })
+      expect(chatStoreMock.hasExplicitSessionSelection).toBe(true)
+
+      // Deleting a session belonging to another bot must not touch bot-1's tabs
+      chatStoreMock.deletedSession.value = { id: 's-non-exp', botId: 'bot-other', seq: 99 }
+      await flushTicks()
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-non-exp')).toBe(true)
+
+      // Queued dirty tab that becomes clean before requestCloseTabs must not stay in closeQueue
+      store.openFilePinned('/data/cleaned.ts')
+      store.setFileDirty('file:/data/cleaned.ts', true, 'bot-1')
+      store.requestCloseTab('file:/data/cleaned.ts')
+      expect(store.pendingClose?.panelId).toBe('file:/data/cleaned.ts')
+      store.setFileDirty('file:/data/cleaned.ts', false, 'bot-1')
+      store.requestCloseTabs(['file:/data/cleaned.ts'])
+      expect(store.workbench.tabs['file:/data/cleaned.ts']).toBeUndefined()
       expect(store.pendingClose).toBeNull()
-    })
 
-    it('restores an explicit session selection without evicting a non-chat panel', async () => {
-      mobileBreakpoint.setMobile(true)
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
-      store.openFile('/data/return.md')
-      const file = dock.getPanel('file:/data/return.md')!
-      useChatSelectionStore().setSession('s1', { explicitSelection: true })
-      chatStoreMock.sessionId = 's1'
-      chatStoreMock.hasExplicitSessionSelection = true
-      store.activateChatPanel()
-      store.activateChatPanel()
-      await flushDraftChatFallback()
-      expect(dock.activePanel?.params.sessionId).toBe('s1')
-      expect(dock.getPanel(file.id)).toBe(file)
-      expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(1)
-    })
-
-    it.each(['auto-selected', 'deleted'] as const)(
-      'does not revive an %s session when returning to chat',
-      async (kind) => {
-        mobileBreakpoint.setMobile(true)
-        const store = useWorkspaceTabsStore()
-        const dock = createFakeDock()
-        store.registerApi(dock as never)
-        await flushDraftChatFallback()
-        store.openFile('/data/return.md')
-        if (kind === 'deleted') {
-          emitDeletedSession('s1')
-          await nextTick()
-        }
-        useChatSelectionStore().setSession('s1', { explicitSelection: kind === 'deleted' })
-        chatStoreMock.sessionId = 's1'
-        chatStoreMock.hasExplicitSessionSelection = kind === 'deleted'
-        store.activateChatPanel()
-        await flushDraftChatFallback()
-        expect(dock.activePanel?.component).toBe('chat')
-        expect(dock.activePanel?.params.sessionId).toBeNull()
-        expect(dock.getPanel('file:/data/return.md')).toBeDefined()
-      },
-    )
-
-    it('waits for a bot switch instead of returning into the previous workspace', async () => {
-      mobileBreakpoint.setMobile(true)
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
-      store.openFile('/data/previous-bot.md')
-      const original = dock.activePanel
+      // Pre-flush bot switch divergence: synchronous mutations for bot-2 must not corrupt bot-1
       useChatSelectionStore().setBot('bot-without-layout')
-      store.activateChatPanel()
-      expect(dock.activePanel).toBe(original)
-      expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
-      await flushDraftChatFallback()
-      store.activateChatPanel()
-      expect(dock.activePanel?.component).toBe('chat')
-      expect(dock.getPanel('file:/data/previous-bot.md')).toBeUndefined()
+      store.openTerminal()
+      store.openSessionChat({ sessionId: 's-leaked' })
+      expect(store.workbench.tabs['terminal:1']).toBeUndefined()
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-leaked')).toBe(false)
+      await flushTicks()
+      expect(store.loadedBotId).toBe('bot-without-layout')
     })
 
-    it('focuses the existing terminal instead of stacking unreachable new ones', async () => {
+    it('reconciles previously deleted sessions before alignSelectionWithDock selects them on bot switch, and clears pendingDragPersist on resetBot', async () => {
+      // Seed bot-2 with a stored chat tab pointing at a session that gets deleted while bot-1 is active.
+      let bot2Wb = createEmptyWorkbenchState('g1')
+      bot2Wb = insertTab(bot2Wb, { id: 'chat:1', pinned: false, target: { kind: 'chat', sessionId: 's-deleted', explicitSelection: true } })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-2': { workbench: bot2Wb, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 1 },
+      }))
+
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Record deletion for bot-2 while still on bot-1.
+      chatStoreMock.deletedSession.value = { id: 's-deleted', botId: 'bot-2', seq: 1 }
+      await flushTicks()
+      chatStoreMock.selectSession.mockClear()
+
+      // Switch to bot-2 -> deleted session tab must be removed BEFORE alignSelectionWithDock runs.
+      useChatSelectionStore().setBot('bot-2')
+      await flushTicks()
+      expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s-deleted', expect.anything())
+      expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s-deleted')
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-deleted')).toBe(false)
+
+      // Mid-drag resetBot must clear pendingDragPersist so ending the drag does not write back a record.
+      store.panelDragging = true
+      store.openFilePinned('/data/dragged.ts')
+      store.resetBot('bot-2')
+      await flushTicks()
+      const savedAfterReset = JSON.parse(sessionStorage.getItem('memoh:workbench:v1') || '{}')
+      expect(savedAfterReset['bot-2']).toBeUndefined()
+    })
+
+    it('preserves explicit chatStore.sessionId when restore reconciles deleted tabs, and activates already-open tab dropped onto its own single-tab group split edge', async () => {
+      // Seed bot-2 with only a deleted chat tab while chatStore explicitly points at a valid session.
+      let bot2Wb = createEmptyWorkbenchState('g1')
+      bot2Wb = insertTab(bot2Wb, { id: 'chat:1', pinned: false, target: { kind: 'chat', sessionId: 's-deleted', explicitSelection: true } })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-2': { workbench: bot2Wb, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 1 },
+      }))
+
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      chatStoreMock.deletedSession.value = { id: 's-deleted', botId: 'bot-2', seq: 1 }
+      await flushTicks()
+
+      // Switch to bot-2 with an explicit valid session already chosen on chatStore.
+      chatStoreMock.sessionId = 's-valid'
+      chatStoreMock.hasExplicitSessionSelection = true
+      useChatSelectionStore().setBot('bot-2')
+      await flushTicks()
+
+      expect(Object.values(store.workbench.tabs).some(t => t.target.kind === 'chat' && t.target.sessionId === 's-valid')).toBe(true)
+      expect(chatStoreMock.sessionId).toBe('s-valid')
+
+      // External drop of an already-open tab onto its own inactive single-tab group's right split edge must still activate & select it.
+      useChatSelectionStore().setBot('bot-1')
+      await flushTicks()
+      store.openSessionChatPinned({ sessionId: 's-valid' })
+      store.openFileToSide('/data/side.ts')
+      const groups = listGroups(store.workbench.root)
+      expect(groups).toHaveLength(2)
+      const chatGroup = groups.find(g => g.tabIds.some(id => store.workbench.tabs[id]?.target.kind === 'chat'))!
+      const fileGroup = groups.find(g => g.id !== chatGroup.id)!
+      store.activateGroup(fileGroup.id)
+      expect(store.activeGroupId).toBe(fileGroup.id)
+
+      chatStoreMock.selectSession.mockClear()
+      store.dropExternalItem({ kind: 'session', sessionId: 's-valid' }, chatGroup.id, 'right')
+      expect(store.activeGroupId).toBe(chatGroup.id)
+      expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s-valid')
+    })
+
+    it('skips pruning when permissions are absent or empty, and prunes once explicit permissions arrive', async () => {
+      let wb = createEmptyWorkbenchState('g1')
+      wb = insertTab(wb, { id: 'file:/data/a.ts', pinned: false, target: { kind: 'file', filePath: '/data/a.ts' } })
+      wb = insertTab(wb, { id: 'terminal:1', pinned: false, target: { kind: 'terminal', instance: 1 } })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-unhydrated': { workbench: wb, terminalCounter: 1, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      }))
+
+      chatStoreMock.bots.push({ id: 'bot-unhydrated', current_user_permissions: [] })
+      useChatSelectionStore().setBot('bot-unhydrated')
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Empty permissions array during hydration must NOT wipe persisted file/terminal tabs.
+      expect(store.workbench.tabs['file:/data/a.ts']).toBeDefined()
+      expect(store.workbench.tabs['terminal:1']).toBeDefined()
+
+      // Once real permissions arrive (chat-only), restricted tabs are pruned.
+      const botEntry = chatStoreMock.bots.find(b => b.id === 'bot-unhydrated')!
+      botEntry.current_user_permissions = ['chat']
+      // Trigger reactivity by updating bots reference if needed or re-switching
+      chatStoreMock.bots = [...chatStoreMock.bots]
+      useChatSelectionStore().setBot('bot-1')
+      await flushTicks()
+      useChatSelectionStore().setBot('bot-unhydrated')
+      await flushTicks()
+      expect(store.workbench.tabs['file:/data/a.ts']).toBeUndefined()
+      expect(store.workbench.tabs['terminal:1']).toBeUndefined()
+    })
+
+    it('passes activate=true to applyDraftViewRequest when a background draft request replaces the active preview tab', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Keep chat:origin open, then open a preview file that becomes the group's active preview tab.
+      store.openSessionChatPinned({ sessionId: 's-origin' })
+      const originTabId = Object.keys(store.workbench.tabs).find((id) => {
+        const tab = store.workbench.tabs[id]
+        return tab?.target.kind === 'chat' && tab.target.sessionId === 's-origin'
+      })!
+      store.openFile('/data/preview.ts')
+      expect(store.activeId).toBe('file:/data/preview.ts')
+
+      chatStoreMock.applyDraftViewRequest.mockClear()
+      chatStoreMock.draftViewRequested.value = {
+        botId: 'bot-1',
+        viewId: originTabId,
+        expectedSessionId: 's-origin',
+        explicitSelection: true,
+        input: null,
+        activate: false,
+        seq: 1,
+      }
+
+      // Replacing the active preview tab makes the newly created draft tab active -> applyDraftViewRequest must receive true.
+      const createdId = store.activeId!
+      expect(createdId).not.toBe('file:/data/preview.ts')
+      expect(store.workbench.tabs[createdId]?.target.kind).toBe('chat')
+      expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ viewId: createdId }),
+        true,
+      )
+    })
+
+    it('preserves an active editing draft on mobile cold-start widen while dropping inactive cold-start drafts', async () => {
+      let desktopWb = createEmptyWorkbenchState('g-desktop')
+      desktopWb = insertTab(desktopWb, { id: 'file:/data/desk.ts', pinned: false, target: { kind: 'file', filePath: '/data/desk.ts' } })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-1': { workbench: desktopWb, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      }))
+
+      // Cold-start on mobile -> gets fresh draft chat:1, user opens a file, then switches back to draft chat:1 to type.
       mobileBreakpoint.setMobile(true)
       const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
+      store.mountWorkspace()
+      await flushTicks()
+      const mobileDraftId = store.activeId!
+      expect(store.workbench.tabs[mobileDraftId]?.target.kind).toBe('chat')
 
-      store.openTerminal()
-      store.openTerminal()
-      store.openTerminal()
+      store.openFilePinned('/data/mobile.ts')
+      store.activateTab(mobileDraftId)
+      expect(store.activeId).toBe(mobileDraftId)
 
-      // The mobile shell has no tab strip to enumerate open panels and ←
-      // only re-activates chat, so every "New Terminal" after the first must
-      // focus the existing one — a second terminal would stay alive but
-      // unreachable and unclosable, leaking its shell.
-      expect(dock.panels.filter(panel => panel.id.startsWith('terminal:'))).toHaveLength(1)
-      expect(dock.activePanel?.id).toBe('terminal:1')
+      // Widen back to desktop -> active editing draft must be preserved and remain active alongside desk.ts and mobile.ts.
+      mobileBreakpoint.setMobile(false)
+      await flushTicks()
+      expect(store.workbench.tabs['file:/data/desk.ts']).toBeDefined()
+      expect(store.workbench.tabs['file:/data/mobile.ts']).toBeDefined()
+      expect(store.workbench.tabs[mobileDraftId]).toBeDefined()
+      expect(store.activeId).toBe(mobileDraftId)
     })
 
-    it('focuses the existing browser instead of stacking unreachable new ones', async () => {
-      mobileBreakpoint.setMobile(true)
+    it('cancels active drag when entering mobile or removing the dragged tab, and blocks pre-flush tab mutations on bot switch', async () => {
       const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
+      store.mountWorkspace()
+      await flushTicks()
+      store.openFilePinned('/data/a.ts')
+      store.openFilePinned('/data/b.ts')
+      const groupId = store.activeGroupId!
 
-      store.openBrowser()
-      store.activateChatPanel()
-      store.openBrowser()
-      store.activateChatPanel()
-      store.openBrowser()
+      const downEv = new MouseEvent('pointerdown', { button: 0, buttons: 1, clientX: 20, clientY: 20, bubbles: true, cancelable: true }) as PointerEvent
+      Object.defineProperty(downEv, 'pointerId', { value: 1 })
+      startWorkbenchTabPointerGesture({
+        event: downEv,
+        tabId: 'file:/data/b.ts',
+        groupId,
+        pinned: false,
+        getTitle: () => 'b.ts',
+        isMobile: () => store.isMobile,
+        getGroupTabIds: gid => listGroups(store.workbench.root).find(g => g.id === gid)?.tabIds ?? [],
+        isTabPinned: tid => Boolean(store.workbench.tabs[tid]?.pinned),
+        onActivate: () => store.activateTab('file:/data/b.ts'),
+        onDragStateChange: (d) => { store.panelDragging = d },
+        onReorderInGroup: (gid, tid, idx) => store.reorderTab(gid, tid, idx),
+        onCommitDrop: vi.fn(),
+      })
+      const moveEv = new MouseEvent('pointermove', { buttons: 1, clientX: 120, clientY: 120, bubbles: true, cancelable: true }) as PointerEvent
+      Object.defineProperty(moveEv, 'pointerId', { value: 1 })
+      window.dispatchEvent(moveEv)
+      expect(activeWorkbenchDrag.value?.detachedTabId).toBe('file:/data/b.ts')
 
-      expect(dock.panels.filter(panel => panel.id.startsWith('browser:'))).toHaveLength(1)
-      expect(dock.activePanel?.id).toBe('browser:1')
+      // Removing the dragged tab cancels the active drag cleanly.
+      store.closeTab('file:/data/b.ts')
+      expect(activeWorkbenchDrag.value).toBeNull()
+      expect(store.panelDragging).toBe(false)
+
+      // Entering mobile while dragging cancels the active drag cleanly.
+      const downEv2 = new MouseEvent('pointerdown', { button: 0, buttons: 1, clientX: 20, clientY: 20, bubbles: true, cancelable: true }) as PointerEvent
+      Object.defineProperty(downEv2, 'pointerId', { value: 2 })
+      startWorkbenchTabPointerGesture({
+        event: downEv2,
+        tabId: 'file:/data/a.ts',
+        groupId,
+        pinned: false,
+        getTitle: () => 'a.ts',
+        isMobile: () => store.isMobile,
+        getGroupTabIds: gid => listGroups(store.workbench.root).find(g => g.id === gid)?.tabIds ?? [],
+        isTabPinned: tid => Boolean(store.workbench.tabs[tid]?.pinned),
+        onActivate: () => store.activateTab('file:/data/a.ts'),
+        onDragStateChange: (d) => { store.panelDragging = d },
+        onReorderInGroup: (gid, tid, idx) => store.reorderTab(gid, tid, idx),
+        onCommitDrop: vi.fn(),
+      })
+      const moveEv2 = new MouseEvent('pointermove', { buttons: 1, clientX: 120, clientY: 120, bubbles: true, cancelable: true }) as PointerEvent
+      Object.defineProperty(moveEv2, 'pointerId', { value: 2 })
+      window.dispatchEvent(moveEv2)
+      expect(activeWorkbenchDrag.value).not.toBeNull()
+      mobileBreakpoint.setMobile(true)
+      await flushTicks()
+      expect(activeWorkbenchDrag.value).toBeNull()
+      mobileBreakpoint.setMobile(false)
+      await flushTicks()
+
+      // Pre-flush bot switch blocks async/child title & session callbacks on stale bot-1 state.
+      store.openTerminal()
+      useChatSelectionStore().setBot('bot-without-layout')
+      store.updateTerminalTitle('terminal:1', 'leaked-shell')
+      expect(store.workbench.tabs['terminal:1']?.target).toEqual({ kind: 'terminal', instance: 1 })
+      await flushTicks()
+      expect(store.loadedBotId).toBe('bot-without-layout')
     })
-
   })
 })

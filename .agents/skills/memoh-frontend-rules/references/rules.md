@@ -220,7 +220,7 @@ Google RAIL 模型（100 ms 内响应）、Material Design 3 加载规范（200 
 
 **本仓库的实现：**
 - 聊天主区（`MainSection`）常驻挂载在 `App.vue` 里，在聊天和 `/settings` 之间切换路由时绝不卸载；
-  因为 `KeepAlive` 保不住 dockview 的分屏布局，一旦卸载重挂就会闪屏（见 `references/architecture.md`
+  因为 `KeepAlive` 保不住扁平工作台舞台与内嵌 iframe/终端连接，一旦卸载重挂就会闪屏（见 `references/architecture.md`
   § 布局系统）。绝不要把 `MainSection` 挪进 `<RouterView>`。
 - 离开设置页时，等离场动画播完再真正切走路由：`pages/settings-section/index.vue` 会捏住路由守卫的
   `next()`，直到 `after-leave` 触发才放行。卸载动作一律排在动画结束之后。
