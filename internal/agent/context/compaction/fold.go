@@ -18,6 +18,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/models/modelretry"
 )
@@ -114,7 +115,7 @@ func (s *Service) passes(ctx context.Context, ev Event) ([]Pass, error) {
 		slog.Int("latest_group_tokens", ev.latestGroupTokens))
 	var passes []Pass
 	for {
-		pass, folded, err := s.foldPass(ctx, ev, rows)
+		pass, folded, err := s.foldPass(ctx, &ev, rows)
 		if err != nil {
 			return passes, err
 		}
@@ -136,7 +137,8 @@ func (s *Service) passes(ctx context.Context, ev Event) ([]Pass, error) {
 // than the instruction asks for is committed too; it brings the next fold
 // sooner rather than fail the run. It reports false when nothing before the
 // messages the event keeps can be folded.
-func (s *Service) foldPass(ctx context.Context, ev Event, rows requestRows) (Pass, bool, error) {
+func (s *Service) foldPass(ctx context.Context, event *Event, rows requestRows) (Pass, bool, error) {
+	ev := *event
 	parent, err := s.checkpoints.Active(ctx, ev.SessionID)
 	if err != nil {
 		return Pass{}, false, err
@@ -148,12 +150,6 @@ func (s *Service) foldPass(ctx context.Context, ev Event, rows requestRows) (Pas
 	if err != nil || !plan.folds() {
 		return Pass{}, false, err
 	}
-	fork := ev.Request
-	fork.Messages = append(slices.Clip(plan.fork), sdk.UserMessage(plan.instruction))
-	if !ev.FixedOutput {
-		fork.MaxTokens = &plan.maxTokens
-	}
-
 	persistCtx := context.WithoutCancel(ctx)
 	logID, err := s.openLog(persistCtx, ev.BotID, ev.SessionID)
 	if err != nil {
@@ -163,9 +159,48 @@ func (s *Service) foldPass(ctx context.Context, ev Event, rows requestRows) (Pas
 		_ = s.completeLog(persistCtx, s.queries, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{})
 		return Pass{}, false, err
 	}
-	result, err := s.summarize(ctx, ev, fork, plan)
-	if err != nil {
-		return fail(err)
+	var result sdk.ModelResult
+	previousInput := 0
+	for recovery := 0; ; recovery++ {
+		fork := ev.Request
+		fork.Messages = append(slices.Clip(plan.fork), sdk.UserMessage(plan.instruction))
+		if !ev.FixedOutput {
+			fork.MaxTokens = &plan.maxTokens
+		}
+		input := forkTokens(fork)
+		if previousInput > 0 && input >= previousInput {
+			return fail(failed(ReasonInputOverflow, fmt.Errorf("%w: rejected summary cannot shrink further", errCompactionInputOverflow)))
+		}
+		result, err = s.summarize(ctx, ev, fork, plan)
+		if err == nil {
+			break
+		}
+		feedback, overflow := modelretry.ContextOverflow(err)
+		if !overflow || recovery >= 3 || ctx.Err() != nil {
+			return fail(err)
+		}
+		rejection := err
+		// Tighten the input of the rejected fork, not an unrelated configured
+		// window. Replan at complete call groups and use the existing bounded
+		// group reader when even one group is too large. Raw rows stay intact.
+		budget := feedback.InputBudget(input)
+		ev.Window = min(ev.Window, budget+leastOutput(ev))
+		ev.Allowance = min(ev.Allowance, budget)
+		ev.retention = retain(ev, rows.unfoldable(ev))
+		plan, err = planFold(ev, rows.unfoldable(ev))
+		if err != nil {
+			return fail(err)
+		}
+		if !plan.folds() {
+			return fail(failed(ReasonInputOverflow, fmt.Errorf("%w: rejected summary has no reducible source", errCompactionInputOverflow)))
+		}
+		previousInput = input
+		*event = ev
+		event := errlog.Event(ctx, "agent.compaction", rejection, errlog.Options{})
+		s.logger.LogAttrs(ctx, event.Level, "compaction summary context overflow, reducing input", append([]slog.Attr{
+			slog.String("session_id", ev.SessionID), slog.Int("attempt", recovery+1),
+			slog.Int("rejected_input_estimate", input), slog.Int("input_allowance", budget),
+		}, event.Attrs()...)...)
 	}
 	summary := strings.TrimSpace(result.Text)
 	replay := summaryReplayTokens(summary)
