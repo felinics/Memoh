@@ -85,6 +85,7 @@ func TestPublishQueueUserTurnsLocatesClaimAndAppliesItWithoutDuplicateProjection
 	}); err != nil {
 		t.Fatalf("publish assistant output: %v", err)
 	}
+	commitHeldRunOutput(t, manager, handle)
 	subscription, err := manager.Subscribe(context.Background(), testBotID, testSessionID)
 	if err != nil {
 		t.Fatalf("subscribe runtime: %v", err)

@@ -324,8 +324,11 @@ func TestContinueRuntimeDecisionCancelsContinuationAfterPublicationFailure(t *te
 			eventCh chan<- WSStreamEvent,
 		) error {
 			backend.failNext.Store(true)
+			// A transition, not streamed text: text is held for the run's
+			// next output window, so its write failure reaches the caller
+			// with the event after it.
 			select {
-			case eventCh <- WSStreamEvent(`{"type":"text_delta","delta":"late"}`):
+			case eventCh <- WSStreamEvent(`{"type":"tool_call_start","toolName":"exec","toolCallId":"call-late"}`):
 			case <-continuationCtx.Done():
 				continuationCause <- context.Cause(continuationCtx)
 				return context.Cause(continuationCtx)
