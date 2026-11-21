@@ -41,6 +41,7 @@ import {
   type DependencyMenuActionKind,
   type DependencyPrimaryAction,
 } from '@/utils/workspace-dependency'
+import { handleDarkIconLoad, shouldInvertDarkIcon } from '@/utils/dark-icon-contrast'
 
 const props = withDefaults(defineProps<{
   item: DependencyItem
@@ -114,8 +115,9 @@ const dimClass = computed(() => (unsupported.value ? 'opacity-40' : ''))
         <img
           v-if="iconUrl"
           :src="iconUrl"
-          class="size-5 object-contain"
+          :class="['size-5 object-contain', shouldInvertDarkIcon(iconUrl) && 'dark:invert']"
           alt=""
+          @load="handleDarkIconLoad($event)"
         >
         <Package
           v-else

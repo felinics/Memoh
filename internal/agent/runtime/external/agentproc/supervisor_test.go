@@ -299,3 +299,60 @@ func TestDrainConversationsClosesOneConversationOrTheWholeBot(t *testing.T) {
 		t.Fatal("a bot drain must close every runtime's processes of that bot, and only them")
 	}
 }
+
+// Observing is not use: it starts nothing, and a process observed every few
+// seconds still closes once its last real use is IdleTTL old. While the read
+// holds it, it is not closed under the reader.
+func TestObservingNeitherStartsNorKeepsAProcessAlive(t *testing.T) {
+	s := newTestSupervisor(t)
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	if _, _, ok := s.Observe(testKey); ok {
+		t.Fatal("Observe reported a process although none was started")
+	}
+
+	st := &starter{}
+	proc, release := lease(t, s, "fp", st)
+	release() // last real use: now
+
+	// Observed 20 minutes later, and reconciled while the read holds it.
+	now = now.Add(20 * time.Minute)
+	observed, done, ok := s.Observe(testKey)
+	if !ok || observed != proc {
+		t.Fatal("Observe did not return the running process")
+	}
+	now = now.Add(20 * time.Minute) // 40 minutes since real use
+	s.reconcile()
+	if proc.isClosed() {
+		t.Fatal("a process was closed while a read held it")
+	}
+	done()
+	// The read did not count as use: 40 minutes idle exceeds IdleTTL.
+	s.reconcile()
+	eventually(t, proc.isClosed)
+	if st.starts.Load() != 1 {
+		t.Fatalf("starts = %d, want only the leased one", st.starts.Load())
+	}
+	if _, _, ok := s.Observe(testKey); ok {
+		t.Fatal("Observe returned a closed process")
+	}
+}
+
+// A retired process an observer still holds closes when that read ends.
+func TestObservingARetiredProcessClosesItOnRelease(t *testing.T) {
+	s := newTestSupervisor(t)
+	st := &starter{}
+	old, release := lease(t, s, "v1", st)
+	release()
+	_, done, ok := s.Observe(testKey)
+	if !ok {
+		t.Fatal("no process observed")
+	}
+	_, releaseFresh := lease(t, s, "v2", st)
+	defer releaseFresh()
+	if old.isClosed() {
+		t.Fatal("the retired process closed under an observer")
+	}
+	done()
+	eventually(t, old.isClosed)
+}

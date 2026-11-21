@@ -6,7 +6,8 @@
     <img
       :src="activeImageUrl"
       alt=""
-      :class="imageClass"
+      :class="[imageClass, !darkImageUrl && shouldInvertDarkIcon(activeImageUrl) && 'dark:invert']"
+      @load="handleDarkIconLoad($event, !darkImageUrl)"
       @error="failed = true"
     >
   </picture>
@@ -22,6 +23,7 @@ import { Zap } from 'lucide-vue-next'
 import type { HandlersSupermarketSkillIcon, HandlersSupermarketSkillIconAsset } from '@memohai/sdk'
 import { sdkApiUrl } from '@/lib/api-client'
 import { useSettingsStore } from '@/store/settings'
+import { handleDarkIconLoad, shouldInvertDarkIcon } from '@/utils/dark-icon-contrast'
 
 const props = withDefaults(defineProps<{
   icon?: HandlersSupermarketSkillIcon

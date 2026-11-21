@@ -10,7 +10,7 @@
   >
     <Sidebar
       collapsible="none"
-      :class="[!fullWidth && 'workspace-divider-r', desktopShell && 'h-dvh']"
+      :class="[!fullWidth && 'relative workspace-divider-r', desktopShell && 'h-dvh']"
     >
       <div
         v-if="macTrafficReserve"
@@ -36,7 +36,10 @@
         </NavItem>
       </SidebarHeader>
 
-      <SidebarContent class="overflow-hidden">
+      <SidebarContent
+        class="overflow-hidden"
+        :class="{ 'pointer-events-none': isResizing }"
+      >
         <ScrollArea
           class="sidebar-scroll h-full [&_[data-slot=scroll-area-viewport]]:pr-0"
           :scroll-hide-delay="300"
@@ -88,16 +91,17 @@
 
       <!-- Width resize handle (web desktop only). Drag to resize the sidebar;
            the width is clamped to [MIN_FULL, MAX_WIDTH] so it can't shrink past
-           a readable minimum. Sits on the sidebar's right edge. fullWidth (the
+           a readable minimum. Straddles the 1.2px right divider (-1px .. +5px)
+           so it never overlaps the sidebar scrollbar track. fullWidth (the
            mobile list home) fills its pane, so there is nothing to resize. -->
       <div
         v-if="!desktopShell && !fullWidth"
-        class="group/resize absolute right-0 top-0 z-(--z-sticky) h-full w-1 cursor-col-resize"
+        class="group/resize absolute top-0 left-[calc(100%-1px)] z-(--z-sticky) h-full w-1.5 cursor-col-resize [-webkit-app-region:no-drag]"
         @mousedown="onResizeStart"
       >
         <div
-          class="h-full w-full transition-colors group-hover/resize:bg-border"
-          :class="{ 'bg-ring': isResizing }"
+          class="pointer-events-none absolute inset-y-0 left-px w-(--workspace-divider-width) transition-colors group-hover/resize:bg-workspace-divider-active"
+          :class="{ 'bg-workspace-divider-active': isResizing }"
         />
       </div>
     </Sidebar>

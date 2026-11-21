@@ -6270,6 +6270,13 @@ definitions:
     type: object
   models.TestResponse:
     properties:
+      args:
+        additionalProperties:
+          type: string
+        description: |-
+          Args are the catalog args attached to Code (such as upstream for
+          non-authentication upstream rejections).
+        type: object
       code:
         description: |-
           Code is the error catalog code for why the test did not pass. It is
@@ -6779,6 +6786,13 @@ definitions:
     type: object
   providers.TestResponse:
     properties:
+      args:
+        additionalProperties:
+          type: string
+        description: |-
+          Args are the catalog args attached to Code (such as upstream for
+          non-authentication upstream rejections).
+        type: object
       code:
         description: |-
           Code is the error catalog code for why the test did not pass. It is

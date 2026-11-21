@@ -88,14 +88,13 @@ func TestAgentStreamFailureConversion(t *testing.T) {
 	}
 }
 
-// The cause of a failure never leaves the application: the published event
-// carries the code and its catalog detail, and nothing of the cause.
+// Public error events always keep the catalog detail in Error and strip Cause.
+// Codes without upstream in AllowedArgs (such as context.budget_unsatisfied)
+// never leak private details, while OSS provider and internal failure codes
+// forward verbatim details in args.upstream.
 func TestPublicAgentStreamEventRedactsPrivateFailure(t *testing.T) {
-	for _, cause := range []error{
-		errors.New("SECRET provider payload"),
-		&sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "Incorrect API key provided: SECRET", RequestID: "req_SECRET"},
-		fmt.Errorf("SECRET window: %w", contextfrag.ErrBudgetUnsatisfied),
-	} {
+	t.Run("non-upstream code redacts private detail", func(t *testing.T) {
+		cause := fmt.Errorf("SECRET window: %w", contextfrag.ErrBudgetUnsatisfied)
 		event := publicAgentStreamEvent(native.StreamEvent{Type: native.EventError, Cause: cause})
 		definition, ok := apperror.Lookup(apperror.Code(event.Code))
 		if !ok || event.Error != definition.Detail || event.Cause != nil {
@@ -108,7 +107,33 @@ func TestPublicAgentStreamEventRedactsPrivateFailure(t *testing.T) {
 		if strings.Contains(string(data), "SECRET") {
 			t.Fatalf("private detail leaked: %s", data)
 		}
-	}
+	})
+
+	t.Run("OSS provider and internal failures carry verbatim args.upstream", func(t *testing.T) {
+		cases := []struct {
+			cause        error
+			wantUpstream string
+		}{
+			{
+				cause:        errors.New("SECRET provider payload"),
+				wantUpstream: "SECRET provider payload",
+			},
+			{
+				cause:        &sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "Incorrect API key provided: SECRET", RequestID: "req_SECRET"},
+				wantUpstream: "HTTP 401: Incorrect API key provided: SECRET\nProvider Request ID: req_SECRET",
+			},
+		}
+		for _, tc := range cases {
+			event := publicAgentStreamEvent(native.StreamEvent{Type: native.EventError, Cause: tc.cause})
+			definition, ok := apperror.Lookup(apperror.Code(event.Code))
+			if !ok || event.Error != definition.Detail || event.Cause != nil {
+				t.Fatalf("public event = %#v, want a catalogued code with its detail", event)
+			}
+			if got := event.Args[apperror.ProviderErrorArgUpstream]; got != tc.wantUpstream {
+				t.Fatalf("args.upstream = %q, want %q", got, tc.wantUpstream)
+			}
+		}
+	})
 }
 
 func TestAgentFailureStreamEventExposesOnlyStablePublicContract(t *testing.T) {
@@ -327,6 +352,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 		true,
 		"",
 		nil,
+		nil,
 	)
 
 	if len(messages.persisted) != 0 {
@@ -515,6 +541,7 @@ func TestPersistTurnFailureStartsRetryReplacementAtomically(t *testing.T) {
 		},
 		resolvedContext{},
 		apperror.CodeAgentResponseTimeout,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistTurnFailure returned error: %v", err)
@@ -550,6 +577,7 @@ func TestPersistPartialResultStoresTimeoutWithoutSnapshot(t *testing.T) {
 		true,
 		false,
 		apperror.CodeAgentResponseTimeout,
+		nil,
 		nil,
 	)
 	if len(persisted) == 0 || len(messages.persisted) != 2 {

@@ -545,6 +545,9 @@ type Backend interface {
 	Now(ctx context.Context) (time.Time, error)
 	// Load returns a snapshot the caller owns and may freely mutate.
 	Load(ctx context.Context, key Key) (Snapshot, bool, error)
+	// LoadCursor returns the stored snapshot's position without the snapshot,
+	// for readers that only need to know whether it moved.
+	LoadCursor(ctx context.Context, key Key) (Cursor, bool, error)
 	Update(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error)
 	Publish(ctx context.Context, event Event) error
 	Subscribe(ctx context.Context, key Key) (Subscription, error)

@@ -2,14 +2,11 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { toast } from '@felinic/ui'
 import i18n from '@/i18n'
+import { isSemverVersion, normalizeVersion } from '@/utils/version'
 import { useCapabilitiesStore } from './capabilities'
 
 const GITHUB_REPO = 'felinics/memoh'
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases/latest`
-
-function normalizeVersion(version?: string | null): string {
-  return (version ?? '').replace(/^v/i, '')
-}
 
 // Update detection is intentionally lightweight (a single GitHub release lookup,
 // not a real auto-updater — that's a separate, larger effort). It lives in a
@@ -42,7 +39,7 @@ export const useUpdateStore = defineStore('update', () => {
       latestVersion.value = latest
       releaseBody.value = data.body ?? ''
       releaseUrl.value = data.html_url ?? RELEASES_URL
-      hasUpdate.value = Boolean(latest) && Boolean(current) && latest !== current
+      hasUpdate.value = isSemverVersion(latest) && isSemverVersion(current) && latest !== current
       checked.value = true
       return hasUpdate.value
     } finally {

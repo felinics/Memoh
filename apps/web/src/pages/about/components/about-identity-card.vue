@@ -23,7 +23,7 @@
             size="sm"
             class="font-medium"
           >
-            {{ $t('settings.versionTag', { version }) }}
+            {{ isSemverVersion(version) ? $t('settings.versionTag', { version: normalizeVersion(version) }) : version }}
           </Badge>
         </div>
         <p class="mt-0.5 text-[13px] leading-[18px] tracking-[-0.08px] font-[360] text-muted-foreground">
@@ -64,6 +64,7 @@
 import type { Component } from 'vue'
 import { BookOpen, Github, MessageSquare } from 'lucide-vue-next'
 import { Badge, Button, SurfaceCard } from '@felinic/ui'
+import { isSemverVersion, normalizeVersion } from '@/utils/version'
 
 defineProps<{
   /** Running version without the leading "v"; the badge is hidden when empty. */

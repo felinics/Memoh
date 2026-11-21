@@ -17,6 +17,7 @@ let host: HTMLElement
 function mountBlock(opts: {
   locale?: 'en' | 'zh' | 'ja'
   code?: string
+  args?: Record<string, string>
   message?: string
   requestId?: string
   traceId?: string
@@ -32,6 +33,7 @@ function mountBlock(opts: {
     error: {
       type: 'error',
       code: opts.code,
+      args: opts.args,
       request_id: opts.requestId,
       trace_id: opts.traceId,
       content: '',
@@ -149,5 +151,65 @@ describe('ChatErrorBlock', () => {
     expect(host.textContent).toContain(expectedTitle)
     expect(host.textContent).toContain(expectedCopy)
     expect(buttons()).toContain(expectedDetails)
+  })
+
+  it('shows upstream details in Details drawer without correlation IDs and includes them in Copy', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
+    const upstream = 'HTTP 400 · context_length_exceeded: max 8192 tokens\nProvider Request ID: req_upstream_1'
+    mountBlock({
+      code: 'agent.provider_request_rejected',
+      message: 'The model provider rejected the request.',
+      args: { upstream },
+    })
+    await nextTick()
+
+    const detailsButton = [...host.querySelectorAll('button')].find(el => el.textContent?.trim() === 'Details')!
+    expect(detailsButton).toBeTruthy()
+    expect(detailsButton.getAttribute('aria-expanded')).toBe('false')
+
+    detailsButton.click()
+    await nextTick()
+    expect(detailsButton.getAttribute('aria-expanded')).toBe('true')
+    expect(host.textContent).toContain(upstream)
+
+    copyButton()!.click()
+    await Promise.resolve()
+    await nextTick()
+    expect(writeText).toHaveBeenCalledWith(`The model provider rejected the request.\n${upstream}`)
+  })
+
+  it('orders upstream details above Request ID when both are present', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
+    const upstream = 'HTTP 429 · rate_limit_exceeded: Slow down'
+    mountBlock({
+      code: 'agent.provider_rate_limited',
+      message: 'Rate limit reached.',
+      args: { upstream },
+      requestId: 'req-memoh-1',
+    })
+    await nextTick()
+
+    const detailsButton = [...host.querySelectorAll('button')].find(el => el.textContent?.trim() === 'Details')!
+    detailsButton.click()
+    await nextTick()
+
+    const text = host.textContent ?? ''
+    expect(text.indexOf(upstream)).toBeGreaterThan(-1)
+    expect(text.indexOf('Request ID: req-memoh-1')).toBeGreaterThan(text.indexOf(upstream))
+
+    copyButton()!.click()
+    await Promise.resolve()
+    await nextTick()
+    expect(writeText).toHaveBeenCalledWith(`Rate limit reached.\n${upstream}\nRequest ID: req-memoh-1`)
   })
 })

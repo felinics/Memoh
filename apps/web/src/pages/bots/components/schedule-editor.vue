@@ -72,7 +72,7 @@
                    both 15 characters and clipped inside 144px. Fixed rather
                    than auto so the row does not resize as the mode changes. -->
               <SelectTrigger class="w-44 shrink-0">
-                <SelectValue />
+                <SelectValue>{{ currentModeLabel }}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem
@@ -227,7 +227,7 @@
               class="w-full"
               :aria-label="t('bots.schedule.notify.inApp')"
             >
-              <SelectValue />
+              <SelectValue>{{ notifyForm.policy === 'every_run' ? t('bots.schedule.notify.everyRun') : t('bots.schedule.notify.important') }}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="important">
@@ -458,6 +458,11 @@ const SCHEDULE_MODES: { value: ScheduleMode; labelKey: string }[] = [
   { value: 'monthly', labelKey: 'bots.schedule.mode.monthly' },
   { value: 'advanced', labelKey: 'bots.schedule.mode.advanced' },
 ]
+
+const currentModeLabel = computed(() => {
+  const found = SCHEDULE_MODES.find(item => item.value === patternState.value.mode)
+  return found ? t(found.labelKey) : ''
+})
 
 interface SchedulePlainForm {
   name: string

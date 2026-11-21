@@ -10,6 +10,7 @@
     <ScrollArea
       ref="scrollAreaRef"
       class="sidebar-scroll min-h-0 flex-1"
+      :scroll-hide-delay="300"
     >
       <div class="px-2 pb-6">
         <p
@@ -81,7 +82,8 @@
                     v-else-if="appDependencyIconUrl(app)"
                     :src="appDependencyIconUrl(app)"
                     alt=""
-                    class="size-5 object-contain"
+                    :class="['size-5 object-contain', shouldInvertDarkIcon(appDependencyIconUrl(app)) && 'dark:invert']"
+                    @load="handleDarkIconLoad($event)"
                   >
                   <SkillIcon v-else />
                 </div>
@@ -228,12 +230,14 @@ import { getBotsByBotIdApps, getSupermarketRegistriesByRegistryIdAppsByAppId, ty
 import { appDisplayDescription, appDisplayName, appKey, botAppsQueryKey } from '@/composables/api/useApps'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { handleDarkIconLoad, shouldInvertDarkIcon } from '@/utils/dark-icon-contrast'
 import SkillIcon from '@/pages/supermarket/components/skill-icon.vue'
 import InstallAppDialog from '@/pages/supermarket/components/install-app-dialog.vue'
 import SidebarPanelHeader from './panel-header.vue'
 import { useSupermarketFeed } from './use-supermarket-feed'
 import { useSidebarInfiniteScroll } from './use-sidebar-infinite-scroll'
 import { filterInstalledApps, uninstalledApps } from './supermarket-apps'
+import '@/styles/sidebar-scroll.css'
 
 /** The frame spans both text lines and their gap; the logo keeps the market card glyph size. */
 const appIconFrameClass = 'flex size-9.5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent'

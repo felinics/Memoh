@@ -177,7 +177,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
       atBottomRefreshRaf = 0
       const el = scrollEl.value
       if (!el || pinScrollActive) return
-      isAtBottom.value = isNearBottom(el)
+      isAtBottom.value = isJumpAtBottom(el)
     })
   }
 
@@ -196,6 +196,23 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // the jump button, follow arming, and the jump target alike.
   function isNearBottom(el: HTMLElement): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD_PX
+  }
+
+  // Empty trailing min-height from sendPin can leave scrollHeight taller than
+  // the viewport even when every real message already fits on screen. Exclude
+  // only that unused reserve when deciding whether to show the jump button.
+  function unusedTurnReservePx(): number {
+    if (turnReserves.value.size === 0) return 0
+    const container = lastTurnEl.value
+    if (!container?.isConnected || !container.style.minHeight) return 0
+    const motion = container.querySelector<HTMLElement>('[data-turn-motion]')
+    if (!motion) return 0
+    return Math.max(0, container.offsetHeight - motion.offsetHeight)
+  }
+
+  function isJumpAtBottom(el: HTMLElement): boolean {
+    const effectiveScrollHeight = el.scrollHeight - unusedTurnReservePx()
+    return effectiveScrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD_PX
   }
 
   // Scroll target for "go to the bottom": the physical bottom.
@@ -293,7 +310,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
         requestAnimationFrame(() => {
           isProgrammaticScroll = false
           const current = scrollEl.value
-          if (current) isAtBottom.value = isNearBottom(current)
+          if (current) isAtBottom.value = isJumpAtBottom(current)
         })
       })
     }
@@ -597,7 +614,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
       isProgrammaticScroll = false
       const cur = scrollEl.value
       if (!cur) return
-      isAtBottom.value = isNearBottom(cur)
+      isAtBottom.value = isJumpAtBottom(cur)
       lastScrollTop = cur.scrollTop
     })
   }
@@ -744,7 +761,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
             // bottom.
             const root = scrollEl.value
             followEnabled = root ? isNearBottom(root) : true
-            if (root) isAtBottom.value = isNearBottom(root)
+            if (root) isAtBottom.value = isJumpAtBottom(root)
           })
         } else {
           if (!newValue) {
@@ -849,7 +866,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     lastScrollTop = top
     // Frozen while the pin's entrance tween animates, or the jump button would
     // flash for its whole flight; the settle timer refreshes it on landing.
-    if (!pinScrollActive) isAtBottom.value = isNearBottom(el)
+    if (!pinScrollActive) isAtBottom.value = isJumpAtBottom(el)
     // A scroll we triggered ourselves only updates the at-bottom mirror; it
     // must never move the follow latch.
     if (isProgrammaticScroll) return
@@ -951,7 +968,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (pinPending && tryApplyPin(el)) return
     if (followEnabled) stickToBottomNow()
     else if (!pinScrollActive) {
-      isAtBottom.value = isNearBottom(el)
+      isAtBottom.value = isJumpAtBottom(el)
       scheduleAtBottomRefresh()
     }
   }

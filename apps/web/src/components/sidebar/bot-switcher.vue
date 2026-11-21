@@ -68,7 +68,8 @@
       align="start"
       side="bottom"
       :align-offset="fullWidth ? 0 : -10"
-      class="w-60"
+      class="min-w-60"
+      :style="{ width: 'var(--reka-dropdown-menu-trigger-width)' }"
     >
       <DropdownMenuLabel class="text-xs font-medium text-muted-foreground">
         {{ t('sidebar.bots') }}
@@ -131,7 +132,7 @@
       </div>
 
       <div
-        v-if="isLoading"
+        v-if="isLoading && displayBots.length === 0"
         class="flex justify-center py-3"
       >
         <Spinner class="size-3.5" />
@@ -190,7 +191,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore } from '@/store/unread'
 import { attentionBadgeVariant, mostUrgentKind } from '@/utils/session-attention'
 import AttentionDot from './attention-dot.vue'
-import { firstAvatarCharacter } from '@/composables/useAvatarInitials'
+import { avatarInitials } from '@/composables/useAvatarInitials'
 import { usePinnedBots } from '@/composables/usePinnedBots'
 import { usePendingBotsRefresh } from '@/composables/usePendingBotsRefresh'
 import { switcherBots } from './bot-switcher-list'
@@ -241,15 +242,7 @@ const currentLabel = computed(() => {
 })
 
 function initialsOf(bot: BotsBot): string {
-  const name = (bot.display_name || bot.id || '').trim()
-  const initials = name
-    .split(/[\s_-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(firstAvatarCharacter)
-    .join('')
-    .toUpperCase()
-  return initials || 'B'
+  return avatarInitials(bot.display_name || bot.id, 'B')
 }
 
 const avatarFallback = computed(() => {

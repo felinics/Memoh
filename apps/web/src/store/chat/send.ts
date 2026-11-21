@@ -121,6 +121,9 @@ export interface ChatSendDeps {
   }) => void
   chatReadOnlyFor: (target: ChatViewTarget) => boolean
   isChatViewStreaming: (target: ChatViewTarget, composerScope?: string) => boolean
+  isSessionStreaming?: (botId: string, sessionId: string) => boolean
+  markSessionRead?: (sessionId: string) => void
+  removeUnreadSession?: (sessionId: string) => void
   isChatViewCreatingSession: (target: ChatViewTarget) => boolean
   pendingExternalAgentStateFor: (target: ChatViewTarget) => unknown
   ensureChatViewSession: (

@@ -7,6 +7,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // probeError translates why a provider or model connection test did not pass
@@ -24,7 +25,11 @@ func probeError(err error, credentialsRejected bool) error {
 	if code == "" {
 		return err
 	}
-	return apperror.Wrap(code, err, nil)
+	var args map[string]string
+	if summary := models.UpstreamErrorSummary(err); summary != "" {
+		args = map[string]string{apperror.ProviderErrorArgUpstream: summary}
+	}
+	return apperror.Wrap(code, err, args)
 }
 
 func probeCode(err error, credentialsRejected bool) apperror.Code {

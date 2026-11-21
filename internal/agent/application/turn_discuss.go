@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 
@@ -379,7 +380,7 @@ events:
 	// Steps are already history. A failure is written after them before the
 	// terminal event proposes the run's end, after which no row can be written.
 	if committer != nil && !runOwnershipLost(ctx) {
-		s.recordStepRunFailure(terminalCtx, committer, uncommittedText.String(), outcome.failureCode())
+		s.recordStepRunFailure(terminalCtx, committer, uncommittedText.String(), outcome.failureCode(), outcome.failureArgs())
 		if storeErr := committer.finish(terminalCtx); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
 			outcome.setCause(historyErr)
@@ -395,10 +396,12 @@ events:
 	}
 	if committer == nil {
 		var failureCode apperror.Code
+		var failureArgs map[string]string
 		if timedOut {
 			failureCode = snapshotFailureCode(true, outcome.cause)
+			failureArgs = snapshotFailureArgs(true, outcome.cause)
 		}
-		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode); storeErr != nil {
+		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode, failureArgs); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
 			outcome.setCause(historyErr)
 			h.emitErr(historyErr)
@@ -441,6 +444,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	finalMessages json.RawMessage,
 	reasoningTiming []messagepkg.ReasoningTimingSegment,
 	failureCode apperror.Code,
+	failureArgs map[string]string,
 ) error {
 	var sdkMsgs []sdk.Message
 	if len(finalMessages) > 0 && json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
@@ -473,6 +477,13 @@ func (s *Service) persistDiscussTerminalSnapshot(
 			runConfig.ContextLifecycle,
 		)
 	}
+	assistantMetadata := map[string]any{
+		messagepkg.AgentStepInterruptedMetadataKey: true,
+		messagepkg.HistoryErrorCodeMetadataKey:     string(failureCode),
+	}
+	if len(failureArgs) > 0 {
+		assistantMetadata[messagepkg.HistoryErrorArgsMetadataKey] = maps.Clone(failureArgs)
+	}
 	return s.storeRoundWithOptions(ctx, ChatRequest{
 		RunID:                   runConfig.RunID,
 		BotID:                   cmd.BotID,
@@ -487,10 +498,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	}}, modelID, storeRoundOptions{
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex: map[int]map[string]any{
-			0: {
-				messagepkg.AgentStepInterruptedMetadataKey: true,
-				messagepkg.HistoryErrorCodeMetadataKey:     string(failureCode),
-			},
+			0: assistantMetadata,
 		},
 		ContextLifecycle: runConfig.ContextLifecycle,
 		ReasoningTiming:  reasoningTiming,

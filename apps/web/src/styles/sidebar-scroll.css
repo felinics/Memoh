@@ -24,6 +24,12 @@
   padding-right: 0.25rem;
 }
 
+.sidebar-scroll [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
+  /* Pull the 8px overlay track 2px off the sidebar divider so the 5px thumb
+   * sits centered in the 12px row gutter and clears the resize handle. */
+  margin-right: 0.125rem;
+}
+
 .sidebar-scroll [data-slot="scroll-area-scrollbar"][data-state="visible"] {
   animation: sidebar-scroll-in 0.1s ease-out both;
 }

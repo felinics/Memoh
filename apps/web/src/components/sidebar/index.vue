@@ -6,26 +6,30 @@
        transitioned, so the resize handle still tracks the pointer 1:1. `inert`
        while closed so focus can't tab into the parked-off-screen rail. -->
   <aside
-    class="workspace-divider-r relative flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-sidebar"
+    class="workspace-divider-r relative flex h-full min-h-0 shrink-0 flex-col bg-sidebar"
     :style="asideStyle"
     :inert="!workbenchOpen || undefined"
   >
-    <!-- Workspace / bot switcher (no bottom divider — header blends into the
+    <div
+      class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      :class="{ 'pointer-events-none': isResizing }"
+    >
+      <!-- Workspace / bot switcher (no bottom divider — header blends into the
          panel below). Taller than the nav row and with its own vertical padding so
          the switcher chip/bar floats clear of the window's top edge instead of its
          hover fill kissing it. mac reserves the traffic-light gutter;
          web/Windows start at the normal pl-3 indent and the switcher goes
          full-width (right edge aligns with the search row below). -->
-    <header
-      class="flex h-11 shrink-0 items-center bg-sidebar pr-2 [-webkit-app-region:drag]"
-      :class="macTrafficReserve ? 'pl-22' : 'pl-3'"
-    >
-      <div class="min-w-0 flex-1">
-        <BotSwitcher :full-width="!macTrafficReserve" />
-      </div>
-    </header>
+      <header
+        class="flex h-11 shrink-0 items-center bg-sidebar pr-2 [-webkit-app-region:drag]"
+        :class="macTrafficReserve ? 'pl-22' : 'pl-3'"
+      >
+        <div class="min-w-0 flex-1">
+          <BotSwitcher :full-width="!macTrafficReserve" />
+        </div>
+      </header>
 
-    <!-- Horizontal nav + search: the active tab is a pill with
+      <!-- Horizontal nav + search: the active tab is a pill with
          icon + label, the others collapse to icon-only. These tabs are plain
          <button>s, NOT <Button>: the cva ships size paddings/gaps (and wraps the
          slot in a display:contents span) that fight the exact geometry we need.
@@ -52,134 +56,139 @@
          track min width and break the circle. The icon→label gap lives on the
          INNER label span (clipped with the text when collapsed); the grid item
          is a bare overflow-hidden wrapper. -->
-    <nav class="flex min-w-0 shrink-0 items-center gap-1 pl-3 pr-2 py-1.5">
-      <TooltipProvider>
-        <Tooltip
-          v-for="view in availableViews"
-          :key="view.id"
-        >
-          <TooltipTrigger as-child>
-            <button
-              type="button"
-              class="inline-flex h-8 min-w-0 shrink-0 cursor-pointer items-center justify-start rounded-full px-2 text-muted-foreground outline-none transition-[margin,padding,color,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-[color:var(--sidebar-hover)] hover:text-foreground dark:hover:text-[color:oklch(0.96_0_0)] focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:-ml-[3px] data-[active=true]:bg-sidebar-accent data-[active=true]:pl-2.5 data-[active=true]:pr-3.5 data-[active=true]:text-foreground/90 dark:data-[active=true]:text-[color:oklch(0.96_0_0)]"
-              :data-active="sidebarView === view.id"
-              :aria-label="view.label"
-              :aria-pressed="sidebarView === view.id"
-              @click="store.selectSidebarView(view.id)"
-            >
-              <span class="relative shrink-0">
-                <component
-                  :is="view.icon"
-                  :stroke-width="1.75"
-                  class="size-[18px] shrink-0"
-                />
-                <!-- Unsaved files live on the Files view, so a count here surfaces them
-                     even while the user is in Chat. -->
-                <BadgeCount
-                  v-if="view.id === 'files' && dirtyFileCount > 0"
-                  :count="dirtyFileCount"
-                  class="pointer-events-none absolute -right-1.5 -top-1"
-                />
-              </span>
-              <span
-                class="grid min-w-0 transition-[grid-template-columns] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
-                :class="sidebarView === view.id ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'"
+      <nav class="flex min-w-0 shrink-0 items-center gap-1 pl-3 pr-2 py-1.5">
+        <TooltipProvider>
+          <Tooltip
+            v-for="view in availableViews"
+            :key="view.id"
+          >
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="inline-flex h-8 min-w-0 shrink-0 cursor-pointer items-center justify-start rounded-full px-2 text-muted-foreground outline-none transition-[margin,padding,color,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-[color:var(--sidebar-hover)] hover:text-foreground dark:hover:text-[color:oklch(0.96_0_0)] focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:-ml-[3px] data-[active=true]:bg-sidebar-accent data-[active=true]:pl-2.5 data-[active=true]:pr-3.5 data-[active=true]:text-foreground/90 dark:data-[active=true]:text-[color:oklch(0.96_0_0)]"
+                :data-active="sidebarView === view.id"
+                :aria-label="view.label"
+                :aria-pressed="sidebarView === view.id"
+                @click="store.selectSidebarView(view.id)"
               >
-                <span class="min-w-0 overflow-hidden">
-                  <span class="block whitespace-nowrap pl-2 text-control font-[550]">{{ view.label }}</span>
+                <span class="relative shrink-0">
+                  <component
+                    :is="view.icon"
+                    :stroke-width="1.75"
+                    class="size-[18px] shrink-0"
+                  />
+                  <!-- Unsaved files live on the Files view, so a count here surfaces them
+                     even while the user is in Chat. -->
+                  <BadgeCount
+                    v-if="view.id === 'files' && dirtyFileCount > 0"
+                    :count="dirtyFileCount"
+                    class="pointer-events-none absolute -right-1.5 -top-1"
+                  />
                 </span>
-              </span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {{ view.label }}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+                <span
+                  class="grid min-w-0 transition-[grid-template-columns] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
+                  :class="sidebarView === view.id ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'"
+                >
+                  <span class="min-w-0 overflow-hidden">
+                    <span class="block whitespace-nowrap pl-2 text-control font-[550]">{{ view.label }}</span>
+                  </span>
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {{ view.label }}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
-      <div class="flex-1" />
+        <div class="flex-1" />
 
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-        :title="t('chat.searchSessions')"
-        :aria-label="t('chat.searchSessions')"
-        @click="searchOpen = true"
-      >
-        <Search
-          :stroke-width="2"
-          class="size-[18px]"
-        />
-      </Button>
-    </nav>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+          :title="t('chat.searchSessions')"
+          :aria-label="t('chat.searchSessions')"
+          @click="searchOpen = true"
+        >
+          <Search
+            :stroke-width="2"
+            class="size-[18px]"
+          />
+        </Button>
+      </nav>
 
-    <!-- Active view (mutually exclusive). A bottom fade dissolves the list into
+      <!-- Active view (mutually exclusive). A bottom fade dissolves the list into
          the footer so the account row reads as floating just below it — instead
          of a hard rule above it, which would be lopsided since the nav above
          the list has no divider of its own. -->
-    <div class="relative min-h-0 flex-1 overflow-hidden">
-      <PanelSessions
-        v-show="sidebarView === 'sessions'"
-        class="h-full"
-      />
-      <PanelFiles
-        v-if="canWorkspaceRead"
-        v-show="sidebarView === 'files'"
-        class="h-full"
-      />
-      <PanelSchedule
-        v-show="sidebarView === 'schedule'"
-        class="h-full"
-      />
-      <PanelSupermarket
-        v-if="supermarketMounted"
-        v-show="sidebarView === 'supermarket'"
-        :bot-id="currentBotId || ''"
-        :bot-name="currentBot?.name || ''"
-        :can-manage="hasBotPermission(currentBot?.current_user_permissions, 'manage')"
-        class="h-full"
-      />
-      <div
-        class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent"
-      />
-    </div>
+      <div class="relative min-h-0 flex-1 overflow-hidden">
+        <PanelSessions
+          v-show="sidebarView === 'sessions'"
+          class="h-full"
+        />
+        <PanelFiles
+          v-if="canWorkspaceRead"
+          v-show="sidebarView === 'files'"
+          class="h-full"
+        />
+        <PanelSchedule
+          v-show="sidebarView === 'schedule'"
+          class="h-full"
+        />
+        <PanelSupermarket
+          v-if="supermarketMounted"
+          v-show="sidebarView === 'supermarket'"
+          :bot-id="currentBotId || ''"
+          :bot-name="currentBot?.name || ''"
+          :can-manage="hasBotPermission(currentBot?.current_user_permissions, 'manage')"
+          class="h-full"
+        />
+        <div
+          class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-sidebar to-transparent"
+        />
+      </div>
 
-    <!-- Usage-example entry on the sidebar floor, directly above the account
+      <!-- Usage-example entry on the sidebar floor, directly above the account
          row, so it stays reachable whichever panel is active. It copies the
          footer's px-2.5 inset and surface, so its row, tile and label line up
          with the account row's. -->
-    <div
-      v-if="!sidebarEntryHidden"
-      class="relative z-1 shrink-0 bg-sidebar px-2.5 pt-1"
-    >
-      <SidebarExamplesEntry beside-account />
-    </div>
+      <div
+        v-if="!sidebarEntryHidden"
+        class="relative z-1 shrink-0 bg-sidebar px-2.5 pt-1"
+      >
+        <SidebarExamplesEntry beside-account />
+      </div>
 
-    <!-- Footer: account menu + update chip, pinned below the scrollable panel.
+      <!-- Footer: account menu + update chip, pinned below the scrollable panel.
          The user block is min-w-0/flex-1 so the chip's hover expansion eats its
          slack instead of overlapping it. px-2.5/pb-2.5 keep the row's hover
          chip equidistant from the window's left and bottom edges — a notch
          wider than the panel's px-2 column above, deliberately. Solid bg +
          z-index keep list rows behind the footer on Web. -->
-    <div
-      class="relative z-1 flex shrink-0 items-center gap-2.5 bg-sidebar px-2.5 pt-1 pb-2.5"
-    >
-      <!-- DropdownMenu has no DOM root; the flex sizing belongs on a real wrapper. -->
-      <div class="min-w-0 flex-1">
-        <UserMenu />
+      <div
+        class="relative z-1 flex shrink-0 items-center gap-2.5 bg-sidebar px-2.5 pt-1 pb-2.5"
+      >
+        <!-- DropdownMenu has no DOM root; the flex sizing belongs on a real wrapper. -->
+        <div class="min-w-0 flex-1">
+          <UserMenu />
+        </div>
+        <UpdateChip />
       </div>
-      <UpdateChip />
     </div>
 
-    <!-- Width resize handle -->
+    <!-- Width resize handle: straddles the 1.2px right divider (-1px .. +5px)
+         into the main workspace's left gutter so it never overlaps the sidebar
+         scrollbar track (-10px .. -2px). Hidden while closed so nothing pokes
+         into the viewport's left edge. -->
     <div
-      class="group absolute right-0 top-0 z-(--z-raised) h-full w-1 cursor-col-resize"
+      v-show="workbenchOpen"
+      class="group/resize absolute top-0 left-[calc(100%-1px)] z-(--z-sticky) h-full w-1.5 cursor-col-resize [-webkit-app-region:no-drag]"
       @mousedown="onResizeStart"
     >
       <div
-        class="h-full w-full transition-colors group-hover:bg-border"
-        :class="{ 'bg-ring': isResizing }"
+        class="pointer-events-none absolute inset-y-0 left-px w-(--workspace-divider-width) transition-colors group-hover/resize:bg-workspace-divider-active"
+        :class="{ 'bg-workspace-divider-active': isResizing }"
       />
     </div>
 

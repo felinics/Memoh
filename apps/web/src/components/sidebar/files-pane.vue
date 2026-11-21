@@ -13,7 +13,7 @@
       class="group/pane-header min-h-[1.6875rem] mx-1 pl-[11px] mt-2"
       :label="botName || t('bots.files.panelTitle')"
     >
-      <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100">
+      <div class="flex items-center gap-0.5 pr-1 opacity-0 transition-opacity duration-150 group-hover/pane-header:opacity-100 group-focus-within/pane-header:opacity-100 pointer-coarse:opacity-100">
         <Button
           v-if="canWrite"
           variant="ghost"
@@ -148,7 +148,10 @@
       <div class="absolute inset-0">
         <ContextMenu>
           <ContextMenuTrigger as-child>
-            <ScrollArea class="h-full">
+            <ScrollArea
+              class="sidebar-scroll h-full"
+              :scroll-hide-delay="300"
+            >
               <FileTree />
             </ScrollArea>
           </ContextMenuTrigger>
@@ -392,6 +395,7 @@ import { FileTreeKey } from '@/components/file-manager/file-tree-context'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
+import '@/styles/sidebar-scroll.css'
 
 const props = withDefaults(defineProps<{
   botId: string

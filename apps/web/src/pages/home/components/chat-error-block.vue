@@ -59,6 +59,19 @@ const errorCode = computed(() => {
   return parseMemohError(props.error)?.code ?? ''
 })
 
+const errorArgs = computed<Record<string, unknown> | undefined>(() => {
+  const direct = (props.error as { args?: unknown } | undefined)?.args
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
+    return direct as Record<string, unknown>
+  }
+  return parseMemohError(props.error)?.args
+})
+
+const upstreamText = computed(() => {
+  const raw = errorArgs.value?.upstream
+  return typeof raw === 'string' ? raw.trim() : ''
+})
+
 const isProviderSettingsError = computed(() =>
   PROVIDER_SETTINGS_CODES.has(errorCode.value),
 )
@@ -82,12 +95,13 @@ const correlationText = computed(() => {
   if (requestId) return `${t('common.requestId')}: ${requestId}`
   return traceId ? `${t('common.traceId')}: ${traceId}` : ''
 })
-const showDetailsToggle = computed(() => Boolean(correlationText.value))
+const showDetailsToggle = computed(() => Boolean(upstreamText.value || correlationText.value))
 
 const report = computed(() => {
   const { requestId, traceId } = correlation.value
   return [
     props.message,
+    upstreamText.value,
     requestId ? `${t('common.requestId')}: ${requestId}` : '',
     traceId ? `${t('common.traceId')}: ${traceId}` : '',
   ].filter(Boolean).join('\n')
@@ -190,9 +204,20 @@ function hasPrimaryAction() {
             :class="detailsOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
           >
             <div class="min-h-0 overflow-hidden">
-              <p class="mt-3 select-text break-all border-t border-border-soft pt-3 text-body tabular-nums text-muted-foreground">
-                {{ correlationText }}
-              </p>
+              <div class="mt-3 space-y-1.5 border-t border-border-soft pt-3">
+                <p
+                  v-if="upstreamText"
+                  class="select-text break-words whitespace-pre-wrap font-mono text-body leading-relaxed text-muted-foreground"
+                >
+                  {{ upstreamText }}
+                </p>
+                <p
+                  v-if="correlationText"
+                  class="select-text break-all text-body tabular-nums text-muted-foreground"
+                >
+                  {{ correlationText }}
+                </p>
+              </div>
             </div>
           </div>
         </div>

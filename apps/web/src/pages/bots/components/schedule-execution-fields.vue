@@ -9,7 +9,7 @@
     <div class="w-full sm:w-56">
       <Select v-model="runTargetModel">
         <SelectTrigger class="w-full">
-          <SelectValue />
+          <SelectValue>{{ form.runTarget === 'existing_session' ? t('bots.schedule.execution.existingSession') : t('bots.schedule.execution.newSession') }}</SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="new_session">
@@ -120,7 +120,9 @@
     <div class="w-full sm:w-56">
       <Select v-model="workdirModel">
         <SelectTrigger class="w-full">
-          <SelectValue :placeholder="t('bots.schedule.execution.noWorkdir')" />
+          <SelectValue :placeholder="t('bots.schedule.execution.noWorkdir')">
+            {{ selectedWorkdirLabel }}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="default">
@@ -459,6 +461,12 @@ const workdirModel = computed({
   set: (value: string) => {
     props.form.workdirId = value === 'default' ? '' : value
   },
+})
+
+const selectedWorkdirLabel = computed(() => {
+  if (!workdirModel.value || workdirModel.value === 'default') return t('bots.schedule.execution.noWorkdir')
+  const found = selectableWorkdirs.value.find(workdir => workdir.id === workdirModel.value)
+  return found ? `${found.name} · ${found.path}` : t('bots.schedule.execution.noWorkdir')
 })
 
 // The selected native model's tiers, as the server resolved them. The client

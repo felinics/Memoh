@@ -417,25 +417,28 @@
   /* ui-allow-z: local split-pane boundary handle above adjacent group headers */
   z-index: 3;
   touch-action: none;
+  background: var(--workspace-divider-color);
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .workbench-sash[data-axis="row"] {
   width: var(--workspace-divider-width, 1px);
   cursor: col-resize;
-  background: var(--workspace-divider-color);
 }
 
 .workbench-sash[data-axis="col"] {
   height: var(--workspace-divider-width, 1px);
   cursor: row-resize;
-  background: var(--workspace-divider-color);
+}
+
+.workbench-sash:hover,
+.workbench-sash[data-dragging="true"] {
+  background: var(--workspace-divider-active-color);
 }
 
 .workbench-sash::before {
   content: "";
   position: absolute;
-  background: transparent;
-  transition: background-color 120ms ease-out;
 }
 
 .workbench-sash[data-axis="row"]::before {
@@ -450,11 +453,6 @@
   right: 0;
   top: -0.1875rem;
   bottom: -0.1875rem;
-}
-
-.workbench-sash:hover::before,
-.workbench-sash[data-dragging="true"]::before {
-  background: color-mix(in oklab, var(--ring) 55%, transparent);
 }
 
 /* Drop zone preview overlay */
@@ -476,7 +474,7 @@
   .wb-tab-enter-active,
   .wb-tab-leave-active,
   .workbench-drop-preview,
-  .workbench-sash::before {
+  .workbench-sash {
     transition-duration: 0ms !important;
   }
 }

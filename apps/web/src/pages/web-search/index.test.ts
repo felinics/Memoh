@@ -165,17 +165,26 @@ vi.mock('@/components/backend-card-grid-skeleton/index.vue', () => ({
   }),
 }))
 
+let nextSearchMaterialized: Record<string, unknown> | undefined
+let nextFetchMaterialized: Record<string, unknown> | undefined
+
 vi.mock('./components/provider-setting.vue', () => ({
   default: {
     emits: ['materialized'],
-    setup() {
+    setup(_props: Record<string, unknown>, { emit }: { emit: (event: 'materialized', value: unknown) => void }) {
       const cur = inject<Ref<Record<string, unknown> | undefined>>('curSearchProvider')
       return () => h('div', {
         'data-testid': 'search-provider-detail',
         'data-id': String(cur?.value?.id ?? ''),
         'data-enable': String(Boolean(cur?.value?.enable)),
         'data-api-key': String((cur?.value?.config as Record<string, unknown> | undefined)?.api_key ?? ''),
-      }, `${cur?.value?.id ?? 'draft'}:${cur?.value?.provider ?? ''}`)
+      }, [
+        `${cur?.value?.id ?? 'draft'}:${cur?.value?.provider ?? ''}`,
+        h('button', {
+          'data-testid': 'emit-search-materialized',
+          'onClick': () => nextSearchMaterialized && emit('materialized', nextSearchMaterialized),
+        }),
+      ])
     },
   },
 }))
@@ -183,14 +192,20 @@ vi.mock('./components/provider-setting.vue', () => ({
 vi.mock('./components/fetch-provider-setting.vue', () => ({
   default: {
     emits: ['materialized'],
-    setup() {
+    setup(_props: Record<string, unknown>, { emit }: { emit: (event: 'materialized', value: unknown) => void }) {
       const cur = inject<Ref<Record<string, unknown> | undefined>>('curFetchProvider')
       return () => h('div', {
         'data-testid': 'fetch-provider-detail',
         'data-id': String(cur?.value?.id ?? ''),
         'data-enable': String(Boolean(cur?.value?.enable)),
         'data-api-key': String((cur?.value?.config as Record<string, unknown> | undefined)?.api_key ?? ''),
-      }, `${cur?.value?.id ?? 'draft'}:${cur?.value?.provider ?? ''}`)
+      }, [
+        `${cur?.value?.id ?? 'draft'}:${cur?.value?.provider ?? ''}`,
+        h('button', {
+          'data-testid': 'emit-fetch-materialized',
+          'onClick': () => nextFetchMaterialized && emit('materialized', nextFetchMaterialized),
+        }),
+      ])
     },
   },
 }))
@@ -434,6 +449,187 @@ describe('web-search page loading, readiness, and failure states', () => {
     await nextTick()
     expect(banner?.querySelector('[data-testid="banner-title"]')?.textContent).toBe('common.loadFailed')
     expect(banner?.querySelector('[data-testid="banner-description"]')).toBeNull()
+    app.unmount()
+  })
+
+  it('orders search and fetch providers by enabled, configured-disabled, then unconfigured while preserving catalog order and search filtering', async () => {
+    mocks.providerData.value = [
+      { id: 's-sogou', name: 'Sogou Search', provider: 'sogou', enable: false, config: { api_key: 'sogou-secret' } },
+      { id: 's-deepseek', name: 'DeepSeek Search', provider: 'deepseek', enable: true, config: { api_key: 'ds-secret' } },
+      { id: 's-tavily', name: 'Tavily Search', provider: 'tavily', enable: true, config: { api_key: 'tv-secret' } },
+    ]
+    mocks.searchProviderMetaData.value = [
+      { provider: 'brave', display_name: 'Brave Search' },
+      { provider: 'bing', display_name: 'Bing' },
+      { provider: 'google', display_name: 'Google' },
+      { provider: 'tavily', display_name: 'Tavily Search' },
+      { provider: 'sogou', display_name: 'Sogou Search' },
+      { provider: 'serper', display_name: 'Serper' },
+      { provider: 'searxng', display_name: 'SearXNG' },
+      { provider: 'jina', display_name: 'Jina' },
+      { provider: 'exa', display_name: 'Exa' },
+      { provider: 'bocha', display_name: 'Bocha' },
+      { provider: 'duckduckgo', display_name: 'DuckDuckGo' },
+      { provider: 'yandex', display_name: 'Yandex' },
+      { provider: 'deepseek', display_name: 'DeepSeek Search' },
+    ]
+    mocks.fetchProviderData.value = [
+      { id: 'f-jina', name: 'Jina Reader', provider: 'jina', enable: false, config: { api_key: 'jina-secret' } },
+      { id: 'f-cf', name: 'Cloudflare Markdown', provider: 'cloudflare_markdown', enable: true, config: { api_token: 'cf-secret', account_id: 'acc-1' } },
+    ]
+    mocks.fetchProviderMetaData.value = [
+      { provider: 'native', display_name: 'Native Fetch' },
+      { provider: 'jina', display_name: 'Jina Reader' },
+      { provider: 'cloudflare_markdown', display_name: 'Cloudflare Markdown' },
+    ]
+
+    const { app, root, query } = await mountPage()
+    const searchSection = sectionOf(root, 'webSearch.searchProviders')
+    const fetchSection = sectionOf(root, 'webSearch.fetchProviders')
+
+    expect(cardNames(searchSection)).toEqual([
+      'Tavily Search',
+      'DeepSeek Search',
+      'Sogou Search',
+      'Brave Search',
+      'Bing',
+      'Google',
+      'Serper',
+      'SearXNG',
+      'Jina',
+      'Exa',
+      'Bocha',
+      'DuckDuckGo',
+      'Yandex',
+    ])
+    expect(searchSection?.querySelector('[data-provider="Tavily Search"]')?.getAttribute('data-enabled')).toBe('true')
+    expect(searchSection?.querySelector('[data-provider="DeepSeek Search"]')?.getAttribute('data-enabled')).toBe('true')
+    expect(searchSection?.querySelector('[data-provider="Sogou Search"]')?.getAttribute('data-enabled')).toBe('false')
+    expect(searchSection?.querySelector('[data-provider="Brave Search"]')?.getAttribute('data-enabled')).toBe('false')
+
+    expect(cardNames(fetchSection)).toEqual([
+      'Native Fetch',
+      'Cloudflare Markdown',
+      'Jina Reader',
+    ])
+    expect(fetchSection?.querySelector('[data-provider="Native Fetch"]')?.getAttribute('data-enabled')).toBe('true')
+    expect(fetchSection?.querySelector('[data-provider="Cloudflare Markdown"]')?.getAttribute('data-enabled')).toBe('true')
+    expect(fetchSection?.querySelector('[data-provider="Jina Reader"]')?.getAttribute('data-enabled')).toBe('false')
+
+    query.value = 'Search'
+    await nextTick()
+    expect(cardNames(searchSection)).toEqual([
+      'Tavily Search',
+      'DeepSeek Search',
+      'Sogou Search',
+      'Brave Search',
+    ])
+    app.unmount()
+  })
+
+  it('promotes optimistically materialized providers, resets on empty id, and prunes stale optimistic entries once server data catches up', async () => {
+    mocks.providerData.value = [
+      { id: 's-tavily', name: 'Tavily Search', provider: 'tavily', enable: true, config: {} },
+    ]
+    mocks.searchProviderMetaData.value = [
+      { provider: 'brave', display_name: 'Brave Search' },
+      { provider: 'tavily', display_name: 'Tavily Search' },
+      { provider: 'deepseek', display_name: 'DeepSeek Search' },
+    ]
+    mocks.fetchProviderData.value = []
+    mocks.fetchProviderMetaData.value = [
+      { provider: 'native', display_name: 'Native Fetch' },
+      { provider: 'jina', display_name: 'Jina Reader' },
+      { provider: 'cloudflare_markdown', display_name: 'Cloudflare Markdown' },
+    ]
+
+    const { app, root } = await mountPage()
+    const searchSection = () => sectionOf(root, 'webSearch.searchProviders')
+    const fetchSection = () => sectionOf(root, 'webSearch.fetchProviders')
+    const unconfiguredTail = ['Brave Search', 'bing', 'google', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex']
+
+    async function materializeFromCard(
+      section: () => Element | null,
+      providerName: string,
+      kind: 'search' | 'fetch',
+      payload: Record<string, unknown>,
+    ) {
+      ;(section()?.querySelector(`[data-provider="${providerName}"]`) as HTMLButtonElement | null)?.click()
+      await nextTick()
+      if (kind === 'search') nextSearchMaterialized = payload
+      else nextFetchMaterialized = payload
+      ;(root.querySelector(`[data-testid="emit-${kind}-materialized"]`) as HTMLButtonElement | null)?.click()
+      ;(root.querySelector('[data-testid="back"]') as HTMLButtonElement | null)?.click()
+      await nextTick()
+    }
+
+    expect(cardNames(searchSection())).toEqual(['Tavily Search', ...unconfiguredTail, 'DeepSeek Search'])
+
+    // Optimistic materialize promotes DeepSeek before server list refetches.
+    await materializeFromCard(searchSection, 'DeepSeek Search', 'search', {
+      id: 's-ds',
+      name: 'DeepSeek Search',
+      provider: 'deepseek',
+      enable: true,
+      config: { api_key: 'ds-key' },
+    })
+    expect(cardNames(searchSection())).toEqual(['Tavily Search', 'DeepSeek Search', ...unconfiguredTail])
+    expect(searchSection()?.querySelector('[data-provider="DeepSeek Search"]')?.getAttribute('data-enabled')).toBe('true')
+
+    // Materialize with empty id clears the optimistic entry.
+    await materializeFromCard(searchSection, 'DeepSeek Search', 'search', {
+      id: '',
+      name: 'DeepSeek Search',
+      provider: 'deepseek',
+      enable: false,
+      config: {},
+    })
+    expect(cardNames(searchSection())).toEqual(['Tavily Search', ...unconfiguredTail, 'DeepSeek Search'])
+    expect(searchSection()?.querySelector('[data-provider="DeepSeek Search"]')?.getAttribute('data-enabled')).toBe('false')
+
+    // Re-promote optimistically, let server data catch up, then simulate cross-tab delete.
+    await materializeFromCard(searchSection, 'DeepSeek Search', 'search', {
+      id: 's-ds',
+      name: 'DeepSeek Search',
+      provider: 'deepseek',
+      enable: true,
+      config: { api_key: 'ds-key' },
+    })
+    mocks.providerData.value = [
+      { id: 's-tavily', name: 'Tavily Search', provider: 'tavily', enable: true, config: {} },
+      { id: 's-ds', name: 'DeepSeek Search', provider: 'deepseek', enable: true, config: { api_key: 'ds-key' } },
+    ]
+    await nextTick()
+    expect(cardNames(searchSection())).toEqual(['Tavily Search', 'DeepSeek Search', ...unconfiguredTail])
+
+    mocks.providerData.value = [
+      { id: 's-tavily', name: 'Tavily Search', provider: 'tavily', enable: true, config: {} },
+    ]
+    await nextTick()
+    expect(cardNames(searchSection())).toEqual(['Tavily Search', ...unconfiguredTail, 'DeepSeek Search'])
+    expect(searchSection()?.querySelector('[data-provider="DeepSeek Search"]')?.getAttribute('data-enabled')).toBe('false')
+
+    // Same optimistic promotion + pruning cycle for fetch providers.
+    await materializeFromCard(fetchSection, 'Jina Reader', 'fetch', {
+      id: 'f-jina',
+      name: 'Jina Reader',
+      provider: 'jina',
+      enable: true,
+      config: { api_key: 'jina-key' },
+    })
+    expect(cardNames(fetchSection())).toEqual(['Native Fetch', 'Jina Reader', 'Cloudflare Markdown'])
+    expect(fetchSection()?.querySelector('[data-provider="Jina Reader"]')?.getAttribute('data-enabled')).toBe('true')
+
+    mocks.fetchProviderData.value = [
+      { id: 'f-jina', name: 'Jina Reader', provider: 'jina', enable: true, config: { api_key: 'jina-key' } },
+    ]
+    await nextTick()
+    mocks.fetchProviderData.value = []
+    await nextTick()
+    expect(fetchSection()?.querySelector('[data-provider="Jina Reader"]')?.getAttribute('data-enabled')).toBe('false')
+
+    nextSearchMaterialized = undefined
+    nextFetchMaterialized = undefined
     app.unmount()
   })
 })

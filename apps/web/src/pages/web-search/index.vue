@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref } from 'vue'
+import { computed, provide, ref, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import { getFetchProviders, getFetchProvidersMeta, getSearchProviders, getSearchProvidersMeta } from '@memohai/sdk'
 import type {
@@ -89,13 +89,38 @@ type WebDetail =
   | { kind: 'fetch', provider: FetchprovidersGetResponse }
 const detailKind = ref<WebDetailKind>('search')
 
-function sortByEnabled<T extends { enable?: boolean }>(list: T[]) {
-  return [...list].sort((a, b) => Number(b.enable !== false) - Number(a.enable !== false))
+function isSearchConfigured(provider: SearchprovidersGetResponse): boolean {
+  return Boolean(provider.id)
+}
+
+function isFetchConfigured(provider: FetchprovidersGetResponse): boolean {
+  return provider.provider === 'native' || Boolean(provider.id)
+}
+
+function isSearchEnabled(provider: SearchprovidersGetResponse): boolean {
+  return provider.enable !== false && isSearchConfigured(provider)
+}
+
+function isFetchEnabled(provider: FetchprovidersGetResponse): boolean {
+  return provider.enable !== false && isFetchConfigured(provider)
+}
+
+function catalogCardRank(enabled: boolean, configured: boolean): number {
+  return enabled ? 0 : configured ? 1 : 2
+}
+
+function pruneOptimistic<T extends { provider?: string }>(list: T[], optimistic: Record<string, T>) {
+  const present = new Set(list.map((p) => p.provider))
+  for (const key of Object.keys(optimistic)) {
+    if (present.has(key)) delete optimistic[key]
+  }
 }
 
 const providers = computed<SearchprovidersGetResponse[]>(() =>
-  Array.isArray(providerData.value) ? sortByEnabled(providerData.value) : [],
+  Array.isArray(providerData.value) ? providerData.value : [],
 )
+
+watch(providers, (list) => pruneOptimistic(list, optimisticSearchProviders.value))
 const searchProviderMetas = computed<SearchprovidersProviderMeta[]>(() =>
   Array.isArray(searchProviderMetaData.value) ? searchProviderMetaData.value : [],
 )
@@ -122,12 +147,17 @@ const searchItems = computed<SearchprovidersGetResponse[]>(() => {
         enable: false,
         config: providerConfigDefaults(meta?.config_schema),
       }
-  })
+  }).sort((a, b) =>
+    catalogCardRank(isSearchEnabled(a), isSearchConfigured(a))
+    - catalogCardRank(isSearchEnabled(b), isSearchConfigured(b)),
+  )
 })
 
 const fetchProviders = computed<FetchprovidersGetResponse[]>(() =>
   Array.isArray(fetchProviderData.value) ? fetchProviderData.value : [],
 )
+
+watch(fetchProviders, (list) => pruneOptimistic(list, optimisticFetchProviders.value))
 const fetchItems = computed<FetchprovidersGetResponse[]>(() => {
   if (!fetchReady.value) return []
   return FETCH_PROVIDER_TYPES.map((provider) => {
@@ -140,7 +170,10 @@ const fetchItems = computed<FetchprovidersGetResponse[]>(() => {
         enable: provider === 'native',
         config: providerConfigDefaults(meta?.config_schema),
       }
-  })
+  }).sort((a, b) =>
+    catalogCardRank(isFetchEnabled(a), isFetchConfigured(a))
+    - catalogCardRank(isFetchEnabled(b), isFetchConfigured(b)),
+  )
 })
 
 const searchError = computed(() =>
@@ -329,7 +362,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
               v-for="provider in filteredSearchItems"
               :key="provider.provider"
               :name="provider.name ?? ''"
-              :enabled="provider.enable !== false && !!provider.id"
+              :enabled="isSearchEnabled(provider)"
               @click="openProvider(provider)"
             >
               <template #leading>
@@ -383,7 +416,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
               v-for="provider in filteredFetchItems"
               :key="provider.provider"
               :name="provider.name ?? ''"
-              :enabled="provider.enable !== false && (provider.provider === 'native' || !!provider.id)"
+              :enabled="isFetchEnabled(provider)"
               @click="openFetchProvider(provider)"
             >
               <template #leading>
