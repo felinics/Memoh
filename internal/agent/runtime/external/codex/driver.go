@@ -100,6 +100,26 @@ func (d *Driver) peekServer(botID, botAgentID string) *appServer {
 	return srv
 }
 
+// observeServer holds the Agent's running app-server for a read without
+// starting one and without counting as use, so polling it neither starts
+// Codex nor keeps it from closing for idleness. It returns nil when none runs;
+// otherwise the caller must call release.
+func (d *Driver) observeServer(botID, botAgentID string) (*appServer, func()) {
+	if d.procs == nil {
+		return nil, nil
+	}
+	proc, release, ok := d.procs.Observe(serverKey(botID, botAgentID))
+	if !ok {
+		return nil, nil
+	}
+	srv, isServer := proc.(*appServer)
+	if !isServer {
+		release()
+		return nil, nil
+	}
+	return srv, release
+}
+
 // markBroken takes a wedged app-server out of service: new work starts a
 // fresh one, and it closes once the turns holding it are done.
 func (d *Driver) markBroken(botID, botAgentID string, srv *appServer) {
