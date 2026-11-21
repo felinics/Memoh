@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  canApplyExternalReload,
   deriveChipContext,
   detectSaveConflict,
   EMPTY_CHIP_CONTEXT,
@@ -118,73 +117,6 @@ describe('detectSaveConflict', () => {
       lastFsChangeAt: 3000,
       lastLoadedAt: 2000,
       affects: true,
-    })).toBe(true)
-  })
-})
-
-describe('canApplyExternalReload', () => {
-  it('allows an automatic reload when the clean buffer stayed unchanged while reading', () => {
-    expect(canApplyExternalReload({
-      contentAtRequestStart: 'base',
-      originalContentAtRequestStart: 'base',
-      currentContent: 'base',
-      currentOriginalContent: 'base',
-    })).toBe(true)
-  })
-
-  it('blocks an automatic reload when the user typed while the read was pending', () => {
-    expect(canApplyExternalReload({
-      contentAtRequestStart: 'base',
-      originalContentAtRequestStart: 'base',
-      currentContent: 'base + user edit',
-      currentOriginalContent: 'base',
-    })).toBe(false)
-  })
-
-  it('blocks an automatic reload when the saved baseline changed while the read was pending', () => {
-    expect(canApplyExternalReload({
-      contentAtRequestStart: 'base',
-      originalContentAtRequestStart: 'base',
-      currentContent: 'saved elsewhere',
-      currentOriginalContent: 'saved elsewhere',
-    })).toBe(false)
-  })
-
-  it('allows an explicit user reload even when it overwrites a dirty buffer', () => {
-    expect(canApplyExternalReload({
-      contentAtRequestStart: 'base',
-      originalContentAtRequestStart: 'base',
-      currentContent: 'mine',
-      currentOriginalContent: 'base',
-      force: true,
-    })).toBe(true)
-  })
-
-  it('refuses auto-reload over a dirty buffer even when no mutation occurred during the read', () => {
-    // Steady-dirty case: the buffer was dirty before the read, no concurrent
-    // typing happened, and force isn't set. The third clause
-    // (currentContent === currentOriginalContent) is the only thing keeping
-    // auto-reload from silently discarding the user's edits — pin it.
-    expect(canApplyExternalReload({
-      contentAtRequestStart: 'base + mine',
-      originalContentAtRequestStart: 'base',
-      currentContent: 'base + mine',
-      currentOriginalContent: 'base',
-    })).toBe(false)
-  })
-
-  it('allows an explicit user reload even when the saved baseline shifted during the read', () => {
-    // A concurrent save (or any out-of-band rewrite) shifts both currentContent
-    // and currentOriginalContent off the captured snapshots; force=true
-    // short-circuits the equality checks and still applies the new disk read.
-    // Pinning this prevents a regression that re-adds a baseline-drift guard
-    // before the force short-circuit.
-    expect(canApplyExternalReload({
-      contentAtRequestStart: 'base',
-      originalContentAtRequestStart: 'base',
-      currentContent: 'saved elsewhere',
-      currentOriginalContent: 'saved elsewhere',
-      force: true,
     })).toBe(true)
   })
 })

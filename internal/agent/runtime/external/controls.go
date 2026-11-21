@@ -4,15 +4,13 @@ import (
 	"context"
 	"errors"
 
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
-	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 var (
-	ErrAuthRequired       = errors.New("runtime authentication is required")
 	ErrControlUnsupported = errors.New("runtime control is unsupported")
 	ErrCommandUnavailable = errors.New("runtime command is no longer available")
-	ErrModeUnavailable    = errors.New("runtime mode is unavailable")
 	ErrThreadUnavailable  = errors.New("runtime thread has not started")
 )
 
@@ -79,11 +77,15 @@ type GoalProvider interface {
 	ControlGoal(context.Context, PromptInput, string) error
 }
 
+// ReadControls reads the controls the runtime declares.
 func ReadControls(ctx context.Context, driver Driver, input PromptInput) (Controls, error) {
 	out := Controls{SessionID: input.ThreadID, Commands: []Command{}, Modes: ModeState{AvailableModes: []Mode{}}}
-	if driver != nil {
-		out.Capabilities.ForkLatestOnly = runtimekind.LatestForkAnchorKey(driver.RuntimeType()) != ""
+	if driver == nil {
+		return out, nil
 	}
+	out.Capabilities.ForkLatestOnly = driver.Caps().ForkLatestOnly()
+	_, out.Capabilities.Compact = driver.(Compactor)
+	_, out.Capabilities.Goal = driver.(GoalProvider)
 	if provider, ok := driver.(CommandProvider); ok {
 		commands, err := provider.Commands(ctx, input)
 		if err != nil {
@@ -104,7 +106,6 @@ func ReadControls(ctx context.Context, driver Driver, input PromptInput) (Contro
 		out.Modes = modes
 		out.Capabilities.PermissionModes = modes.Supported && modes.Kind == "permission"
 	}
-	_, out.Capabilities.Compact = driver.(Compactor)
 	if provider, ok := driver.(PlanModeProvider); ok {
 		state, err := provider.PlanMode(ctx, input)
 		if err != nil {
@@ -113,7 +114,6 @@ func ReadControls(ctx context.Context, driver Driver, input PromptInput) (Contro
 		out.PlanMode = &state
 		out.Capabilities.PlanMode = state.Supported
 	}
-	_, out.Capabilities.Goal = driver.(GoalProvider)
 	return out, nil
 }
 
@@ -124,4 +124,19 @@ func FindCommand(commands []Command, name string) (Command, bool) {
 		}
 	}
 	return Command{}, false
+}
+
+// CompactionTurn turns a control request into the silent turn a runtime runs
+// its own compaction as: it needs the conversation's native session (stored
+// at sessionKey), asks the user nothing, takes no steering, and none of its
+// events become chat messages. The caller publishes the operation's state.
+func CompactionTurn(input PromptInput, sessionKey string) (PromptInput, error) {
+	if MetadataString(input.RuntimeMetadata, sessionKey) == "" {
+		return input, ErrThreadUnavailable
+	}
+	input.Command = "compact"
+	input.CanRequestUserInput = false
+	input.Steering = nil
+	input.Sink = EventSinkFunc(func(event.StreamEvent) {})
+	return input, nil
 }

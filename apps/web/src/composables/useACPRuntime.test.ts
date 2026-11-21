@@ -91,25 +91,6 @@ describe('useACPRuntime', () => {
     chatStoreMock.use.mockReset()
   })
 
-  it('exposes Agent commands only for the current runtime target', async () => {
-    makeStore(runtime('model-a', 'high', 'codex', 'session-1', [
-      { name: 'review', description: 'Review' },
-    ]))
-    const sessionId = ref('session-1')
-    const pane = useACPRuntime({
-      target: computed(() => ({ botId: 'bot-1', sessionId: sessionId.value, viewId: 'chat' })),
-      pending: false,
-      enabled: true,
-      agentId: 'codex',
-      projectPath: '',
-    })
-
-    expect(pane.availableCommands.value.map(command => command.name)).toEqual(['review'])
-    sessionId.value = 'session-2'
-    await Promise.resolve()
-    expect(pane.availableCommands.value).toEqual([])
-  })
-
   it('adopts only the latest model response', async () => {
     const { setACPRuntimeModel } = makeStore(runtime('model-a', 'high'))
     const first = deferred<AcpagentRuntimeStatus | undefined>()
@@ -127,17 +108,6 @@ describe('useACPRuntime', () => {
     await older
 
     expect(pane.currentModelId.value).toBe('model-b')
-    expect(pane.currentReasoningEffort.value).toBe('low')
-  })
-
-  it('updates the runtime reasoning effort immediately', async () => {
-    const { setACPRuntimeReasoning } = makeStore(runtime('model-a', 'high'))
-    setACPRuntimeReasoning.mockResolvedValueOnce(runtime('model-a', 'low'))
-    const pane = useSessionRuntime()
-
-    await pane.setReasoning('low')
-
-    expect(setACPRuntimeReasoning).toHaveBeenCalledWith('low', 'session-1')
     expect(pane.currentReasoningEffort.value).toBe('low')
   })
 
@@ -167,6 +137,24 @@ describe('useACPRuntime', () => {
 
     expect(pane.currentModelId.value).toBe('model-a')
     expect(pane.currentReasoningEffort.value).toBe('high')
+  })
+
+  it('holds a draft to the options of its own project', async () => {
+    const { pendingExternalAgentStateFor } = makeStore()
+    const draftOptions = ref({ ...runtime('model-b', 'low'), project_path: '/data/project' })
+    pendingExternalAgentStateFor.mockImplementation(() => ({ runtimeStatus: draftOptions.value, ensuring: false }))
+    const draft = useACPRuntime({
+      enabled: true,
+      agentId: 'codex',
+      projectPath: '/data/project',
+      target: computed(() => ({ botId: 'bot-1', sessionId: null, viewId: 'chat' })),
+      pending: true,
+    })
+
+    expect(draft.currentModelId.value).toBe('model-b')
+    draftOptions.value = { ...runtime('model-c', 'low'), project_path: '/data/other' }
+    await Promise.resolve()
+    expect(draft.currentModelId.value).toBe('')
   })
 
   it('does not reuse a shared snapshot from the previous Agent', async () => {

@@ -10,6 +10,7 @@
     <ScrollArea
       ref="scrollAreaRef"
       class="sidebar-scroll min-h-0 flex-1"
+      :scroll-hide-delay="300"
     >
       <div class="px-2 pb-6">
         <p
@@ -81,7 +82,8 @@
                     v-else-if="appDependencyIconUrl(app)"
                     :src="appDependencyIconUrl(app)"
                     alt=""
-                    class="size-5 object-contain"
+                    :class="['size-5 object-contain', shouldInvertDarkIcon(appDependencyIconUrl(app)) && 'dark:invert']"
+                    @load="handleDarkIconLoad($event)"
                   >
                   <SkillIcon v-else />
                 </div>
@@ -228,19 +230,21 @@ import { getBotsByBotIdApps, getSupermarketRegistriesByRegistryIdAppsByAppId, ty
 import { appDisplayDescription, appDisplayName, appKey, botAppsQueryKey } from '@/composables/api/useApps'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { handleDarkIconLoad, shouldInvertDarkIcon } from '@/utils/dark-icon-contrast'
 import SkillIcon from '@/pages/supermarket/components/skill-icon.vue'
 import InstallAppDialog from '@/pages/supermarket/components/install-app-dialog.vue'
 import SidebarPanelHeader from './panel-header.vue'
 import { useSupermarketFeed } from './use-supermarket-feed'
 import { useSidebarInfiniteScroll } from './use-sidebar-infinite-scroll'
 import { filterInstalledApps, uninstalledApps } from './supermarket-apps'
+import '@/styles/sidebar-scroll.css'
 
 /** The frame spans both text lines and their gap; the logo keeps the market card glyph size. */
 const appIconFrameClass = 'flex size-9.5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent'
 
 const appRowClass = 'flex min-w-0 cursor-pointer items-start gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-3 py-2.5 transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-style: App cards reuse the schedule sidebar card surface (bordered in both modes — rationale in schedule-item.vue) and hover token while retaining their content layout. */
 
-const props = defineProps<{ botId: string, canManage: boolean }>()
+const props = defineProps<{ botId: string, botName?: string, canManage: boolean }>()
 const { t, locale } = useI18n()
 const { appDependencyIconUrl } = useWorkspaceDependencyText()
 const router = useRouter()
@@ -309,7 +313,8 @@ async function prepareInstall(app: HandlersSupermarketAppSummary) {
 }
 
 function openInstalled(app: HandlersAppItem) {
-  void router.push({ name: 'bot-detail', params: { botName: props.botId }, query: { tab: 'apps', app: appKey(app) } })
+  const botName = props.botName?.trim() || props.botId
+  void router.push({ name: 'bot-detail', params: { botName }, query: { tab: 'apps', app: appKey(app) } })
 }
 /** Preserve the selected bot when browsing an uninstalled App. */
 function openCatalog(app: HandlersSupermarketAppSummary) {

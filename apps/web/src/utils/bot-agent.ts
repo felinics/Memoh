@@ -30,14 +30,14 @@ export interface BotAgentRuntimeOption {
   keywords: string[]
 }
 
-export type AgentAuthMode = 'chatgpt' | 'grok_account' | 'workspace' | 'oauth_token' | 'api_key'
-export type DeviceLoginAuthMode = Extract<AgentAuthMode, 'chatgpt' | 'grok_account'>
+export type AgentAuthMode = 'chatgpt' | 'grok_account' | 'claude_account' | 'api_key'
+export type DeviceLoginAuthMode = Exclude<AgentAuthMode, 'api_key'>
 
 // Each runtime's auth modes as an existing Agent offers them. The first is the
 // one a new Agent starts in.
 export const DIRECT_BOT_AGENT_AUTH_MODES: Record<DirectBotAgentRuntime, readonly [AgentAuthMode, ...AgentAuthMode[]]> = {
   [BOT_AGENT_RUNTIME_CODEX]: ['chatgpt', 'api_key'],
-  [BOT_AGENT_RUNTIME_CLAUDE_CODE]: ['workspace', 'api_key', 'oauth_token'],
+  [BOT_AGENT_RUNTIME_CLAUDE_CODE]: ['claude_account', 'api_key'],
   [BOT_AGENT_RUNTIME_GROK_BUILD]: ['grok_account', 'api_key'],
 }
 
@@ -45,8 +45,7 @@ export const DIRECT_BOT_AGENT_AUTH_MODES: Record<DirectBotAgentRuntime, readonly
 export const AGENT_AUTH_MODE_COPY: Record<AgentAuthMode, { label: string, description: string }> = {
   chatgpt: { label: 'bots.agent.authChatGPT', description: 'bots.agent.authChatGPTDescription' },
   grok_account: { label: 'bots.agent.grokAccount', description: 'bots.agent.authGrokAccountDescription' },
-  workspace: { label: 'bots.agent.authWorkspace', description: 'bots.agent.authWorkspaceDescription' },
-  oauth_token: { label: 'bots.agent.authOAuthToken', description: 'bots.agent.authOAuthTokenDescription' },
+  claude_account: { label: 'bots.agent.claudeAccount', description: 'bots.agent.authClaudeAccountDescription' },
   api_key: { label: 'bots.agent.apiKey', description: 'bots.agent.authApiKeyDescription' },
 }
 
@@ -60,15 +59,11 @@ export const DIRECT_BOT_AGENT_API_KEY_AUTH_KIND: Record<DirectBotAgentRuntime, s
   [BOT_AGENT_RUNTIME_GROK_BUILD]: 'xai_api_key',
 }
 
-// Account sign-ins completed with a device code, by auth mode: the credential
-// kind each one produces and the i18n keys its sign-in shows. An existing
-// Agent signs in on its own runtime process; `staged` marks a sign-in the
-// server can also run before the Bot exists. An existing Agent's settings
-// already explain the auth mode, so its account row says where the account
-// is kept instead (agentDescription).
+// Account sign-ins, by auth mode: the i18n keys each one shows. The sign-in
+// runs in the Agent's own runtime process, so it happens after the Bot is
+// created. An existing Agent's settings already explain the auth mode, so its
+// account row says where the account is kept instead (agentDescription).
 export const DEVICE_LOGINS: Record<DeviceLoginAuthMode, {
-  authKind: string
-  staged: boolean
   agentDescription: string
   connectedDescription: string
   hint: string
@@ -76,49 +71,30 @@ export const DEVICE_LOGINS: Record<DeviceLoginAuthMode, {
   failed: string
 }> = {
   chatgpt: {
-    authKind: 'openai_codex_oauth',
-    staged: true,
     agentDescription: 'bots.agent.chatgptAccountDescription',
     connectedDescription: 'bots.agent.chatgptAccountConnectedDescription',
     hint: 'bots.agent.codexDeviceHint',
     success: 'bots.agent.codexLoginSuccess',
     failed: 'bots.agent.codexLoginFailed',
   },
-  // Only Grok writes its login file, so the sign-in needs the Agent's
-  // process: it happens after the Bot is created.
   grok_account: {
-    authKind: 'xai_grok_oauth',
-    staged: false,
     agentDescription: 'bots.agent.grokAccountDescription',
     connectedDescription: 'bots.agent.grokAccountConnectedDescription',
     hint: 'bots.agent.grokDeviceHint',
     success: 'bots.agent.grokLoginSuccess',
     failed: 'bots.agent.grokLoginFailed',
   },
-}
-
-// The managed workspace dependency that provides each runtime's CLI.
-export const DIRECT_BOT_AGENT_DEPENDENCY_ID: Record<DirectBotAgentRuntime, string> = {
-  [BOT_AGENT_RUNTIME_CODEX]: 'codex',
-  [BOT_AGENT_RUNTIME_CLAUDE_CODE]: 'claude-code',
-  [BOT_AGENT_RUNTIME_GROK_BUILD]: 'grok',
+  claude_account: {
+    agentDescription: 'bots.agent.claudeAccountDescription',
+    connectedDescription: 'bots.agent.claudeAccountConnectedDescription',
+    hint: 'bots.agent.claudeAuthorizationHint',
+    success: 'bots.agent.claudeLoginSuccess',
+    failed: 'bots.agent.claudeLoginFailed',
+  },
 }
 
 export function isDeviceLoginAuthMode(value: string): value is DeviceLoginAuthMode {
   return Object.hasOwn(DEVICE_LOGINS, value)
-}
-
-function deviceLoginAuth(authKind: string): DeviceLoginAuthMode | undefined {
-  return (Object.keys(DEVICE_LOGINS) as DeviceLoginAuthMode[]).find(auth => DEVICE_LOGINS[auth].authKind === authKind)
-}
-
-export function isDeviceLoginAuthKind(authKind: string): boolean {
-  return deviceLoginAuth(authKind) !== undefined
-}
-
-// The auth mode an Agent needs for a credential of this kind to be accepted.
-export function agentAuthForCredentialKind(authKind: string): AgentAuthMode {
-  return deviceLoginAuth(authKind) ?? (authKind === 'claude_code_oauth' ? 'oauth_token' : 'api_key')
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
@@ -177,8 +153,9 @@ export function isDirectBotAgentConfigured(
   if (!isDirectBotAgentRuntime(runtime)) return null
   const auth = normalizeAgentID(objectValue(agent?.metadata)?.auth)
   if (!isAgentAuthMode(auth) || !DIRECT_BOT_AGENT_AUTH_MODES[runtime].includes(auth)) return false
-  // The workspace's own login is the one mode that stores no credential.
-  return auth === 'workspace' || !!agent?.agent_credential_id
+  // An account sign-in (ChatGPT, Claude, Grok) is kept by the CLI in the
+  // workspace; Memoh stores no credential for it.
+  return isDeviceLoginAuthMode(auth) || !!agent?.agent_credential_id
 }
 
 export function botAgentProvider(agent: Pick<BotagentsBotAgent, 'runtime' | 'metadata'> | null | undefined): string {
@@ -192,14 +169,26 @@ export function botAgentIcon(agent: Pick<BotagentsBotAgent, 'runtime' | 'metadat
   return externalAgentIcon(botAgentProvider(agent), color)
 }
 
+export interface AgentSessionSource {
+  bot_agent_id?: string
+  metadata?: Record<string, unknown>
+  runtime_metadata?: Record<string, unknown>
+}
+
+// sessionAgentProvider is the External Agent a session runs. A direct runtime
+// is its own Agent and an ACP session runs its Agent instance's profile, so
+// it is read from that instance. A session from before instances is bound to
+// none and names its profile itself; this is the one place that is read.
 export function sessionAgentProvider(
   runtimeType: unknown,
-  runtimeMetadata: Record<string, unknown> | undefined,
-  metadata: Record<string, unknown> | undefined,
+  session: AgentSessionSource,
+  agents: ReadonlyArray<Pick<BotagentsBotAgent, 'id' | 'runtime' | 'metadata'>> | undefined,
 ): string {
   const runtime = normalizeBotAgentRuntime(runtimeType)
   if (isDirectBotAgentRuntime(runtime)) return runtime
-  return normalizeAgentID(runtimeMetadata?.acp_agent_id ?? metadata?.acp_agent_id)
+  const botAgentId = session.bot_agent_id?.trim()
+  if (botAgentId) return botAgentProvider(agents?.find(agent => agent.id === botAgentId))
+  return normalizeAgentID(session.runtime_metadata?.acp_agent_id ?? session.metadata?.acp_agent_id)
 }
 
 export function botAgentName(agent: Pick<BotagentsBotAgent, 'name' | 'runtime' | 'metadata'> | null | undefined): string {

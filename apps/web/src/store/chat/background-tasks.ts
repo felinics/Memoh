@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
 import type { UIBackgroundTask } from '@/composables/api/useChat'
-import { asRecord, pickRawString, pickString, taskIdFromToolBlock } from '../chat-list.normalize'
+import { pickRawString, pickString, taskIdFromToolBlock } from '../chat-list.normalize'
 import type { BackgroundTask, ChatMessage, ToolCallBlock } from './types'
 
 export type { BackgroundTask } from './types'
@@ -53,28 +53,25 @@ export function isBackgroundTaskActive(task?: BackgroundTask): boolean {
 
 export function normalizeBackgroundTask(task?: UIBackgroundTask, eventType?: string): BackgroundTask | null {
   if (!task) return null
-  const outer = task as Record<string, unknown>
-  const nested = asRecord(outer.task)
-  const record = Object.keys(nested).length > 0 ? nested : outer
-  const taskId = pickString(record, 'task_id', 'taskId')
+  const record = task as Record<string, unknown>
+  const taskId = pickString(record, 'task_id')
   if (!taskId) return null
-  const event = pickString(record, 'event') || pickString(outer, 'event') || (eventType ?? '').trim()
+  const event = pickString(record, 'event') || (eventType ?? '').trim()
   const status = normalizeBackgroundStatus(pickString(record, 'status'), event) || 'running'
-  const exitCode = record.exit_code ?? record.exitCode
   return {
     taskId,
     status,
     event: event || undefined,
-    botId: pickString(record, 'bot_id', 'botId') || pickString(outer, 'bot_id', 'botId') || undefined,
-    sessionId: pickString(record, 'session_id', 'sessionId') || pickString(outer, 'session_id', 'sessionId') || undefined,
+    botId: pickString(record, 'bot_id') || undefined,
+    sessionId: pickString(record, 'session_id') || undefined,
     command: pickString(record, 'command') || undefined,
-    agentId: pickString(record, 'agent_id', 'agentId') || undefined,
-    agentSessionId: pickString(record, 'agent_session_id', 'agentSessionId') || undefined,
-    outputFile: pickString(record, 'output_file', 'outputFile') || undefined,
-    outputTail: pickRawString(record, 'output_tail', 'outputTail', 'tail') || undefined,
+    agentId: pickString(record, 'agent_id') || undefined,
+    agentSessionId: pickString(record, 'agent_session_id') || undefined,
+    outputFile: pickString(record, 'output_file') || undefined,
+    outputTail: pickRawString(record, 'output_tail', 'tail') || undefined,
     stream: pickString(record, 'stream') || undefined,
     chunk: pickRawString(record, 'chunk') || undefined,
-    exitCode: typeof exitCode === 'number' ? exitCode : undefined,
+    exitCode: typeof record.exit_code === 'number' ? record.exit_code : undefined,
     duration: pickString(record, 'duration') || undefined,
     stalled: record.stalled === true || status === 'stalled',
   }

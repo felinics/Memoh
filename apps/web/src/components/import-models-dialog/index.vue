@@ -38,9 +38,7 @@
           </Label>
         </RadioGroup>
         <p class="text-xs text-muted-foreground">
-          {{ $t(origin === 'catalog' && source
-            ? 'models.importFromCatalogHint'
-            : isRefresh ? 'models.refreshConfirmHint' : 'models.importConfirmHint') }}
+          {{ $t(hintKey) }}
         </p>
       </div>
     </template>
@@ -57,6 +55,7 @@ import { Button } from '@felinic/ui'
 import type { ButtonVariants } from '@felinic/ui'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
+import { isManagedModelCatalogClientType } from '@/constants/client-types'
 
 const props = withDefaults(defineProps<{
   providerId: string
@@ -76,6 +75,18 @@ const { run } = useDialogMutation()
 const { importProviderModels } = useProviderModelCatalog()
 const origin = ref<'catalog' | 'endpoint'>('catalog')
 const isRefresh = computed(() => props.mode === 'refresh')
+const isManaged = computed(() => isManagedModelCatalogClientType(props.clientType))
+const hintKey = computed(() => {
+  if (props.source) {
+    return origin.value === 'catalog'
+      ? 'models.importFromCatalogHint'
+      : 'models.importFromEndpointHint'
+  }
+  // Only managed OAuth catalogs drop unavailable models on refresh.
+  return isManaged.value && isRefresh.value
+    ? 'models.refreshConfirmHint'
+    : 'models.importConfirmHint'
+})
 
 const { mutateAsync: importModelsMutation, isLoading } = useMutation({
   mutation: () => importProviderModels(

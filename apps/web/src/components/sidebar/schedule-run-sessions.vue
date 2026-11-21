@@ -2,12 +2,16 @@
   <!-- What a schedule card expands into: one row per run, each row the
        conversation that run created. Titles line up with the card's own name
        (12px card gutter = 4px list inset + 8px row inset). -->
-  <div class="flex flex-col gap-px border-t border-border p-1">
+  <div
+    ref="list"
+    class="flex flex-col gap-px border-t border-border p-1"
+  >
     <button
       v-for="run in runs"
       :key="run.log_id"
       type="button"
       data-slot="schedule-run-row"
+      :data-session-id="run.session_id || undefined"
       :class="rowClass"
       :data-ui-selected="run.session_id && run.session_id === sessionId ? '' : undefined"
       :disabled="!run.session_id"
@@ -16,7 +20,10 @@
     >
       <span
         class="min-w-0 flex-1 truncate text-label"
-        :class="run.session_id ? 'text-foreground' : 'text-muted-foreground'"
+        :class="[
+          run.session_id ? 'text-foreground' : 'text-muted-foreground',
+          unreadKind(run) ? 'font-semibold' : '',
+        ]"
       >
         {{ run.title?.trim() || scheduleName }}
       </span>
@@ -25,6 +32,12 @@
           v-if="isRunning(run)"
           class="size-3"
           :aria-label="t('chat.sessionStreaming')"
+        />
+        <AttentionDot
+          v-else-if="unreadKind(run)"
+          :kind="unreadKind(run)!"
+          :session-id="run.session_id"
+          :attention-at="unread.entries[run.session_id ?? '']?.attentionAt"
         />
         <CircleAlert
           v-else-if="run.status === 'error'"
@@ -73,12 +86,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { nextTick, ref, useTemplateRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { CircleAlert } from 'lucide-vue-next'
 import { Spinner, TextButton } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
+import { useUnreadStore } from '@/store/unread'
+import AttentionDot from './attention-dot.vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { fetchScheduleRunSessions, type ScheduleRunSession } from '@/composables/api/useScheduleRuns'
 import { formatCalendarTime } from '@/utils/date-time'
@@ -90,12 +105,25 @@ const props = defineProps<{
   scheduleName: string
   /** Bumps whenever the server reports a change to this bot's schedules. */
   revision: number
+  /** A run session the user opened from a notification; its row is scrolled into view. */
+  focusSessionId?: string
+}>()
+
+const emit = defineEmits<{
+  /** The focused run is in view, or cannot be found in this schedule's runs. */
+  focused: []
 }>()
 
 const { t, locale } = useI18n()
 const chatStore = useChatStore()
 const { sessionId } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
+const unread = useUnreadStore()
+
+/** The run's session is unread: it marks the row the way a Recents row is marked. */
+function unreadKind(run: ScheduleRunSession) {
+  return run.session_id ? unread.kindOf(run.session_id) : null
+}
 
 /** Runs a card shows before it asks; one schedule must not bury the cards below it. */
 const PAGE_SIZE = 4
@@ -179,6 +207,39 @@ watch(
   () => { void reload() },
   { immediate: true },
 )
+
+const list = useTemplateRef<HTMLElement>('list')
+/** Pages "Show more" may fetch while looking for a focused run. */
+const MAX_FOCUS_PAGES = 5
+let focusPages = 0
+
+/**
+ * Brings the focused run into view once its row is loaded, fetching older
+ * pages a few times when it is not on the first one. Only the user's click
+ * asks for this, so moving the sidebar's scroll here is theirs to expect.
+ */
+async function revealFocused() {
+  const id = props.focusSessionId
+  if (!id || !loaded.value || loading.value) return
+  await nextTick()
+  const row = [...list.value?.querySelectorAll<HTMLElement>('[data-session-id]') ?? []].find(el => el.dataset.sessionId === id)
+  if (row) {
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    row.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' })
+    focusPages = 0
+    emit('focused')
+    return
+  }
+  if (nextCursor.value && focusPages < MAX_FOCUS_PAGES) {
+    focusPages += 1
+    void loadMore()
+    return
+  }
+  focusPages = 0
+  emit('focused')
+}
+
+watch(() => [props.focusSessionId, loaded.value, loading.value, runs.value.length] as const, () => { void revealFocused() })
 
 function isRunning(run: ScheduleRunSession): boolean {
   return !run.completed_at

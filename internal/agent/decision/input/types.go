@@ -9,15 +9,20 @@ import (
 const (
 	ToolNameAskUser = "ask_user"
 
-	// Provider sources record which surface created a request, for audit and
-	// display only. Nothing classifies on them: whether an answer feeds an
-	// in-process waiter or a native continuation is decided by the session's
-	// runtime (runtimekind.UsesDecisionWaiter), the same as tool approvals.
-	ProviderSourceACPMCP           = "acp_mcp"
-	ProviderSourceACPElicitation   = "acp_elicitation"
-	ProviderSourceACPAgentQuestion = "acp_agent_question"
-	ProviderSourceCodexUserInput   = "codex_request_user_input"
-	ProviderSourceCodexElicitation = "codex_mcp_elicitation"
+	// Provider sources record which surface created a request. Whether an
+	// answer feeds an in-process waiter or a native continuation is decided by
+	// the session's runtime (runtimekind.UsesDecisionWaiter), never by them.
+	// The one distinction drawn on them: Memoh's own ask_user, which an
+	// external agent calls through the tool gateway, accepts a free-text
+	// answer to any choice; an agent's own question keeps its constraints.
+	// The stored value of ProviderSourceMemohTool predates its name.
+	ProviderSourceMemohTool         = "acp_mcp"
+	ProviderSourceACPElicitation    = "acp_elicitation"
+	ProviderSourceACPAgentQuestion  = "acp_agent_question"
+	ProviderSourceCodexUserInput    = "codex_request_user_input"
+	ProviderSourceCodexElicitation  = "codex_mcp_elicitation"
+	ProviderSourceClaudeUserInput   = "claude_request_user_input"
+	ProviderSourceClaudeElicitation = "claude_mcp_elicitation"
 
 	StatusPending   = "pending"
 	StatusSubmitted = "submitted"

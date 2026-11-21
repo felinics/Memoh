@@ -11,10 +11,18 @@ const props = withDefaults(defineProps<{
   modelValue: KeyValuePair[]
   keyPlaceholder?: string
   valuePlaceholder?: string
+  keyAriaLabel?: string
+  valueAriaLabel?: string
+  valueType?: 'text' | 'password'
+  addLabel?: string
   readonly?: boolean
 }>(), {
   keyPlaceholder: 'Key',
   valuePlaceholder: 'Value',
+  keyAriaLabel: undefined,
+  valueAriaLabel: undefined,
+  valueType: 'text',
+  addLabel: undefined,
   readonly: false,
 })
 
@@ -51,13 +59,16 @@ function removeRow(index: number) {
       <Input
         :model-value="pair.key"
         :placeholder="keyPlaceholder"
+        :aria-label="keyAriaLabel ?? keyPlaceholder"
         :readonly="readonly"
         class="flex-1 font-mono text-xs"
         @update:model-value="(val) => updateRow(index, 'key', String(val))"
       />
       <Input
         :model-value="pair.value"
+        :type="valueType"
         :placeholder="valuePlaceholder"
+        :aria-label="valueAriaLabel ?? valuePlaceholder"
         :readonly="readonly"
         class="flex-1 font-mono text-xs"
         @update:model-value="(val) => updateRow(index, 'value', String(val))"
@@ -85,7 +96,7 @@ function removeRow(index: number) {
       <Plus
         class="mr-1.5"
       />
-      {{ $t('common.add') }}
+      {{ addLabel || $t('common.add') }}
     </Button>
   </div>
 </template>

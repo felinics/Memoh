@@ -1,0 +1,133 @@
+package claudecode
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"time"
+
+	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
+)
+
+type pendingSteer struct {
+	input    external.SteerInput
+	step     int
+	observed bool
+	terminal bool
+	settled  chan error
+}
+
+// startSteering delivers same-turn input once the CLI reported it takes it.
+func (t *turnRunner) startSteering(ctx context.Context) func() {
+	if t.input.Command != "" {
+		return func() {}
+	}
+	return external.PumpSteering(ctx, t.input.Steering, t.done, t.ready,
+		func() bool {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			return t.steerSupported
+		},
+		t.submitSteer,
+		func(err error) {
+			t.logger.WarnContext(ctx, "claude steer was not delivered", slog.Any("error", err))
+			t.emit(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
+		})
+}
+
+func (t *turnRunner) submitSteer(ctx context.Context, input external.SteerInput) error {
+	// Serializes result completion with writes: no input can be sent after the
+	// result handler has closed this run's admission window.
+	t.submissionMu.Lock()
+	t.mu.Lock()
+	if t.ending || t.closed {
+		t.mu.Unlock()
+		t.submissionMu.Unlock()
+		return errs.New("claude turn ended")
+	}
+	pending := &pendingSteer{input: input, step: len(t.steers), settled: make(chan error, 1)}
+	t.steers[input.ID] = pending
+	sessionID := t.sessionID
+	t.mu.Unlock()
+	line, err := json.Marshal(map[string]any{"type": "user", "uuid": input.ID, "session_id": sessionID, "priority": "now", "parent_tool_use_id": nil, "message": map[string]any{"role": "user", "content": input.Text}})
+	if err == nil {
+		err = t.writeLine(line)
+	}
+	t.submissionMu.Unlock()
+	if err != nil {
+		t.mu.Lock()
+		t.protocolErr = err
+		t.mu.Unlock()
+		t.finish()
+		return err
+	}
+	select {
+	case err := <-pending.settled:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.done:
+		select {
+		case err := <-pending.settled:
+			return err
+		default:
+			return errs.New("claude ended before consuming steer")
+		}
+	}
+}
+
+func (t *turnRunner) handleCommandLifecycle(msg *inboundMessage) {
+	t.mu.Lock()
+	pending := t.steers[msg.CommandUUID]
+	if pending == nil {
+		t.mu.Unlock()
+		return
+	}
+	started := msg.State == "started" && !pending.observed && !pending.terminal
+	if started {
+		pending.observed = true
+		t.awaitingResult = true
+	}
+	terminal := msg.State == "completed" || msg.State == "cancelled" || msg.State == "discarded" || msg.State == "refused"
+	if terminal {
+		pending.terminal = true
+	}
+	observed := pending.observed
+	t.mu.Unlock()
+	if started {
+		t.endText()
+		t.closeThinking()
+		t.emit(event.StreamEvent{Type: event.StepEnd, StepNumber: pending.step})
+		t.stream.SteerInput(pending.input.ID, pending.input.Text, func() {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), 5*time.Second)
+			defer cancel()
+			pending.settled <- t.input.Steering.Accepted(ctx, pending.input.ID, pending.step)
+		})
+	}
+	if terminal && !observed {
+		select {
+		case pending.settled <- errs.New("claude did not consume queued input"):
+		default:
+		}
+	}
+	t.maybeFinishResult()
+}
+
+func (t *turnRunner) maybeFinishResult() {
+	t.submissionMu.Lock()
+	defer t.submissionMu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.result == nil || t.awaitingResult || t.result.QueuedTurnCount > 0 {
+		return
+	}
+	for _, pending := range t.steers {
+		if !pending.terminal {
+			return
+		}
+	}
+	t.ending = true
+	t.finish()
+}

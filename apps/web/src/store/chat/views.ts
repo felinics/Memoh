@@ -38,6 +38,24 @@ export function createChatViews(deps: ChatViewsDeps) {
     seq: number
   } | null>(null)
   let draftPromotedSeq = 0
+  const userSentInSession = ref<{
+    id: string
+    botId: string
+    viewId: string
+    wasDraft: boolean
+    seq: number
+  } | null>(null)
+  let userSendSeq = 0
+
+  function recordUserSent(botId: string, targetSessionId: string, viewId: string, wasDraft: boolean) {
+    userSentInSession.value = {
+      id: targetSessionId,
+      botId,
+      viewId,
+      wasDraft,
+      seq: ++userSendSeq,
+    }
+  }
   let runtimeProjectionProbe: (sessionId: string) => RuntimeProjectionState | undefined =
     () => undefined
   let refreshAppliedHook: (
@@ -165,6 +183,16 @@ export function createChatViews(deps: ChatViewsDeps) {
       view.transcript.applyRuntimeTranscript(runtimeTranscript)
     })
   }
+  async function retryInitialSessionLoad(botId: string, sessionId: string) {
+    const resolvedBotId = botId.trim()
+    const resolvedSessionId = sessionId.trim()
+    if (!resolvedBotId || !resolvedSessionId) return
+    const transcript = sessionTranscript(resolvedBotId, resolvedSessionId)
+    await transcript.refreshCurrentSession(resolvedBotId, resolvedSessionId, () => {
+      const runtimeTranscript = runtimeProjectionProbe(resolvedSessionId)?.transcript
+      if (runtimeTranscript) transcript.applyRuntimeTranscript(runtimeTranscript)
+    })
+  }
   async function loadInitialMessages(
     botId: string,
     sessionId: string,
@@ -183,12 +211,25 @@ export function createChatViews(deps: ChatViewsDeps) {
     const clientBorn = view.clientBorn
     view.clientBorn = false
     const mask = !clientBorn && (
-      view.transcript.messages.length === 0
+      !view.initialized
+      || view.transcript.messages.length === 0
       || view.staleWhileHidden
       || !chatViews.isActivityStreamCovered(botId)
     )
-    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, { mask })
-    view.initialized = true
+    view.initialLoadFailed.value = false
+    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, {
+      mask,
+      onError: () => {
+        // Set before loadingMessages clears in loadInitialMessages's finally so
+        // watchers (such as useSessionViewing) never observe an unmasked,
+        // non-failed frame on a failed cold open. Cached (initialized) and
+        // client-born views keep their turns unflagged; an uninitialized server
+        // session still lacks its history even if a live runtime turn arrived.
+        if (!clientBorn && !view.initialized) {
+          view.initialLoadFailed.value = true
+        }
+      },
+    })
   }
   const fetchSessionWindow = (botId: string, sessionId: string) =>
     sessionTranscript(botId, sessionId).fetchSessionWindow(botId, sessionId)
@@ -280,6 +321,28 @@ export function createChatViews(deps: ChatViewsDeps) {
         )
   }
 
+  function isChatViewStopping(target: ChatViewTarget) {
+    const resolved = normalizeTarget(target)
+    return assistantStreams.isSessionStopping(resolved.botId, resolved.sessionId)
+  }
+
+  function canRefreshIdleSession(botId: string, targetSessionId: string): boolean {
+    if (
+      isSessionStreaming(botId, targetSessionId)
+      || assistantStreams.assistantStreamsForSession(botId, targetSessionId).length > 0
+      || firstSend.isSessionTentative(targetSessionId)
+      || Boolean(runtimeProjectionProbe(targetSessionId)?.currentRunView?.configuration_only)
+    ) {
+      return false
+    }
+    const view = chatViews.getSession(botId, targetSessionId)
+    if (!view || view.transcript.messages.some(m => m.role === 'assistant' && m.streaming)) {
+      return false
+    }
+    return view.visiblePanelIds.size > 0
+      || !chatViews.entries().some(entry => entry.botId === botId && entry.visiblePanelIds.size > 0)
+  }
+
   function workspaceTargetSelectionFor(target?: ChatViewTarget) {
     const view = chatView(target)
     return {
@@ -336,6 +399,23 @@ export function createChatViews(deps: ChatViewsDeps) {
     }
     stopSessionRuntime(view.botId, view.sessionId)
     chatViews.prune()
+  }
+
+  /**
+   * Releases the runtime of a session the focused composer is leaving, such as
+   * when a new draft replaces it. The session keeps its subscription while it
+   * is still shown or running, so its terminal state still arrives; the
+   * terminal projection releases it later. A session without a view has no
+   * one left to settle it and is stopped unless it is still streaming.
+   */
+  function releaseSessionRuntime(botId: string, sessionId: string) {
+    const view = chatViews.getSession(botId, sessionId)
+    if (view) {
+      releaseHiddenSessionView(view)
+      return
+    }
+    if (isSessionStreaming(botId, sessionId)) return
+    stopSessionRuntime(botId, sessionId)
   }
 
   function bindChatView(panelId: string, target: ChatViewTarget, visible = true) {
@@ -423,6 +503,8 @@ export function createChatViews(deps: ChatViewsDeps) {
   return {
     focusedViewId,
     draftPromoted,
+    userSentInSession,
+    recordUserSent,
     projectionVersion,
     chatViews,
     assistantStreams,
@@ -446,6 +528,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     markHistoryEmpty,
     refreshCurrentSession,
     resyncRuntimeTranscript,
+    retryInitialSessionLoad,
     loadInitialMessages,
     fetchSessionWindow,
     loadOlderMessages,
@@ -456,11 +539,14 @@ export function createChatViews(deps: ChatViewsDeps) {
     streamingSessionIds,
     streaming,
     isChatViewStreaming,
+    isChatViewStopping,
+    canRefreshIdleSession,
     workspaceTargetSelectionFor,
     setWorkspaceTargetSelection,
     initializeWorkspaceTargetSelection,
     resetWorkspaceTargetSelection,
     releaseHiddenSessionView,
+    releaseSessionRuntime,
     bindChatView,
     setChatViewVisible,
     unbindChatView: (panelId: string) =>
@@ -470,6 +556,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     configure,
     reset: () => {
       draftPromoted.value = null
+      userSentInSession.value = null
       chatViews.resetAll()
       firstSend.reset()
     },

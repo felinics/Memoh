@@ -81,6 +81,7 @@ func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) 
 			Name:        desc.Name,
 			Description: desc.Description,
 			Parameters:  schema,
+			Group:       federationToolGroup(desc),
 			Execute: func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
 				args := inputAsMap(input)
 				result, err := src.CallTool(ctx.Context, sess, desc.Name, args)
@@ -92,6 +93,13 @@ func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) 
 		})
 	}
 	return tools, nil
+}
+
+func federationToolGroup(desc mcp.ToolDescriptor) string {
+	if group := strings.TrimSpace(desc.Group); group != "" {
+		return group
+	}
+	return "mcp"
 }
 
 func normalizeMCPResult(result map[string]any) any {

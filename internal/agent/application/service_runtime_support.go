@@ -13,8 +13,6 @@ import (
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/event"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
@@ -25,6 +23,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // runtimeSinkStallTimeout bounds how long a live-turn event delivery may wait on
@@ -32,10 +31,6 @@ import (
 // stream (client-disconnect semantics) so the adapter callback — and the
 // prompt's runtime slot behind it — cannot stall indefinitely.
 const runtimeSinkStallTimeout = 30 * time.Second
-
-type acpPrompter interface {
-	Prompt(ctx context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error)
-}
 
 type runtimePreparedAttachments struct {
 	Images                   []external.Image
@@ -50,11 +45,6 @@ type RuntimeSessionExecutionInfo struct {
 	RuntimeOwnerAccountID string
 }
 
-func (s *Service) SetACPSessionPool(pool acpPrompter) {
-	s.acpPool = pool
-	s.SetExternalRuntimes(acpagent.NewDriver(pool))
-}
-
 func (s *Service) RuntimeSessionExecutionInfo(ctx context.Context, sessionID string) (RuntimeSessionExecutionInfo, error) {
 	if s == nil || s.sessionService == nil || strings.TrimSpace(sessionID) == "" {
 		return RuntimeSessionExecutionInfo{}, nil
@@ -63,11 +53,10 @@ func (s *Service) RuntimeSessionExecutionInfo(ctx context.Context, sessionID str
 	if err != nil {
 		return RuntimeSessionExecutionInfo{}, err
 	}
-	// Direct external runtimes execute in the workspace exactly like ACP
-	// agents; the WS execution gate must cover both, or a
-	// session reached by other means (a fork, a shared session) executes
-	// with only the inherited runtime owner ever checked.
-	if !session.IsACPRuntime(sess) && !session.IsDirectRuntime(sess) {
+	// Every external agent executes in the workspace; the WS execution gate
+	// must cover all of them, or a session reached by other means (a fork, a
+	// shared session) executes with only the inherited runtime owner checked.
+	if !session.IsExternalRuntime(sess) {
 		return RuntimeSessionExecutionInfo{}, nil
 	}
 	runtimeMeta := runtimeSessionMeta(sess)
@@ -339,9 +328,20 @@ func (s *Service) cleanupRuntimeDecisionProjectionRows(ctx context.Context, req 
 	if err != nil {
 		return
 	}
-	if _, err := s.queries.DeleteRuntimeDecisionProjectionsByRun(ctx, sqlc.DeleteRuntimeDecisionProjectionsByRunParams{
-		BotID: botID, SessionID: sessionID, RunID: runID,
-	}); err != nil {
+	cleanup := func(queries dbstore.Queries) error {
+		_, err := queries.DeleteRuntimeDecisionProjectionsByRun(ctx, sqlc.DeleteRuntimeDecisionProjectionsByRunParams{
+			BotID: botID, SessionID: sessionID, RunID: runID,
+		})
+		return err
+	}
+	// A run deletes under its persistence fence: an owner that lost the
+	// session cannot delete rows its successor reads.
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		err = runtimefence.InTransaction(ctx, s.queries, req.BotID, req.ThreadID, cleanup)
+	} else {
+		err = cleanup(s.queries)
+	}
+	if err != nil {
 		s.logger.WarnContext(ctx, "cleanup External Agent decision projections by run failed",
 			slog.String("session_id", req.ThreadID), slog.String("run_id", req.RunID), slog.Any("error", err))
 	}

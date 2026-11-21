@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -514,6 +515,17 @@ func (s *Service) reconcileTerminalContextLifecycles(ctx context.Context) error 
 		return fmt.Errorf("reconcile terminal context lifecycles: %w", err)
 	}
 	return nil
+}
+
+func pgUUIDString(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	parsed, err := uuid.FromBytes(value.Bytes[:])
+	if err != nil {
+		return ""
+	}
+	return parsed.String()
 }
 
 func contextLifecycleBoundedContext(ctx context.Context) (context.Context, context.CancelFunc) {

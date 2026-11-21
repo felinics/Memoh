@@ -186,37 +186,6 @@ func (s *Service) DetachFromBotAgent(ctx context.Context, botID, botAgentID stri
 	return s.inTx(ctx, detach)
 }
 
-// UpdateSecretCAS persists a rotated secret guarded by credential_version so a
-// concurrent rotation (or revoke) loses cleanly instead of overwriting.
-func (s *Service) UpdateSecretCAS(ctx context.Context, credentialID string, expectedVersion int64, secret map[string]string, accountMetadata map[string]any, expiresAt *time.Time) (PublicCredential, error) {
-	if !s.Configured() {
-		return PublicCredential{}, ErrEncryptionUnavailable
-	}
-	id, err := db.ParseUUID(credentialID)
-	if err != nil || expectedVersion <= 0 {
-		return PublicCredential{}, ErrInvalidRequest
-	}
-	ciphertext, nonce, err := s.encrypt(secret)
-	if err != nil {
-		return PublicCredential{}, err
-	}
-	meta, err := json.Marshal(nonNilMap(accountMetadata))
-	if err != nil {
-		return PublicCredential{}, ErrInvalidRequest
-	}
-	row, err := s.queries.UpdateAgentCredentialPayloadCAS(ctx, dbsqlc.UpdateAgentCredentialPayloadCASParams{
-		EncryptedPayload: ciphertext, EncryptionNonce: nonce, KeyVersion: 1,
-		AccountMetadata: meta, ExpiresAt: timestamptz(expiresAt), ID: id, ExpectedVersion: expectedVersion,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return PublicCredential{}, ErrNotFound
-	}
-	if err != nil {
-		return PublicCredential{}, err
-	}
-	return publicFromRow(row), nil
-}
-
 // Compatible reports whether an auth kind can drive the Agent runtime.
 func Compatible(agentRuntime, authKind string) bool {
 	spec, ok := authKinds[authKind]

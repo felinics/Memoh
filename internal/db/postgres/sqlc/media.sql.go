@@ -26,98 +26,41 @@ func (q *Queries) CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID
 }
 
 const createMessageAsset = `-- name: CreateMessageAsset :one
-WITH message_locator AS MATERIALIZED (
-  SELECT message.id, message.session_id
-  FROM bot_history_messages message
-  WHERE message.team_id = public.memoh_current_team_id()
-    AND message.id = $1
-),
-owner_session AS MATERIALIZED (
-  SELECT session.id, session.bot_id, session.compaction_epoch
-  FROM bot_sessions session
-  JOIN message_locator message
-    ON message.session_id = session.id
-   AND session.team_id = public.memoh_current_team_id()
-  FOR UPDATE
-),
-target_message AS MATERIALIZED (
-  SELECT message.id, message.session_id, message.compact_id
-  FROM bot_history_messages message
-  JOIN message_locator locator ON locator.id = message.id
-  LEFT JOIN owner_session owner ON owner.id = locator.session_id
-  WHERE message.team_id = public.memoh_current_team_id()
-    AND (locator.session_id IS NULL OR owner.id IS NOT NULL)
-  FOR UPDATE OF message
-),
-changed_asset AS MATERIALIZED (
-  SELECT target.id, target.session_id, target.compact_id
-  FROM target_message target
-  LEFT JOIN bot_history_message_assets existing
-    ON existing.message_id = target.id
-   AND existing.team_id = public.memoh_current_team_id()
-   AND existing.content_hash = $2
-  WHERE existing.id IS NULL
-     OR existing.role IS DISTINCT FROM $3
-     OR existing.ordinal IS DISTINCT FROM $4
-     OR existing.name IS DISTINCT FROM $5
-     OR existing.metadata IS DISTINCT FROM $6
-),
-invalidated_session AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
-  FROM changed_asset changed
-  JOIN owner_session owner ON owner.id = changed.session_id
-  JOIN bot_history_message_compacts compact
-    ON compact.id = changed.compact_id
-   AND compact.team_id = public.memoh_current_team_id()
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = owner.id
-    AND compact.bot_id = owner.bot_id
-    AND compact.session_id = owner.id
-    AND compact.compaction_epoch = owner.compaction_epoch
-    AND compact.status IN ('pending', 'ok')
-  RETURNING session.id
-),
-upserted_asset AS (
-  INSERT INTO bot_history_message_assets (
-    message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
-  )
-  SELECT
-    target.id,
-    $3,
-    $4,
-    $2,
-    COALESCE($7::text, ''),
-    $8,
-    COALESCE($9::text, ''),
-    $5,
-    $6
-  FROM target_message target
-  CROSS JOIN (SELECT count(*) FROM invalidated_session) invalidation_done
-  ON CONFLICT (team_id, message_id, content_hash) DO UPDATE SET
-    role = EXCLUDED.role,
-    ordinal = EXCLUDED.ordinal,
-    mime = CASE WHEN EXCLUDED.mime <> '' THEN EXCLUDED.mime ELSE bot_history_message_assets.mime END,
-    size_bytes = CASE WHEN EXCLUDED.size_bytes > 0 THEN EXCLUDED.size_bytes ELSE bot_history_message_assets.size_bytes END,
-    storage_key = CASE WHEN EXCLUDED.storage_key <> '' THEN EXCLUDED.storage_key ELSE bot_history_message_assets.storage_key END,
-    name = EXCLUDED.name,
-    metadata = EXCLUDED.metadata
-  RETURNING id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata, created_at
+INSERT INTO bot_history_message_assets (
+  message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
 )
-SELECT id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata, created_at
-FROM upserted_asset
+VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  COALESCE($5::text, ''),
+  $6,
+  COALESCE($7::text, ''),
+  $8,
+  $9
+)
+ON CONFLICT (team_id, message_id, content_hash) DO UPDATE SET
+  role = EXCLUDED.role,
+  ordinal = EXCLUDED.ordinal,
+  mime = CASE WHEN EXCLUDED.mime <> '' THEN EXCLUDED.mime ELSE bot_history_message_assets.mime END,
+  size_bytes = CASE WHEN EXCLUDED.size_bytes > 0 THEN EXCLUDED.size_bytes ELSE bot_history_message_assets.size_bytes END,
+  storage_key = CASE WHEN EXCLUDED.storage_key <> '' THEN EXCLUDED.storage_key ELSE bot_history_message_assets.storage_key END,
+  name = EXCLUDED.name,
+  metadata = EXCLUDED.metadata
+RETURNING id, message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata, created_at
 `
 
 type CreateMessageAssetParams struct {
 	MessageID   pgtype.UUID `json:"message_id"`
-	ContentHash string      `json:"content_hash"`
 	Role        string      `json:"role"`
 	Ordinal     int32       `json:"ordinal"`
-	Name        string      `json:"name"`
-	Metadata    []byte      `json:"metadata"`
+	ContentHash string      `json:"content_hash"`
 	Mime        string      `json:"mime"`
 	SizeBytes   int64       `json:"size_bytes"`
 	StorageKey  string      `json:"storage_key"`
+	Name        string      `json:"name"`
+	Metadata    []byte      `json:"metadata"`
 }
 
 type CreateMessageAssetRow struct {
@@ -137,14 +80,14 @@ type CreateMessageAssetRow struct {
 func (q *Queries) CreateMessageAsset(ctx context.Context, arg CreateMessageAssetParams) (CreateMessageAssetRow, error) {
 	row := q.db.QueryRow(ctx, createMessageAsset,
 		arg.MessageID,
-		arg.ContentHash,
 		arg.Role,
 		arg.Ordinal,
-		arg.Name,
-		arg.Metadata,
+		arg.ContentHash,
 		arg.Mime,
 		arg.SizeBytes,
 		arg.StorageKey,
+		arg.Name,
+		arg.Metadata,
 	)
 	var i CreateMessageAssetRow
 	err := row.Scan(

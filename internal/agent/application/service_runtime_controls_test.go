@@ -69,6 +69,14 @@ func (d *controlDriver) RuntimeType() string {
 	return "codex"
 }
 
+// Caps declares what the stub implements; a runtime that reads its native
+// session on a read command declares so, like Grok Build.
+func (d *controlDriver) Caps() external.Caps {
+	return external.Caps{
+		ReadCommandsRequireIdle: d.RuntimeType() == "grok-build",
+	}
+}
+
 func (*controlDriver) Prompt(context.Context, external.PromptInput) (external.PromptResult, error) {
 	panic("control must not start chat")
 }
@@ -103,7 +111,7 @@ func runtimeControlFixture(t *testing.T) (*Service, *controlQueries, *controlDri
 	driver := &controlDriver{commands: []external.Command{{Name: "inspect", Kind: external.CommandRead}, {Name: "shrink", Kind: external.CommandOperation}}}
 	admitter := newScriptedAdmitter()
 	request := RuntimeControlRequest{BotID: botID.String(), ThreadID: threadID.String(), ActorID: actorID.String()}
-	svc := &Service{sessionService: session.NewService(nil, q, nil), botPermissions: &fakeBotPermissionChecker{values: map[string]bool{request.BotID + ":" + request.ActorID + ":" + bots.PermissionWorkspaceExec: true}}, externalDrivers: map[string]external.Driver{"codex": driver}, sessionRuntime: admitter}
+	svc := &Service{sessionService: session.NewService(nil, q, nil), botPermissions: &fakeBotPermissionChecker{values: map[string]bool{request.BotID + ":" + request.ActorID + ":" + bots.PermissionWorkspaceExec: true}}, runtimes: testRuntimes(t, driver), sessionRuntime: admitter}
 	return svc, q, driver, admitter, request
 }
 
@@ -168,7 +176,7 @@ func (d *planControlDriver) SetPlanMode(ctx context.Context, input external.Prom
 func TestPlanModePersistsWithoutReplacingPermission(t *testing.T) {
 	for _, mode := range []string{"plan", "default"} {
 		svc, q, driver, _, req := runtimeControlFixture(t)
-		svc.externalDrivers["codex"] = &planControlDriver{driver}
+		svc.runtimes = testRuntimes(t, &planControlDriver{driver})
 		q.row.RuntimeMetadata = []byte(`{"permission_mode":"yolo","keep":"value"}`)
 		req.ModeKind, req.ModeID = "plan", mode
 		if _, err := svc.SetRuntimeMode(t.Context(), req); err != nil {
@@ -191,7 +199,7 @@ func TestReadCommandAdmissionMatchesRuntimePolicy(t *testing.T) {
 				svc, q, driver, admitter, req := runtimeControlFixture(t)
 				q.row.RuntimeType = runtime
 				driver.runtimeType = runtime
-				svc.externalDrivers = map[string]external.Driver{runtime: driver}
+				svc.runtimes = testRuntimes(t, driver)
 				req.Command = "inspect"
 				if busy {
 					admitter.admitErr = sessionruntime.ErrSessionBusy

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -39,6 +40,14 @@ func (q resumeLedgerQueries) RetireInterruptedSessionRun(ctx context.Context, ru
 	return q.db.RetireInterruptedSessionRun(ctx, runID)
 }
 
+func (q resumeLedgerQueries) GetSessionRun(ctx context.Context, runID pgtype.UUID) (dbsqlc.SessionRun, error) {
+	return q.db.GetSessionRun(ctx, runID)
+}
+
+func (q resumeLedgerQueries) ListRunHistoryTurnRequestMessageIDs(ctx context.Context, arg dbsqlc.ListRunHistoryTurnRequestMessageIDsParams) ([]pgtype.UUID, error) {
+	return q.db.ListRunHistoryTurnRequestMessageIDs(ctx, arg)
+}
+
 // resumeProcess is one server process: its runtime and its application
 // service, with resume enabled the way the server configures it.
 type resumeProcess struct {
@@ -50,7 +59,6 @@ func (h wsStepHistoryHarness) startProcess(t *testing.T) resumeProcess {
 	t.Helper()
 	manager := h.restarted(t)
 	service, _ := newWSStepHistoryService(t, wsStepHistorySuccess, postgresstore.NewQueriesWithPool(h.pool, dbsqlc.New(h.pool)), manager)
-	service.SetResumeSecret("history-reset-resume")
 	service.SetSessionResumeScopeProvider(singletonSessionResumeScopes{teamID: team.DefaultTeamID})
 	service.queries = resumeLedgerQueries{noDecisionQueries: service.queries.(noDecisionQueries), db: dbsqlc.New(h.pool)}
 	return resumeProcess{manager: manager, service: service}
@@ -74,6 +82,20 @@ func (h wsStepHistoryHarness) interruptedTurn(t *testing.T, p resumeProcess, tas
 		t.Fatalf("admit turn = (%+v, %v)", admission, err)
 	}
 	fenced := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: h.botID, SessionID: h.sessionID, Token: admission.Handle.FencingToken})
+	request, err := h.messages.Persist(fenced, messagepkg.PersistInput{
+		BotID: h.botID, SessionID: h.sessionID, RunID: admission.RunID, Role: "user",
+		Content: []byte(`{"role":"user","content":"` + task + `"}`),
+		TurnID:  admission.TurnID, TurnPosition: &admission.TurnPosition,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.messages.Persist(fenced, messagepkg.PersistInput{
+		BotID: h.botID, SessionID: h.sessionID, RunID: admission.RunID, Role: "assistant",
+		TurnRequestMessageID: request.ID, Content: []byte(`{"role":"assistant","content":"before restart"}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := p.service.recordRunResumeContext(fenced, ChatRequest{RunID: admission.RunID, ChatID: h.botID, Query: task}); err != nil {
 		t.Fatalf("record resume intent: %v", err)
 	}

@@ -104,7 +104,7 @@ func TestPostgresHistoryResetReplaceImport(t *testing.T) {
 
 	backup := h.historyBackup(t)
 	importer := botbackup.New(botbackup.Params{
-		DB: h.pool, Queries: postgresstore.NewQueriesWithPool(h.pool, dbsqlc.New(h.pool)), ACPRuntimes: h.manager,
+		DB: h.pool, Queries: postgresstore.NewQueriesWithPool(h.pool, dbsqlc.New(h.pool)), RuntimeResets: h.manager,
 	})
 	opts := botbackup.ImportOptions{
 		Mode: botbackup.ImportModeOverwrite, TargetBotID: h.botID,

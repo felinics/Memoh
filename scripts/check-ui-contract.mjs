@@ -9,15 +9,17 @@
 //   · CONTRACT rules — packages/ui ONLY (raw color / arbitrary radius / invented
 //     shadow / disabled opacity / field-edge / selection ring). The library is the
 //     single source the app consumes.
-//   · px-SCALING rules — packages/ui AND apps/web. The root font-size is driven by
-//     --memoh-ui-font-size, so rem scales with the user's font setting / browser zoom
-//     while a hardcoded px does NOT. A px on a property that gates TEXT therefore
-//     stops growing while the surrounding text grows → clipped / misaligned controls.
-//   · APP-INJECTION rules — apps/web (ratcheted). Interaction chrome, color and
-//     elevation each have ONE source in the library; a page that hand-injects
-//     hover:/active: fills, raw colors or shadow-* onto a component tag forks that
-//     source — the exact drift where one control hovers differently than its
-//     neighbour. Existing debt is grandfathered; new injection HARD-fails.
+//   · px-SCALING rules — packages/ui, apps/web AND apps/desktop renderer. The root
+//     font-size is driven by --memoh-ui-font-size, so rem scales with the user's font
+//     setting / browser zoom while a hardcoded px does NOT. A px on a property that
+//     gates TEXT therefore stops growing while the surrounding text grows → clipped /
+//     misaligned controls.
+//   · APP-INJECTION rules — apps/web AND apps/desktop renderer (ratcheted).
+//     Interaction chrome, color and elevation each have ONE source in the library;
+//     a page that hand-injects hover:/active: fills, raw colors or shadow-* onto a
+//     component tag forks that source — the exact drift where one control hovers
+//     differently than its neighbour. Existing debt is grandfathered; new injection
+//     HARD-fails.
 //   · INVALID-COLOR rule — packages/ui AND apps/web (both scopes, no ratchet).
 //     hsl(var(--x)) wrapping an oklch token is an invalid color function; the
 //     browser drops the whole declaration silently (no error, no fallback),
@@ -105,7 +107,7 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..')
 // hand-inject it. Both app families are ratcheted (below) so existing debt is
 // grandfathered while new injection is blocked.
 const FULL_DIRS = ['packages/ui/src']
-const APP_DIRS = ['apps/web/src']
+const APP_DIRS = ['apps/web/src', 'apps/desktop/src/renderer/src']
 const EXT = /\.(vue|ts)$/
 const PX_BASELINE_PATH = join(ROOT, 'scripts/ui-px-baseline.json')
 const APP_BASELINE_PATH = join(ROOT, 'scripts/ui-app-baseline.json')
@@ -313,7 +315,7 @@ function scan(file, full) {
           /(?:^|:)(?:bg|text|border|divide|ring|shadow|from|to|via)-(?:muted|accent|border|foreground|background|destructive|warning|primary|success|info|card|popover|sidebar[a-z-]*)(?:-foreground)?\/[0-9]+$/.test(tok))
         alphaHard.push({ rel, ln, msg: `hand-written alpha (use a -soft/-border/-muted token, or add one — see packages/ui/AGENTS.md § Alpha policy) → ${tok}` })
 
-      // ── app-scope injection rules (apps/web only; ratcheted) ─────────────
+      // ── app-scope injection rules (apps/web + desktop renderer; ratcheted) ─
       //   The library owns interaction chrome (style.css ::before), color (palette
       //   tokens) and elevation (shadow tokens). A page that hand-injects these onto
       //   a component tag forks the single source — the drift where one control hovers
@@ -322,7 +324,7 @@ function scan(file, full) {
         if (/(?:^|:)(?:hover|active|group-hover):(?:bg|text|border|ring)-/.test(tok))
           appHard.push({ rel, ln, msg: `ad-hoc interaction fill (chrome belongs to the component, not the page) → ${tok}` })
         else if (/(?:^|:)(?:bg|text|border|ring|divide|outline)-(?:white|black)(?:$|\/)/.test(tok) ||
-                 /(?:^|:)(?:bg|text|border|ring|divide|outline)-(?:gray|zinc|slate|neutral|stone)-\d/.test(tok) ||
+                 /(?:^|:)(?:bg|text|border|ring|divide|outline)-(?:gray|zinc|slate|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d/.test(tok) ||
                  /-\[(?:#|(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix)\()/.test(tok))
           appHard.push({ rel, ln, msg: `raw color (use a palette token, not a fixed shade) → ${tok}` })
         else if (/(?:^|:)shadow-(?:2xs|xs|sm|md|lg|xl|2xl)$/.test(tok))

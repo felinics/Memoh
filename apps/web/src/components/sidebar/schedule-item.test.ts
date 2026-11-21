@@ -15,8 +15,11 @@ vi.mock('@felinic/ui', async (importOriginal) => {
     ...await importOriginal<object>(),
     DropdownMenu: passthrough,
     DropdownMenuTrigger: passthrough,
-    DropdownMenuContent: defineComponent({ setup: () => () => null }),
-    DropdownMenuItem: passthrough,
+    DropdownMenuContent: passthrough,
+    DropdownMenuItem: defineComponent({
+      emits: ['select'],
+      setup: (_, { slots, emit }) => () => render('button', { 'data-menu-item': '', onClick: () => emit('select') }, slots.default?.()),
+    }),
     DropdownMenuSeparator: passthrough,
     Switch: defineComponent({
       props: { modelValue: Boolean },
@@ -50,6 +53,8 @@ interface CardProps {
   expandable?: boolean
   expanded?: boolean
   pinnedSession?: boolean
+  unreadCount?: number
+  onReadAll?: () => void
   onOpen?: () => void
   onToggle?: (enabled: boolean) => void
 }
@@ -106,4 +111,24 @@ it('emits open from the header and keeps the switch from opening the card', asyn
   await nextTick()
   expect(onToggle).toHaveBeenCalledWith(false)
   expect(onOpen).toHaveBeenCalledTimes(1)
+})
+
+function menuItem(label: string): HTMLButtonElement | undefined {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('[data-menu-item]')).find(b => b.textContent?.trim() === label)
+}
+
+it('offers to read all runs only while some are unread', async () => {
+  const onReadAll = vi.fn()
+  const state = await mount({ expandable: true, unreadCount: 0, onReadAll })
+  expect(menuItem(en.notifications.clearAll)).toBeUndefined()
+
+  state.unreadCount = 3
+  await nextTick()
+  menuItem(en.notifications.clearAll)!.click()
+  expect(onReadAll).toHaveBeenCalledTimes(1)
+})
+
+it('has no read-all for a pinned-session schedule', async () => {
+  await mount({ pinnedSession: true, unreadCount: 2 })
+  expect(menuItem(en.notifications.clearAll)).toBeUndefined()
 })

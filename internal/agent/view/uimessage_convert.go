@@ -3,17 +3,18 @@ package view
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/toolbridge"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/messageconv"
-	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/textutil"
 )
 
@@ -564,20 +565,29 @@ func persistedHistoryErrorCode(meta map[string]any) string {
 // persistedHistoryErrorArgs are the string args stored beside a failure's
 // code. A row written before args were stored has none.
 func persistedHistoryErrorArgs(meta map[string]any) map[string]string {
-	stored, _ := meta[messagepkg.HistoryErrorArgsMetadataKey].(map[string]any)
-	if len(stored) == 0 {
-		return nil
-	}
-	args := make(map[string]string, len(stored))
-	for key, value := range stored {
-		if text, ok := value.(string); ok {
-			args[key] = text
+	switch stored := meta[messagepkg.HistoryErrorArgsMetadataKey].(type) {
+	case map[string]string:
+		if len(stored) == 0 {
+			return nil
 		}
-	}
-	if len(args) == 0 {
+		return maps.Clone(stored)
+	case map[string]any:
+		if len(stored) == 0 {
+			return nil
+		}
+		args := make(map[string]string, len(stored))
+		for key, value := range stored {
+			if text, ok := value.(string); ok {
+				args[key] = text
+			}
+		}
+		if len(args) == 0 {
+			return nil
+		}
+		return args
+	default:
 		return nil
 	}
-	return args
 }
 
 func persistedHistoryErrorDetail(meta map[string]any) string {
@@ -885,10 +895,11 @@ func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedTool
 		if !strings.EqualFold(strings.TrimSpace(part.Type), "tool-call") {
 			continue
 		}
+		name, input, _ := toolbridge.Unwrap(strings.TrimSpace(part.ToolName), part.Input)
 		calls = append(calls, uiExtractedToolCall{
 			ID:                strings.TrimSpace(part.ToolCallID),
-			Name:              strings.TrimSpace(part.ToolName),
-			Input:             part.Input,
+			Name:              name,
+			Input:             input,
 			Approval:          extractApprovalMetadata(part.ProviderMetadata),
 			ExecutionLocation: extractExecutionLocationMetadata(part.ProviderMetadata),
 			UserInput:         extractUserInputMetadata(part.ProviderMetadata),
@@ -906,9 +917,10 @@ func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedTool
 				input = rawArgs
 			}
 		}
+		name, input, _ := toolbridge.Unwrap(strings.TrimSpace(toolCall.Function.Name), input)
 		calls = append(calls, uiExtractedToolCall{
 			ID:    strings.TrimSpace(toolCall.ID),
-			Name:  strings.TrimSpace(toolCall.Function.Name),
+			Name:  name,
 			Input: input,
 		})
 	}
@@ -1768,12 +1780,14 @@ func isBackgroundTerminalStatus(status string) bool {
 	}
 }
 
-// ConvertSessionMessagesToUITurns applies the session's native fork boundary.
-// The durable anchor, rather than the last row in this page, is authoritative
-// so an older history page never offers a fork from its own final reply.
-func ConvertSessionMessagesToUITurns(messages []messagepkg.Message, runtimeType string, metadata map[string]any) []UITurn {
+// ConvertSessionMessagesToUITurns applies the session's native fork boundary:
+// forkAnchorKey names the runtime metadata key of the only turn a fork may
+// start from (external.Caps.ForkAnchorKey), empty when any turn can fork. The
+// durable anchor, rather than the last row in this page, is authoritative so
+// an older history page never offers a fork from its own final reply.
+func ConvertSessionMessagesToUITurns(messages []messagepkg.Message, forkAnchorKey string, metadata map[string]any) []UITurn {
 	turns := ConvertMessagesToUITurns(messages)
-	key := runtimekind.LatestForkAnchorKey(runtimeType)
+	key := forkAnchorKey
 	if key == "" {
 		return turns
 	}

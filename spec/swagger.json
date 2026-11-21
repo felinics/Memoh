@@ -25,7 +25,7 @@
         },
         "/agent-authorizations": {
             "post": {
-                "description": "Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.",
+                "description": "Encrypts a supplied API key. A ChatGPT, Claude or Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys are not probed against the provider.",
                 "consumes": [
                     "application/json"
                 ],
@@ -155,113 +155,6 @@
                     },
                     "403": {
                         "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/agent-authorizations/{id}/exchange": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "agent-authorizations"
-                ],
-                "summary": "Complete Claude browser authorization with the returned authorization code",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Authorization ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Authorization code",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.AgentAuthorizationExchangeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.Authorization"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "410": {
-                        "description": "Gone",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/agent-authorizations/{id}/poll": {
-            "post": {
-                "tags": [
-                    "agent-authorizations"
-                ],
-                "summary": "Poll a pending Agent device authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Authorization ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.Authorization"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "410": {
-                        "description": "Gone",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -1132,83 +1025,13 @@
                 }
             }
         },
-        "/bots/{bot_id}/acp-runtimes": {
-            "post": {
-                "description": "Starts an agent runtime before any session exists. The runtime ID is server generated; bind it to a session at creation time via acp_runtime_id.",
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Create an unbound ACP runtime (pre-session model picker)",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Runtime spec",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.acpRuntimeCreateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acpagent.RuntimeStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "429": {
-                        "description": "Too Many Requests",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp-runtimes/{runtime_id}": {
+        "/bots/{bot_id}/acp-options": {
             "get": {
+                "description": "Reports the models, reasoning efforts, modes and commands the agent offers before a conversation exists. Choices travel in the new session's runtime_metadata (acp_model_id, acp_reasoning_effort, permission_mode).",
                 "tags": [
                     "acp"
                 ],
-                "summary": "Get ACP runtime state by runtime ID",
+                "summary": "Get what a new ACP conversation could choose",
                 "parameters": [
                     {
                         "type": "string",
@@ -1219,294 +1042,28 @@
                     },
                     {
                         "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acpagent.RuntimeStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Close an ACP runtime",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
+                        "description": "ACP agent ID",
+                        "name": "acp_agent_id",
+                        "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp-runtimes/{runtime_id}/mode": {
-            "patch": {
-                "description": "Sends the selected agent-declared mode ID unchanged to session/set_mode before the first chat message binds this runtime to a Session.",
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Set an unbound ACP runtime's mode",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
+                        "description": "Agent instance ID",
+                        "name": "bot_agent_id",
+                        "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Mode selection",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.acpRuntimeModeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acpagent.RuntimeStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp-runtimes/{runtime_id}/model": {
-            "patch": {
-                "description": "An empty model_id resets the runtime to the agent default model.",
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Set (or reset) an ACP runtime's model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
+                        "description": "Project the conversation will run in; /data when omitted",
+                        "name": "project_path",
+                        "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Model selection",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.acpRuntimeModelRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/acpagent.RuntimeStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning": {
-            "patch": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Set an ACP runtime's reasoning effort",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Runtime ID",
-                        "name": "runtime_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Reasoning effort selection",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.acpRuntimeReasoningRequest"
-                        }
+                        "description": "Model whose reasoning efforts to report; the agent's current model when omitted",
+                        "name": "model_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1811,13 +1368,13 @@
                 }
             }
         },
-        "/bots/{bot_id}/agents/{id}/codex/usage": {
+        "/bots/{bot_id}/agents/{id}/account": {
             "get": {
-                "description": "Available to anyone who can chat with the Bot, so the composer",
+                "description": "For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Claude Code with a Claude account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.",
                 "tags": [
                     "external-agents"
                 ],
-                "summary": "Get the Codex usage limits of the Agent's ChatGPT account",
+                "summary": "Get the account a direct runtime Agent is signed in to",
                 "parameters": [
                     {
                         "type": "string",
@@ -1838,7 +1395,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/externalagent.CodexUsageResponse"
+                            "$ref": "#/definitions/externalagent.AgentAccountResponse"
                         }
                     },
                     "403": {
@@ -1853,20 +1410,14 @@
                             "$ref": "#/definitions/server.Problem"
                         }
                     },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
                     },
-                    "502": {
-                        "description": "Bad Gateway",
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -2095,11 +1646,11 @@
         },
         "/bots/{bot_id}/agents/{id}/login/device/authorize": {
             "post": {
-                "description": "The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex, Grok Build) accept it.",
+                "description": "The Agent's own process starts the sign-in. For Codex and Grok Build the user opens the URL and confirms the device code there; for Claude Code (code_required) the page shows a code the user pastes back to /login/device/code.",
                 "tags": [
                     "external-agents"
                 ],
-                "summary": "Start a device-code account sign-in on a direct runtime Agent",
+                "summary": "Start an account sign-in on a direct runtime Agent",
                 "parameters": [
                     {
                         "type": "string",
@@ -2206,9 +1757,72 @@
                 }
             }
         },
+        "/bots/{bot_id}/agents/{id}/login/device/code": {
+            "post": {
+                "description": "For sign-ins started with code_required. The code goes to the Agent's own process, which completes the sign-in and keeps the login; Memoh does not store it. A rejected code ends the sign-in.",
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Finish a sign-in with the code its page showed",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Sign-in reference and code",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.DeviceLoginCodeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/agents/{id}/login/device/poll": {
             "post": {
-                "description": "A successful sign-in has already been stored as the Agent's credential when this answers success.",
+                "description": "A successful sign-in has already been kept by the Agent's runtime when this answers success.",
                 "tags": [
                     "external-agents"
                 ],
@@ -2315,6 +1929,63 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/quota": {
+            "get": {
+                "description": "For runtimes whose account reports its usage (Codex with a ChatGPT account, Claude Code with a Claude account). Available to anyone who can chat with the Bot, so the composer can warn before a turn runs into the limit.",
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Get the usage limits of the Agent's account",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.AgentQuotaResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -7922,6 +7593,172 @@
                 }
             }
         },
+        "/bots/{bot_id}/network/actions/{action_id}": {
+            "post": {
+                "description": "Run a provider action such as test_connection or logout",
+                "tags": [
+                    "network"
+                ],
+                "summary": "Run a bot network action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Action ID",
+                        "name": "action_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Action input",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/network.BotActionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/network.ProviderActionExecution"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/network/nodes": {
+            "get": {
+                "description": "List the peers the bot can use as exit nodes",
+                "tags": [
+                    "network"
+                ],
+                "summary": "List bot network nodes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/network.NodeListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/network/status": {
+            "get": {
+                "description": "Get the state of the bot's network overlay and of the workspace it attaches to",
+                "tags": [
+                    "network"
+                ],
+                "summary": "Get bot network status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/network.BotStatus"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/quick-actions/execute": {
             "post": {
                 "description": "Runs a typed Web quick action such as help or skill.list and returns a command_result or command_error envelope.",
@@ -9050,6 +8887,66 @@
                     },
                     "502": {
                         "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session": {
+            "delete": {
+                "description": "Forgets the agent session that keeps failing to restore and keeps the messages. The next message opens a new agent session, which does not remember them.",
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Start the agent over on a new ACP session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -12564,81 +12461,6 @@
                 }
             }
         },
-        "/bots/{id}/channel/{platform}/send_chat": {
-            "post": {
-                "description": "Send a message using a session-scoped token (reply only)",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "Send message via bot channel session token",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Channel platform",
-                        "name": "platform",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Send payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/channel.SendRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{id}/channel/{platform}/status": {
             "patch": {
                 "description": "Update bot channel enabled/disabled status",
@@ -12782,6 +12604,56 @@
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{id}/channels": {
+            "get": {
+                "description": "List all configured channel integrations for a bot",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "List bot channel configs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ListBotChannelsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -13734,6 +13606,38 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/network/meta": {
+            "get": {
+                "description": "List the network providers a bot can use, with their config schema, capabilities and actions",
+                "tags": [
+                    "network"
+                ],
+                "summary": "List network providers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/network.ProviderDescriptor"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -16421,6 +16325,32 @@
                 }
             }
         },
+        "/users/me/attention/events": {
+            "get": {
+                "description": "SSE addressed to the caller: session_attention when one of\ntheir sessions needs them, session_unread when they mark one\nunread, session_read when their read cursor moves. Starts with attention_ready; never carries message bodies.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Stream the caller's attention events",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/channel-identities": {
             "get": {
                 "description": "List the IM channel identities bound to the current user's account",
@@ -16676,6 +16606,46 @@
                 }
             }
         },
+        "/users/me/read-state": {
+            "put": {
+                "description": "Marks each session read (through the attention time the client\ndisplayed) or unread. Read and unread are forward-only marks; the\nlater one wins. Sessions the caller did not create, or that carry no\nunread state, are skipped. Marking unread never notifies.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Set the caller's read state of sessions",
+                "parameters": [
+                    {
+                        "description": "Read state changes",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetReadStateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetReadStateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/runtimes": {
             "get": {
                 "produces": [
@@ -16783,6 +16753,32 @@
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/unread": {
+            "get": {
+                "description": "Sessions the caller created that need their attention, across\nevery bot they can still access, newest first. No message bodies.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List the caller's unread sessions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UnreadSessionsResponse"
                         }
                     },
                     "500": {
@@ -18180,17 +18176,11 @@
                 "auth_kind": {
                     "type": "string"
                 },
-                "authorization_url": {
-                    "type": "string"
-                },
                 "expires_at": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
-                },
-                "interval_seconds": {
-                    "type": "integer"
                 },
                 "runtime": {
                     "type": "string"
@@ -18198,16 +18188,9 @@
                 "status": {
                     "type": "string",
                     "enum": [
-                        "pending",
                         "ready",
                         "claimed"
                     ]
-                },
-                "user_code": {
-                    "type": "string"
-                },
-                "verification_url": {
-                    "type": "string"
                 }
             }
         },
@@ -18290,6 +18273,70 @@
                 "FaultDependency",
                 "FaultCanceled"
             ]
+        },
+        "attention.Attention": {
+            "type": "object",
+            "properties": {
+                "attention_at": {
+                    "description": "At is when the session last needed attention, or when it was marked\nunread if it never did; it orders the inbox.",
+                    "type": "string"
+                },
+                "attention_kind": {
+                    "$ref": "#/definitions/attention.Kind"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "marked": {
+                    "description": "Marked is true when the user marked the session unread themselves; such\na session is not read just because it is already on screen.",
+                    "type": "boolean"
+                },
+                "read_through": {
+                    "description": "ReadThrough is the through a client sends to read it: it covers both the\nattention and a manual unread mark.",
+                    "type": "string"
+                },
+                "schedule_id": {
+                    "description": "ScheduleID names the schedule whose run created the session, so a\nclient can show one schedule's unread runs as one entry.",
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "attention.Kind": {
+            "type": "string",
+            "enum": [
+                "reply",
+                "failed",
+                "needs_input",
+                "update",
+                "marked"
+            ],
+            "x-enum-varnames": [
+                "KindReply",
+                "KindFailed",
+                "KindNeedsInput",
+                "KindUpdate",
+                "KindMarked"
+            ]
+        },
+        "attention.ReadStateChange": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string"
+                },
+                "through": {
+                    "type": "string"
+                },
+                "unread": {
+                    "type": "boolean"
+                }
+            }
         },
         "audio.ConfigSchema": {
             "type": "object",
@@ -18682,6 +18729,10 @@
                 },
                 "name": {
                     "type": "string"
+                },
+                "reports_quota": {
+                    "description": "ReportsQuota is decided at read time: the Agent's own account login\nreports its plan usage (GET .../quota).",
+                    "type": "boolean"
                 },
                 "runtime": {
                     "type": "string"
@@ -21408,7 +21459,21 @@
                 }
             }
         },
-        "externalagent.CodexUsageResponse": {
+        "externalagent.AgentAccountResponse": {
+            "type": "object",
+            "required": [
+                "signed_in"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "signed_in": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "externalagent.AgentQuotaResponse": {
             "type": "object",
             "required": [
                 "limit_reached",
@@ -21421,18 +21486,22 @@
                 "windows": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/externalagent.CodexUsageWindow"
+                        "$ref": "#/definitions/externalagent.AgentQuotaWindow"
                     }
                 }
             }
         },
-        "externalagent.CodexUsageWindow": {
+        "externalagent.AgentQuotaWindow": {
             "type": "object",
             "required": [
                 "used_percent",
                 "window_minutes"
             ],
             "properties": {
+                "model": {
+                    "description": "Model names the models the window counts alone; absent when it counts all.",
+                    "type": "string"
+                },
                 "resets_at": {
                     "type": "string"
                 },
@@ -21440,7 +21509,7 @@
                     "type": "integer"
                 },
                 "window_minutes": {
-                    "description": "WindowMinutes is 0 when the backend does not report the window length.",
+                    "description": "WindowMinutes is 0 when the runtime does not report the window length.",
                     "type": "integer"
                 }
             }
@@ -21449,10 +21518,12 @@
             "type": "object",
             "required": [
                 "login_id",
-                "user_code",
                 "verification_url"
             ],
             "properties": {
+                "code_required": {
+                    "type": "boolean"
+                },
                 "login_id": {
                     "type": "string"
                 },
@@ -21460,6 +21531,21 @@
                     "type": "string"
                 },
                 "verification_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.DeviceLoginCodeRequest": {
+            "type": "object",
+            "required": [
+                "code",
+                "login_id"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "login_id": {
                     "type": "string"
                 }
             }
@@ -21669,17 +21755,6 @@
             ],
             "properties": {
                 "authorization_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.AgentAuthorizationExchangeRequest": {
-            "type": "object",
-            "required": [
-                "code"
-            ],
-            "properties": {
-                "code": {
                     "type": "string"
                 }
             }
@@ -23036,6 +23111,20 @@
                 }
             }
         },
+        "handlers.ListBotChannelsResponse": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channel.ChannelConfig"
+                    }
+                }
+            }
+        },
         "handlers.ListSnapshotsResponse": {
             "type": "object",
             "properties": {
@@ -23345,6 +23434,28 @@
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                }
+            }
+        },
+        "handlers.SetReadStateRequest": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.ReadStateChange"
+                    }
+                }
+            }
+        },
+        "handlers.SetReadStateResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.Attention"
                     }
                 }
             }
@@ -24358,6 +24469,17 @@
                 }
             }
         },
+        "handlers.UnreadSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.Attention"
+                    }
+                }
+            }
+        },
         "handlers.UpdateContainerMetricsRequest": {
             "type": "object",
             "properties": {
@@ -24865,21 +24987,6 @@
                 }
             }
         },
-        "handlers.acpRuntimeCreateRequest": {
-            "type": "object",
-            "properties": {
-                "acp_agent_id": {
-                    "type": "string"
-                },
-                "bot_agent_id": {
-                    "description": "BotAgentID names the Agent instance whose setup launches the runtime;\nonly a session bound to the same instance can later adopt it.",
-                    "type": "string"
-                },
-                "project_path": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.acpRuntimeModeRequest": {
             "type": "object",
             "required": [
@@ -24960,10 +25067,6 @@
         "handlers.createSessionRequest": {
             "type": "object",
             "properties": {
-                "acp_runtime_id": {
-                    "description": "ACPRuntimeID optionally binds a warm pre-session runtime (created via\nPOST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a\ntransient in-memory handle reference, never persisted in metadata.",
-                    "type": "string"
-                },
                 "bot_agent_id": {
                     "type": "string"
                 },
@@ -26258,6 +26361,13 @@
         "models.TestResponse": {
             "type": "object",
             "properties": {
+                "args": {
+                    "description": "Args are the catalog args attached to Code (such as upstream for\nnon-authentication upstream rejections).",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "code": {
                     "description": "Code is the error catalog code for why the test did not pass. It is\nempty on success and when no catalog code describes the failure.",
                     "type": "string"
@@ -26308,6 +26418,457 @@
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
+                }
+            }
+        },
+        "network.ActionType": {
+            "type": "string",
+            "enum": [
+                "test_connection"
+            ],
+            "x-enum-varnames": [
+                "ActionTypeTestConnection"
+            ]
+        },
+        "network.BotActionRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
+        "network.BotStatus": {
+            "type": "object",
+            "required": [
+                "attached",
+                "state"
+            ],
+            "properties": {
+                "attached": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "message": {
+                    "type": "string"
+                },
+                "network_ip": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "proxy_address": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/network.OverlayState"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "workspace": {
+                    "$ref": "#/definitions/network.WorkspaceRuntimeStatus"
+                }
+            }
+        },
+        "network.ConfigConstraint": {
+            "type": "object",
+            "properties": {
+                "max": {
+                    "type": "number"
+                },
+                "min": {
+                    "type": "number"
+                },
+                "step": {
+                    "type": "number"
+                }
+            }
+        },
+        "network.ConfigField": {
+            "type": "object",
+            "required": [
+                "key",
+                "type"
+            ],
+            "properties": {
+                "collapsed": {
+                    "type": "boolean"
+                },
+                "constraint": {
+                    "$ref": "#/definitions/network.ConfigConstraint"
+                },
+                "default": {},
+                "description": {
+                    "type": "string"
+                },
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "example": {},
+                "key": {
+                    "type": "string"
+                },
+                "multiline": {
+                    "type": "boolean"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "placeholder": {
+                    "type": "string"
+                },
+                "readonly": {
+                    "type": "boolean"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "secret": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/network.FieldType"
+                }
+            }
+        },
+        "network.ConfigSchema": {
+            "type": "object",
+            "required": [
+                "fields",
+                "version"
+            ],
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/network.ConfigField"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "network.FieldType": {
+            "type": "string",
+            "enum": [
+                "string",
+                "secret",
+                "number",
+                "bool",
+                "enum",
+                "textarea"
+            ],
+            "x-enum-varnames": [
+                "FieldTypeString",
+                "FieldTypeSecret",
+                "FieldTypeNumber",
+                "FieldTypeBool",
+                "FieldTypeEnum",
+                "FieldTypeTextarea"
+            ]
+        },
+        "network.NodeListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/network.NodeOption"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.NodeOption": {
+            "type": "object",
+            "required": [
+                "can_exit_node",
+                "display_name",
+                "id",
+                "online",
+                "selected",
+                "value"
+            ],
+            "properties": {
+                "addresses": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "can_exit_node": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "online": {
+                    "type": "boolean"
+                },
+                "selected": {
+                    "type": "boolean"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.OverlayState": {
+            "type": "string",
+            "enum": [
+                "ready",
+                "starting",
+                "needs_login",
+                "degraded",
+                "stopped",
+                "missing",
+                "unsupported",
+                "disabled",
+                "workspace_missing",
+                "needs_config",
+                "unauthorized",
+                "unknown"
+            ],
+            "x-enum-varnames": [
+                "OverlayStateReady",
+                "OverlayStateStarting",
+                "OverlayStateNeedsLogin",
+                "OverlayStateDegraded",
+                "OverlayStateStopped",
+                "OverlayStateMissing",
+                "OverlayStateUnsupported",
+                "OverlayStateDisabled",
+                "OverlayStateWorkspaceMissing",
+                "OverlayStateNeedsConfig",
+                "OverlayStateUnauthorized",
+                "OverlayStateUnknown"
+            ]
+        },
+        "network.ProviderAction": {
+            "type": "object",
+            "required": [
+                "id",
+                "label",
+                "type"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "primary": {
+                    "type": "boolean"
+                },
+                "status": {
+                    "$ref": "#/definitions/network.ProviderActionStatus"
+                },
+                "type": {
+                    "$ref": "#/definitions/network.ActionType"
+                }
+            }
+        },
+        "network.ProviderActionExecution": {
+            "type": "object",
+            "required": [
+                "action_id",
+                "status"
+            ],
+            "properties": {
+                "action_id": {
+                    "type": "string"
+                },
+                "output": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "status": {
+                    "$ref": "#/definitions/network.ProviderStatus"
+                }
+            }
+        },
+        "network.ProviderActionStatus": {
+            "type": "object",
+            "required": [
+                "enabled"
+            ],
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.ProviderCapabilities": {
+            "type": "object",
+            "required": [
+                "egress_proxy",
+                "exit_node",
+                "kernel_tun",
+                "mesh",
+                "native_client",
+                "private_dns",
+                "service_proxy",
+                "sidecar_worker",
+                "transparent_proxy",
+                "userspace"
+            ],
+            "properties": {
+                "egress_proxy": {
+                    "type": "boolean"
+                },
+                "exit_node": {
+                    "type": "boolean"
+                },
+                "kernel_tun": {
+                    "type": "boolean"
+                },
+                "mesh": {
+                    "type": "boolean"
+                },
+                "native_client": {
+                    "type": "boolean"
+                },
+                "private_dns": {
+                    "type": "boolean"
+                },
+                "service_proxy": {
+                    "type": "boolean"
+                },
+                "sidecar_worker": {
+                    "type": "boolean"
+                },
+                "transparent_proxy": {
+                    "type": "boolean"
+                },
+                "userspace": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "network.ProviderDescriptor": {
+            "type": "object",
+            "required": [
+                "capabilities",
+                "config_schema",
+                "display_name",
+                "kind"
+            ],
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/network.ProviderAction"
+                    }
+                },
+                "capabilities": {
+                    "$ref": "#/definitions/network.ProviderCapabilities"
+                },
+                "config_schema": {
+                    "$ref": "#/definitions/network.ConfigSchema"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.ProviderStatus": {
+            "type": "object",
+            "required": [
+                "state"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "state": {
+                    "$ref": "#/definitions/network.OverlayState"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "network.WorkspaceRuntimeStatus": {
+            "type": "object",
+            "required": [
+                "state"
+            ],
+            "properties": {
+                "container_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "network_attached": {
+                    "type": "boolean"
+                },
+                "network_target": {
+                    "type": "string"
+                },
+                "network_target_kind": {
+                    "type": "string"
+                },
+                "pid": {
+                    "type": "integer"
+                },
+                "state": {
+                    "description": "workspace_missing | runtime_unavailable | task_stopped | network_target_ready | unknown",
+                    "type": "string"
+                },
+                "task_status": {
+                    "type": "string"
                 }
             }
         },
@@ -26541,6 +27102,13 @@
         "providers.TestResponse": {
             "type": "object",
             "properties": {
+                "args": {
+                    "description": "Args are the catalog args attached to Code (such as upstream for\nnon-authentication upstream rejections).",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "code": {
                     "description": "Code is the error catalog code for why the test did not pass. It is\nempty on success and when no catalog code describes the failure.",
                     "type": "string"
@@ -26736,6 +27304,10 @@
                 "command": {
                     "type": "string"
                 },
+                "contact_via_channels": {
+                    "description": "ContactViaChannels defaults to true.",
+                    "type": "boolean"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -26755,6 +27327,14 @@
                 },
                 "name": {
                     "type": "string"
+                },
+                "notify_policy": {
+                    "description": "NotifyPolicy defaults to important.",
+                    "type": "string",
+                    "enum": [
+                        "important",
+                        "every_run"
+                    ]
                 },
                 "pattern": {
                     "type": "string"
@@ -26971,6 +27551,10 @@
                 "command": {
                     "type": "string"
                 },
+                "contact_via_channels": {
+                    "description": "ContactViaChannels leaves the bot free to reach the owner on its social\nplatforms when a run has something for them.",
+                    "type": "boolean"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -26999,6 +27583,14 @@
                 },
                 "name": {
                     "type": "string"
+                },
+                "notify_policy": {
+                    "description": "NotifyPolicy is when a run tells the owner in Memoh: important (only\nwhen the run asks to, fails or waits for a decision) or every_run.",
+                    "type": "string",
+                    "enum": [
+                        "important",
+                        "every_run"
+                    ]
                 },
                 "pattern": {
                     "type": "string"
@@ -27034,6 +27626,9 @@
                 "command": {
                     "type": "string"
                 },
+                "contact_via_channels": {
+                    "type": "boolean"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -27053,6 +27648,14 @@
                 },
                 "name": {
                     "type": "string"
+                },
+                "notify_policy": {
+                    "description": "NotifyPolicy and ContactViaChannels keep their stored value when absent.",
+                    "type": "string",
+                    "enum": [
+                        "important",
+                        "every_run"
+                    ]
                 },
                 "pattern": {
                     "type": "string"
@@ -27164,7 +27767,8 @@
                 "exa",
                 "bocha",
                 "duckduckgo",
-                "yandex"
+                "yandex",
+                "deepseek"
             ],
             "x-enum-varnames": [
                 "ProviderBrave",
@@ -27178,7 +27782,8 @@
                 "ProviderExa",
                 "ProviderBocha",
                 "ProviderDuckDuckGo",
-                "ProviderYandex"
+                "ProviderYandex",
+                "ProviderDeepSeek"
             ]
         },
         "searchproviders.UpdateRequest": {
@@ -27242,6 +27847,13 @@
         "session.Session": {
             "type": "object",
             "properties": {
+                "attention_at": {
+                    "type": "string"
+                },
+                "attention_kind": {
+                    "description": "AttentionKind and Unread describe the requesting user's unread state.\nThey are filled by the attention service for list responses only.",
+                    "type": "string"
+                },
                 "bot_agent_id": {
                     "type": "string"
                 },
@@ -27305,6 +27917,9 @@
                 },
                 "type": {
                     "type": "string"
+                },
+                "unread": {
+                    "type": "boolean"
                 },
                 "updated_at": {
                     "type": "string"
@@ -27382,11 +27997,26 @@
                 "display_enabled": {
                     "type": "boolean"
                 },
+                "effective_timezone": {
+                    "description": "EffectiveTimezone is the timezone the bot runs in: Timezone when set,\notherwise InheritedTimezone. Agent turns and the scheduler use the same\nvalue, so clients read it instead of deriving one from the browser.\nOnly the settings API fills EffectiveTimezone, InheritedTimezone and\nInheritedTimezoneSource; they are empty on settings the server reads for\nits own use.",
+                    "type": "string"
+                },
                 "fetch_provider_id": {
                     "type": "string"
                 },
                 "image_model_id": {
                     "type": "string"
+                },
+                "inherited_timezone": {
+                    "description": "InheritedTimezone is what the bot uses without a Timezone of its own.\nInheritedTimezoneSource says whose timezone that is.",
+                    "type": "string"
+                },
+                "inherited_timezone_source": {
+                    "type": "string",
+                    "enum": [
+                        "owner",
+                        "system"
+                    ]
                 },
                 "memory_enabled": {
                     "description": "MemoryEnabled reports whether the bot uses Built-in Memory. It is derived\nfrom MemoryProviderID, which stays internal to the server.",

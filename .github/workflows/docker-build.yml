@@ -186,7 +186,6 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT_HASH=${{ github.sha }}
             VITE_API_URL=/api
-            VITE_AGENT_URL=/agent
           cache-from: |
             type=gha,scope=${{ steps.resolve.outputs.artifact_key }}-${{ matrix.platform }}
             ${{ env.PUSH == 'true' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3}-{4}', env.REGISTRY, github.repository_owner, matrix.image, steps.resolve.outputs.artifact_key, matrix.platform == 'linux/amd64' && 'amd64' || 'arm64') || '' }}

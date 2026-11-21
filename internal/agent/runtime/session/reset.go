@@ -19,8 +19,9 @@ import (
 
 const minimumHistoryResetTTL = 30 * time.Second
 
-// SetHistoryResetHandler installs the owner-local operation-boundary closer.
-// SessionPool supplies it without sessionruntime depending on the ACP package.
+// SetHistoryResetHandler installs the closer of the agent processes a reset
+// covers. The process supervisor supplies it without sessionruntime
+// depending on the runtimes.
 func (m *Manager) SetHistoryResetHandler(handler HistoryResetHandler) {
 	if m == nil {
 		return
@@ -172,6 +173,24 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 		err = runtimefence.NormalizeResetError(resetCtx, err)
 		release()
 		return nil, nil, err
+	}
+	// With the runs stopped, the processes go too, and none starts until the
+	// reset is released: a process started meanwhile would pick up the state
+	// the reset is about to clear.
+	m.mu.Lock()
+	closeProcesses := m.historyResetHandler
+	m.mu.Unlock()
+	if closeProcesses != nil {
+		releaseProcesses, err := closeProcesses(resetCtx, scope)
+		if err != nil {
+			release()
+			return nil, nil, err
+		}
+		releaseLease := release
+		release = func() {
+			releaseLease()
+			releaseProcesses()
+		}
 	}
 	if err := context.Cause(resetCtx); err != nil {
 		release()
@@ -433,11 +452,14 @@ func (m *Manager) dispatchRemoteHistoryReset(ctx context.Context, ownerID string
 	return errs.WrapDependency(err, "reset run on its owner")
 }
 
-func (m *Manager) applyHistoryResetCommand(ctx context.Context, cmd Command, ctrl *runControl) error {
+// applyHistoryResetCommand stops the run under runCtx, which ends with the
+// run, then closes the processes in scope under ctx, the command's own: the
+// stop it just made ends the run, and the processes outlive it.
+func (m *Manager) applyHistoryResetCommand(ctx, runCtx context.Context, cmd Command, ctrl *runControl) error {
 	if ctrl == nil {
 		return ErrCommandTargetNotActive
 	}
-	if _, err := m.abortLocal(ctx, ctrl); err != nil && !errors.Is(err, ErrCommandTargetNotActive) {
+	if _, err := m.abortLocal(runCtx, ctrl); err != nil && !errors.Is(err, ErrCommandTargetNotActive) {
 		return err
 	}
 	m.mu.Lock()
@@ -446,7 +468,13 @@ func (m *Manager) applyHistoryResetCommand(ctx context.Context, cmd Command, ctr
 	if handler == nil {
 		return ErrHistoryResetUnavailable
 	}
-	return handler(ctx, ResetScope{BotID: cmd.BotID, SessionID: cmd.SessionID})
+	release, err := handler(ctx, ResetScope{BotID: cmd.BotID, SessionID: cmd.SessionID})
+	if err != nil {
+		return err
+	}
+	// The owner of the reset holds new runs off through its lease.
+	release()
+	return nil
 }
 
 func waitHistoryResetRetry(ctx context.Context, base time.Duration) error {

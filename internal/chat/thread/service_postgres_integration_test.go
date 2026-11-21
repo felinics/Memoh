@@ -1068,3 +1068,88 @@ func TestPostgresListHidesScheduleRunSessionsButKeepsPinnedTargets(t *testing.T)
 		t.Fatalf("pinned targets and chats must stay listed, got %v", hidden)
 	}
 }
+
+// Deleting a bot locks it before its sessions. A fork locks them in the same
+// order, so a fork that meets a locked bot waits there without holding its
+// source, and the delete still takes the source instead of deadlocking.
+func TestPostgresForkLocksTheBotBeforeItsSource(t *testing.T) {
+	ctx := context.Background()
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("skip postgres integration test: TEST_POSTGRES_DSN is not set")
+	}
+	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	cleanup := func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM bots WHERE id = $1`, postgresSessionTestBotID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, postgresSessionTestUserID)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	setup, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin fixtures: %v", err)
+	}
+	setupPostgresSessionForkFixtures(t, ctx, setup)
+	if err := setup.Commit(ctx); err != nil {
+		t.Fatalf("commit fixtures: %v", err)
+	}
+
+	deleting, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin delete: %v", err)
+	}
+	defer func() { _ = deleting.Rollback(ctx) }()
+	if _, err := deleting.Exec(ctx, `SELECT id FROM bots WHERE id = $1 FOR UPDATE`, postgresSessionTestBotID); err != nil {
+		t.Fatalf("lock bot: %v", err)
+	}
+
+	forked := make(chan error, 1)
+	go func() {
+		svc := NewService(nil, postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool)), nil)
+		_, err := svc.ForkFromAssistantTurn(ctx, ForkFromAssistantInput{
+			BotID:           postgresSessionTestBotID,
+			ThreadID:        postgresSessionTestSessionID,
+			TurnID:          postgresSessionTestTurn2ID,
+			Title:           "Forked",
+			CreatedByUserID: postgresSessionTestUserID,
+		})
+		forked <- err
+	}()
+	waiting := false
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && !waiting; time.Sleep(20 * time.Millisecond) {
+		select {
+		case err := <-forked:
+			t.Fatalf("the fork finished while the bot was locked: %v", err)
+		default:
+		}
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n); err != nil {
+			t.Fatalf("read lock waits: %v", err)
+		}
+		waiting = n > 0
+	}
+	if !waiting {
+		t.Fatal("the fork never waited on the locked bot")
+	}
+	if _, err := deleting.Exec(ctx, `SET LOCAL lock_timeout = '3s'`); err != nil {
+		t.Fatalf("set lock timeout: %v", err)
+	}
+	if _, err := deleting.Exec(ctx, `SELECT id FROM bot_sessions WHERE id = $1 FOR UPDATE`, postgresSessionTestSessionID); err != nil {
+		t.Fatalf("the delete could not lock the fork's source while the fork waited on the bot: %v", err)
+	}
+	if err := deleting.Rollback(ctx); err != nil {
+		t.Fatalf("release bot: %v", err)
+	}
+	select {
+	case err := <-forked:
+		if err != nil {
+			t.Fatalf("fork after the bot was released: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the fork did not finish after the bot was released")
+	}
+}

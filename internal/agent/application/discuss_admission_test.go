@@ -21,7 +21,7 @@ func TestAdmitDiscussMessagesUnderBudgetPassthrough(t *testing.T) {
 func TestAdmitDiscussMessagesDropsOldestKeepsPinnedAndNewest(t *testing.T) {
 	messages := []turn.DiscussMessage{
 		{Role: "assistant", Content: strings.Repeat("a", 4000)},
-		{Role: "user", Content: "summary of earlier context", CompactionArtifactID: "a1"},
+		{Role: "user", Content: "summary of earlier context", CompactionArtifactID: "a1", Pinned: true},
 		{Role: "assistant", Content: strings.Repeat("b", 4000)},
 		{Role: "user", Content: strings.Repeat("c", 400)},
 	}
@@ -89,7 +89,7 @@ func TestAdmitDiscussMessagesNewestOrphanToolFailsClosed(t *testing.T) {
 	// provider an empty or summary-only context.
 	messages := []turn.DiscussMessage{
 		{Role: "assistant", Content: strings.Repeat("a", 8000)},
-		{Role: "user", Content: "summary", CompactionArtifactID: "a1"},
+		{Role: "user", Content: "summary", CompactionArtifactID: "a1", Pinned: true},
 		{Role: "tool", Content: strings.Repeat("t", 40)},
 	}
 	admitted, admission := admitDiscussMessages(messages, 50)

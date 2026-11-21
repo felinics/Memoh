@@ -78,3 +78,27 @@ func TestHubSubscriptionDroppedCounter(t *testing.T) {
 		t.Fatalf("DroppedSinceLastRead after reset = %d, want 0", got)
 	}
 }
+
+func TestUserTopicDoesNotReachBotSubscribers(t *testing.T) {
+	hub := NewHub()
+	botSub, cancelBot := hub.Subscribe("u1", 8)
+	defer cancelBot()
+	userSub, cancelUser := hub.Subscribe(UserTopic("u1"), 8)
+	defer cancelUser()
+
+	hub.Publish(Event{Type: EventTypeSessionAttention, BotID: UserTopic("u1")})
+
+	select {
+	case got := <-userSub.Events:
+		if got.Type != EventTypeSessionAttention {
+			t.Fatalf("user topic event type = %q, want %q", got.Type, EventTypeSessionAttention)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("expected event on the user topic")
+	}
+	select {
+	case <-botSub.Events:
+		t.Fatalf("a bot subscriber keyed by the same id must not see user-topic events")
+	case <-time.After(120 * time.Millisecond):
+	}
+}

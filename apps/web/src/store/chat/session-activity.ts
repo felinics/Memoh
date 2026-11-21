@@ -31,13 +31,40 @@ export function createSessionActivity(deps: {
   // view of the bot becomes unknowable.
   markSessionViewStale?: (botId: string, sessionId: string) => void
   markAllSessionViewsStale?: (botId: string) => void
+  canRefreshIdleSession?: (botId: string, sessionId: string) => boolean
+  reconcileOnVisibilityResume?: boolean
 }) {
   const visibleSummaryRequests = new Map<string, Promise<SessionSummary | null>>()
+  // Keyed by bot and session, and only read while that summary is unknown.
+  // reset() keeps them: initialize() resets at the start of every bot load,
+  // and a pane's request that already failed before that point would
+  // otherwise lose its retry. Each new request clears its own key first, so
+  // a kept entry never outlives the next attempt; a user-scope change clears
+  // them all (reset({ userScope: true })).
+  const visibleSummaryFailures = ref(new Set<string>())
+
+  function visibleSummaryKey(botId: string, sessionId: string): string {
+    return `${botId}\u0000${sessionId}`
+  }
+
+  function setVisibleSummaryFailed(key: string, failed: boolean) {
+    const has = visibleSummaryFailures.value.has(key)
+    if (has === failed) return
+    const next = new Set(visibleSummaryFailures.value)
+    if (failed) next.add(key)
+    else next.delete(key)
+    visibleSummaryFailures.value = next
+  }
+
+  function visibleSessionSummaryFailed(botId: string, sessionId: string): boolean {
+    return visibleSummaryFailures.value.has(visibleSummaryKey(botId, sessionId))
+  }
   const compactingSessions = ref<Record<string, string[]>>({})
   const scheduleActivityRevisions = ref<Record<string, number>>({})
   const manualCompactions = ref(new Map<string, symbol>())
   let loadMoreRequestVersion = 0
   const persistedSessionRefreshes = new Map<string, { pending: boolean }>()
+  const connectedActivityBots = new Set<string>()
 
   function refreshPersistedSession(botId: string, sessionId: string) {
     const key = `${botId}:${sessionId}`
@@ -50,15 +77,17 @@ export function createSessionActivity(deps: {
     persistedSessionRefreshes.set(key, state)
     const generation = deps.userScopeGeneration()
     void (async () => {
-      do {
-        state.pending = false
-        await deps.refreshSessionMessages(botId, sessionId)
-      } while (state.pending && generation === deps.userScopeGeneration())
-    })().catch((error) => {
-      console.error('Failed to refresh persisted session:', error)
-    }).finally(() => {
-      if (persistedSessionRefreshes.get(key) === state) persistedSessionRefreshes.delete(key)
-    })
+      try {
+        do {
+          state.pending = false
+          await deps.refreshSessionMessages(botId, sessionId)
+        } while (state.pending && generation === deps.userScopeGeneration())
+      } catch (error) {
+        console.error('Failed to refresh persisted session:', error)
+      } finally {
+        if (persistedSessionRefreshes.get(key) === state) persistedSessionRefreshes.delete(key)
+      }
+    })()
   }
 
   function isSessionCompacting(botId: string, sessionId: string): boolean {
@@ -70,6 +99,60 @@ export function createSessionActivity(deps: {
     scheduleActivityRevisions.value = {
       ...scheduleActivityRevisions.value,
       [botId]: (scheduleActivityRevisions.value[botId] ?? 0) + 1,
+    }
+  }
+
+  function reconcileIdleSessionMessages(botId: string, targetSessionId?: string) {
+    if (!botId || deps.currentBotId.value !== botId) return
+    const activeSid = deps.sessionId.value ?? ''
+    const sid = targetSessionId ?? activeSid
+    if (!sid || sid !== activeSid) return
+    if (!deps.canRefreshIdleSession?.(botId, sid)) return
+    refreshPersistedSession(botId, sid)
+  }
+
+  function reconcileBotState(
+    botId: string,
+    options: { refreshMessages?: boolean; targetSessionId?: string } = {},
+  ) {
+    if (!botId) return
+    markScheduleSnapshotStale(botId)
+    void deps.refreshSessionsList(botId)
+    if (options.refreshMessages !== false) {
+      reconcileIdleSessionMessages(botId, options.targetSessionId)
+    }
+  }
+
+  function handleRuntimeSnapshotReconnected(
+    botId: string,
+    targetSessionId: string,
+    options: { hasActiveRun: boolean; alreadyRefreshedMessages: boolean },
+  ) {
+    reconcileBotState(botId, {
+      refreshMessages: !options.hasActiveRun && !options.alreadyRefreshedMessages,
+      targetSessionId,
+    })
+  }
+
+  let wasDocumentHidden = document.visibilityState === 'hidden'
+  function handleVisibilityChange() {
+    if (document.visibilityState !== 'visible') {
+      wasDocumentHidden = true
+      return
+    }
+    if (!wasDocumentHidden) return
+    wasDocumentHidden = false
+    const bid = deps.currentBotId.value ?? ''
+    if (bid) reconcileBotState(bid)
+  }
+
+  if (deps.reconcileOnVisibilityResume) {
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+  }
+
+  function dispose() {
+    if (deps.reconcileOnVisibilityResume) {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }
 
@@ -88,25 +171,28 @@ export function createSessionActivity(deps: {
     sessionId: string,
     requestId?: number,
   ): Promise<SessionSummary | null> {
-    const bid = botId.trim()
-    const sid = sessionId.trim()
-    if (!bid || !sid) return null
-    const known = deps.knownSession(sid)
-    if (known) return known
+    if (!botId || !sessionId) return null
+    const key = visibleSummaryKey(botId, sessionId)
+    const known = deps.knownSession(sessionId)
+    if (known) {
+      setVisibleSummaryFailed(key, false)
+      return known
+    }
+    setVisibleSummaryFailed(key, false)
 
+    const isCurrent = () => (requestId === undefined || deps.currentSelectRequest() === requestId)
+      && deps.currentBotId.value === botId
+      && deps.sessionId.value === sessionId
     try {
-      const fetched = await fetchSession(bid, sid)
-      if (
-        requestId !== undefined
-        && deps.currentSelectRequest() !== requestId
-      ) return null
-      if (
-        (deps.currentBotId.value ?? '').trim() !== bid
-        || (deps.sessionId.value ?? '').trim() !== sid
-      ) return null
+      const fetched = await fetchSession(botId, sessionId)
+      if (!isCurrent()) return null
       deps.rememberSession(fetched)
+      setVisibleSummaryFailed(key, false)
       return fetched
     } catch {
+      // Same failure state as the visible-pane path: the pane offers a retry
+      // instead of leaving the send waiting on a summary that never arrives.
+      if (isCurrent()) setVisibleSummaryFailed(key, true)
       return null
     }
   }
@@ -115,25 +201,31 @@ export function createSessionActivity(deps: {
     botId: string,
     sessionId: string,
   ): Promise<SessionSummary | null> {
-    const bid = botId.trim()
-    const sid = sessionId.trim()
-    if (!bid || !sid) return Promise.resolve(null)
-    const known = deps.knownSession(sid)
-    if (known) return Promise.resolve(known)
-    const key = `${bid}\u0000${sid}`
+    if (!botId || !sessionId) return Promise.resolve(null)
+    const key = visibleSummaryKey(botId, sessionId)
+    const known = deps.knownSession(sessionId)
+    if (known) {
+      setVisibleSummaryFailed(key, false)
+      return Promise.resolve(known)
+    }
     const pending = visibleSummaryRequests.get(key)
     if (pending) return pending
+    setVisibleSummaryFailed(key, false)
     const generation = deps.userScopeGeneration()
     const request: Promise<SessionSummary | null> = (async () => {
       try {
-        const fetched = await fetchSession(bid, sid)
+        const fetched = await fetchSession(botId, sessionId)
         if (
           generation !== deps.userScopeGeneration()
-          || (deps.currentBotId.value ?? '').trim() !== bid
+          || deps.currentBotId.value !== botId
         ) return null
         deps.rememberSession(fetched)
+        setVisibleSummaryFailed(key, false)
         return fetched
       } catch {
+        if (generation === deps.userScopeGeneration() && deps.currentBotId.value === botId) {
+          setVisibleSummaryFailed(key, true)
+        }
         return null
       }
     })()
@@ -148,7 +240,7 @@ export function createSessionActivity(deps: {
 
   async function loadMoreSessions() {
     if (!deps.hasMoreSessions.value || deps.loadingMoreSessions.value) return
-    const botId = (deps.currentBotId.value ?? '').trim()
+    const botId = deps.currentBotId.value ?? ''
     const cursor = deps.sessionsCursor.value
     if (!botId || !cursor) return
     const userGeneration = deps.userScopeGeneration()
@@ -160,7 +252,7 @@ export function createSessionActivity(deps: {
       if (
         requestVersion !== loadMoreRequestVersion
         || userGeneration !== deps.userScopeGeneration()
-        || (deps.currentBotId.value ?? '').trim() !== botId
+        || deps.currentBotId.value !== botId
         || deps.sessionsCursor.value !== cursor
         || deps.currentSessionListRevision() !== listRevision
       ) return
@@ -177,7 +269,14 @@ export function createSessionActivity(deps: {
   }
 
   function handleActivity(botId: string, event: BotSessionActivityEvent) {
-    if (event.type === 'activity_ready') return
+    if (event.type === 'activity_ready') {
+      if (connectedActivityBots.has(botId)) {
+        reconcileBotState(botId)
+      } else {
+        connectedActivityBots.add(botId)
+      }
+      return
+    }
     if (event.type === 'session_invalidated') {
       const sessionId = event.session_id.trim()
       if (sessionId) deps.markSessionViewStale?.(botId, sessionId)
@@ -204,9 +303,9 @@ export function createSessionActivity(deps: {
       if (!sessionId) return
       deps.markSessionViewStale?.(botId, sessionId)
       const activeScheduleSession = (
-        (deps.currentBotId.value ?? '').trim() === botId
-        && (deps.sessionId.value ?? '').trim() === sessionId
-        && (deps.knownSession(sessionId)?.type ?? '').trim() === 'schedule'
+        deps.currentBotId.value === botId
+        && deps.sessionId.value === sessionId
+        && deps.knownSession(sessionId)?.type === 'schedule'
       )
       if (event.reason === 'background_task' || activeScheduleSession) {
         refreshPersistedSession(botId, sessionId)
@@ -235,17 +334,22 @@ export function createSessionActivity(deps: {
   return {
     ensureSessionSummary,
     ensureVisibleSessionSummary,
+    visibleSessionSummaryFailed,
     loadMoreSessions,
     handleActivity,
+    handleRuntimeSnapshotReconnected,
     scheduleActivityRevisions,
     isSessionCompacting,
     beginSessionCompaction,
-    reset: () => {
+    dispose,
+    reset: (options: { userScope?: boolean } = {}) => {
+      if (options.userScope) visibleSummaryFailures.value = new Set()
       compactingSessions.value = {}
       scheduleActivityRevisions.value = {}
       manualCompactions.value.clear()
       visibleSummaryRequests.clear()
       persistedSessionRefreshes.clear()
+      connectedActivityBots.clear()
       loadMoreRequestVersion += 1
       deps.loadingMoreSessions.value = false
     },

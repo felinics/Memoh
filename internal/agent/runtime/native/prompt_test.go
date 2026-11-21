@@ -359,3 +359,34 @@ func allPromptSessionTypes() []string {
 		sessionmode.Subagent,
 	}
 }
+
+func TestSchedulePromptChannelNote(t *testing.T) {
+	base := Schedule{Name: "News", Description: "AI news", Pattern: "0 9 * * *", Command: "Summarize AI news"}
+	on := GenerateSchedulePrompt(base)
+	if strings.Contains(on, "social platforms") || !strings.HasSuffix(on, "Summarize AI news") {
+		t.Fatalf("a schedule with channel contact on must read as before:\n%s", on)
+	}
+	off := base
+	off.NoChannelContact = true
+	got := GenerateSchedulePrompt(off)
+	if !strings.HasPrefix(got, on) || !strings.Contains(got, "No need to notify the user through social platforms") {
+		t.Fatalf("a schedule with channel contact off must add the note after the command:\n%s", got)
+	}
+}
+
+func TestSchedulePromptEveryRunNote(t *testing.T) {
+	base := Schedule{Name: "Digest", Description: "Tech digest", Pattern: "0 8 * * *", Command: "Summarize tech news"}
+	quiet := GenerateSchedulePrompt(base)
+	every := base
+	every.NotifiesEveryRun = true
+	got := GenerateSchedulePrompt(every)
+	if !strings.HasPrefix(got, quiet) || !strings.HasSuffix(got, "The user is notified when this run finishes; your final reply is what they read.") {
+		t.Fatalf("an every_run schedule must add the note after the command:\n%s", got)
+	}
+	both := every
+	both.NoChannelContact = true
+	got = GenerateSchedulePrompt(both)
+	if !strings.Contains(got, "your final reply is what they read.\nNo need to notify the user through social platforms") {
+		t.Fatalf("both notes should follow the command on their own lines:\n%s", got)
+	}
+}

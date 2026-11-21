@@ -54,7 +54,6 @@ type Options struct {
 	BackoffCap        time.Duration
 	MaxAttempts       int32
 	SlowRetryInterval time.Duration
-	Batch             int32
 	Concurrency       int
 	// TeardownConcurrency gives removals (rows whose desired state is absent)
 	// slots of their own beside Concurrency's, so a removal never waits
@@ -106,9 +105,6 @@ func (o Options) withDefaults() Options {
 	}
 	if o.SlowRetryInterval <= 0 {
 		o.SlowRetryInterval = 15 * time.Minute
-	}
-	if o.Batch <= 0 {
-		o.Batch = 20
 	}
 	if o.Concurrency <= 0 {
 		o.Concurrency = 4
@@ -484,6 +480,13 @@ func (s *Service) claimInto(ctx context.Context, wg *sync.WaitGroup, p pool) (st
 			defer wg.Done()
 			rec := &passRecord{}
 			defer func() {
+				// However the pass ended, the row is released here, before
+				// its slot: every path through it is covered, and so is a
+				// claim that slipped in while the row still counted as running
+				// here, whose lease was then skipped. Release checks the owner,
+				// so a row another instance took over is left alone, and one
+				// the pass already released stays as it is.
+				s.release(ctx, w.BotID)
 				s.unmarkRunning(w.BotID)
 				// The freed slot may be what a waiting row needs: an intent
 				// that arrived while every slot was busy, rows a pass had to
@@ -517,10 +520,7 @@ func (s *Service) freeSlots(p pool) int32 {
 	if free <= 0 {
 		return 0
 	}
-	if free > int(s.opts.Batch) {
-		return s.opts.Batch
-	}
-	return int32(free) //nolint:gosec // free <= Batch, which is an int32
+	return int32(free) //nolint:gosec // free <= the pool's size, a handful of slots
 }
 
 // markRunning reserves a slot of pool p for the row. A row is processed once
@@ -545,37 +545,27 @@ func (s *Service) unmarkRunning(botID string) {
 // pass left something recorded: the write landed, or it lost to a concurrent
 // change (a new intent, a takeover) that recorded something newer. Only then
 // does the freed slot wake the loop. Otherwise the row is as due as the pass
-// found it: the pass wrote nothing (the claim found the row due where Decide
-// did not, their clocks differ), or its last write failed for another reason
-// and left the row released mid-way, a provisioning whose outcome was never
-// written. A wake would claim it again at once and fail the same way, over
-// and over until the clocks agree or the database takes writes again, calling
-// the backend each time. Work that found the only slot held by such a row
+// found it: the pass wrote nothing, or its last write failed for another
+// reason and left the row released mid-way, a provisioning whose outcome was
+// never written. A wake would claim it again at once and fail the same way,
+// over and over until the database takes writes again, calling the backend
+// each time. Work that found the only slot held by such a row
 // waits for the next kick or tick, as all waiting work did before.
 type passRecord struct{ recorded bool }
 
 type passRecordKey struct{}
 
 func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
-	switch Decide(w, s.now()) {
+	switch Decide(w) {
 	case ActionNone:
 		if w.ObservedGeneration < w.DesiredGeneration {
 			if _, err := s.writeObserved(ctx, w, ObservedWrite{
 				Observed: w.Observed, ObservedGeneration: w.DesiredGeneration,
 				Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
-			}); err != nil {
-				// The failed write did not release the row. Release checks the
-				// owner, so a row another instance took over is left alone.
-				s.release(ctx, w.BotID)
-				if !superseded(ctx, err) {
-					s.event(ctx, "catch up generation failed", errs.Wrap(err, "catch up observed generation"), slog.String("bot_id", w.BotID))
-				}
+			}); err != nil && !superseded(ctx, err) {
+				s.event(ctx, "catch up generation failed", errs.Wrap(err, "catch up observed generation"), slog.String("bot_id", w.BotID))
 			}
-			return
 		}
-		s.release(ctx, w.BotID)
-	case ActionWait:
-		s.release(ctx, w.BotID)
 	case ActionProvision:
 		_ = job.Run(ctx, s.log, "workspace.provision", job.Options{}, func(ctx context.Context) error {
 			return s.provision(ctx, w)
@@ -615,7 +605,6 @@ func (s *Service) provision(ctx context.Context, w Workspace) error {
 		Attempts: w.Attempts, NextAttemptAt: s.now(), ReleaseLease: false,
 	})
 	if err != nil {
-		s.release(ctx, w.BotID)
 		if superseded(ctx, err) {
 			return nil
 		}
@@ -644,7 +633,6 @@ func (s *Service) provision(ctx context.Context, w Workspace) error {
 		Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 	})
 	if err != nil {
-		s.release(ctx, w.BotID)
 		if superseded(ctx, err) {
 			return nil
 		}
@@ -681,7 +669,6 @@ func (s *Service) fail(ctx context.Context, w Workspace, step *StepError) error 
 	})
 	if err != nil {
 		s.event(ctx, "record failure failed", errs.Wrap(err, "record provisioning failure"), slog.String("bot_id", w.BotID))
-		s.release(ctx, w.BotID)
 	} else {
 		s.deriveBotStatus(ctx, final)
 		// The failure text stays on the unit's result record; the event carries
@@ -723,7 +710,6 @@ func (s *Service) teardown(ctx context.Context, w Workspace) error {
 		Attempts: w.Attempts, NextAttemptAt: s.now(), ReleaseLease: false,
 	})
 	if err != nil {
-		s.release(ctx, w.BotID)
 		if superseded(ctx, err) {
 			return nil
 		}
@@ -757,7 +743,6 @@ func (s *Service) teardown(ctx context.Context, w Workspace) error {
 			Attempts: attempts, NextAttemptAt: next, ReleaseLease: true,
 		}); werr != nil {
 			s.event(ctx, "record teardown failure failed", errs.Wrap(werr, "record teardown failure"), slog.String("bot_id", w.BotID))
-			s.release(ctx, w.BotID)
 		}
 		// The unit's result names the same code the row records.
 		failure := apperror.Wrap(apperror.CodeWorkspaceTeardownFailed, errs.Wrap(err, "tear down workspace",
@@ -773,7 +758,6 @@ func (s *Service) teardown(ctx context.Context, w Workspace) error {
 		Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 	})
 	if err != nil {
-		s.release(ctx, w.BotID)
 		if superseded(ctx, err) {
 			return nil
 		}

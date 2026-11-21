@@ -144,7 +144,7 @@ describe('chat decisions', () => {
     expect(showError).toHaveBeenCalledWith('The response was not applied.')
   })
 
-  it('treats an unapplied acknowledgement without a code as a resolved no-op', async () => {
+  it('restores the request when a response is not applied', async () => {
     const { decisions, transcript, showError } = setup()
     const approval: UIToolApproval = {
       approval_id: 'approval-1',
@@ -161,8 +161,36 @@ describe('chat decisions', () => {
       control_id: 'control-1',
       applied: false,
     })).toBe(true)
-    expect(transcript.restoreToolApprovalStates).not.toHaveBeenCalled()
-    expect(showError).not.toHaveBeenCalled()
+    expect(transcript.restoreToolApprovalStates).toHaveBeenCalledWith(['approval-snapshot'])
+    expect(showError).toHaveBeenCalledWith('The response was not applied.')
+  })
+
+  it('closes a question the server no longer accepts an answer for', async () => {
+    const { decisions, transcript, showError } = setup()
+    const userInput: UIUserInput = {
+      user_input_id: 'input-1',
+      status: 'pending',
+      can_respond: true,
+    }
+    await decisions.respondUserInput(userInput, { answers: [{ question_id: 'q1', text: 'runtime' }] }, target)
+    expect(transcript.markUserInputDecision).toHaveBeenLastCalledWith('input-1', 'submitted', [{ question_id: 'q1', text: 'runtime' }])
+
+    expect(decisions.handleControlAck({
+      type: 'control_ack',
+      session_id: 'session-1',
+      run_id: 'run-1',
+      control: 'user_input_response',
+      control_id: 'control-1',
+      applied: false,
+      code: 'user_input.expired',
+    })).toBe(true)
+    expect(transcript.restoreUserInputStates).not.toHaveBeenCalled()
+    expect(transcript.markUserInputDecision).toHaveBeenLastCalledWith('input-1', 'expired')
+    expect(showError).toHaveBeenCalledWith('The response was not applied.')
+
+    // The decision is settled: a later projection must not re-apply the answer.
+    decisions.observeRun('session-1', run())
+    expect(transcript.markUserInputDecision).toHaveBeenLastCalledWith('input-1', 'expired')
   })
 
   it('keeps an applied acknowledgement optimistic until projection confirms it', async () => {

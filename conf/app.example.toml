@@ -95,7 +95,8 @@ owner_lease_ttl = "30s"
 cluster = false
 # How long to wait after the live backend is replaced (a Redis or Valkey
 # restart or failover) before in-flight runs are recorded as lost. Defaults to
-# 3 x owner_lease_ttl and must not be shorter than owner_lease_ttl.
+# 3 x owner_lease_ttl and must not be shorter than owner_lease_ttl. The memory
+# backend does not wait: its live state ends with the process.
 # backend_loss_grace = "90s"
 
 [session_runtime.redis]

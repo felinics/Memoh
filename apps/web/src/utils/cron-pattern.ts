@@ -301,12 +301,7 @@ export function isValidCron(pattern: string): boolean {
   }
 }
 
-// Localized weekday/month labels. 0 = Sunday per ISO cron convention.
+// Localized weekday labels. 0 = Sunday per ISO cron convention.
 export const WEEKDAY_KEYS = [
   'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat',
-] as const
-
-export const MONTH_KEYS = [
-  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
-  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
 ] as const

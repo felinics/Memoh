@@ -30,6 +30,11 @@ const (
 // releases the slot early through the request context.
 const ReverseHTTPTimeout = 16 * time.Minute
 
+// reverseHTTPRouteWait is how long a request waits for its route's stream.
+// The Server hands a route to an agent as soon as it opens the stream, before
+// this broker has registered it, and an agent may connect at once.
+const reverseHTTPRouteWait = 5 * time.Second
+
 type ReverseHTTPBroker struct {
 	nextID uint64
 
@@ -37,6 +42,8 @@ type ReverseHTTPBroker struct {
 	sendMu  sync.Mutex
 	streams map[string]bridgepb.ContainerService_ReverseHTTPServer
 	pending map[string]reverseHTTPPending
+	// registered is closed and replaced whenever a stream registers.
+	registered chan struct{}
 }
 
 type reverseHTTPPending struct {
@@ -46,8 +53,9 @@ type reverseHTTPPending struct {
 
 func NewReverseHTTPBroker() *ReverseHTTPBroker {
 	return &ReverseHTTPBroker{
-		streams: map[string]bridgepb.ContainerService_ReverseHTTPServer{},
-		pending: map[string]reverseHTTPPending{},
+		streams:    map[string]bridgepb.ContainerService_ReverseHTTPServer{},
+		pending:    map[string]reverseHTTPPending{},
+		registered: make(chan struct{}),
 	}
 }
 
@@ -65,7 +73,7 @@ func (b *ReverseHTTPBroker) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	id := b.nextRequestID()
 	route := reverseHTTPRouteFromRequest(req)
 	responseCh := make(chan *bridgepb.ReverseHTTPFrame, 1)
-	stream, err := b.registerPending(route, id, responseCh)
+	stream, err := b.registerPending(req.Context(), route, id, responseCh)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -142,18 +150,30 @@ func (b *ReverseHTTPBroker) nextRequestID() string {
 	return "reverse-http-" + strconv.FormatUint(id, 10)
 }
 
-func (b *ReverseHTTPBroker) registerPending(route, id string, ch chan *bridgepb.ReverseHTTPFrame) (bridgepb.ContainerService_ReverseHTTPServer, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	stream := b.streams[route]
-	if stream == nil && route != "" {
-		stream = b.streams[""]
+func (b *ReverseHTTPBroker) registerPending(ctx context.Context, route, id string, ch chan *bridgepb.ReverseHTTPFrame) (bridgepb.ContainerService_ReverseHTTPServer, error) {
+	timer := time.NewTimer(reverseHTTPRouteWait)
+	defer timer.Stop()
+	for {
+		b.mu.Lock()
+		stream := b.streams[route]
+		if stream == nil && route != "" {
+			stream = b.streams[""]
+		}
+		if stream != nil {
+			b.pending[id] = reverseHTTPPending{route: route, ch: ch}
+			b.mu.Unlock()
+			return stream, nil
+		}
+		registered := b.registered
+		b.mu.Unlock()
+		select {
+		case <-registered:
+		case <-timer.C:
+			return nil, errors.New("memoh tools proxy is not connected")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
-	if stream == nil {
-		return nil, errors.New("memoh tools proxy is not connected")
-	}
-	b.pending[id] = reverseHTTPPending{route: route, ch: ch}
-	return stream, nil
 }
 
 func (b *ReverseHTTPBroker) unregisterPending(id string) {
@@ -166,6 +186,8 @@ func (b *ReverseHTTPBroker) replaceStream(route string, stream bridgepb.Containe
 	b.mu.Lock()
 	b.failPendingLocked(route, "reverse HTTP stream replaced")
 	b.streams[route] = stream
+	close(b.registered)
+	b.registered = make(chan struct{})
 	b.mu.Unlock()
 }
 

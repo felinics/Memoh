@@ -1,46 +1,52 @@
 <template>
-  <SectionGroup
+  <SettingsSection
+    v-if="initialLoading"
     :title="t('bots.toolApproval.title')"
-    :description="t('bots.toolApproval.intro')"
   >
-    <SettingsSection v-if="initialLoading">
-      <InlineLoadingRow surface="card-row">
-        {{ t('bots.toolApproval.loading') }}
-      </InlineLoadingRow>
-    </SettingsSection>
+    <InlineLoadingRow surface="card-row">
+      {{ t('bots.toolApproval.loading') }}
+    </InlineLoadingRow>
+  </SettingsSection>
 
-    <SettingsSection v-else-if="loadFailed">
-      <SettingsRow
-        :label="t('bots.toolApproval.loadFailed')"
-        :description="t('bots.toolApproval.loadFailedDescription')"
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          @click="refetchWorkspaceTargets()"
-        >
-          {{ t('runtimes.retry') }}
-        </Button>
-      </SettingsRow>
-    </SettingsSection>
-
-    <div
-      v-else
-      class="space-y-8"
+  <SettingsSection
+    v-else-if="loadFailed"
+    :title="t('bots.toolApproval.title')"
+  >
+    <SettingsRow
+      :label="t('bots.toolApproval.loadFailed')"
+      :description="t('bots.toolApproval.loadFailedDescription')"
     >
-      <SettingsSection
-        v-for="target in validTargets"
-        :key="target.target_id"
-        :title="targetName(target)"
+      <Button
+        variant="outline"
+        size="sm"
+        @click="refetchWorkspaceTargets()"
       >
-        <template #actions>
-          <Switch
-            :model-value="draftFor(target).enabled"
-            :aria-label="t('bots.toolApproval.enabled')"
-            @update:model-value="(value) => updateEnabled(target, !!value)"
-          />
-        </template>
+        {{ t('runtimes.retry') }}
+      </Button>
+    </SettingsRow>
+  </SettingsSection>
 
+  <div
+    v-else
+    class="space-y-3"
+  >
+    <SettingsSection
+      v-for="(target, targetIdx) in validTargets"
+      :key="target.target_id"
+      :title="targetIdx === 0 ? t('bots.toolApproval.title') : undefined"
+    >
+      <SettingsRow
+        :label="validTargets.length > 1 ? targetName(target) : t('bots.toolApproval.enableTitle')"
+        :description="t('bots.toolApproval.intro')"
+      >
+        <Switch
+          :model-value="draftFor(target).enabled"
+          :aria-label="t('bots.toolApproval.enabled')"
+          @update:model-value="(value) => updateEnabled(target, !!value)"
+        />
+      </SettingsRow>
+
+      <template v-if="draftFor(target).enabled">
         <template
           v-for="tool in approvalTools"
           :key="target.target_id + ':' + tool"
@@ -108,9 +114,9 @@
             </template>
           </SettingsRow>
         </template>
-      </SettingsSection>
-    </div>
-  </SectionGroup>
+      </template>
+    </SettingsSection>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -130,7 +136,7 @@ import {
   Textarea,
   toast,
 } from '@felinic/ui'
-import { FieldStack, InlineLoadingRow, SectionGroup, SettingsRow, SettingsSection } from '@felinic/ui'
+import { FieldStack, InlineLoadingRow, SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   cloneToolApprovalConfig,

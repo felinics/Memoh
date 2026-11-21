@@ -6,7 +6,7 @@ import { SessionQueueSubmissionGate } from './session-queue-submission'
 function input(overrides: Partial<ComposerActionInput> = {}): ComposerActionInput {
   return {
     text: '', hasFiles: false, hasSkills: false,
-    streaming: false, awaitingFirstSend: false, queuePending: false,
+    streaming: false, awaitingFirstSend: false, stopping: false, queuePending: false,
     active: true, hasBot: true, hasSession: true, readOnly: false,
     loadingMessages: false, configPending: false, hasNoModel: false,
     modeUnavailable: false, modeChangeDisabled: false, agentUnavailable: false,

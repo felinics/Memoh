@@ -11,6 +11,8 @@ export interface AssistantStream {
   readonly sessionId: string
   readonly composerScope: string
   readonly viewId: string
+  // A stop is waiting for the server to end the run (see markStopping).
+  readonly stopping: boolean
 }
 
 // AcceptedRun is what run_accepted tells us: the server's name for a turn we
@@ -27,6 +29,7 @@ export interface AcceptedRun {
 interface PendingAssistantStream extends AssistantStream {
   sessionId: string
   runId: string
+  stopping: boolean
   appendMessages: boolean
   messageIds: Map<number, number>
   onModelPreferenceSettled?: () => void
@@ -76,6 +79,9 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
     sessionId: string
   }>()
   const createdSessionsByInvocation = new Map<string, string>()
+  // Sends whose stop waited for the server, kept past the stream so the send
+  // can tell its stop apart from one that ended the stream at once.
+  const stoppedInvocations = new Set<string>()
 
   function activeStreams(): PendingAssistantStream[] {
     return [...streams.values()]
@@ -104,6 +110,10 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
 
   function isUnboundComposerStreaming(botId: string | null | undefined, composerScope?: string): boolean {
     return activeUnboundInvocationIds(botId, composerScope).length > 0
+  }
+
+  function isSessionStopping(botId: string | null | undefined, targetSessionId: string | null | undefined): boolean {
+    return assistantStreamsForSession(botId, targetSessionId).some(stream => stream.stopping)
   }
 
   // Resolves an event to the local key for its turn. A run id is authoritative
@@ -143,6 +153,7 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
         sessionId: input.sessionId.trim(),
         composerScope: input.composerScope?.trim() || 'chat',
         viewId: input.viewId?.trim() || 'chat',
+        stopping: false,
         appendMessages: input.assistantTurn.messages.length > 0,
         messageIds: new Map(),
         onModelPreferenceSettled: input.onModelPreferenceSettled,
@@ -206,6 +217,30 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
       sessionId: stream?.sessionId ?? '',
     })
     return ''
+  }
+
+  // markStopping keeps a stopped stream open until the server ends its run,
+  // which settles it like any other terminal. Returns false for a stream that
+  // is gone or already stopping.
+  function markStopping(invocationId: string): boolean {
+    const stream = streams.get(invocationId.trim())
+    if (!stream || stream.stopping) return false
+    stream.stopping = true
+    stoppedInvocations.add(stream.invocationId)
+    return true
+  }
+
+  // Forgets a waiting stop, so the stream ends as a stop that never waited.
+  function clearStopping(invocationId: string) {
+    const id = invocationId.trim()
+    const stream = streams.get(id)
+    if (stream) stream.stopping = false
+    stoppedInvocations.delete(id)
+  }
+
+  // Reports once whether the send's stop waited for the server.
+  function takeStopRequest(invocationId: string): boolean {
+    return stoppedInvocations.delete(invocationId.trim())
   }
 
   function getAssistantStream(invocationId: string): AssistantStream | undefined {
@@ -276,6 +311,7 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
   function rejectAllStreams(error: Error, beforeReject?: BeforeReject) {
     for (const stream of activeStreams()) {
       beforeReject?.(stream.invocationId)
+      stoppedInvocations.delete(stream.invocationId)
       rejectAssistantStream(stream.invocationId, error)
     }
   }
@@ -306,17 +342,22 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
     invocationIdsByRunId.clear()
     runIdsByInvocation.clear()
     abortRequestedInvocations.clear()
+    stoppedInvocations.clear()
   }
 
   return {
     activeUnboundInvocationIds,
     assistantStreamsForSession,
     isUnboundComposerStreaming,
+    isSessionStopping,
     invocationIdForEvent,
     trackAssistantStream,
     bindRunId,
     settleModelPreference,
     requestAbort,
+    markStopping,
+    clearStopping,
+    takeStopRequest,
     getAssistantStream,
     mapAssistantStreamMessage,
     resolveAssistantStream,

@@ -14,6 +14,8 @@ export interface OnboardingAgentResult {
   authorizationId?: string
   agentId: string
   botAgentId: string
+  /** The Agent signs in to its account on itself, after the Bot exists. */
+  signInFirst?: boolean
 }
 
 export interface OnboardingBotResult {
@@ -48,6 +50,7 @@ function normalizeBotResult(value: unknown): OnboardingBotResult | null {
         agentId,
         botAgentId,
         authorizationId: normalizeProviderId(selectedAgent?.authorizationId) || undefined,
+        ...(selectedAgent?.signInFirst === true && botAgentId && { signInFirst: true }),
       },
     }),
   }

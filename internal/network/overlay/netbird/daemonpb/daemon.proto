@@ -1,0 +1,127 @@
+// Subset of the NetBird client daemon API, taken from
+// https://github.com/netbirdio/netbird/blob/v0.82.0/client/proto/daemon.proto
+// (BSD-3-Clause, Copyright (c) 2022-2026 NetBird GmbH & AUTHORS).
+//
+// Only the calls and fields Memoh uses are kept. Package, service, method
+// names and field numbers must match upstream so that the wire format stays
+// compatible; fields left out are skipped as unknown fields.
+
+syntax = "proto3";
+
+package daemon;
+
+option go_package = "github.com/felinics/memoh/internal/network/overlay/netbird/daemonpb";
+
+service DaemonService {
+  rpc Login(LoginRequest) returns (LoginResponse) {}
+  rpc WaitSSOLogin(WaitSSOLoginRequest) returns (WaitSSOLoginResponse) {}
+  rpc Up(UpRequest) returns (UpResponse) {}
+  rpc Status(StatusRequest) returns (StatusResponse) {}
+  rpc Down(DownRequest) returns (DownResponse) {}
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse) {}
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse) {}
+  rpc Logout(LogoutRequest) returns (LogoutResponse) {}
+}
+
+message LoginRequest {
+  string setupKey = 1;
+  string managementUrl = 3;
+  string adminURL = 4;
+  string hostname = 9;
+  optional bool disable_dns = 22;
+  optional string profileName = 30;
+  optional string username = 31;
+}
+
+message LoginResponse {
+  bool needsSSOLogin = 1;
+  string userCode = 2;
+  string verificationURI = 3;
+  string verificationURIComplete = 4;
+}
+
+message WaitSSOLoginRequest {
+  string userCode = 1;
+  string hostname = 2;
+}
+
+message WaitSSOLoginResponse {
+  string email = 1;
+}
+
+message UpRequest {
+  optional string profileName = 1;
+  optional string username = 2;
+}
+
+message UpResponse {}
+
+message StatusRequest {
+  bool getFullPeerStatus = 1;
+}
+
+message StatusResponse {
+  string status = 1;
+  FullStatus fullStatus = 2;
+  string daemonVersion = 3;
+}
+
+message FullStatus {
+  ManagementState managementState = 1;
+  SignalState signalState = 2;
+  LocalPeerState localPeerState = 3;
+  repeated PeerState peers = 4;
+}
+
+message ManagementState {
+  string URL = 1;
+  bool connected = 2;
+  string error = 3;
+}
+
+message SignalState {
+  string URL = 1;
+  bool connected = 2;
+  string error = 3;
+}
+
+message LocalPeerState {
+  string IP = 1;
+  string fqdn = 4;
+}
+
+message PeerState {
+  string IP = 1;
+  string connStatus = 3;
+  string fqdn = 9;
+}
+
+message DownRequest {}
+
+message DownResponse {}
+
+message GetConfigRequest {
+  string profileName = 1;
+  string username = 2;
+}
+
+message GetConfigResponse {
+  string managementUrl = 1;
+  bool disable_dns = 17;
+}
+
+message SetConfigRequest {
+  string username = 1;
+  string profileName = 2;
+  string managementUrl = 3;
+  optional bool disable_dns = 15;
+}
+
+message SetConfigResponse {}
+
+message LogoutRequest {
+  optional string profileName = 1;
+  optional string username = 2;
+}
+
+message LogoutResponse {}

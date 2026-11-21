@@ -149,7 +149,6 @@
         <SettingsRow
           stack="sm"
           :label="t('bots.remoteRuntime.connectManage')"
-          :description="t('bots.remoteRuntime.connectManageDescription')"
         >
           <Button
             variant="outline"

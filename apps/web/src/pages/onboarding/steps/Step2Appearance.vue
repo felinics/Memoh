@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/store/settings'
 import { useOnboarding } from '@/composables/useOnboarding'
@@ -7,7 +8,7 @@ import { Button, FieldStack, Select, SelectContent, SelectItem, SelectTrigger, S
 import { Moon, Sun } from 'lucide-vue-next'
 import ColorSchemeCard from '@/components/color-scheme-card/index.vue'
 import { colorSchemes } from '@/constants/color-schemes'
-import { LOCALE_OPTIONS, type Locale } from '@/i18n'
+import { LOCALE_OPTIONS, preloadLocales, type Locale } from '@/i18n'
 import { useStepTransition } from '../useStepTransition'
 import StepFrame from '../components/step-frame.vue'
 import StepExitShell from '../components/step-exit-shell.vue'
@@ -19,6 +20,10 @@ const { language, theme, colorScheme } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme } = settingsStore
 const { nextStep, prevStep } = useOnboarding()
 const { visible, exiting, leave } = useStepTransition()
+
+// This step has the language picker; download the other languages now so a
+// pick applies at once (see preloadLocales).
+onMounted(preloadLocales)
 </script>
 
 <template>

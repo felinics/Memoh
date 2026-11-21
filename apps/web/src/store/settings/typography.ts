@@ -239,8 +239,6 @@ export function applyTypographyVariables(options: {
   uiFontSizePx: number
   codeFontSizePx: number
 }) {
-  if (typeof document === 'undefined') return
-
   const uiSize = normalizeUiFontSizePx(options.uiFontSizePx)
   const codeSize = normalizeCodeFontSizePx(options.codeFontSizePx)
   const uiFamily = normalizeStoredFontFamilyInput(options.uiFontFamily, DEFAULT_UI_FONT_FAMILY)
@@ -253,10 +251,15 @@ export function applyTypographyVariables(options: {
   // Tailwind's preflight resolves body/code fonts through --font-sans /
   // --font-mono at runtime. Override them only for explicit customizations so
   // the default render stays exactly Tailwind's stock stacks.
+  // A custom UI font also replaces the Inter-tuned Latin face of the user prompt
+  // (.chat-user-text in style.css), so the prompt follows the chosen family.
   if (uiFamily) {
-    style.setProperty('--font-sans', cssFontFamilyDeclaration(uiFamily, DEFAULT_UI_FONT_FAMILY))
+    const declaration = cssFontFamilyDeclaration(uiFamily, DEFAULT_UI_FONT_FAMILY)
+    style.setProperty('--font-sans', declaration)
+    style.setProperty('--chat-user-text-font', declaration)
   } else {
     style.removeProperty('--font-sans')
+    style.removeProperty('--chat-user-text-font')
   }
   if (codeFamily) {
     style.setProperty('--font-mono', cssCodeFontFamilyStyleValue(codeFamily))

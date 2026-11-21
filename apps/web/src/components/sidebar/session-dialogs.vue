@@ -116,6 +116,8 @@ async function handleDelete() {
     await chatStore.removeSession(target.id)
     deleteOpen.value = false
     pendingDelete.value = null
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('common.deleteFailed')))
   } finally {
     deleteLoading.value = false
   }

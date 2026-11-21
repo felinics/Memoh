@@ -18,12 +18,14 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/felinics/memoh/internal/acl"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/attachment"
-	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/discuss"
@@ -132,7 +134,6 @@ type DefaultChatRuntimeSettings struct {
 	Runtime     string
 	ACPAgentID  string
 	ProjectPath string
-	ProjectMode string
 }
 
 type DefaultChatRuntimeReader interface {
@@ -197,6 +198,10 @@ type NewSessionSpec struct {
 	Title                 string
 	CreatedByUserID       string
 	RuntimeOwnerAccountID string
+	// ACPAgentID is the ACP agent profile the session will run, read before it
+	// exists to check its setup and name it. The thread records the
+	// profile itself, from the Agent instance.
+	ACPAgentID string
 }
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
@@ -210,8 +215,6 @@ type ChannelInboundProcessor struct {
 	queueCommandHandler QueueCommandHandler
 	registry            *channel.Registry
 	logger              *slog.Logger
-	jwtSecret           string
-	tokenTTL            time.Duration
 	identity            *IdentityResolver
 	policy              PolicyService
 	acl                 chatACL
@@ -236,6 +239,10 @@ type ChannelInboundProcessor struct {
 	// currently running agent stream. Used by /stop to abort generation
 	// on external channels (Telegram, Discord, etc.).
 	activeStreams sync.Map
+
+	// replays joins concurrent first accesses of one session into a single
+	// replay, so a busy chat whose session is cold loads its history once.
+	replays singleflight.Group
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -247,14 +254,9 @@ func NewChannelInboundProcessor(
 	turnSvc turn.Service,
 	channelIdentityService ChannelIdentityService,
 	policyService PolicyService,
-	jwtSecret string,
-	tokenTTL time.Duration,
 ) *ChannelInboundProcessor {
 	if log == nil {
 		log = slog.Default()
-	}
-	if tokenTTL <= 0 {
-		tokenTTL = 5 * time.Minute
 	}
 	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, policyService, "")
 	return &ChannelInboundProcessor{
@@ -263,8 +265,6 @@ func NewChannelInboundProcessor(
 		message:       messageWriter,
 		registry:      registry,
 		logger:        log.With(slog.String("component", "channel_router")),
-		jwtSecret:     strings.TrimSpace(jwtSecret),
-		tokenTTL:      tokenTTL,
 		identity:      identityResolver,
 		policy:        policyService,
 	}
@@ -852,7 +852,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		ownerPrincipal := strings.TrimSpace(sessionRuntimeOwner)
 		var err error
 		if ownerPrincipal == "" {
-			err = sessionpkg.ErrACPRuntimeOwnerMissing
+			err = sessionpkg.ErrRuntimeOwnerMissing
 		} else {
 			err = p.requireWorkspaceExecForPrincipal(ctx, identity.BotID, ownerPrincipal)
 		}
@@ -869,22 +869,14 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	// Push event into the DCP pipeline (persist + in-memory projection).
-	// On first access for a session, replay persisted events to warm the pipeline.
 	var latestRC timeline.RenderedContext
 	var eventID string
 	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
-		if !p.pipeline.HasSession(sessionID) {
-			p.replayPipelineSession(ctx, identity.BotID, sessionID)
-		}
 		pipelineMsg := msg
 		pipelineMsg.Message = msg.Message
 		pipelineMsg.Message.Attachments = resolvedAttachments
 		event := AdaptInbound(pipelineMsg, sessionID, identity.ChannelIdentityID, identity.DisplayName)
-		var store sessionEventPersister
-		if p.eventStore != nil {
-			store = p.eventStore
-		}
-		eventID, latestRC = persistAndProjectEvent(ctx, store, p.pipeline, p.logger, identity.BotID, sessionID, event)
+		eventID, latestRC = p.projectInboundEvent(ctx, identity.BotID, sessionID, event)
 	}
 
 	// Bot-centric history container:
@@ -897,8 +889,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Discuss mode: dispatch to the discuss driver and return.
 	// The discuss driver autonomously decides whether to call the LLM.
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil && slashDecision.AgentCommand == "" {
-		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
-		sessionToken := p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken)
 		statusInfo := channel.ProcessingStatusInfo{
 			BotID:             identity.BotID,
 			ChatID:            activeChatID,
@@ -918,8 +908,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			CurrentPlatform:   msg.Channel.String(),
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
-			SessionToken:      sessionToken,
-			ChatToken:         chatToken,
+			ActorAccountID:    p.runActorAccountID(ctx, identity, runtimeSession, sessionRuntimeOwner),
 			ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
 			StartProcessing:   p.discussProcessingStarter(cfg, msg, identity, statusInfo),
 		})
@@ -968,26 +957,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return nil
 	}
 
-	// Issue chat token for reply routing.
-	chatToken := ""
-	if p.jwtSecret != "" && strings.TrimSpace(msg.ReplyTarget) != "" {
-		signed, _, err := auth.GenerateChatToken(auth.ChatToken{
-			BotID:             identity.BotID,
-			ChatID:            activeChatID,
-			RouteID:           resolved.RouteID,
-			UserID:            identity.UserID,
-			ChannelIdentityID: identity.ChannelIdentityID,
-		}, p.jwtSecret, p.tokenTTL)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "issue chat token failed", slog.Any("error", err))
-			}
-		} else {
-			chatToken = signed
-		}
-	}
-
-	token := p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken)
+	actorAccountID := p.runActorAccountID(ctx, identity, runtimeSession, sessionRuntimeOwner)
 
 	var desc channel.Descriptor
 	if p.registry != nil {
@@ -1101,12 +1071,11 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		BotID:                     identity.BotID,
 		ChatID:                    activeChatID,
 		ThreadID:                  sessionID,
-		Token:                     token,
+		ActorAccountID:            actorAccountID,
 		UserID:                    identity.UserID,
 		SourceChannelIdentityID:   identity.ChannelIdentityID,
 		DisplayName:               identity.DisplayName,
 		RouteID:                   resolved.RouteID,
-		ChatToken:                 chatToken,
 		IdempotencyKey:            turnIdempotencyKey(msg.Channel, resolved.RouteID, sourceMessageID),
 		ExternalMessageID:         sourceMessageID,
 		ReplyTarget:               target,
@@ -1480,31 +1449,26 @@ func (p *ChannelInboundProcessor) handleQueueCommand(
 	if strings.TrimSpace(sessionType) == sessionpkg.TypeDiscuss {
 		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueUnsupportedSession, nil))
 	}
-	// A follow-up starts a run that the server owns; only local channels see
-	// that run's output through the session runtime subscription. A steer
-	// joins the run this channel is already streaming, so it stays available.
-	if resource == "queue" && !isLocalChannelType(msg.Channel) {
-		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueFollowUpUnsupportedChannel, nil))
-	}
-	invocationID := queueCommandIdempotencyKey(msg.Channel, routeID, msg.Message.ID, resource)
-	input := QueueCommandInput{
-		TeamID:            strings.TrimSpace(cfg.TeamID),
-		BotID:             strings.TrimSpace(identity.BotID),
-		SessionID:         strings.TrimSpace(sessionID),
-		InvocationID:      invocationID,
-		UserID:            strings.TrimSpace(identity.UserID),
-		ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
-		Text:              strings.TrimSpace(invocation.Rest),
-	}
-	var err error
+	// A follow-up starts a run that the server owns, with no handle for this
+	// channel to stream its reply from; the Web client, which watches the
+	// session, queues follow-ups through its own API. A steer joins the run
+	// this channel is already streaming, so it stays available.
 	switch resource {
-	case "steer":
-		err = p.queueCommandHandler.EnqueueSteer(ctx, input)
 	case "queue":
-		err = p.queueCommandHandler.EnqueueFollowUp(ctx, input)
+		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueFollowUpUnsupportedChannel, nil))
+	case "steer":
 	default:
 		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueRequestInvalid, nil))
 	}
+	err := p.queueCommandHandler.EnqueueSteer(ctx, QueueCommandInput{
+		TeamID:            strings.TrimSpace(cfg.TeamID),
+		BotID:             strings.TrimSpace(identity.BotID),
+		SessionID:         strings.TrimSpace(sessionID),
+		InvocationID:      queueCommandIdempotencyKey(msg.Channel, routeID, msg.Message.ID, resource),
+		UserID:            strings.TrimSpace(identity.UserID),
+		ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
+		Text:              strings.TrimSpace(invocation.Rest),
+	})
 	if err != nil {
 		if apperror.CodeOf(err) == "" {
 			// A queue command that failed for any other reason was not admitted.
@@ -1519,10 +1483,7 @@ func (p *ChannelInboundProcessor) handleQueueCommand(
 		}
 		return p.sendSlashError(ctx, sender, msg, err)
 	}
-	if resource == "steer" {
-		return p.sendSlashNotice(ctx, sender, msg, "queue.steerAccepted")
-	}
-	return p.sendSlashNotice(ctx, sender, msg, "queue.accepted")
+	return p.sendSlashNotice(ctx, sender, msg, "queue.steerAccepted")
 }
 
 func (p *ChannelInboundProcessor) accessDeniedRole(ctx context.Context, identity InboundIdentity) string {
@@ -3038,25 +2999,58 @@ func isLocalChannelType(ct channel.ChannelType) bool {
 	return s == "web" || s == "cli"
 }
 
+// projectInboundEvent persists an inbound event and projects it into the
+// pipeline, replaying the session's persisted events first when it is cold.
+// When that replay fails the event still renders for this message, but the
+// session stays cold: made resident without its history, it would keep
+// serving context with that history missing until evicted, and the next
+// message would never retry the replay.
+func (p *ChannelInboundProcessor) projectInboundEvent(ctx context.Context, botID, sessionID string, event timeline.CanonicalEvent) (string, timeline.RenderedContext) {
+	project := p.pipeline.PushEvent
+	if !p.pipeline.HasSession(sessionID) && !p.replayPipelineSession(ctx, botID, sessionID) {
+		project = p.pipeline.PushResidentEvent
+	}
+	var store sessionEventPersister
+	if p.eventStore != nil {
+		store = p.eventStore
+	}
+	return persistAndProjectEvent(ctx, store, project, p.logger, botID, sessionID, event)
+}
+
 // replayPipelineSession loads persisted events from the DB and replays them
-// into the pipeline. Called lazily on first access per session after cold start.
-func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, botID, sessionID string) {
-	if p.eventStore == nil || p.pipeline == nil {
-		return
+// into the pipeline, reporting whether the session is loaded. Called lazily on
+// first access per session after cold start or eviction. Concurrent callers
+// for one session share one replay; a caller that arrives after it finished
+// finds the session loaded and leaves it alone, since replaying again would
+// drop the events pushed since. The shared replay runs without the starting
+// caller's cancellation: the others waiting on it would otherwise go on
+// without the history it was loading.
+func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, botID, sessionID string) bool {
+	if p.eventStore == nil {
+		// Nothing is persisted, so the pipeline is all the history there is.
+		return true
 	}
-	events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
-	if err != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+	ctx = context.WithoutCancel(ctx)
+	loaded, _, _ := p.replays.Do(sessionID, func() (any, error) {
+		if p.pipeline.HasSession(sessionID) {
+			return true, nil
 		}
-		return
-	}
-	if len(events) > 0 {
+		events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.WarnContext(ctx, "pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+			}
+			return false, nil
+		}
+		// A successful empty replay is warm too; otherwise callers arriving
+		// after this flight would keep loading the same empty history.
 		p.pipeline.ReplaySession(sessionID, events)
 		if p.logger != nil {
 			p.logger.InfoContext(ctx, "pipeline session replayed", slog.String("session_id", sessionID), slog.Int("events", len(events)))
 		}
-	}
+		return true, nil
+	})
+	return loaded.(bool)
 }
 
 // broadcastInboundMessage notifies the observer about the user's inbound
@@ -3607,7 +3601,6 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 		ReplyExternalMessageID: replyExternalID,
 		Decision:               parsed.Resource,
 		Reason:                 reason,
-		ChatToken:              p.issueChatToken(identity, routeID, msg),
 	})
 }
 
@@ -3649,7 +3642,6 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 		Answers:                answers,
 		TextAnswer:             answerText,
 		UILanguage:             loc.Locale(),
-		ChatToken:              p.issueChatToken(identity, routeID, msg),
 	})
 }
 
@@ -3937,90 +3929,27 @@ func hasUserInputAction(actions []channel.Action) bool {
 	return false
 }
 
-func (p *ChannelInboundProcessor) issueChatToken(identity InboundIdentity, routeID string, msg channel.InboundMessage) string {
-	if p.jwtSecret == "" || strings.TrimSpace(msg.ReplyTarget) == "" {
-		return ""
-	}
-	signed, _, err := auth.GenerateChatToken(auth.ChatToken{
-		BotID:             identity.BotID,
-		ChatID:            identity.BotID,
-		RouteID:           strings.TrimSpace(routeID),
-		UserID:            identity.UserID,
-		ChannelIdentityID: identity.ChannelIdentityID,
-	}, p.jwtSecret, p.tokenTTL)
-	if err != nil {
-		if p.logger != nil {
-			p.logger.Warn("issue approval chat token failed", slog.Any("error", err))
+// runActorAccountID is the account a turn acts for: the runtime owner of an
+// external-runtime session, else the bot owner; the sender's account when
+// neither resolves.
+func (p *ChannelInboundProcessor) runActorAccountID(ctx context.Context, identity InboundIdentity, sess SessionResult, runtimeOwnerAccountID string) string {
+	if sessionUsesExternalRuntime(sess) {
+		if owner := strings.TrimSpace(runtimeOwnerAccountID); owner != "" {
+			return owner
 		}
-		return ""
+		return strings.TrimSpace(identity.UserID)
 	}
-	return signed
-}
-
-func (p *ChannelInboundProcessor) issueChannelBearerToken(ctx context.Context, identity InboundIdentity, fallbackChatToken string) string {
-	if p.jwtSecret == "" {
-		if strings.TrimSpace(fallbackChatToken) != "" {
-			return "Bearer " + strings.TrimSpace(fallbackChatToken)
-		}
-		return ""
-	}
-	tokenUserID := strings.TrimSpace(identity.UserID)
 	if p.policy != nil {
-		if ownerID, err := p.policy.BotOwnerUserID(ctx, identity.BotID); err == nil && strings.TrimSpace(ownerID) != "" {
-			tokenUserID = strings.TrimSpace(ownerID)
-		} else if p.logger != nil {
-			p.logger.WarnContext(ctx, "resolve bot owner for token failed, falling back to caller identity",
+		ownerID, err := p.policy.BotOwnerUserID(ctx, identity.BotID)
+		if err == nil && strings.TrimSpace(ownerID) != "" {
+			return strings.TrimSpace(ownerID)
+		}
+		if err != nil && p.logger != nil {
+			p.logger.WarnContext(ctx, "resolve bot owner for the run actor failed, falling back to the caller",
 				slog.String("bot_id", identity.BotID), slog.Any("error", err))
 		}
 	}
-	if tokenUserID != "" {
-		signed, _, err := auth.GenerateToken(tokenUserID, p.jwtSecret, p.tokenTTL)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "issue channel token failed", slog.Any("error", err))
-			}
-		} else {
-			return "Bearer " + signed
-		}
-	}
-	if strings.TrimSpace(fallbackChatToken) != "" {
-		return "Bearer " + strings.TrimSpace(fallbackChatToken)
-	}
-	return ""
-}
-
-func (p *ChannelInboundProcessor) issueSessionBearerToken(ctx context.Context, identity InboundIdentity, sess SessionResult, runtimeOwnerAccountID, fallbackChatToken string) string {
-	if sessionUsesExternalRuntime(sess) {
-		return p.issueRuntimeBearerToken(ctx, identity, runtimeOwnerAccountID, fallbackChatToken)
-	}
-	return p.issueChannelBearerToken(ctx, identity, fallbackChatToken)
-}
-
-func (p *ChannelInboundProcessor) issueRuntimeBearerToken(ctx context.Context, identity InboundIdentity, runtimeOwnerAccountID, fallbackChatToken string) string {
-	if p.jwtSecret == "" {
-		if strings.TrimSpace(fallbackChatToken) != "" {
-			return "Bearer " + strings.TrimSpace(fallbackChatToken)
-		}
-		return ""
-	}
-	tokenUserID := strings.TrimSpace(runtimeOwnerAccountID)
-	if tokenUserID == "" {
-		tokenUserID = strings.TrimSpace(identity.UserID)
-	}
-	if tokenUserID != "" {
-		signed, _, err := auth.GenerateToken(tokenUserID, p.jwtSecret, p.tokenTTL)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "issue ACP runtime token failed", slog.Any("error", err))
-			}
-		} else {
-			return "Bearer " + signed
-		}
-	}
-	if strings.TrimSpace(fallbackChatToken) != "" {
-		return "Bearer " + strings.TrimSpace(fallbackChatToken)
-	}
-	return ""
+	return strings.TrimSpace(identity.UserID)
 }
 
 func acpMCPToolsURLFromEnv(botID string) string {
@@ -4091,14 +4020,13 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 	}
 	spec.BotAgentID = agent.ID
 	spec.AgentName = agent.Name
-	if sessionpkg.IsDirectRuntimeType(agent.Runtime) {
-		spec.Runtime = agent.Runtime
-		return spec, nil
-	}
-	spec.Runtime = sessionpkg.RuntimeACPAgent
-	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{"acp_agent_id": agent.ACPAgentID})
-	if mode == sessionpkg.TypeChat {
-		spec.Type = sessionpkg.TypeACPAgent
+	// The thread takes the Agent's profile from the instance.
+	spec.Runtime = botagents.SessionRuntime(agent.Runtime)
+	if spec.Runtime == sessionpkg.RuntimeACPAgent {
+		spec.ACPAgentID = agent.ACPAgentID
+		if mode == sessionpkg.TypeChat {
+			spec.Type = sessionpkg.TypeACPAgent
+		}
 	}
 	return spec, nil
 }
@@ -4277,7 +4205,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		return p.replyFailure(ctx, sender, msg, identity, errs.Wrap(err, "resolve route for /new command"), startFailed)
 	}
 
-	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
+	if runtimekind.IsExternal(spec.Runtime) {
 		spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, spec.RuntimeOwnerAccountID)
 	}
 	if strings.TrimSpace(spec.CreatedByUserID) == "" {
@@ -4474,20 +4402,17 @@ func newSessionHarnessName(spec NewSessionSpec, agentName string, profiles turn.
 	if name := strings.TrimSpace(agentName); name != "" {
 		return name
 	}
-	switch {
-	case spec.Runtime == sessionpkg.RuntimeACPAgent:
-		agentID := acpNewSessionAgentID(spec)
-		if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
-			return strings.TrimSpace(profile.DisplayName)
-		}
-		if agentID != "" {
-			return agentID
-		}
-		return "ACP"
-	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
+	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return runtimekind.DisplayName(spec.Runtime)
 	}
-	return ""
+	agentID := acpNewSessionAgentID(spec)
+	if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
+		return strings.TrimSpace(profile.DisplayName)
+	}
+	if agentID != "" {
+		return agentID
+	}
+	return "ACP"
 }
 
 // newSessionAgentName is the Name of the Agent a /new session runs on. /new
@@ -4552,16 +4477,14 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 		return NewSessionSpec{}, err
 	}
 	defaultRuntime := strings.TrimSpace(defaults.Runtime)
-	directDefault := runtimekind.IsDirect(defaultRuntime)
-	if !directDefault && defaultRuntime != sessionpkg.RuntimeACPAgent {
+	if !runtimekind.IsExternal(defaultRuntime) {
 		return spec, nil
 	}
+	botAgentID := strings.TrimSpace(defaults.BotAgentID)
+	// A default bound to an Agent instance is that instance; one from before
+	// instances names its ACP agent alone.
 	agentID := normalizeACPAgentID(defaults.ACPAgentID)
-	if directDefault {
-		// A direct default is fully described by its runtime.
-		agentID = defaultRuntime
-	}
-	if agentID == "" {
+	if botAgentID == "" && defaultRuntime == sessionpkg.RuntimeACPAgent && agentID == "" {
 		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	if p.permissionChecker == nil {
@@ -4570,43 +4493,35 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
 		return NewSessionSpec{}, err
 	}
-	projectPath := strings.TrimSpace(defaults.ProjectPath)
-	if projectPath == "" {
-		projectPath = sessionpkg.DefaultACPProjectPath
-	}
-
-	// Direct external agents have no ACP profile to resolve; only real ACP
-	// providers go through the profile registry.
-	if directDefault {
-		spec.Runtime = defaultRuntime
-		spec.Type = sessionpkg.TypeChat
-		spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
-		spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, "")
-		spec.Metadata = map[string]any{
-			"project_path": projectPath,
-		}
+	spec.Runtime = defaultRuntime
+	spec.Type = sessionpkg.TypeChat
+	spec.BotAgentID = botAgentID
+	spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, "")
+	spec.Metadata = map[string]any{"project_path": firstNonEmptyTrimmed(defaults.ProjectPath, sessionpkg.DefaultACPProjectPath)}
+	if defaultRuntime != sessionpkg.RuntimeACPAgent {
 		return spec, nil
 	}
-
-	profile := resolveACPProfile(p.acpProfiles, agentID)
-	if !profile.Known {
-		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
-	}
-	agentID = profile.ID
-	projectMode := strings.TrimSpace(defaults.ProjectMode)
-	if projectMode == "" {
-		projectMode = sessionpkg.DefaultACPProjectMode
-	}
-	spec.Runtime = sessionpkg.RuntimeACPAgent
 	spec.Type = sessionpkg.TypeACPAgent
-	spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
-	spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, "")
-	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{
-		"acp_agent_id":     agentID,
-		"project_path":     projectPath,
-		"acp_project_mode": projectMode,
-	})
+	spec.ACPAgentID = agentID
+	if botAgentID == "" {
+		// Without an instance the request names the profile, and the thread
+		// binds the session to the bot's instance of it.
+		profile := resolveACPProfile(p.acpProfiles, agentID)
+		if !profile.Known {
+			return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
+		}
+		spec.Metadata["acp_agent_id"] = profile.ID
+	}
 	return spec, nil
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // applyDefaultProjectToNamedAgent gives a named Agent the project the bot's
@@ -4628,9 +4543,6 @@ func (p *ChannelInboundProcessor) applyDefaultProjectToNamedAgent(ctx context.Co
 	if projectPath := strings.TrimSpace(defaults.ProjectPath); projectPath != "" {
 		spec.Metadata["project_path"] = projectPath
 	}
-	if projectMode := strings.TrimSpace(defaults.ProjectMode); projectMode != "" && spec.Runtime == sessionpkg.RuntimeACPAgent {
-		spec.Metadata["acp_project_mode"] = projectMode
-	}
 	return spec, nil
 }
 
@@ -4648,15 +4560,10 @@ func metadataString(metadata map[string]any, key string) string {
 	}
 }
 
+// validateACPNewSessionSpec refuses a /new ACP session before the user
+// confirms it: its project, its agent profile and the setup it would launch
+// with.
 func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) error {
-	agentID := acpNewSessionAgentID(spec)
-	if agentID == "" {
-		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
-	}
-	profile := resolveACPProfile(p.acpProfiles, agentID)
-	if !profile.Known {
-		return apperror.New(apperror.CodeACPAgentNotFound, nil)
-	}
 	projectPath := strings.TrimSpace(metadataString(spec.Metadata, "project_path"))
 	if projectPath == "" {
 		projectPath = sessionpkg.DefaultACPProjectPath
@@ -4664,16 +4571,13 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	if !strings.HasPrefix(projectPath, "/") {
 		return apperror.New(apperror.CodeACPProjectPathInvalid, nil)
 	}
-	projectMode := strings.TrimSpace(metadataString(spec.Metadata, "acp_project_mode"))
-	if projectMode == "" {
-		projectMode = sessionpkg.DefaultACPProjectMode
+	agentID := acpNewSessionAgentID(spec)
+	if agentID == "" {
+		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
-	switch projectMode {
-	case sessionpkg.DefaultACPProjectMode:
-	case "none":
-		return apperror.New(apperror.CodeACPProjectModeInvalid, nil)
-	default:
-		return apperror.New(apperror.CodeACPProjectModeInvalid, nil)
+	profile := resolveACPProfile(p.acpProfiles, agentID)
+	if !profile.Known {
+		return apperror.New(apperror.CodeACPAgentNotFound, nil)
 	}
 	if p == nil || p.acpAgentSetup == nil {
 		return nil
@@ -4721,7 +4625,7 @@ func requireExternalRuntimeActor(identity InboundIdentity, runtimeOwnerAccountID
 	actorUserID := strings.TrimSpace(identity.UserID)
 	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
-		return sessionpkg.ErrACPRuntimeOwnerMissing
+		return sessionpkg.ErrRuntimeOwnerMissing
 	}
 	if actorUserID == "" {
 		return externalAgentExecDenied("account_user_unbound")
@@ -4836,7 +4740,7 @@ func threadError(err error) error {
 		code = apperror.CodeACPAgentNotFound
 	case errors.Is(err, sessionpkg.ErrACPAgentNotEnabled):
 		code = apperror.CodeACPAgentNotEnabled
-	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
+	case errors.Is(err, sessionpkg.ErrRuntimeOwnerMissing):
 		code = apperror.CodeACPRuntimeOwnerMissing
 	default:
 		return err
@@ -4848,7 +4752,7 @@ func acpNewSessionAgentID(spec NewSessionSpec) string {
 	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return ""
 	}
-	return normalizeACPAgentID(newSessionMetadataString(spec.Metadata, "acp_agent_id"))
+	return normalizeACPAgentID(firstNonEmptyTrimmed(spec.ACPAgentID, newSessionMetadataString(spec.Metadata, "acp_agent_id")))
 }
 
 func normalizeACPAgentID(agentID string) string {

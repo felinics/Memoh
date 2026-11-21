@@ -22,7 +22,21 @@ VALUES (
 )
 RETURNING *;
 
+-- name: LockSessionForFork :exec
+-- A fork reads its source under the source's share lock: a fold in flight
+-- commits first, and a later one waits, so the rows the fork copies and the
+-- checkpoint it takes are one state of the source.
+SELECT s.id
+FROM bot_sessions s
+WHERE s.team_id = public.memoh_current_team_id()
+  AND s.id = sqlc.arg(session_id)
+FOR SHARE;
+
 -- name: ForkSessionFromAssistantTurn :one
+-- The fork copies the source's visible history through the target turn. It
+-- returns the fork's id, the ids of the source rows it copied beside the ids
+-- of their copies, in the same order, and the source position of the target
+-- turn. The caller gives the fork the history checkpoint that holds for the copy.
 WITH source_session AS (
   SELECT s.*
   FROM bot_sessions s
@@ -245,9 +259,20 @@ copied_assets AS (
   WHERE a.team_id = public.memoh_current_team_id()
   RETURNING id
 )
-SELECT cs.*
+SELECT cs.id,
+  copied.source_message_ids,
+  copied.fork_message_ids,
+  tt.position::bigint AS through_turn_position
 FROM created_session cs
-CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts;
+CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
+CROSS JOIN target_turn tt
+CROSS JOIN (
+  SELECT
+    COALESCE(array_agg(cm.old_message_id ORDER BY cm.old_message_id), '{}')::uuid[] AS source_message_ids,
+    COALESCE(array_agg(cm.new_message_id ORDER BY cm.old_message_id), '{}')::uuid[] AS fork_message_ids
+  FROM copy_messages cm
+  JOIN inserted_messages im ON im.id = cm.new_message_id
+) copied;
 
 
 -- name: GetSessionByID :one
@@ -508,22 +533,16 @@ WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id) AND deleted
 RETURNING *;
 
 -- name: SoftDeleteSession :exec
--- Soft delete does not fire FK cascades; remove the runtime publication head.
-WITH invalidated_session AS MATERIALIZED (
-  UPDATE bot_sessions
-  SET deleted_at = now(),
-      updated_at = now(),
-      runtime_config_epoch = runtime_config_epoch + 1,
-      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
-  WHERE team_id = public.memoh_current_team_id()
-    AND id = sqlc.arg(id)
-    AND deleted_at IS NULL
-  RETURNING id
-)
-DELETE FROM agent_session_publications publication
-USING invalidated_session invalidated
-WHERE publication.team_id = public.memoh_current_team_id()
-  AND publication.session_id = invalidated.id;
+-- The epoch and fencing bumps retire warm runtimes and in-flight runs that
+-- still hold the deleted session's previous generation.
+UPDATE bot_sessions
+SET deleted_at = now(),
+    updated_at = now(),
+    runtime_config_epoch = runtime_config_epoch + 1,
+    runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND deleted_at IS NULL;
 
 -- name: TouchSession :exec
 UPDATE bot_sessions
@@ -597,6 +616,9 @@ WHERE team_id = public.memoh_current_team_id()
 ORDER BY created_at DESC;
 
 -- name: SoftDeleteSessionsByBot :exec
+-- Rows are locked in id order, the same order ClearHistoryByBot uses, so the
+-- two bot-wide statements cannot deadlock. The epoch and fencing bumps retire
+-- warm runtimes and in-flight runs as in SoftDeleteSession.
 WITH target_sessions AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
@@ -605,22 +627,15 @@ WITH target_sessions AS MATERIALIZED (
     AND session.deleted_at IS NULL
   ORDER BY session.id
   FOR UPDATE
-),
-invalidated_sessions AS MATERIALIZED (
-  UPDATE bot_sessions session
-  SET deleted_at = now(),
-      updated_at = now(),
-      runtime_config_epoch = session.runtime_config_epoch + 1,
-      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
-  FROM target_sessions target
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = target.id
-  RETURNING session.id
 )
-DELETE FROM agent_session_publications publication
-USING invalidated_sessions invalidated
-WHERE publication.team_id = public.memoh_current_team_id()
-  AND publication.session_id = invalidated.id;
+UPDATE bot_sessions session
+SET deleted_at = now(),
+    updated_at = now(),
+    runtime_config_epoch = session.runtime_config_epoch + 1,
+    runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+FROM target_sessions target
+WHERE session.team_id = public.memoh_current_team_id()
+  AND session.id = target.id;
 
 -- name: UpdateSessionModelPreference :exec
 -- Preference write-back (issue #879). Deliberately does NOT touch

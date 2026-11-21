@@ -13,6 +13,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -87,14 +88,13 @@ func TestAgentStreamFailureConversion(t *testing.T) {
 	}
 }
 
-// The cause of a failure never leaves the application: the published event
-// carries the code and its catalog detail, and nothing of the cause.
+// Public error events always keep the catalog detail in Error and strip Cause.
+// Codes without upstream in AllowedArgs (such as context.budget_unsatisfied)
+// never leak private details, while OSS provider and internal failure codes
+// forward verbatim details in args.upstream.
 func TestPublicAgentStreamEventRedactsPrivateFailure(t *testing.T) {
-	for _, cause := range []error{
-		errors.New("SECRET provider payload"),
-		&sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "Incorrect API key provided: SECRET", RequestID: "req_SECRET"},
-		fmt.Errorf("SECRET window: %w", contextfrag.ErrBudgetUnsatisfied),
-	} {
+	t.Run("non-upstream code redacts private detail", func(t *testing.T) {
+		cause := fmt.Errorf("SECRET window: %w", contextfrag.ErrBudgetUnsatisfied)
 		event := publicAgentStreamEvent(native.StreamEvent{Type: native.EventError, Cause: cause})
 		definition, ok := apperror.Lookup(apperror.Code(event.Code))
 		if !ok || event.Error != definition.Detail || event.Cause != nil {
@@ -107,7 +107,33 @@ func TestPublicAgentStreamEventRedactsPrivateFailure(t *testing.T) {
 		if strings.Contains(string(data), "SECRET") {
 			t.Fatalf("private detail leaked: %s", data)
 		}
-	}
+	})
+
+	t.Run("OSS provider and internal failures carry verbatim args.upstream", func(t *testing.T) {
+		cases := []struct {
+			cause        error
+			wantUpstream string
+		}{
+			{
+				cause:        errors.New("SECRET provider payload"),
+				wantUpstream: "SECRET provider payload",
+			},
+			{
+				cause:        &sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "Incorrect API key provided: SECRET", RequestID: "req_SECRET"},
+				wantUpstream: "HTTP 401: Incorrect API key provided: SECRET\nProvider Request ID: req_SECRET",
+			},
+		}
+		for _, tc := range cases {
+			event := publicAgentStreamEvent(native.StreamEvent{Type: native.EventError, Cause: tc.cause})
+			definition, ok := apperror.Lookup(apperror.Code(event.Code))
+			if !ok || event.Error != definition.Detail || event.Cause != nil {
+				t.Fatalf("public event = %#v, want a catalogued code with its detail", event)
+			}
+			if got := event.Args[apperror.ProviderErrorArgUpstream]; got != tc.wantUpstream {
+				t.Fatalf("args.upstream = %q, want %q", got, tc.wantUpstream)
+			}
+		}
+	})
 }
 
 func TestAgentFailureStreamEventExposesOnlyStablePublicContract(t *testing.T) {
@@ -140,14 +166,11 @@ func TestAgentFailureStreamEventExposesOnlyStablePublicContract(t *testing.T) {
 }
 
 type recordingMessageService struct {
-	persisted               []messagepkg.PersistInput
-	persistErr              error
-	roundPersistErr         error
-	roundOptions            []messagepkg.RoundPersistenceOptions
-	replaced                int
-	replacementTurnID       string
-	replacementTurnPosition *int64
-	deleted                 [][]string
+	persisted       []messagepkg.PersistInput
+	persistErr      error
+	roundPersistErr error
+	roundOptions    []messagepkg.RoundPersistenceOptions
+	deleted         [][]string
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
@@ -183,19 +206,7 @@ func (s *recordingMessageService) PersistRound(_ context.Context, inputs []messa
 	return persisted, true, nil
 }
 
-func (*recordingMessageService) List(context.Context, string) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
 func (*recordingMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListBefore(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
@@ -207,20 +218,24 @@ func (*recordingMessageService) ListSinceBySession(context.Context, string, time
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
+func (*recordingMessageService) ListHistoryWithinBytes(context.Context, string, messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
+}
+
+func (*recordingMessageService) ListHistoryByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
-	return nil, nil
+func (*recordingMessageService) HistoryPositionByID(context.Context, string, string) (messagepkg.HistoryPosition, error) {
+	return messagepkg.HistoryPosition{}, nil
 }
 
-func (*recordingMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return nil, nil
+func (*recordingMessageService) ListTurnResponseSourcesWithinBytes(context.Context, string, messagepkg.HistoryPosition, int64) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
 }
 
-func (*recordingMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
-	return messagepkg.ActiveMessagesMeasure{}, nil
+func (*recordingMessageService) ListTurnResponseSourcesByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
+	return nil, nil
 }
 
 func (*recordingMessageService) ListLatestBySession(context.Context, string, int32) ([]messagepkg.Message, error) {
@@ -263,13 +278,6 @@ func (*recordingMessageService) GetLatestVisibleTurnBySession(context.Context, s
 	return messagepkg.HistoryTurn{}, nil
 }
 
-func (s *recordingMessageService) ReplaceTurn(_ context.Context, _, _, replacementTurnID string, replacementTurnPosition *int64, _, _, _ string) (messagepkg.HistoryTurn, error) {
-	s.replaced++
-	s.replacementTurnID = replacementTurnID
-	s.replacementTurnPosition = replacementTurnPosition
-	return messagepkg.HistoryTurn{}, nil
-}
-
 func (s *recordingMessageService) DeleteByIDs(_ context.Context, ids []string) error {
 	s.deleted = append(s.deleted, append([]string(nil), ids...))
 	return nil
@@ -294,7 +302,7 @@ func TestStreamChatWSResultRejectsTurnReplacementForACP(t *testing.T) {
 		sessionService: acpRuntimeSessionServiceForTest("user-1"),
 		logger:         slog.New(slog.DiscardHandler),
 	}
-	resolver.SetACPSessionPool(&recordingACPPrompter{})
+	resolver.SetRuntimeRegistry(testRuntimes(t, acpagent.NewDriver(&recordingACPPrompter{})))
 	preflightCalled := false
 	postPersistCalled := false
 
@@ -343,6 +351,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 		false,
 		true,
 		"",
+		nil,
 		nil,
 	)
 
@@ -532,6 +541,7 @@ func TestPersistTurnFailureStartsRetryReplacementAtomically(t *testing.T) {
 		},
 		resolvedContext{},
 		apperror.CodeAgentResponseTimeout,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistTurnFailure returned error: %v", err)
@@ -567,6 +577,7 @@ func TestPersistPartialResultStoresTimeoutWithoutSnapshot(t *testing.T) {
 		true,
 		false,
 		apperror.CodeAgentResponseTimeout,
+		nil,
 		nil,
 	)
 	if len(persisted) == 0 || len(messages.persisted) != 2 {

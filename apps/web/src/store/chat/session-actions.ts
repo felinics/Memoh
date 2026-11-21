@@ -39,6 +39,7 @@ export function createSessionActions(deps: {
   fetchSessionWindow: (botId: string, sessionId: string) => Promise<UITurn[]>
   replaceSessionHistory: (botId: string, sessionId: string, turns: UITurn[]) => void
   rescopeCommandToComposer: (botId: string, sessionId: string) => string
+  removeUnreadSession?: (sessionId: string) => void
   forkFailedMessage: () => string
 }) {
   const deletedSession = ref<{
@@ -81,6 +82,8 @@ export function createSessionActions(deps: {
     if (!bid || !sid) return
     const composerScope = deps.rescopeCommandToComposer(bid, sid)
       || fallbackComposerScope.trim()
+    deps.abort({ botId: bid, sessionId: sid, viewId: deps.focusedViewId.value })
+    deps.removeUnreadSession?.(sid)
     deps.markSessionDeleted(bid, sid)
     recordDeleted(bid, sid, composerScope)
     deps.clearRuntimeStatus(bid, sid)
@@ -107,8 +110,9 @@ export function createSessionActions(deps: {
     if (!sid) return
     const botId = deps.currentBotId.value ?? ''
     if (!botId) throw new Error('Bot not selected')
-    await deleteSession(botId, sid)
     deps.abort({ botId, sessionId: sid, viewId: deps.focusedViewId.value })
+    await deleteSession(botId, sid)
+    deps.removeUnreadSession?.(sid)
     deps.markSessionDeleted(botId, sid)
     recordDeleted(botId, sid)
     deps.stopSessionRuntime(botId, sid)

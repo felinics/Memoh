@@ -5,20 +5,20 @@ import (
 	"github.com/felinics/memoh/internal/agent/turn"
 )
 
-// chatRequestFromCommand translates the pure-data command into the
-// application's request type, field for field. Function- and channel-typed
-// fields (InjectCh, OutboundAssetCollector) are wired by StartTurn.
-func chatRequestFromCommand(cmd turn.StartTurnCommand) ChatRequest {
+// ChatRequestFromCommand translates the pure-data command into the
+// application's request type, field for field. A run's own fields (its ids,
+// handle, inject channel, and output collector) are wired by whoever starts
+// it: StartTurn, or an ingress that streams the run itself.
+func ChatRequestFromCommand(cmd turn.StartTurnCommand) ChatRequest {
 	return ChatRequest{
 		BotID:                     cmd.BotID,
 		ChatID:                    cmd.ChatID,
 		ThreadID:                  cmd.ThreadID,
-		Token:                     cmd.Token,
+		ActorAccountID:            cmd.ActorAccountID,
 		UserID:                    cmd.UserID,
 		SourceChannelIdentityID:   cmd.SourceChannelIdentityID,
 		DisplayName:               cmd.DisplayName,
 		RouteID:                   cmd.RouteID,
-		ChatToken:                 cmd.ChatToken,
 		ExternalMessageID:         cmd.ExternalMessageID,
 		ReplyTarget:               cmd.ReplyTarget,
 		ConversationType:          cmd.ConversationType,
@@ -51,6 +51,7 @@ func chatRequestFromCommand(cmd turn.StartTurnCommand) ChatRequest {
 		Model:                     cmd.Model,
 		ReasoningEffort:           cmd.ReasoningEffort,
 		WorkspaceTargetID:         cmd.WorkspaceTargetID,
+		ToolHTTPURL:               cmd.ToolHTTPURL,
 	}
 }
 
@@ -84,7 +85,6 @@ func toolApprovalInputFromResponse(in turn.ToolApprovalResponse) ToolApprovalRes
 		Decision:                   in.Decision,
 		OptionID:                   in.OptionID,
 		Reason:                     in.Reason,
-		ChatToken:                  in.ChatToken,
 		SuppressActivePromptAttach: in.SuppressActivePromptAttach,
 	}
 }
@@ -104,7 +104,6 @@ func userInputInputFromResponse(in turn.UserInputResponse) UserInputResponseInpu
 		UILanguage:                 in.UILanguage,
 		Canceled:                   in.Canceled,
 		Reason:                     in.Reason,
-		ChatToken:                  in.ChatToken,
 		SuppressActivePromptAttach: in.SuppressActivePromptAttach,
 	}
 }

@@ -29,7 +29,6 @@ type storeRoundOptions struct {
 	ReasoningTiming                   []messagepkg.ReasoningTimingSegment
 	RequireCompletePersist            bool
 	CleanupRuntimeDecisionProjections bool
-	AgentPublication                  *messagepkg.AgentPublication
 	AgentTurnID                       string
 	ContextLifecycle                  *contextfrag.LifecycleHolder
 }
@@ -221,8 +220,7 @@ func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, mess
 	if err != nil {
 		return nil, fmt.Errorf("prepare messages for persistence: %w", err)
 	}
-	// Persist the complete round and its runtime publication in one
-	// transaction so warm processes observe only committed rounds.
+	// Persist the complete round in one transaction.
 	if opts.RequireCompletePersist {
 		atomic, ok := s.messageService.(messagepkg.AtomicRoundPersister)
 		if !ok {
@@ -231,7 +229,6 @@ func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, mess
 		persisted, handled, persistErr := atomic.PersistRound(ctx, persistInputs, messagepkg.RoundPersistenceOptions{
 			Replacement:                       req.TurnReplacement,
 			CleanupRuntimeDecisionProjections: opts.CleanupRuntimeDecisionProjections,
-			AgentPublication:                  opts.AgentPublication,
 			AgentTurnID:                       opts.AgentTurnID,
 		})
 		if persistErr != nil {

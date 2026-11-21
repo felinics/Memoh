@@ -1,6 +1,4 @@
-import enMessages from '@/i18n/locales/en.json'
-import zhMessages from '@/i18n/locales/zh.json'
-import jaMessages from '@/i18n/locales/ja.json'
+import { messagesFor } from '@/i18n/messages'
 import { renderI18nMessage } from '@/utils/api-error'
 
 function localizedMessages() {
@@ -8,10 +6,7 @@ function localizedMessages() {
   const stored = typeof storage?.getItem === 'function'
     ? storage.getItem('language')
     : ''
-  const locale = stored === 'zh' || stored === 'ja' ? stored : 'en'
-  if (locale === 'zh') return zhMessages
-  if (locale === 'ja') return jaMessages
-  return enMessages
+  return messagesFor(stored === 'zh' || stored === 'ja' ? stored : 'en')
 }
 
 export function userInputConnectionLostMessage() {

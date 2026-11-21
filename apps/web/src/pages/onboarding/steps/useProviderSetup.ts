@@ -115,12 +115,6 @@ export function useProviderSetup(options: {
 
   const submitting = computed(() => saving.value || importing.value)
 
-  const formCtaLabel = computed(() => {
-    if (saving.value) return t('onboarding.provider.form.importing')
-    if (importing.value) return t('onboarding.provider.form.importing')
-    return t('onboarding.next')
-  })
-
   const formCtaDisabled = computed(() => {
     if (saving.value) return true
     if (importing.value) return true
@@ -413,7 +407,6 @@ export function useProviderSetup(options: {
     providerModels,
     availableClientTypes,
     baseUrlPlaceholder,
-    formCtaLabel,
     formCtaDisabled,
     resetFormState,
     initFormValues,

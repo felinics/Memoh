@@ -1,30 +1,40 @@
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, ref } from 'vue'
+import { computed, onActivated, onDeactivated, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, DeviceCodePanel, Dialog, DialogBody, DialogFooter, DialogHeader, DialogPanel, DialogTitle, LabelSwap, SettingsRow, Spinner } from '@felinic/ui'
-import { KeyRound } from 'lucide-vue-next'
+import { Button, DeviceCodePanel, Dialog, DialogBody, DialogFooter, DialogHeader, DialogPanel, DialogTitle, Input, Label, LabelSwap, SettingsRow, Spinner } from '@felinic/ui'
+import { ExternalLink, KeyRound } from 'lucide-vue-next'
+import type { ExternalagentDeviceLoginAuthorizeResponse } from '@memohai/sdk'
 import { AGENT_AUTH_MODE_COPY, DEVICE_LOGINS, type DeviceLoginAuthMode } from '@/utils/bot-agent'
 
-// The account row and device-code dialog of a staged sign-in. The caller
-// drives the authorization; the default slot adds row actions.
+// The account row and sign-in dialog of an Agent's sign-in. The caller drives
+// the authorization; the default slot adds row actions. A device code is
+// entered on the provider's page; a code_required sign-in (Claude) shows a
+// code on that page, which is pasted back here.
 const props = defineProps<{
   auth: DeviceLoginAuthMode
   authorized: boolean
-  /** Signing in an Agent that already exists: it can sign in again to replace its account. */
-  existing?: boolean
+  /** The account the Agent is signed in to, when its runtime reports one. */
+  account?: string
+  /** Shown instead of the account description, e.g. while the sign-in is being checked. */
+  note?: string
   authorizing: boolean
-  deviceLogin?: { user_code: string, verification_url: string } | null
-  expiresAt?: string
-  error?: string
+  disabled?: boolean
+  deviceLogin?: ExternalagentDeviceLoginAuthorizeResponse | null
+  /** The pasted code is being checked. */
+  submitting?: boolean
 }>()
-const emit = defineEmits<{ connect: [], cancel: [] }>()
+const emit = defineEmits<{ connect: [], cancel: [], submit: [code: string] }>()
+const code = ref('')
+watch(() => props.deviceLogin, () => { code.value = '' })
 const { t } = useI18n()
 const login = computed(() => DEVICE_LOGINS[props.auth])
 const label = computed(() => t(AGENT_AUTH_MODE_COPY[props.auth].label))
 const devicePending = computed(() => !!props.deviceLogin)
-const description = computed(() => props.authorized
-  ? login.value.connectedDescription
-  : props.existing ? login.value.agentDescription : AGENT_AUTH_MODE_COPY[props.auth].description)
+const description = computed(() => {
+  if (props.note) return props.note
+  if (!props.authorized) return t(login.value.agentDescription)
+  return props.account ? t('bots.agent.signedInAs', { account: props.account }) : t(login.value.connectedDescription)
+})
 // KeepAlive does not take a teleported dialog away with its deactivated host,
 // and a sign-in that outlives the deactivation would leave it over the next page.
 const active = ref(true)
@@ -35,16 +45,16 @@ onDeactivated(() => { active.value = false })
 <template>
   <SettingsRow
     :label="label"
-    :description="t(description)"
+    :description="description"
   >
     <div class="flex gap-2">
       <Button
-        v-if="!authorized || existing"
         type="button"
         variant="outline"
         size="sm"
         class="shrink-0"
         :loading="authorizing"
+        :disabled="disabled && !devicePending"
         loading-mode="manual"
         @click="devicePending ? emit('cancel') : emit('connect')"
       >
@@ -79,12 +89,44 @@ onDeactivated(() => { active.value = false })
       <DialogHeader>
         <DialogTitle>{{ label }}</DialogTitle>
       </DialogHeader>
-      <DialogBody>
+      <DialogBody
+        v-if="deviceLogin?.code_required"
+        class="space-y-4"
+      >
+        <p class="text-body text-muted-foreground">
+          {{ t(login.hint) }}
+        </p>
+        <Button
+          as="a"
+          variant="outline"
+          :href="deviceLogin.verification_url"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <ExternalLink />
+          {{ t('bots.agent.openAuthorizationPage') }}
+        </Button>
+        <form
+          id="agent-login-code-form"
+          class="space-y-2"
+          @submit.prevent="code.trim() && emit('submit', code.trim())"
+        >
+          <Label for="agent-login-code">{{ t('bots.agent.authorizationCode') }}</Label>
+          <Input
+            id="agent-login-code"
+            v-model="code"
+            :placeholder="t('bots.agent.authorizationCodePlaceholder')"
+            autocomplete="off"
+            :spellcheck="false"
+            :disabled="submitting"
+          />
+        </form>
+      </DialogBody>
+      <DialogBody v-else>
         <DeviceCodePanel
-          v-if="deviceLogin"
+          v-if="deviceLogin?.user_code"
           :code="deviceLogin.user_code"
           :verification-uri="deviceLogin.verification_url"
-          :expires-at="expiresAt"
           :hint="t(login.hint)"
           :retry-loading="authorizing"
           :copy-and-open-label="t('deviceCode.copyAndOpen')"
@@ -103,14 +145,16 @@ onDeactivated(() => { active.value = false })
         >
           {{ t('common.cancel') }}
         </Button>
+        <Button
+          v-if="deviceLogin?.code_required"
+          type="submit"
+          form="agent-login-code-form"
+          :disabled="!code.trim() || submitting"
+          :loading="submitting"
+        >
+          {{ t('bots.agent.completeAuthorization') }}
+        </Button>
       </DialogFooter>
     </DialogPanel>
   </Dialog>
-  <p
-    v-if="error"
-    role="alert"
-    class="px-4 text-sm text-destructive"
-  >
-    {{ error }}
-  </p>
 </template>

@@ -27,6 +27,10 @@ export interface AutosaveJob<T extends Record<string, unknown>> {
   // error (e.g. the URL name: a 409 must leave the draft text for the user
   // to fix, not snap it back).
   rollback?: boolean
+  // Optional owner guard when a single form instance can rebind to another
+  // entity while a save is in flight: stale completions still fire onSaved /
+  // onError, but never overwrite the newly bound entity's `synced` or `form`.
+  isCurrent?: () => boolean
   onSaved?: () => void
   onError?: (error: unknown) => void
 }
@@ -76,14 +80,20 @@ export function useAutosaveQueue<T extends Record<string, unknown>>(options: Aut
           const keys = Object.keys(job.payload) as (keyof T)[]
           try {
             await job.save()
+            const current = job.isCurrent ? job.isCurrent() : true
+            if (current) {
+              for (const key of keys) {
+                synced[key] = job.payload[key] as T[keyof T]
+              }
+            }
             for (const key of keys) {
-              synced[key] = job.payload[key] as T[keyof T]
               savedKeys.add(key)
             }
             job.onSaved?.()
           } catch (error) {
             job.onError?.(error)
-            if (job.rollback !== false) {
+            const current = job.isCurrent ? job.isCurrent() : true
+            if (current && job.rollback !== false) {
               for (const key of keys) {
                 if (form[key] === job.payload[key]) form[key] = synced[key]
               }

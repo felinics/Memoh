@@ -49,7 +49,7 @@
                 v-if="!botUnavailable"
                 class="mt-3"
               >
-                <div class="flex items-center gap-3 p-3">
+                <div class="flex items-center gap-3 py-3">
                   <!-- Avatar -->
                   <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
                     <Avatar class="size-12 rounded-full">
@@ -65,7 +65,7 @@
                     <!-- Edit Overlay -->
                     <button
                       type="button"
-                      class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                      class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
                       :title="$t('common.edit')"
                       :aria-label="$t('common.edit')"
                       :disabled="!bot || botLifecyclePending"
@@ -100,7 +100,7 @@
                         <button
                           v-if="bot"
                           type="button"
-                          class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
+                          class="opacity-0 group-hover/name:opacity-100 focus-visible:opacity-100 group-focus-within/name:opacity-100 pointer-coarse:opacity-100 p-1 shrink-0"
                           :disabled="botLifecyclePending"
                           @click="handleStartEditBotName"
                         >
@@ -275,6 +275,7 @@
                 <KeepAlive v-else>
                   <component
                     :is="activeComponent?.component"
+                    :key="`${botId}:${activeSection}`"
                     v-bind="activeComponent?.params"
                   />
                 </KeepAlive>
@@ -301,7 +302,7 @@ import {
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, MessageSquare,
   ShieldAlert, Database, Link, Server, SlidersHorizontal,
-  Bot as BotIcon, ChevronLeft, Laptop, Package as App
+  Bot as BotIcon, ChevronLeft, Laptop, Package as App,
 } from 'lucide-vue-next'
 import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import { computed, ref, watch, onMounted, toValue, nextTick, type Ref } from 'vue'
@@ -311,14 +312,11 @@ import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
 import {
   putBotsById,
-  getBotsByIdChecks,
   getBotsByBotIdContainer,
-  getBotsByBotIdContainerSnapshots,
 } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import type {
-  BotsBotCheck, HandlersGetContainerResponse,
-  HandlersListSnapshotsResponse,
+  HandlersGetContainerResponse,
 } from '@memohai/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useBotQuery } from '@/composables/api/useBot'
@@ -345,11 +343,10 @@ import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
+import { canManageBotPermissions } from '@/utils/bot-permissions'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
 import { appNeedsAttention, useBotAppsQuery } from '@/composables/api/useApps'
-type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
-type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
 
 const route = useRoute()
 const router = useRouter()
@@ -406,15 +403,9 @@ const botWorkspaceBackend = computed(() =>
   resolveBotWorkspaceBackend(containerInfo.value?.workspace_backend),
 )
 
-const canManageBot = computed(() => {
-  const perms = bot.value?.current_user_permissions
-  // Only restrict management when the backend explicitly reports a permission
-  // set without "manage". When the field is absent (older backend, cache, etc.)
-  // default to allowing management so owners are never locked out of their own
-  // bot; the backend still enforces access on every management endpoint.
-  if (!perms || perms.length === 0) return true
-  return perms.includes('manage')
-})
+const canManageBot = computed(() =>
+  canManageBotPermissions(bot.value?.current_user_permissions),
+)
 
 const capabilitiesStore = useCapabilitiesStore()
 
@@ -563,8 +554,8 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => [
   { key: 'core', keys: ['overview', 'general', 'channels'] },
-  { key: 'capabilities', keys: ['memory', 'agents', 'apps', 'mcp', 'container', 'remote-runtime'] },
-  { key: 'administration', keys: ['advanced', 'access'] },
+  { key: 'capabilities', keys: ['mcp', 'agents', 'apps', 'memory', 'container', 'remote-runtime'] },
+  { key: 'administration', keys: ['access', 'advanced'] },
 ].map(group => ({
   key: group.key,
   items: group.keys.flatMap(key => tabList.value.filter(tab => tab.value === key)),
@@ -597,11 +588,6 @@ const { mutateAsync: updateBot, isLoading: updateBotLoading } = useMutation({
   },
 })
 
-async function fetchChecks(id: string): Promise<BotCheck[]> {
-  const { data } = await getBotsByIdChecks({ path: { id }, throwOnError: true })
-  return data?.items ?? []
-}
-
 const isEditingBotName = ref(false)
 const botNameDraft = ref('')
 const editNameInputRef = ref<InstanceType<typeof Input> | null>(null)
@@ -622,6 +608,7 @@ watch(bot, (val) => {
 }, { immediate: true })
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
+const activeSection = computed(() => activeTab.value)
 watch([tabList, activeTab], ([tabs, tab]) => {
   if (['tool-approval', 'hooks', 'desktop', 'network', 'compaction'].includes(tab)) {
     void router.replace({ query: { ...route.query, tab: 'advanced', section: tab } })
@@ -674,14 +661,6 @@ const {
   statusVariant,
 } = useBotStatusMeta(bot, t)
 
-const checks = ref<BotCheck[]>([])
-const checksLoading = ref(false)
-
-const containerMissing = ref(false)
-const containerLoading = ref(false)
-const snapshotsLoading = ref(false)
-const snapshots = ref<BotContainerSnapshot[]>([])
-
 watch(botId, () => {
   isEditingBotName.value = false
   botNameDraft.value = ''
@@ -696,23 +675,6 @@ watch([botId, canManageBot], async ([id, manage]) => {
   const result = await getBotsByBotIdContainer({ path: { bot_id: id } })
   if (result.error === undefined && botId.value === id) {
     containerInfo.value = result.data ?? null
-  }
-}, { immediate: true })
-
-watch([activeTab, botId, canManageBot], ([tab]) => {
-  if (!botId.value) {
-    return
-  }
-  if (tab === 'container') {
-    // Container data is management-only; chat-only members never see this tab.
-    if (!canManageBot.value) {
-      return
-    }
-    void loadContainerData(true)
-    return
-  }
-  if (tab === 'overview') {
-    void loadChecks(true)
   }
 }, { immediate: true })
 
@@ -760,65 +722,6 @@ async function handleConfirmBotName() {
     toast.success(t('bots.renameSuccess'))
   } catch (error) {
     toast.error(resolveErrorMessage(error, t('bots.renameFailed')))
-  }
-}
-
-async function loadChecks(showToast: boolean) {
-  checksLoading.value = true
-  checks.value = []
-  try {
-    checks.value = await fetchChecks(botId.value)
-  } catch (error) {
-    if (showToast) {
-      toast.error(resolveErrorMessage(error, t('bots.checks.loadFailed')))
-    }
-  } finally {
-    checksLoading.value = false
-  }
-}
-
-async function loadContainerData(showLoadingToast: boolean) {
-  await capabilitiesStore.load()
-  containerLoading.value = true
-  try {
-    const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
-    if (result.error !== undefined) {
-      if (result.response?.status === 404) {
-        containerInfo.value = null
-        containerMissing.value = true
-        snapshots.value = []
-        return
-      }
-      throw result.error
-    }
-    containerInfo.value = result.data
-    containerMissing.value = false
-    if (capabilitiesStore.snapshotSupported) {
-      await loadSnapshots()
-    }
-  } catch (error) {
-    if (showLoadingToast) {
-      toast.error(resolveErrorMessage(error, t('bots.container.loadFailed')))
-    }
-  } finally {
-    containerLoading.value = false
-  }
-}
-
-async function loadSnapshots() {
-  if (!containerInfo.value || !capabilitiesStore.snapshotSupported) {
-    snapshots.value = []
-    return
-  }
-  snapshotsLoading.value = true
-  try {
-    const { data } = await getBotsByBotIdContainerSnapshots({ path: { bot_id: botId.value }, throwOnError: true })
-    snapshots.value = data.snapshots ?? []
-  } catch (error) {
-    snapshots.value = []
-    toast.error(resolveErrorMessage(error, t('bots.container.snapshotLoadFailed')))
-  } finally {
-    snapshotsLoading.value = false
   }
 }
 </script>

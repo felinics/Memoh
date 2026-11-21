@@ -1,6 +1,6 @@
 {
   "name": "@memohai/config",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.2",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/felinics/Memoh.git",
@@ -16,6 +16,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "toml": "^4.3.0"
+    "toml": "^5.0.1"
   }
 }

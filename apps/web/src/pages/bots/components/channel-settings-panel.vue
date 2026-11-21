@@ -3,7 +3,7 @@
     <!-- Identity card: the platform this connection belongs to, with the
          committing actions (enable/disable, save) on the right. -->
     <SettingsSection>
-      <div class="flex items-center gap-3 p-4">
+      <div class="flex items-center gap-3 py-4">
         <span class="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted">
           <ChannelIcon
             :channel="platformType"
@@ -25,7 +25,7 @@
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <span
-            v-if="isFormDirty"
+            v-if="isFormDirty && !isHydratingCredentials && channelItem.meta.type !== 'weixin'"
             class="hidden text-xs text-muted-foreground sm:inline"
           >
             {{ $t('common.unsaved') }}
@@ -34,15 +34,16 @@
             v-if="isEditMode"
             variant="outline"
             size="sm"
-            :disabled="isBusy"
+            :disabled="isBusy || isHydratingCredentials"
             :loading="action === 'toggle'"
             @click="handleToggleDisabled"
           >
             {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
           </Button>
           <Button
+            v-if="channelItem.meta.type !== 'weixin'"
             size="sm"
-            :disabled="(!isFormDirty && isEditMode) || isBusy"
+            :disabled="(!isFormDirty && isEditMode) || isBusy || isHydratingCredentials"
             :loading="action === 'save'"
             @click="handleSave"
           >
@@ -60,13 +61,24 @@
       />
     </div>
 
+    <template v-else-if="isHydratingCredentials">
+      <!-- Secret-stripped localStorage cache hydrated before server revalidation
+           finished: wait for real credentials so edits cannot overwrite optional
+           fields (encryptKey, enableStreaming, ...) with blank/default values. -->
+      <SettingsSection :title="$t('bots.channels.credentials')">
+        <InlineLoadingRow surface="card-row">
+          {{ $t('common.loading') }}
+        </InlineLoadingRow>
+      </SettingsSection>
+    </template>
+
     <template v-else>
       <!-- Callback URL the platform console needs (Feishu webhook mode / WeChat OA) -->
       <SettingsSection
         v-if="showWebhookCallback"
         :title="$t('bots.channels.webhookCallback')"
       >
-        <div class="mx-4 space-y-3 py-4">
+        <div class="space-y-3 py-4">
           <p class="text-xs text-muted-foreground">
             {{ $t(webhookCallbackHintKey) }}
           </p>
@@ -127,17 +139,19 @@
       >
         <p
           v-if="isFeishuWebhook"
-          class="mx-4 border-b border-border py-3 text-xs text-warning"
+          class="border-b border-border py-3 text-xs text-warning"
         >
           {{ $t('bots.channels.feishuWebhookSecurityHint') }}
         </p>
 
-        <ChannelField
+        <SchemaField
           v-for="[key, field] in requiredFields"
           :key="key"
-          v-model="form.credentials[key]"
+          :model-value="form.credentials[key]"
           :field="field"
           :field-key="key"
+          id-prefix="channel-field"
+          @update:model-value="(v) => setCredential(key, v)"
         />
       </SettingsSection>
 
@@ -161,13 +175,19 @@
             <DialogTitle>{{ $t('bots.channels.advancedTitle') }}</DialogTitle>
           </DialogHeader>
           <DialogBody>
-            <ChannelField
-              v-for="[key, field] in optionalFields"
-              :key="key"
-              v-model="form.credentials[key]"
-              :field="field"
-              :field-key="key"
-            />
+            <!-- The dialog body already pads its content, so the fields take
+                 only the list's row rhythm, not a card's inset. -->
+            <SettingsList>
+              <SchemaField
+                v-for="[key, field] in optionalFields"
+                :key="key"
+                :model-value="form.credentials[key]"
+                :field="field"
+                :field-key="key"
+                id-prefix="channel-field"
+                @update:model-value="(v) => setCredential(key, v)"
+              />
+            </SettingsList>
           </DialogBody>
         </DialogPanel>
       </Dialog>
@@ -195,7 +215,7 @@
             <Button
               variant="destructive"
               size="sm"
-              :disabled="isBusy"
+              :disabled="isBusy || isHydratingCredentials"
               :loading="action === 'delete'"
             >
               {{ $t('common.delete') }}
@@ -208,7 +228,7 @@
 </template>
 
 <script setup lang="ts">
-import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
+import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, InlineLoadingRow, Input, SettingsList, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@felinic/ui'
@@ -218,7 +238,7 @@ import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBot
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
 import ChannelIcon from '@/components/channel-icon/index.vue'
-import ChannelField from './channel-field.vue'
+import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -251,9 +271,19 @@ const channelTitle = computed(() => channelTypeDisplayName(t, props.channelItem.
 const action = ref<'save' | 'toggle' | 'delete' | 'webhook' | ''>('')
 const isBusy = computed(() => action.value !== '')
 const isEditMode = computed(() => props.channelItem.configured)
+function isItemHydratingCredentials(item: BotChannelItem): boolean {
+  return item.configured && item.config != null && item.config.credentials === undefined
+}
+const isHydratingCredentials = computed(() => isItemHydratingCredentials(props.channelItem))
 const lastSavedConfigId = ref('')
 
 const form = reactive<{ credentials: Record<string, unknown>; disabled: boolean }>({ credentials: {}, disabled: false })
+
+// A cleared number field reports undefined; store it as '' like a cleared
+// text field so dirty tracking and the save filter treat both the same.
+function setCredential(key: string, value: unknown) {
+  form.credentials[key] = value ?? ''
+}
 const isAdvancedExpanded = ref(false)
 
 const { mutateAsync: upsertChannel } = useMutation({
@@ -320,7 +350,7 @@ const webhookCallbackUrl = computed(() => {
 // switch, per-field guard on background refresh (see the composable header).
 const { synced: syncedCredentials, markClean: markCredentialsClean } = useServerSyncedRecord(form.credentials, {
   source: () => props.channelItem,
-  identity: () => `${props.botId}:${platformType.value}`,
+  identity: (item) => `${props.botId}:${platformType.value}:${isItemHydratingCredentials(item) ? 'hydrating' : 'ready'}`,
   server: (item) => {
     const schema = item.meta.config_schema?.fields ?? {}
     const existing = item.config?.credentials ?? {}
@@ -415,7 +445,7 @@ function buildWebhookCallbackUrl(configId: string): string {
     const base = lineWebhookPublicBase.value.url
     return base ? `${base}/channels/line/webhook/${encodeURIComponent(configId)}` : ''
   }
-  const base = (import.meta.env.VITE_WEBHOOK_PUBLIC_BASE_URL?.trim() || import.meta.env.VITE_API_PUBLIC_URL?.trim() || client.getConfig().baseUrl || import.meta.env.VITE_API_URL?.trim() || (typeof window !== 'undefined' ? new URL(window.location.origin).toString() : '')).replace(/\/+$/, '')
+  const base = (import.meta.env.VITE_WEBHOOK_PUBLIC_BASE_URL?.trim() || import.meta.env.VITE_API_PUBLIC_URL?.trim() || client.getConfig().baseUrl || import.meta.env.VITE_API_URL?.trim() || window.location.origin).replace(/\/+$/, '')
   return `${base}/channels/${encodeURIComponent(platformType.value)}/webhook/${encodeURIComponent(configId)}`
 }
 

@@ -7,6 +7,7 @@ dotenv.config()
 
 const webRoot = fileURLToPath(new URL('./apps/web', import.meta.url))
 const desktopRoot = fileURLToPath(new URL('./apps/desktop', import.meta.url))
+const runtimeRoot = fileURLToPath(new URL('./packages/runtime', import.meta.url))
 const repoRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
@@ -27,9 +28,18 @@ export default defineConfig({
         },
         test: {
           name: 'web',
+          environment: 'jsdom',
+          environmentOptions: {
+            jsdom: {
+              url: 'http://localhost/',
+            },
+          },
           server: { deps: { inline: ['reka-ui', /@vueuse\//] } },
           globals: true,
           include: ['src/**/*.test.ts'],
+          // The app loads only its active language before mounting; tests read
+          // copy in every language, so this loads all three first.
+          setupFiles: ['./src/vitest-setup.ts'],
           env: process.env,
           testTimeout: Infinity,
         },
@@ -42,6 +52,18 @@ export default defineConfig({
           include: ['src/**/*.test.ts'],
           env: process.env,
           testTimeout: Infinity,
+        },
+      },
+      {
+        root: runtimeRoot,
+        test: {
+          name: 'runtime',
+          environment: 'node',
+          include: ['test/**/*.test.ts'],
+          env: process.env,
+          // Windows filesystem integration tests launch native PowerShell ACL checks.
+          testTimeout: process.platform === 'win32' ? 120_000 : 5_000,
+          hookTimeout: process.platform === 'win32' ? 120_000 : 10_000,
         },
       },
       {

@@ -206,6 +206,10 @@ func (f failingSessionService) MergeRuntimeMetadata(context.Context, string, str
 	return session.Thread{}, f.err
 }
 
+func (failingSessionService) ExternalIdentity(ctx context.Context, sess session.Thread) (session.ExternalIdentity, error) {
+	return (*session.Service)(nil).ExternalIdentity(ctx, sess)
+}
+
 type allowAllPermissions struct{}
 
 func (allowAllPermissions) HasBotPermission(context.Context, string, string, string) (bool, error) {

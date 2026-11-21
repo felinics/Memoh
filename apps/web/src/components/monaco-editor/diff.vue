@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type * as Monaco from 'monaco-editor'
 import { useMonaco } from 'stream-monaco'
 import { DiffTitleBar } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
 import { getLanguageByFilename } from '@/components/file-manager/utils'
+import { installMinimapSurface, syncMinimapSurface } from './minimap-theme'
 
 // Side-by-side Monaco diff editor used by the Compare view inside the file
 // viewer. Reuses stream-monaco's useMonaco so the theme, font, and language
@@ -26,6 +28,8 @@ const containerRef = ref<HTMLDivElement>()
 const settings = useSettingsStore()
 const fontSize = computed(() => settings.codeFontSizePx)
 const fontFamily = computed(() => settings.codeFontFamily ? settings.codeFontStack : undefined)
+let themeFrame = 0
+let mounted = false
 
 function resolveLanguage(): string {
   if (props.filename) return getLanguageByFilename(props.filename)
@@ -58,11 +62,16 @@ const {
   fontSize: fontSize.value,
   fontFamily: fontFamily.value,
   padding: { top: 8, bottom: 8 },
+  // The diff has no minimap of its own, but themes are global to the shared
+  // Monaco instance: a grammar loaded here re-registers them for every editor.
+  onBeforeCreate: (monaco) => {
+    installMinimapSurface(monaco as unknown as typeof Monaco, settings.resolvedColorMode, settings.colorScheme)
+    return []
+  },
 })
 
-let themeObserver: MutationObserver | null = null
-
 onMounted(async () => {
+  mounted = true
   if (!containerRef.value) return
   await createDiffEditor(
     containerRef.value,
@@ -70,6 +79,7 @@ onMounted(async () => {
     props.modified,
     resolveLanguage(),
   )
+  if (!mounted) return
   const view = getDiffEditorView()
   view?.updateOptions({
     fontSize: fontSize.value,
@@ -77,21 +87,14 @@ onMounted(async () => {
     renderSideBySide: true,
     ignoreTrimWhitespace: false,
   })
-
-  // Re-apply theme when dark mode flips so the diff editor stays in sync with
-  // the rest of the chrome.
-  themeObserver = new MutationObserver(() => {
-    void setTheme(resolveThemeName(), true)
-  })
-  themeObserver.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['class', 'data-color-scheme'],
-  })
 })
 
 onBeforeUnmount(() => {
-  themeObserver?.disconnect()
-  themeObserver = null
+  mounted = false
+  if (themeFrame) {
+    cancelAnimationFrame(themeFrame)
+    themeFrame = 0
+  }
   cleanupEditor()
 })
 
@@ -101,8 +104,16 @@ watch(() => props.filename, () => setLanguage(resolveLanguage()))
 watch(fontSize, (v) => getDiffEditorView()?.updateOptions({ fontSize: v }))
 watch(fontFamily, (v) => getDiffEditorView()?.updateOptions({ fontFamily: v }))
 watch(
-  () => [settings.shikiThemeLight, settings.shikiThemeDark, settings.resolvedColorMode] as const,
-  () => { void setTheme(resolveThemeName(), true) },
+  () => [settings.shikiThemeLight, settings.shikiThemeDark, settings.resolvedColorMode, settings.colorScheme] as const,
+  () => {
+    if (themeFrame) cancelAnimationFrame(themeFrame)
+    themeFrame = requestAnimationFrame(() => {
+      themeFrame = 0
+      if (!getDiffEditorView()) return
+      syncMinimapSurface(settings.resolvedColorMode, settings.colorScheme)
+      void setTheme(resolveThemeName(), true)
+    })
+  },
 )
 </script>
 

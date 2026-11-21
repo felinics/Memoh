@@ -5,31 +5,45 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/boot"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/timezone"
 )
 
 type SettingsHandler struct {
 	service        *settings.Service
 	botService     *bots.Service
 	accountService *accounts.Service
+	queries        dbstore.Queries
+	// systemLocation is the server's default timezone, the last fallback of a
+	// bot's effective timezone.
+	systemLocation *time.Location
 	logger         *slog.Logger
 }
 
-func NewSettingsHandler(log *slog.Logger, service *settings.Service, botService *bots.Service, accountService *accounts.Service) *SettingsHandler {
-	return &SettingsHandler{
+func NewSettingsHandler(log *slog.Logger, service *settings.Service, botService *bots.Service, accountService *accounts.Service, queries dbstore.Queries, runtimeConfig *boot.RuntimeConfig) *SettingsHandler {
+	h := &SettingsHandler{
 		service:        service,
 		botService:     botService,
 		accountService: accountService,
+		queries:        queries,
 		logger:         log.With(slog.String("handler", "settings")),
 	}
+	if runtimeConfig != nil {
+		h.systemLocation = runtimeConfig.TimezoneLocation
+	}
+	return h
 }
 
 func (h *SettingsHandler) Register(e *echo.Echo) {
@@ -67,7 +81,7 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 	if err != nil {
 		return errs.Wrap(err, "get bot")
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, h.withTimezones(c.Request().Context(), botID, resp))
 }
 
 // Upsert godoc
@@ -118,7 +132,17 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 		return errs.Wrap(err, "update bot settings")
 	}
 
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(http.StatusOK, h.withTimezones(c.Request().Context(), botID, resp))
+}
+
+// withTimezones fills the bot's effective and inherited timezones, resolved
+// the same way agent turns and the scheduler resolve them.
+func (h *SettingsHandler) withTimezones(ctx context.Context, botID string, resp settings.Settings) settings.Settings {
+	effective, inherited := timezone.ResolveBotWithInherited(ctx, h.queries, db.ParseUUIDOrEmpty(botID), h.systemLocation, h.logger)
+	resp.EffectiveTimezone = effective.Name
+	resp.InheritedTimezone = inherited.Name
+	resp.InheritedTimezoneSource = string(inherited.Source)
+	return resp
 }
 
 // settingsModelRefHTTPError names the request field whose model reference

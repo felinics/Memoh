@@ -1,15 +1,61 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent, h } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterView, useRoute } from 'vue-router'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
-import MainSection from '@/pages/main-section/index.vue'
+import { isChunkLoadError, reloadForChunkLoadError } from '@/lib/chunk-load-error'
+import { dismissBootSplash, showBootFailure } from '@/lib/boot-splash'
+import { holdPrefetchUntil, whenNetworkQuiet } from '@/lib/idle-prefetch'
+import { loadMainSection, prefetchAppPages, showsChatWorkspace } from './routes'
 
 useSettingsStore()
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
+
+// Loaded on demand so the login and onboarding pages don't download the chat
+// workspace before they can render (see loadMainSection). A chunk that fails
+// to load reloads the page, the same recovery the router applies to route
+// chunks; nothing in the workspace has user state yet at this point. Failing
+// again within a minute of that reload, the loading splash switches to its
+// failure state instead (see reloadForChunkLoadError, showBootFailure).
+let markMainSectionSettled!: () => void
+const mainSectionSettled = new Promise<void>((resolve) => {
+  markMainSectionSettled = resolve
+})
+// Until the workspace arrives, the loading splash's mark and line stand in for
+// it (the .boot-splash styles are in index.html; the timed status text is left
+// out because it is localized there, before i18n exists). Signing in right
+// after the login page opens can outrun the warm-up on a slow network: measured
+// on Slow 4G, the page was otherwise empty for about 5s after the login page left.
+const MainSectionLoading = () => h('div', { class: 'boot-splash', 'aria-hidden': 'true' }, [
+  h('div', { class: 'boot-splash-stage' }, [
+    h('img', { class: 'boot-splash-mark', src: '/logo.svg', alt: '' }),
+    h('div', { class: 'boot-splash-loading' }, [
+      h('div', { class: 'boot-splash-track' }, [h('div', { class: 'boot-splash-seg' })]),
+    ]),
+  ]),
+])
+const MainSection = defineAsyncComponent({
+  loader: () => loadMainSection().finally(markMainSectionSettled),
+  loadingComponent: MainSectionLoading,
+  // The splash keeps its mark hidden for its first 200ms, so a quick load shows
+  // only the page background either way.
+  delay: 0,
+  onError(error, _retry, fail) {
+    if (isChunkLoadError(error)) {
+      if (reloadForChunkLoadError()) {
+        console.warn('[App] Chat workspace chunk failed to load, reloading...', error.message)
+        return
+      }
+      console.error('[App] Chat workspace chunk failed to load again after a reload', error)
+      showBootFailure(error.message)
+    }
+    fail()
+  },
+})
 
 // The chat workspace (MainSection: sidebar + dockview) is mounted persistently
 // here rather than as a route component. This keeps the chat DOM attached and
@@ -22,9 +68,31 @@ const route = useRoute()
 //   - settings routes: MainSection stays mounted, settings content renders above it.
 //   - auth-boundary routes (login/onboarding/oauth/dev): MainSection is not
 //     mounted at all; those render alone via RouterView.
-const isChatRoute = computed(() => route.name === 'home' || route.name === 'bot')
 const isSettingsRoute = computed(() => route.path.startsWith('/settings'))
-const isAppArea = computed(() => isChatRoute.value || isSettingsRoute.value)
+const isAppArea = computed(() => showsChatWorkspace(route))
+
+// index.html shows a loading splash (#boot-splash) while the entry downloads.
+// Vue mounting is not the end of the wait: the initial navigation still loads
+// its lazy route page, and on chat and settings routes the chat workspace is
+// still loading. Remove the splash once both have settled, on the next frame
+// so the screen behind it has rendered. On failure it is dismissed too, so an
+// error state is not hidden behind it.
+const firstScreenSettled = router.isReady()
+  .then(() => (isAppArea.value ? mainSectionSettled : undefined))
+  .catch(() => {})
+void firstScreenSettled.finally(() => requestAnimationFrame(dismissBootSplash))
+
+// Warm the chat workspace and the settings pages in the background so the
+// first open after sign-in and first-time sidebar clicks don't wait on a chunk
+// (see prefetchAppPages). The downloads wait for the first screen. In the chat
+// workspace they also wait out the burst of requests its first screen starts
+// (fonts, a dozen API calls), so they don't delay the user's first clicks. On
+// the login and onboarding pages they start once the page has rendered: the
+// chat workspace is first in the queue, and signing in needs it. Queued here
+// rather than when the router is ready, which can happen before this
+// component mounts and so before the hold is in place.
+holdPrefetchUntil(firstScreenSettled.then(() => (isAppArea.value ? whenNetworkQuiet() : undefined)))
+prefetchAppPages()
 
 // Localized headings for auto-shaped long-blob toasts (raw backend errors etc.).
 // @felinic/ui is i18n-agnostic, so the app supplies these; they react to locale.

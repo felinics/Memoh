@@ -38,6 +38,23 @@
             />
           </div>
 
+          <SettingsSection v-else-if="error && allChannels.length === 0">
+            <Empty class="py-16">
+              <EmptyTitle>{{ t('common.loadFailed') }}</EmptyTitle>
+              <EmptyDescription v-if="loadErrorDetail">
+                {{ loadErrorDetail }}
+              </EmptyDescription>
+              <EmptyContent>
+                <Button
+                  variant="outline"
+                  @click="refetch()"
+                >
+                  {{ t('common.retry') }}
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </SettingsSection>
+
           <!-- Platforms + a dashed add tile to drop another in -->
           <div
             v-else-if="configuredChannels.length > 0"
@@ -47,8 +64,8 @@
               v-for="item in configuredChannels"
               :key="item.meta.type"
               :name="channelTitle(item.meta)"
-              :subtitle="!item.config?.disabled ? t('bots.channels.statusActive') : t('bots.channels.configured')"
-              :enabled="!item.config?.disabled"
+              :subtitle="isChannelEnabled(item) ? t('bots.channels.statusActive') : t('bots.channels.configured')"
+              :enabled="isChannelEnabled(item)"
               @click="openPlatform(item)"
             >
               <template #leading>
@@ -156,19 +173,15 @@ import {
   Empty, EmptyTitle, EmptyDescription, EmptyContent,
 } from '@felinic/ui'
 import { useQuery } from '@pinia/colada'
-import { getChannels, getBotsByIdChannelByPlatform, getBotsByBotIdSettings } from '@memohai/sdk'
-import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
+import { getBotsByBotIdSettings } from '@memohai/sdk'
+import type { HandlersChannelMeta } from '@memohai/sdk'
 import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
+import { useBotChannels, type BotChannelItem } from '@/composables/api/useBotChannels'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
-
-export interface BotChannelItem {
-  meta: HandlersChannelMeta
-  config: ChannelChannelConfig | null
-  configured: boolean
-}
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
@@ -202,31 +215,22 @@ function openModelSettings() {
   void router.push({ query: { ...route.query, tab: 'general', section: 'interaction' } })
 }
 
-const { data: channels, isLoading, refetch } = useQuery({
-  key: () => ['bot-channels', botIdRef.value],
-  query: async (): Promise<BotChannelItem[]> => {
-    const { data: metas } = await getChannels({ throwOnError: true })
-    if (!metas) return []
-    const configurableTypes = metas.filter((m) => !m.configless)
-    const results = await Promise.all(
-      configurableTypes.map(async (meta) => {
-        try {
-          const { data: config } = await getBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform: meta.type ?? '' }, throwOnError: true })
-          return { meta, config: config ?? null, configured: true } as BotChannelItem
-        } catch {
-          return { meta, config: null, configured: false } as BotChannelItem
-        }
-      })
-    )
-    return results
-  },
-  enabled: () => !!botIdRef.value,
-})
+const { data: channels, error, isLoading, refetch } = useBotChannels(botIdRef)
+
+const loadErrorDetail = computed(() => (error.value ? resolveApiErrorMessage(error.value, '') : ''))
 
 const selectedType = ref<string | null>(null)
 
+function isChannelEnabled(item: BotChannelItem): boolean {
+  return !item.config?.disabled
+}
+
 const allChannels = computed<BotChannelItem[]>(() => channels.value ?? [])
-const configuredChannels = computed(() => allChannels.value.filter((c) => c.configured))
+const configuredChannels = computed(() =>
+  allChannels.value
+    .filter((c) => c.configured)
+    .sort((a, b) => Number(isChannelEnabled(b)) - Number(isChannelEnabled(a))),
+)
 const unconfiguredChannels = computed(() => allChannels.value.filter((c) => !c.configured))
 
 const selectedItem = computed(() => allChannels.value.find((c) => c.meta.type === selectedType.value) ?? null)

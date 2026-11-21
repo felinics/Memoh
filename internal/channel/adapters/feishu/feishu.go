@@ -29,9 +29,10 @@ type assetOpener interface {
 
 // FeishuAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Feishu.
 type FeishuAdapter struct {
-	logger  *slog.Logger
-	assets  assetOpener
-	cardKit feishuCardKitAvailability
+	logger      *slog.Logger
+	assets      assetOpener
+	cardKit     feishuCardKitAvailability
+	openBaseURL string
 }
 
 const (
@@ -143,6 +144,7 @@ func (*FeishuAdapter) Descriptor() channel.Descriptor {
 			BlockStreaming: true,
 		},
 		OutboundPolicy: channel.OutboundPolicy{
+			TextChunkLimit:     feishuStreamMaxRunes,
 			RichTextChunkLimit: feishuStreamMaxRunes,
 		},
 		ConfigSchema: channel.ConfigSchema{
@@ -171,6 +173,12 @@ func (*FeishuAdapter) Descriptor() channel.Descriptor {
 					Description: "Choose websocket long-connection or webhook callback for inbound messages",
 					Enum:        []string{inboundModeWebsocket, inboundModeWebhook},
 					Example:     inboundModeWebsocket,
+				},
+				"enableStreaming": {
+					Type:        channel.FieldBool,
+					Title:       "Stream Replies",
+					Description: "Stream replies progressively by updating cards in real time. Disable to send each reply once after generation completes and reduce Feishu Open Platform API calls.",
+					Example:     true,
 				},
 			},
 		},
@@ -241,12 +249,19 @@ func (a *FeishuAdapter) ProcessingFailed(ctx context.Context, cfg channel.Channe
 	return a.ProcessingCompleted(ctx, cfg, msg, info, handle)
 }
 
-func (*FeishuAdapter) processingReactionGateway(cfg channel.ChannelConfig) (processingReactionGateway, error) {
+func (a *FeishuAdapter) newClient(feishuCfg Config) *lark.Client {
+	if a != nil && strings.TrimSpace(a.openBaseURL) != "" {
+		return feishuCfg.newClient(lark.WithOpenBaseUrl(strings.TrimSpace(a.openBaseURL)))
+	}
+	return feishuCfg.newClient()
+}
+
+func (a *FeishuAdapter) processingReactionGateway(cfg channel.ChannelConfig) (processingReactionGateway, error) {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
 	}
-	client := feishuCfg.newClient()
+	client := a.newClient(feishuCfg)
 	gateway := &larkProcessingReactionGateway{api: client.Im.MessageReaction}
 	return gateway, nil
 }
@@ -588,7 +603,7 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		return err
 	}
 
-	client := feishuCfg.newClient()
+	client := a.newClient(feishuCfg)
 
 	if len(msg.Message.Attachments) > 0 {
 		for _, att := range msg.Message.Attachments {
@@ -689,22 +704,24 @@ func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfi
 	if err != nil {
 		return nil, err
 	}
-	client := feishuCfg.newClient()
+	client := a.newClient(feishuCfg)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
+	disableStreaming := !feishuCfg.EnableStreaming
 	return &feishuOutboundStream{
-		adapter:       a,
-		cfg:           cfg,
-		target:        target,
-		reply:         opts.Reply,
-		client:        client,
-		receiveID:     receiveID,
-		receiveType:   receiveType,
-		useCardKit:    a.cardKit.available(cfg.ID),
-		patchInterval: feishuStreamPatchInterval,
+		adapter:          a,
+		cfg:              cfg,
+		target:           target,
+		reply:            opts.Reply,
+		client:           client,
+		receiveID:        receiveID,
+		receiveType:      receiveType,
+		disableStreaming: disableStreaming,
+		useCardKit:       !disableStreaming && a.cardKit.available(cfg.ID),
+		patchInterval:    feishuStreamPatchInterval,
 	}, nil
 }
 

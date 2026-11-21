@@ -8,6 +8,7 @@ import { keyboardBindings, resolveKeyboardBinding } from '@/lib/keyboard-binding
 import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 
 const Stub = defineComponent({ inheritAttrs: false, setup: () => () => h('div') })
+const Passthrough = defineComponent({ inheritAttrs: false, setup: (_, { slots }) => () => slots.default?.() })
 
 vi.mock('markstream-vue', () => ({ default: Stub, setCustomComponents: vi.fn(), enableKatex: vi.fn(), enableMermaid: vi.fn() }))
 vi.mock('@/components/markdown', () => ({ registerSharedMarkdownComponents: vi.fn() }))
@@ -27,6 +28,9 @@ vi.mock('./message-actions.vue', () => ({
 }))
 vi.mock('@felinic/ui', () => ({
   Avatar: Stub, AvatarImage: Stub, AvatarFallback: Stub, Button: Stub, CalloutBanner: Stub,
+  SurfaceCard: defineComponent({ setup: (_, { slots, attrs }) => () => h('div', attrs, slots.default?.()) }),
+  InfoHint: Stub, DropdownMenu: Passthrough, DropdownMenuTrigger: Passthrough, DropdownMenuContent: Stub, DropdownMenuItem: Stub,
+  toast: { success: vi.fn(), error: vi.fn() }, useClipboard: () => ({ copyText: vi.fn() }),
   Textarea: defineComponent({
     inheritAttrs: false,
     props: { modelValue: String },
@@ -102,5 +106,35 @@ describe('message-item edit', () => {
     } finally {
       window.removeEventListener('keydown', dispatch)
     }
+  })
+})
+
+describe('message-item notify notice', () => {
+  it('breaks a delivered notify_user call out of the tool group as a notice', async () => {
+    const MessageItem = (await import('./message-item.vue')).default
+    root = document.createElement('div')
+    document.body.append(root)
+    const tool = (id: string, toolName: string, result: unknown) => ({ type: 'tool', id, toolCallId: `c${id}`, toolName, input: {}, result, done: true })
+    app = createApp(MessageItem, {
+      message: {
+        id: 'm1',
+        turnId: 't1',
+        role: 'assistant',
+        messages: [
+          tool('1', 'web_search', { ok: true }),
+          tool('2', 'notify_user', { structuredContent: { status: 'notified' } }),
+          { type: 'text', id: '3', content: 'Atlas-3 is out.' },
+        ],
+        timestamp: new Date(),
+      },
+      isScrolling: false,
+    })
+    app.config.globalProperties.$t = (key: string) => key
+    app.mount(root)
+    await nextTick()
+
+    const notices = root.querySelectorAll('[data-slot="notify-notice"]')
+    expect(notices).toHaveLength(1)
+    expect(notices[0]!.textContent).toContain('chat.notifyNotice.title')
   })
 })

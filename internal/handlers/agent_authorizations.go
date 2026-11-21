@@ -30,15 +30,13 @@ func (h *AgentAuthorizationHandler) Register(e *echo.Echo) {
 	g := e.Group("/agent-authorizations")
 	g.POST("", h.Create)
 	g.GET("/:id", h.Get)
-	g.POST("/:id/poll", h.Poll)
-	g.POST("/:id/exchange", h.Exchange)
 	g.DELETE("/:id", h.Cancel)
 	e.POST("/bots/:bot_id/agents/:id/credential/claim", h.Claim)
 }
 
 // Create godoc
 // @Summary Authorize an Agent account independently of a Bot
-// @Description Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
+// @Description Encrypts a supplied API key. A ChatGPT, Claude or Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys are not probed against the provider.
 // @Tags agent-authorizations
 // @Accept json
 // @Produce json
@@ -71,55 +69,12 @@ func (h *AgentAuthorizationHandler) Create(c echo.Context) error {
 // @Success 200 {object} agentcredential.Authorization
 // @Failure 403,410,503 {object} server.Problem
 // @Router /agent-authorizations/{id} [get].
-func (h *AgentAuthorizationHandler) Get(c echo.Context) error { return h.status(c, false) }
-
-// Poll godoc
-// @Summary Poll a pending Agent device authorization
-// @Tags agent-authorizations
-// @Param id path string true "Authorization ID"
-// @Success 200 {object} agentcredential.Authorization
-// @Failure 403,410,503 {object} server.Problem
-// @Router /agent-authorizations/{id}/poll [post].
-func (h *AgentAuthorizationHandler) Poll(c echo.Context) error { return h.status(c, true) }
-
-type AgentAuthorizationExchangeRequest struct {
-	Code string `json:"code" validate:"required"`
-}
-
-// Exchange godoc
-// @Summary Complete Claude browser authorization with the returned authorization code
-// @Tags agent-authorizations
-// @Accept json
-// @Produce json
-// @Param id path string true "Authorization ID"
-// @Param payload body AgentAuthorizationExchangeRequest true "Authorization code"
-// @Success 200 {object} agentcredential.Authorization
-// @Failure 400,403,410,503 {object} server.Problem
-// @Router /agent-authorizations/{id}/exchange [post].
-func (h *AgentAuthorizationHandler) Exchange(c echo.Context) error {
+func (h *AgentAuthorizationHandler) Get(c echo.Context) error {
 	owner, err := RequireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	var req AgentAuthorizationExchangeRequest
-	if err := c.Bind(&req); err != nil {
-		return mapAuthorizationError(agentcredential.ErrAuthorizationCodeInvalid)
-	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
-	defer cancel()
-	result, err := h.service.Exchange(ctx, owner, c.Param("id"), req.Code)
-	if err != nil {
-		return mapAuthorizationError(err)
-	}
-	return c.JSON(http.StatusOK, result)
-}
-
-func (h *AgentAuthorizationHandler) status(c echo.Context, poll bool) error {
-	owner, err := RequireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	result, err := h.service.Get(c.Request().Context(), owner, c.Param("id"), poll)
+	result, err := h.service.Get(c.Request().Context(), owner, c.Param("id"))
 	if err != nil {
 		return mapAuthorizationError(err)
 	}
@@ -177,7 +132,7 @@ func (h *AgentAuthorizationHandler) Claim(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return mapAuthorizationError(agentcredential.ErrInvalidRequest)
 	}
-	session, err := h.service.Get(c.Request().Context(), owner, req.AuthorizationID, false)
+	session, err := h.service.Get(c.Request().Context(), owner, req.AuthorizationID)
 	if err != nil {
 		return mapAuthorizationError(err)
 	}
@@ -198,16 +153,12 @@ func (h *AgentAuthorizationHandler) Claim(c echo.Context) error {
 
 func mapAuthorizationError(err error) error {
 	switch {
-	case errors.Is(err, agentcredential.ErrAuthorizationCodeInvalid):
-		return apperror.Wrap(apperror.CodeAgentAuthorizationCodeInvalid, err, nil)
 	case errors.Is(err, agentcredential.ErrAuthorizationExpired):
 		return apperror.Wrap(apperror.CodeAgentAuthorizationExpired, err, nil)
 	case errors.Is(err, agentcredential.ErrAuthorizationNotReady):
 		return apperror.Wrap(apperror.CodeAgentAuthorizationNotReady, err, nil)
 	case errors.Is(err, agentcredential.ErrAuthorizationLimit):
 		return apperror.Wrap(apperror.CodeAgentAuthorizationLimit, err, nil)
-	case errors.Is(err, agentcredential.ErrAuthorizationFailed):
-		return apperror.Wrap(apperror.CodeAgentAuthorizationFailed, err, nil)
 	default:
 		mapped := mapAgentCredentialError(err)
 		if apperror.CodeOf(mapped) != "" {

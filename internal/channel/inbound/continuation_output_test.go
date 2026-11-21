@@ -13,7 +13,7 @@ import (
 )
 
 func TestContinuationForwardsReplyAndInteractiveFollowUp(t *testing.T) {
-	processor := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, nil, nil)
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{Channel: channel.ChannelType("telegram"), ReplyTarget: "test-chat", Message: channel.Message{ID: "answer"}}
 	err := processor.streamContinuationCommand(context.Background(), msg, sender, InboundIdentity{BotID: "bot"}, "", func(_ context.Context, ch chan<- json.RawMessage) error {
@@ -47,7 +47,7 @@ func TestContinuationHiddenToolCallEndsIMTextSegment(t *testing.T) {
 		{channel: channel.ChannelType("telegram"), wantSegmentEnd: true},
 		{channel: channel.ChannelType("web"), wantSegmentEnd: false},
 	} {
-		processor := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, nil, nil, "", 0)
+		processor := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, nil, nil)
 		sender := &fakeReplySender{}
 		msg := channel.InboundMessage{Channel: tc.channel, ReplyTarget: "test-chat", Message: channel.Message{ID: "approve"}}
 		err := processor.streamContinuationCommand(context.Background(), msg, sender, InboundIdentity{BotID: "bot"}, "", func(_ context.Context, ch chan<- json.RawMessage) error {
@@ -79,7 +79,7 @@ func TestContinuationHiddenToolCallEndsIMTextSegment(t *testing.T) {
 }
 
 func TestAcceptanceReceiptPrecedesFailedContinuation(t *testing.T) {
-	p := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, nil, nil, "", 0)
+	p := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, nil, nil)
 	sink := &fakeReplySender{}
 	accepted := false
 	sender := decisionReplySender{StreamReplySender: sink, accepted: func(context.Context, string) { accepted = true }}

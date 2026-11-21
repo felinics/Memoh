@@ -477,7 +477,6 @@ func toMCPSession(s SessionContext) mcp.ToolSessionContext {
 		SessionID:                s.SessionID,
 		SessionType:              s.SessionType,
 		ChannelIdentityID:        s.ChannelIdentityID,
-		SessionToken:             s.SessionToken,
 		CurrentPlatform:          s.CurrentPlatform,
 		ReplyTarget:              s.ReplyTarget,
 		ConversationType:         s.ConversationType,

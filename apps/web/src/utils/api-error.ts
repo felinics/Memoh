@@ -1,6 +1,4 @@
-import enMessages from '@/i18n/locales/en.json'
-import zhMessages from '@/i18n/locales/zh.json'
-import jaMessages from '@/i18n/locales/ja.json'
+import { messagesFor } from '@/i18n/messages'
 
 interface ResolveApiErrorMessageOptions {
   prefixFallback?: boolean
@@ -51,12 +49,6 @@ const clientStatusCodes: Record<number, string> = {
   429: 'http.too_many_requests',
 }
 
-const messagesByLocale = {
-  en: enMessages,
-  zh: zhMessages,
-  ja: jaMessages,
-} as const
-
 function asRecord(value: unknown): ErrorRecord | null {
   if (!value || typeof value !== 'object') {
     return null
@@ -89,8 +81,18 @@ function currentLocale(): Locale {
   return 'en'
 }
 
-function lookupMessage(locale: Locale, key: string): string {
-  let value: unknown = messagesByLocale[locale]
+// Copy comes from the stored language once it has loaded. A language picked in
+// another tab is stored before this tab has downloaded it (see the language
+// watch in store/settings); until then messagesFor answers in the language this
+// tab still shows, so an error still gets copy. Before any language has loaded
+// (the app mounts only after one has) there is no copy.
+function lookupMessage(key: string): string {
+  let value: unknown
+  try {
+    value = messagesFor(currentLocale())
+  } catch {
+    return ''
+  }
   for (const part of key.split('.')) {
     if (!value || typeof value !== 'object') return ''
     value = (value as Record<string, unknown>)[part]
@@ -111,11 +113,10 @@ function formatMessage(template: string, args?: ErrorRecord): string {
 
 /**
  * The copy for an i18n key in the stored locale, for code outside a component
- * that has no vue-i18n instance. Empty when no locale has the key.
+ * that has no vue-i18n instance. Empty when there is no copy for the key.
  */
 export function renderI18nMessage(key: string, args?: ErrorRecord): string {
-  const trimmed = key.trim()
-  const template = lookupMessage(currentLocale(), trimmed) || lookupMessage('en', trimmed)
+  const template = lookupMessage(key.trim())
   return template ? formatMessage(template, args).trim() : ''
 }
 
@@ -141,7 +142,6 @@ function readFault(record: ErrorRecord): ApiErrorFault | undefined {
 
 function readStatus(record: ErrorRecord): number | undefined {
   if (typeof record.status === 'number') return record.status
-  if (typeof record.http_status === 'number') return record.http_status
   return undefined
 }
 
@@ -267,4 +267,35 @@ export function resolveApiErrorMessage(
   }
 
   return detail
+}
+
+/** Preserve operation IDs separately from message text, including nested feedback. */
+export interface ErrorCorrelation {
+  requestId?: string
+  traceId?: string
+}
+
+export function apiErrorCorrelation(error: unknown): ErrorCorrelation {
+  const records = collectErrorRecords(error)
+  function value(record: ErrorRecord, keys: string[]): string | undefined {
+    for (const key of keys) {
+      const candidate = record[key]
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+    }
+    return undefined
+  }
+  // A saved operation may carry only one ID. Its other ID must not be filled
+  // from a later polling response, which would join unrelated operations.
+  for (const record of records) {
+    const requestId = value(record, ['request_id', 'requestId'])
+    const traceId = value(record, ['trace_id', 'traceId'])
+    if (requestId || traceId) return { requestId, traceId }
+  }
+  for (const record of records) {
+    if (!(record.headers instanceof Headers)) continue
+    const requestId = record.headers.get('X-Request-ID')?.trim() || undefined
+    const traceId = record.headers.get('X-Trace-ID')?.trim() || undefined
+    if (requestId || traceId) return { requestId, traceId }
+  }
+  return { requestId: undefined, traceId: undefined }
 }

@@ -120,6 +120,26 @@ export function withoutLegacyKeys(config?: ModelsModelConfig | null): ModelsMode
   return out as ModelsModelConfig
 }
 
+/**
+ * Distinguishes a cleared number input (`''` or `null`) from an unmounted/unset
+ * field (`undefined`) during model edits so clearing removes the stored limit
+ * instead of falling back to the previous config value.
+ */
+export function resolveEditedOptionalNumber(
+  raw: unknown,
+  editFallback: number | undefined,
+): number | undefined {
+  if (raw === '' || raw === null) return undefined
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (trimmed === '') return undefined
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return editFallback
+}
+
 export function buildModelConfig(input: BuildModelConfigInput): ModelsModelConfig {
   const config: ModelsModelConfig = { ...withoutLegacyKeys(input.existing), schema_version: MODEL_CONFIG_SCHEMA_VERSION }
   const description = input.description?.trim() ?? ''
@@ -129,7 +149,8 @@ export function buildModelConfig(input: BuildModelConfigInput): ModelsModelConfi
   else delete config.description
 
   if (input.type === 'embedding') {
-    config.dimensions = input.dimensions
+    if (input.dimensions) config.dimensions = input.dimensions
+    else delete config.dimensions
     delete config.modalities
     delete config.tool_call
     delete config.structured_output

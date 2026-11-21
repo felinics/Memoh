@@ -236,6 +236,10 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 					continue
 				}
 				prefix := sanitizePrefix(connection.Name)
+				group := "mcp"
+				if prefix != "" {
+					group = "mcp:" + prefix
+				}
 				for _, tool := range connTools {
 					origin := strings.TrimSpace(tool.Name)
 					alias := origin
@@ -243,6 +247,7 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 						alias = prefix + "_" + origin
 					}
 					tool.Name = alias
+					tool.Group = group
 					if strings.TrimSpace(tool.Description) != "" {
 						tool.Description = "[" + strings.TrimSpace(connection.Name) + "] " + tool.Description
 					} else {
@@ -297,6 +302,7 @@ func cloneTools(items []mcpgw.ToolDescriptor) []mcpgw.ToolDescriptor {
 			Name:        item.Name,
 			Description: item.Description,
 			InputSchema: item.InputSchema,
+			Group:       item.Group,
 		})
 	}
 	return out

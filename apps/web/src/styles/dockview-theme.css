@@ -42,7 +42,9 @@
 
   --dv-separator-border: var(--workspace-divider-color);
   --dv-sash-color: transparent;
-  --dv-active-sash-color: var(--ring);
+  /* Keep dockview's 4px .dv-sash hit box transparent even after its 0.5s hover
+   * delay; only the 1.2px ::after indicator below paints the active hairline. */
+  --dv-active-sash-color: transparent;
 
   /* Drop indicator fill: dockview's grey, toned down from the base 0.5 opacity
    * (which reads too dark on Memoh's chrome). The base theme defines this per
@@ -616,6 +618,7 @@
   position: absolute;
   background-color: transparent;
   pointer-events: none;
+  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .dockview-theme-memoh .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash::after {
@@ -633,7 +636,7 @@
 }
 
 .dockview-theme-memoh .dv-split-view-container > .dv-sash-container > .dv-sash:not(.disabled):is(:hover, :active)::after {
-  background-color: var(--ring);
+  background-color: var(--workspace-divider-active-color);
 }
 
 /* No vertical inter-tab divider lines: selecting a tab changes only fill, stroke,

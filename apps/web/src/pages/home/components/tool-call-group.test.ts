@@ -249,6 +249,20 @@ describe('ToolCallGroup adaptive header layers', () => {
     expect(header).not.toContain('chat.process.frag.steps')
   })
 
+  it('counts the tools an on-demand load ran, not the loading step', () => {
+    const root = mountGroup([
+      toolBlock('tool_describe', { names: ['schedule'] }),
+      toolBlock('create_schedule', { name: 'daily', pattern: '0 9 * * *' }),
+      toolBlock('create_schedule', { name: 'weekly', pattern: '0 9 * * 1' }),
+    ], false)
+
+    const header = headerText(root)
+    expect(header).toContain('Scheduled')
+    expect(header).toContain('2 schedules')
+    expect(header).not.toContain('searches')
+    expect(header).not.toContain('step')
+  })
+
   it('keeps a lone live tool on its own specific label, no phase verb', () => {
     const root = mountGroup([
       toolBlock('read', { path: 'src/main.ts' }),

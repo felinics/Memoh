@@ -236,10 +236,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch, type Ref } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useQueryCache } from '@pinia/colada'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import {
   Button,
   CalloutBanner,
@@ -824,42 +825,19 @@ function goToSupermarket() {
 // so a newer catalog shows up without the user asking for it.
 
 const POLL_MS = 5_000
-let pollTimer: ReturnType<typeof setInterval> | null = null
-let tabActive = true
-
 const hasForeignProgress = computed(() => items.value.some(item => appInProgress(item) && !ownsAppStream(item.registry_id, item.app_id)))
 const catalogRefreshing = computed(() => data.value?.dependency_catalog_refreshing === true)
 
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-function syncPolling() {
-  const shouldPoll = tabActive && (hasForeignProgress.value || catalogRefreshing.value)
-  if (shouldPoll && !pollTimer) {
-    pollTimer = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') void refetchApps()
-    }, POLL_MS)
-  } else if (!shouldPoll) {
-    stopPolling()
-  }
-}
-
-watch([hasForeignProgress, catalogRefreshing], syncPolling, { immediate: true })
+useVisiblePoll(
+  () => refetchApps(),
+  POLL_MS,
+  {
+    enabled: () => hasForeignProgress.value || catalogRefreshing.value,
+    immediateOnResume: false,
+  },
+)
 
 onActivated(() => {
-  tabActive = true
-  syncPolling()
   void refetchApps()
 })
-
-onDeactivated(() => {
-  tabActive = false
-  stopPolling()
-})
-
-onBeforeUnmount(stopPolling)
 </script>

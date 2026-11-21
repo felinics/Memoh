@@ -11,6 +11,7 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 const (
@@ -32,6 +33,12 @@ type failingForkDriver struct {
 	err error
 }
 
+func (failingForkDriver) RuntimeType() string { return string(runtimekind.Codex) }
+
+func (failingForkDriver) Caps() external.Caps {
+	return external.Caps{}
+}
+
 func (d failingForkDriver) ForkThread(context.Context, string, string, map[string]any, string) (map[string]any, error) {
 	return nil, d.err
 }
@@ -44,8 +51,8 @@ func TestPrepareExternalForkAnswersRuntimeFailures(t *testing.T) {
 		err  error
 		code apperror.Code
 	}{
-		{"runtime unavailable", external.Unavailable(errors.New("session has no codex thread to fork")), apperror.CodeExternalRuntimeUnavailable},
-		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired},
+		{"agent failed", external.Upstream(errors.New("codex refused the fork")), apperror.CodeExternalRuntimeReported},
+		{"auth required", external.Fail(external.FailureAuthRequired, nil), apperror.CodeExternalRuntimeAuthRequired},
 		{"missing dependency", &external.DependencyMissingError{DependencyID: "codex"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,9 +60,9 @@ func TestPrepareExternalForkAnswersRuntimeFailures(t *testing.T) {
 				queries:        forkAnchorQueries{},
 				sessionRuntime: newScriptedAdmitter(),
 				sessionService: &fakeBackgroundSessionService{getFn: func(context.Context, string) (session.Thread, error) {
-					return session.Thread{ID: forkTestSessionID, BotID: forkTestBotID, BotAgentID: "agent-1", RuntimeType: session.RuntimeCodex}, nil
+					return session.Thread{ID: forkTestSessionID, BotID: forkTestBotID, BotAgentID: "agent-1", RuntimeType: string(runtimekind.Codex)}, nil
 				}},
-				externalDrivers: map[string]external.Driver{session.RuntimeCodex: failingForkDriver{err: tc.err}},
+				runtimes: testRuntimes(t, failingForkDriver{err: tc.err}),
 			}
 			_, err := svc.PrepareExternalFork(context.Background(), forkTestBotID, forkTestSessionID, forkTestTurnID)
 			if got := apperror.CodeOf(err); got != tc.code {

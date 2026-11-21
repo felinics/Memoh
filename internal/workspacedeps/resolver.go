@@ -14,12 +14,6 @@ var (
 	_ external.VersionObserver  = (*Service)(nil)
 )
 
-// BuiltinLauncherCommands is the command binding of the built-in direct runtimes.
-// It contains no recipes and remains available when the remote catalog is empty.
-func BuiltinLauncherCommands() map[string]string {
-	return map[string]string{"codex": "codex", "claude-code": "claude", "grok": "grok"}
-}
-
 // ResolveLauncher is read-only. Missing dependencies require an administrator
 // to preview and confirm an install through the dependency management endpoint.
 // A conversation, including a guest turn, never authorizes downloading scripts.
@@ -31,7 +25,7 @@ func (s *Service) ResolveLauncher(ctx context.Context, botID, depID string) (ext
 	}
 	dep, err := s.dependency(ctx, depID)
 	if catalogErr != nil || err != nil {
-		command, builtin := BuiltinLauncherCommands()[depID]
+		command, builtin := s.launcherCommands[depID]
 		if !builtin {
 			if catalogErr != nil {
 				return external.Launcher{}, catalogErr

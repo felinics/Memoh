@@ -7,6 +7,7 @@ import {
   reasoningFormFrom,
   reasoningBudgetError,
   reasoningIsUncontrollable,
+  resolveEditedOptionalNumber,
   withoutLegacyKeys,
 } from './model-config'
 
@@ -140,6 +141,35 @@ describe('buildModelConfig', () => {
       reasoning: { ...defaultReasoningForm(), enabled: true },
       existing: { schema_version: 2, tool_call: true, modalities: { input: ['text'] } },
     })).toEqual({ schema_version: 2, description: '', dimensions: 1536 })
+  })
+
+  it('drops cleared optional numbers instead of keeping previous stored values', () => {
+    expect(resolveEditedOptionalNumber('', 4096)).toBeUndefined()
+    expect(resolveEditedOptionalNumber('   ', 4096)).toBeUndefined()
+    expect(resolveEditedOptionalNumber(null, 4096)).toBeUndefined()
+    expect(resolveEditedOptionalNumber(undefined, 4096)).toBe(4096)
+    expect(resolveEditedOptionalNumber(8192, 4096)).toBe(8192)
+    expect(resolveEditedOptionalNumber('8192', 4096)).toBe(8192)
+
+    const clearedEmbedding = buildModelConfig({
+      type: 'embedding',
+      dimensions: resolveEditedOptionalNumber('', 1536),
+      capabilities: defaultCapabilityForm(),
+      reasoning: defaultReasoningForm(),
+      existing: { schema_version: 2, dimensions: 1536 },
+    })
+    expect(clearedEmbedding).not.toHaveProperty('dimensions')
+
+    const clearedChat = buildModelConfig({
+      type: 'chat',
+      contextWindow: resolveEditedOptionalNumber('', 128000),
+      maxOutputTokens: resolveEditedOptionalNumber('', 4096),
+      capabilities: defaultCapabilityForm(),
+      reasoning: defaultReasoningForm(),
+      existing: { schema_version: 2, context_window: 128000, max_output_tokens: 4096 },
+    })
+    expect(clearedChat).not.toHaveProperty('context_window')
+    expect(clearedChat).not.toHaveProperty('max_output_tokens')
   })
 })
 

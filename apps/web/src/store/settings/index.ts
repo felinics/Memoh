@@ -1,8 +1,10 @@
 import type { Locale } from '@/i18n'
+import { loadLocaleMessages, setShownLocale } from '@/i18n/messages'
 import { computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useColorMode, useStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import { toast } from '@felinic/ui'
 import type { BundledTheme } from 'shiki'
 import { isColorSchemeId, type ColorSchemeId } from '@/constants/color-schemes'
 import { syncThemeColorWithBackground } from '@/utils/theme-color'
@@ -28,6 +30,17 @@ import { DEFAULT_MERMAID_THEME, isMermaidTheme, type MermaidTheme } from './merm
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 
+// Which keystroke sends from the chat composer. 'enter' sends on a bare Enter
+// (Shift+Enter breaks the line); 'mod-enter' makes Enter a line break and sends
+// on Ctrl+Enter / ⌘+Enter.
+export const COMPOSER_SEND_KEYS = ['enter', 'mod-enter'] as const
+export type ComposerSendKey = typeof COMPOSER_SEND_KEYS[number]
+export const DEFAULT_COMPOSER_SEND_KEY: ComposerSendKey = 'enter'
+
+export function isComposerSendKey(value: unknown): value is ComposerSendKey {
+  return typeof value === 'string' && (COMPOSER_SEND_KEYS as readonly string[]).includes(value)
+}
+
 export interface Settings {
   language: Locale;
   theme: ThemePreference;
@@ -39,6 +52,7 @@ export interface Settings {
   shikiThemeLight: BundledTheme;
   shikiThemeDark: BundledTheme;
   mermaidTheme: MermaidTheme;
+  composerSendKey: ComposerSendKey;
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -47,6 +61,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaultUiFontFamily = computed(() => DEFAULT_UI_FONT_FAMILY)
   const defaultCodeFontFamily = computed(() => DEFAULT_CODE_FONT_FAMILY)
   const language = useStorage<Locale>('language', 'en')
+  // `theme` and `color-scheme` are also read by an inline script in
+  // index.html (web and desktop renderer) before the app loads, so the first
+  // frame already has the right background. Keep the keys and stored values
+  // in step with it.
   const theme = useStorage<ThemePreference>('theme', 'system')
   const colorScheme = useStorage<ColorSchemeId>('color-scheme', 'memoh')
   const uiFontFamily = useStorage<string>('ui-font-family', '')
@@ -56,9 +74,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const shikiThemeLight = useStorage<BundledTheme>('shiki-theme-light', DEFAULT_SHIKI_THEME_LIGHT)
   const shikiThemeDark = useStorage<BundledTheme>('shiki-theme-dark', DEFAULT_SHIKI_THEME_DARK)
   const mermaidTheme = useStorage<MermaidTheme>('mermaid-theme', DEFAULT_MERMAID_THEME)
+  const composerSendKey = useStorage<ComposerSendKey>('composer-send-key', DEFAULT_COMPOSER_SEND_KEY)
   const uiFontStack = computed(() => cssFontFamilyDeclaration(uiFontFamily.value, DEFAULT_UI_FONT_FAMILY))
   const codeFontStack = computed(() => cssCodeFontFamilyStyleValue(codeFontFamily.value))
-  const shikiThemes = computed(() => ({ light: shikiThemeLight.value, dark: shikiThemeDark.value }))
 
   // Expose the resolved active color mode as the single source of truth.
   // 'system' is resolved against the OS/browser preference so consumers don't
@@ -68,7 +86,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const isDark = computed(() => resolvedColorMode.value === 'dark')
 
   const applyColorScheme = (value: ColorSchemeId) => {
-    if (typeof document === 'undefined') return
     document.documentElement.dataset.colorScheme = value
   }
 
@@ -98,21 +115,49 @@ export const useSettingsStore = defineStore('settings', () => {
   if (!isMermaidTheme(mermaidTheme.value)) {
     mermaidTheme.value = DEFAULT_MERMAID_THEME
   }
+  if (!isComposerSendKey(composerSendKey.value)) {
+    composerSendKey.value = DEFAULT_COMPOSER_SEND_KEY
+  }
   normalizeTypographySettings()
 
   watch(theme, (value) => {
     colorMode.value = value === 'system' ? 'auto' : value
   }, { immediate: true })
 
-  watch(language, (value) => {
+  const applyLanguage = (value: Locale) => {
     i18n.locale.value = value
+    setShownLocale(value)
     // Reflect the active locale onto <html lang> so locale-scoped CSS can target
     // it — chiefly the CJK font-weight de-emphasis (see :lang(zh) in style.css):
     // CJK glyphs render visually heavier than Latin at the same numeric weight, so
     // Chinese UI needs a lighter rung than English to read at the same density.
-    if (typeof document !== 'undefined') {
-      document.documentElement.lang = value
+    document.documentElement.lang = value
+  }
+
+  // Loads a language and registers it with vue-i18n (the same step i18n.ts
+  // runs for the starting language).
+  const prepareLocale = (value: Locale) => loadLocaleMessages(value).then((messages) => {
+    if (!i18n.availableLocales.includes(value)) i18n.setLocaleMessage(value, messages)
+  })
+
+  // Languages download on demand, the active one before the first screen and
+  // the others in the background after it (see i18n/messages.ts). setLanguage
+  // stores a pick once its language has loaded, so this normally applies at
+  // once; the starting language is loaded before the app mounts. A change from
+  // another tab (useStorage follows storage events) may name a language this
+  // tab hasn't loaded yet, so load it first.
+  watch(language, (value) => {
+    if (i18n.availableLocales.includes(value)) {
+      applyLanguage(value)
+      return
     }
+    prepareLocale(value).then(
+      () => {
+        // A later pick may have landed while this one was downloading.
+        if (language.value === value) applyLanguage(value)
+      },
+      (error: unknown) => console.error('[settings] Failed to load language', value, error),
+    )
   }, { immediate: true })
 
   watch(colorScheme, (value) => {
@@ -136,12 +181,27 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTypography()
   }, { immediate: true })
 
+  // Code outside components reads copy in the stored language (API error copy,
+  // chat notices), so store a pick only once its language has loaded. Only the
+  // latest pick is stored: picking again while a download is in flight must not
+  // be overridden when the earlier download finishes later. A failed download
+  // leaves the current language in place and says so; picking again retries.
+  let pickedLanguage: Locale | undefined
   const setLanguage = (value: Locale) => {
-    language.value = value
+    pickedLanguage = value
+    prepareLocale(value).then(
+      () => {
+        if (pickedLanguage === value) language.value = value
+      },
+      (error: unknown) => {
+        console.error('[settings] Failed to load language', value, error)
+        if (pickedLanguage === value) toast.error(i18n.t('settings.languageLoadFailed'))
+      },
+    )
   }
 
   const withViewTransition = (fn: () => void) => {
-    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+    if ('startViewTransition' in document) {
       (document as Document & { startViewTransition: (cb: () => void) => unknown }).startViewTransition(fn)
     } else {
       fn()
@@ -191,6 +251,11 @@ export const useSettingsStore = defineStore('settings', () => {
     mermaidTheme.value = value
   }
 
+  const setComposerSendKey = (value: ComposerSendKey) => {
+    if (!isComposerSendKey(value)) return
+    composerSendKey.value = value
+  }
+
   return {
     language,
     theme,
@@ -201,10 +266,10 @@ export const useSettingsStore = defineStore('settings', () => {
     codeFontSizePx,
     shikiThemeLight,
     shikiThemeDark,
-    shikiThemes,
     resolvedColorMode,
     isDark,
     mermaidTheme,
+    composerSendKey,
     defaultUiFontFamily,
     defaultCodeFontFamily,
     uiFontStack,
@@ -218,6 +283,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setCodeFontSizePx,
     setShikiTheme,
     setMermaidTheme,
+    setComposerSendKey,
   }
 })
 

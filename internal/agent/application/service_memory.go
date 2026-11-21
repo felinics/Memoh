@@ -56,13 +56,15 @@ func (s *Service) resolveMemoryProviderWithID(ctx context.Context, botID string)
 	return providerID, p
 }
 
-func (s *Service) loadMemoryContext(ctx context.Context, req ChatRequest) memoryContextLoad {
-	builtQuery := s.buildMemoryQuery(ctx, req)
-	if strings.TrimSpace(builtQuery.Query) == "" {
-		return memoryContextLoad{}
-	}
+// loadMemoryContext recalls memory for a request. The query is only built
+// once a memory provider is known to exist.
+func (s *Service) loadMemoryContext(ctx context.Context, req ChatRequest, buildQuery func() memoryQuery) memoryContextLoad {
 	providerID, p := s.resolveMemoryProviderWithID(ctx, req.BotID)
 	if p == nil {
+		return memoryContextLoad{}
+	}
+	builtQuery := buildQuery()
+	if strings.TrimSpace(builtQuery.Query) == "" {
 		return memoryContextLoad{}
 	}
 	cacheKey := s.memoryContextCacheKey(ctx, req, providerID, p, builtQuery.Query)
@@ -318,7 +320,7 @@ func (s *Service) writeMemory(ctx context.Context, req ChatRequest, botID string
 			return nil
 		}
 	}
-	_, tzLoc := s.resolveTimezone(ctx, req.BotID, req.UserID)
+	_, tzLoc := s.resolveTimezone(ctx, req.BotID)
 	// A post-turn write belongs to a conversation that is still warm: it may
 	// leave MEMORY.md for refreshMemoryOverview to rewrite.
 	if err := p.OnAfterChat(storefs.WithConversationWrite(ctx), memprovider.AfterChatRequest{

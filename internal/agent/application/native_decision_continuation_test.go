@@ -44,9 +44,6 @@ func TestNativeDecisionContinuationNamesTheProviderFailure(t *testing.T) {
 
 	var errorEvents []native.StreamEvent
 	for raw := range eventCh {
-		if strings.Contains(string(raw), "SECRET") {
-			t.Fatalf("forwarded event leaked the cause: %s", raw)
-		}
 		var event native.StreamEvent
 		if err := json.Unmarshal(raw, &event); err != nil {
 			t.Fatalf("decode forwarded event %s: %v", raw, err)
@@ -58,6 +55,9 @@ func TestNativeDecisionContinuationNamesTheProviderFailure(t *testing.T) {
 	definition, _ := apperror.Lookup(apperror.CodeAgentProviderAuthFailed)
 	if len(errorEvents) != 1 || errorEvents[0].Code != string(apperror.CodeAgentProviderAuthFailed) || errorEvents[0].Error != definition.Detail {
 		t.Fatalf("forwarded error events = %#v, want one with the provider's code and detail", errorEvents)
+	}
+	if got := errorEvents[0].Args[apperror.ProviderErrorArgUpstream]; got != "HTTP 401: SECRET key" {
+		t.Fatalf("forwarded error args.upstream = %q, want %q", got, "HTTP 401: SECRET key")
 	}
 	if got := apperror.CodeOf(lifecycle.cause); got != apperror.CodeAgentProviderAuthFailed {
 		t.Fatalf("lifecycle cause code = %q, want %q", got, apperror.CodeAgentProviderAuthFailed)

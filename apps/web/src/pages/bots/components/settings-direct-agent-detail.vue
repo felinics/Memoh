@@ -26,16 +26,15 @@
       </SettingsRow>
 
       <SettingsRow
-        v-if="config.auth === 'api_key' || config.auth === 'oauth_token'"
-        :label="config.auth === 'api_key' ? $t('bots.agent.apiKey') : $t('bots.agent.oauthToken')"
-        :description="config.auth === 'api_key' ? $t('bots.agent.apiKeyDescription') : $t('bots.agent.oauthTokenDescription')"
+        v-if="config.auth === 'api_key'"
+        :label="$t('bots.agent.apiKey')"
+        :description="$t('bots.agent.apiKeyDescription')"
         stack="sm"
       >
         <AgentCredentialInput
           v-model="credentialSecret"
           :loading="savingCredential"
           :connected="credentialConnected"
-          :placeholder="config.auth === 'oauth_token' ? $t('bots.agent.oauthToken') : undefined"
           class="sm:w-96"
           @save="saveCredential"
         >
@@ -48,7 +47,7 @@
       </SettingsRow>
 
       <SettingsRow
-        v-if="baseUrlPlaceholder && (config.auth === 'api_key' || config.auth === 'oauth_token')"
+        v-if="baseUrlPlaceholder && config.auth === 'api_key'"
         :label="$t('common.baseUrl')"
         stack="sm"
       >
@@ -100,9 +99,9 @@
       </SettingsRow>
     </SettingsSection>
 
-    <!-- Codex and Grok Build sign their account in on the Agent's own
-         process: the runtime obtains the device code and writes its login,
-         which Memoh then keeps in the credential store. -->
+    <!-- Codex, Claude Code and Grok Build sign their account in on the
+         Agent's own process: the runtime starts the sign-in, writes its login
+         into the workspace, and keeps it there. -->
     <SettingsSection
       v-if="deviceLoginAuth"
       :title="$t('bots.agent.account')"
@@ -110,11 +109,15 @@
       <DeviceLoginPanel
         :auth="deviceLoginAuth"
         :authorized="credentialConnected"
-        existing
+        :account="runtimeSignIn ? runtimeAccount.data.value?.email : undefined"
+        :note="accountNote"
+        :disabled="!agentEnabled"
         :authorizing="authorizing"
         :device-login="deviceLogin"
+        :submitting="submittingCode"
         @connect="startDeviceLogin"
         @cancel="cancelDeviceLogin"
+        @submit="submitLoginCode"
       >
         <AgentCredentialDisconnect
           v-if="credentialConnected"
@@ -123,8 +126,8 @@
         />
       </DeviceLoginPanel>
 
-      <CodexUsageRows
-        v-if="isCodex && credentialConnected && !deviceLogin"
+      <AgentQuotaRows
+        v-if="agent.reports_quota && credentialConnected && !deviceLogin"
         :bot-id="botId"
         :bot-agent-id="agent.id!"
       />
@@ -133,9 +136,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Input,
@@ -150,17 +152,21 @@ import {
 } from '@felinic/ui'
 import {
   deleteBotsByBotIdAgentsByIdCredential,
+  getBotsByBotIdAgentsByIdAccount,
   getBotsByBotIdAgentsByIdRuntimeControls,
   patchBotsByBotIdAgentsById,
   postBotsByBotIdAgentsByIdLoginDeviceAuthorize,
   postBotsByBotIdAgentsByIdLoginDeviceCancel,
+  postBotsByBotIdAgentsByIdLoginDeviceCode,
   postBotsByBotIdAgentsByIdLoginDevicePoll,
   putBotsByBotIdAgentsByIdCredential,
   type BotagentsBotAgent,
+  type ExternalagentDeviceLoginAuthorizeResponse,
 } from '@memohai/sdk'
 import AgentCredentialDisconnect from './agent-credential-disconnect.vue'
 import AgentCredentialInput from './agent-credential-input.vue'
-import CodexUsageRows from './codex-usage-rows.vue'
+import AgentQuotaRows from './agent-quota-rows.vue'
+import { agentDependencyRequirement } from './dependency-enable-flow'
 import DeviceLoginPanel from './device-login-panel.vue'
 import { localizeRuntimeControls } from '@/utils/runtime-control-presentation'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
@@ -171,13 +177,11 @@ import {
   DEVICE_LOGINS,
   DIRECT_BOT_AGENT_API_KEY_AUTH_KIND,
   DIRECT_BOT_AGENT_AUTH_MODES,
-  DIRECT_BOT_AGENT_DEPENDENCY_ID,
   isAgentAuthMode,
   isDeviceLoginAuthMode,
   isDirectBotAgentRuntime,
   normalizeBotAgentRuntime,
 } from '@/utils/bot-agent'
-import { externalAgentDisplayName } from '@/utils/external-agent'
 
 interface DirectAgentConfig {
   auth: string
@@ -187,28 +191,25 @@ interface DirectAgentConfig {
   reasoning_effort: string
 }
 
-interface DeviceLogin {
-  login_id: string
-  user_code: string
-  verification_url: string
-}
-
 const props = defineProps<{
   botId: string
   agent: BotagentsBotAgent
 }>()
-const emit = defineEmits<{ authorized: [] }>()
+const emit = defineEmits<{
+  authorized: []
+  missingDependency: []
+}>()
 const { t, te } = useI18n()
-const router = useRouter()
 const queryCache = useQueryCache()
 
 const runtime = computed(() => normalizeBotAgentRuntime(props.agent.runtime))
 const isCodex = computed(() => runtime.value === BOT_AGENT_RUNTIME_CODEX)
 const isClaudeCode = computed(() => runtime.value === BOT_AGENT_RUNTIME_CLAUDE_CODE)
 const config = reactive<DirectAgentConfig>({ auth: '', base_url: '', model: '', reasoning_effort: '', permission_mode: '' })
+const agentEnabled = computed(() => props.agent.enabled !== false)
 const defaultControls = useQuery({
   key: () => ['bot-agent-runtime-controls', props.botId, props.agent.id ?? '', props.agent.metadata?.permission_mode ?? ''],
-  enabled: () => !!props.agent.id,
+  enabled: () => agentEnabled.value && !!props.agent.id,
   query: async ({ signal }) => {
     const { data } = await getBotsByBotIdAgentsByIdRuntimeControls({
       path: { bot_id: props.botId, id: props.agent.id! },
@@ -230,11 +231,36 @@ async function setDefaultPermission(value: unknown) {
 }
 const credentialSecret = ref('')
 const savingCredential = ref(false)
-const credentialConnected = computed(() => !!props.agent.agent_credential_id)
+// An account sign-in (ChatGPT, Claude, Grok) is kept by the runtime in the
+// workspace, so only the runtime can say whether it is signed in.
+const runtimeSignIn = computed(() => isDeviceLoginAuthMode(config.auth))
+const runtimeAccount = useQuery({
+  key: () => ['agent-account', props.botId, props.agent.id ?? ''],
+  enabled: () => agentEnabled.value && runtimeSignIn.value && !!props.agent.id,
+  // Reading it starts the runtime, so only opening the page and signing in or out do.
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+  query: async ({ signal }) => {
+    const { data } = await getBotsByBotIdAgentsByIdAccount({
+      path: { bot_id: props.botId, id: props.agent.id! },
+      signal, throwOnError: true,
+    })
+    return data
+  },
+})
+const credentialConnected = computed(() => runtimeSignIn.value
+  ? agentEnabled.value && !!runtimeAccount.data.value?.signed_in
+  : !!props.agent.agent_credential_id)
+const accountNote = computed(() => {
+  if (!agentEnabled.value) return t('bots.agent.enableToSignIn')
+  if (!runtimeSignIn.value || runtimeAccount.data.value) return undefined
+  if (runtimeAccount.error.value) return resolveApiErrorMessage(runtimeAccount.error.value, t('bots.agent.signInCheckFailed'))
+  return t('bots.agent.checkingSignIn')
+})
 
 const authOptions = computed(() => (isDirectBotAgentRuntime(runtime.value) ? DIRECT_BOT_AGENT_AUTH_MODES[runtime.value] : [])
   .map(value => ({ value, label: t(AGENT_AUTH_MODE_COPY[value].label) })))
-// The auth mode whose account signs in with a device code on this Agent.
+// The auth mode whose account signs in on this Agent.
 const deviceLoginAuth = computed(() => isDeviceLoginAuthMode(config.auth) ? config.auth : undefined)
 
 function readConfig() {
@@ -256,7 +282,12 @@ const baseUrlPlaceholder = computed(() => isCodex.value
   : isClaudeCode.value ? 'https://api.anthropic.com' : '')
 
 async function refreshAgent() {
-  await queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
+  // Usage is not refreshed here: its rows show only while the account is
+  // signed in and read it when they appear.
+  await Promise.all([
+    queryCache.invalidateQueries({ key: ['bot-agents', props.botId] }),
+    queryCache.invalidateQueries({ key: ['agent-account', props.botId, props.agent.id ?? ''] }),
+  ])
   emit('authorized')
 }
 
@@ -300,15 +331,11 @@ async function setAuthMode(value: unknown) {
 async function saveCredential() {
   const secret = credentialSecret.value.trim()
   if (!secret || !isDirectBotAgentRuntime(runtime.value)) return
-  const authKind = config.auth === 'oauth_token'
-    ? 'claude_code_oauth'
-    : DIRECT_BOT_AGENT_API_KEY_AUTH_KIND[runtime.value]
-  const secretKey = config.auth === 'oauth_token' ? 'oauth_token' : 'api_key'
   savingCredential.value = true
   try {
     await putBotsByBotIdAgentsByIdCredential({
       path: { bot_id: props.botId, id: props.agent.id! },
-      body: { auth_kind: authKind, secret: { [secretKey]: secret } },
+      body: { auth_kind: DIRECT_BOT_AGENT_API_KEY_AUTH_KIND[runtime.value], secret: { api_key: secret } },
       throwOnError: true,
     })
     credentialSecret.value = ''
@@ -333,7 +360,7 @@ async function disconnectCredential() {
   }
 }
 
-const deviceLogin = ref<DeviceLogin | null>(null)
+const deviceLogin = ref<ExternalagentDeviceLoginAuthorizeResponse | null>(null)
 const authorizing = ref(false)
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -380,7 +407,7 @@ async function pollDeviceLogin(loginId: string) {
 }
 
 async function startDeviceLogin() {
-  if (authorizing.value || !isDirectBotAgentRuntime(runtime.value)) return
+  if (!agentEnabled.value || authorizing.value || !isDirectBotAgentRuntime(runtime.value)) return
   stopPolling()
   authorizing.value = true
   try {
@@ -388,27 +415,14 @@ async function startDeviceLogin() {
       path: { bot_id: props.botId, id: props.agent.id! },
       throwOnError: true,
     })
-    deviceLogin.value = {
-      login_id: data.login_id,
-      user_code: data.user_code,
-      verification_url: data.verification_url,
-    }
-    void pollDeviceLogin(data.login_id)
+    if (unmounted) return
+    deviceLogin.value = data
+    // A code_required sign-in completes when its code is submitted.
+    if (!data.code_required) void pollDeviceLogin(data.login_id)
   } catch (error) {
-    if (isApiErrorCode(error, 'agent_dependency_missing')) {
-      const dependencyId = DIRECT_BOT_AGENT_DEPENDENCY_ID[runtime.value]
-      toast.error(t('chat.externalAgent.dependencyMissing', { dep_id: externalAgentDisplayName(runtime.value, runtime.value) }), {
-        action: {
-          label: t('chat.externalAgent.dependencyOpen'),
-          onClick: () => {
-            void router.push({
-              name: 'bot-detail',
-              params: { botName: props.botId },
-              query: { tab: 'dependencies', dependency_id: dependencyId },
-            }).catch(() => {})
-          },
-        },
-      })
+    if (!active.value || unmounted) return
+    if (isApiErrorCode(error, 'agent_dependency_missing') && agentDependencyRequirement(props.agent)) {
+      emit('missingDependency')
     } else {
       toast.error(resolveApiErrorMessage(error, t(loginCopy.value.failed)))
     }
@@ -417,9 +431,34 @@ async function startDeviceLogin() {
   }
 }
 
+const submittingCode = ref(false)
+
+// The Agent's runtime ends the sign-in on any answer, so a rejected code
+// closes it too and the user connects again.
+async function submitLoginCode(code: string) {
+  const loginId = deviceLogin.value?.login_id
+  if (!loginId || submittingCode.value) return
+  submittingCode.value = true
+  try {
+    await postBotsByBotIdAgentsByIdLoginDeviceCode({
+      path: { bot_id: props.botId, id: props.agent.id! },
+      body: { login_id: loginId, code },
+      throwOnError: true,
+    })
+    deviceLogin.value = null
+    await refreshAgent()
+    toast.success(t(loginCopy.value.success))
+  } catch (error) {
+    deviceLogin.value = null
+    toast.error(resolveApiErrorMessage(error, t(loginCopy.value.failed)))
+  } finally {
+    submittingCode.value = false
+  }
+}
+
 async function cancelDeviceLogin() {
   const loginId = deviceLogin.value?.login_id
-  if (!loginId || authorizing.value) return
+  if (!loginId || authorizing.value || submittingCode.value) return
   stopPolling()
   deviceLogin.value = null
   try {
@@ -433,5 +472,15 @@ async function cancelDeviceLogin() {
   }
 }
 
-onBeforeUnmount(stopPolling)
+// KeepAlive does not deactivate pending async requests on tab switch; a late
+// rejection must not emit into DependencyEnableFlow and steal focus over another tab.
+const active = ref(true)
+let unmounted = false
+onActivated(() => { active.value = true })
+onDeactivated(() => { active.value = false })
+onBeforeUnmount(() => {
+  unmounted = true
+  active.value = false
+  stopPolling()
+})
 </script>

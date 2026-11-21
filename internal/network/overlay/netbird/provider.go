@@ -3,6 +3,7 @@ package netbird
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	netctl "github.com/felinics/memoh/internal/network"
@@ -13,6 +14,7 @@ type Deps struct {
 	SidecarRuntime sidecar.Runtime
 	Runtime        netctl.RuntimeDescriptor
 	StateRoot      string
+	Logger         *slog.Logger
 }
 
 type Provider struct {
@@ -34,6 +36,7 @@ func (p *Provider) Descriptor() netctl.ProviderDescriptor {
 		Capabilities: netctl.ProviderCapabilities{
 			Mesh:          true,
 			PrivateDNS:    true,
+			EgressProxy:   true,
 			Userspace:     true,
 			KernelTUN:     true,
 			NativeClient:  true,
@@ -65,20 +68,20 @@ func (*Provider) NormalizeConfig(raw map[string]any) (map[string]any, error) {
 func (p *Provider) Status(_ context.Context, cfg netctl.BotOverlayConfig) (netctl.ProviderStatus, error) {
 	if !cfg.Enabled {
 		return netctl.ProviderStatus{
-			State:       netctl.StatusStateNeedsConfig,
+			State:       netctl.OverlayStateNeedsConfig,
 			Title:       "Disabled",
 			Description: "This network provider is disabled.",
 		}, nil
 	}
 	if _, err := p.NormalizeConfig(cfg.Config); err != nil {
 		return netctl.ProviderStatus{
-			State:       netctl.StatusStateNeedsConfig,
+			State:       netctl.OverlayStateNeedsConfig,
 			Title:       "Config Required",
 			Description: err.Error(),
 		}, nil
 	}
 	return netctl.ProviderStatus{
-		State:       netctl.StatusStateReady,
+		State:       netctl.OverlayStateReady,
 		Title:       "Ready",
 		Description: "Provider configuration is valid.",
 	}, nil
@@ -111,7 +114,7 @@ func (p *Provider) BuildDriver(cfg netctl.BotOverlayConfig) (netctl.OverlayDrive
 	}
 	cfg.Config = config
 	if p.deps.Runtime.Capabilities.SidecarWorker {
-		return newNativeDriver(cfg, p.deps.SidecarRuntime, filepath.Join(p.deps.StateRoot, "network")), nil
+		return newNativeDriver(cfg, p.deps.SidecarRuntime, filepath.Join(p.deps.StateRoot, "network"), p.deps.Logger), nil
 	}
 	return unsupportedDriver{kind: p.Kind(), message: "NetBird overlay is not supported by the current runtime backend."}, nil
 }
@@ -134,5 +137,5 @@ func (d unsupportedDriver) Status(context.Context, netctl.AttachmentRequest) (ne
 }
 
 func (d unsupportedDriver) status() netctl.OverlayStatus {
-	return netctl.OverlayStatus{Provider: d.kind, State: "unsupported", Message: d.message}
+	return netctl.OverlayStatus{Provider: d.kind, State: netctl.OverlayStateUnsupported, Message: d.message}
 }

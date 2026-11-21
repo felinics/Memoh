@@ -210,11 +210,11 @@ func assertDiscussEquivalent(t *testing.T, input discussLegacyInput) {
 }
 
 func composeDiscussMessages(rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, summary string) []timeline.ContextMessage {
-	var artifacts []timeline.CompactionArtifact
+	var held timeline.HistoryCheckpoint
 	if strings.TrimSpace(summary) != "" {
-		artifacts = []timeline.CompactionArtifact{{ID: "equivalence-artifact", Summary: summary}}
+		held.Items = []timeline.CheckpointItem{{SummaryID: "equivalence-summary", Summary: summary}}
 	}
-	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
+	composed := timeline.ComposeContextWithCheckpoint(rc, trs, held)
 	if composed == nil {
 		return make([]timeline.ContextMessage, 0)
 	}

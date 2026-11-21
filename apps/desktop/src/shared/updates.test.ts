@@ -60,12 +60,37 @@ describe('desktop update state', () => {
     const downloaded = reduceDesktopUpdateState(available, { type: 'downloaded' })
     expect(downloaded.releaseNotes).toBe('### Fixes\n- something')
 
-    // A later check that finds nothing new clears stale notes.
-    const upToDate = reduceDesktopUpdateState(downloaded, {
+    // A check that finds nothing new clears notes when no download is ready.
+    const upToDate = reduceDesktopUpdateState(available, {
       type: 'not-available',
       latestVersion: '1.3.0',
     })
     expect(upToDate.releaseNotes).toBeNull()
+  })
+
+  it('keeps a ready update stable during same-version rechecks', () => {
+    const downloaded = reduceDesktopUpdateState(createInitialDesktopUpdateState('1.2.3'), {
+      type: 'downloaded',
+      latestVersion: '1.3.0',
+      releaseNotes: '### Fixes',
+    })
+
+    expect(reduceDesktopUpdateState(downloaded, { type: 'checking' })).toBe(downloaded)
+    expect(reduceDesktopUpdateState(downloaded, {
+      type: 'available',
+      latestVersion: '1.3.0',
+      releaseNotes: '### Fixes',
+    })).toBe(downloaded)
+    expect(reduceDesktopUpdateState(downloaded, {
+      type: 'not-available',
+      latestVersion: '1.2.3',
+    })).toBe(downloaded)
+
+    const newer = reduceDesktopUpdateState(downloaded, {
+      type: 'available',
+      latestVersion: '1.4.0',
+    })
+    expect(newer).toMatchObject({ status: 'downloading', latestVersion: '1.4.0', progress: null })
   })
 
   it('normalizes update errors for the renderer', () => {

@@ -41,7 +41,7 @@ export function useLineWebhookPublicBase(isLineWebhook: Readonly<Ref<boolean>>) 
 
   onMounted(() => {
     isPanelActive.value = true
-    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', handleVisibilityChange)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     if (isLineWebhook.value) startPolling()
   })
 
@@ -57,7 +57,7 @@ export function useLineWebhookPublicBase(isLineWebhook: Readonly<Ref<boolean>>) 
 
   onUnmounted(() => {
     isPanelActive.value = false
-    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', handleVisibilityChange)
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
     stopPolling()
   })
 
@@ -96,7 +96,7 @@ export function useLineWebhookPublicBase(isLineWebhook: Readonly<Ref<boolean>>) 
   }
 
   function isDocumentHidden() {
-    return typeof document !== 'undefined' && document.visibilityState === 'hidden'
+    return document.visibilityState === 'hidden'
   }
 
   function handleVisibilityChange() {

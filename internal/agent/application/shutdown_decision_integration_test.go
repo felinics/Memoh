@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -22,18 +23,37 @@ import (
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
-// Exercise real PostgreSQL decisions, Redis expiry, a fresh Manager's reaper,
-// and the application's response commit path. No production provider is used.
-//
-//nolint:contextcheck // Continuation contexts are intentionally owned by the recovered run, not the command deadline.
-func TestPostgresRedisDecisionSurvivesGracefulShutdown(t *testing.T) {
-	redisURL := os.Getenv("MEMOH_TEST_REDIS_URL")
-	if redisURL == "" {
-		if os.Getenv("MEMOH_TEST_DISTRIBUTED_REQUIRED") == "1" {
-			t.Fatal("MEMOH_TEST_REDIS_URL required")
+// Exercise real PostgreSQL decisions, a fresh Manager's reaper, and the
+// application's response commit path on both live backends. Redis recovers the
+// parked run after its lease expires; the memory backend recovers it from the
+// generation the previous process stamped on it. No production provider is used.
+func TestPostgresDecisionSurvivesGracefulShutdown(t *testing.T) {
+	t.Run("memory", func(t *testing.T) {
+		testPostgresDecisionSurvivesGracefulShutdown(t, func(context.Context) sessionruntime.Backend {
+			return sessionruntime.NewMemoryBackend()
+		})
+	})
+	t.Run("redis", func(t *testing.T) {
+		redisURL := os.Getenv("MEMOH_TEST_REDIS_URL")
+		if redisURL == "" {
+			if os.Getenv("MEMOH_TEST_DISTRIBUTED_REQUIRED") == "1" {
+				t.Fatal("MEMOH_TEST_REDIS_URL required")
+			}
+			t.Skip("set MEMOH_TEST_REDIS_URL")
 		}
-		t.Skip("set MEMOH_TEST_REDIS_URL")
-	}
+		prefix := "shutdown-test:" + uuid.NewString()
+		testPostgresDecisionSurvivesGracefulShutdown(t, func(ctx context.Context) sessionruntime.Backend {
+			backend, err := sessionruntime.NewRedisBackend(ctx, sessionruntime.RedisOptions{URL: redisURL, KeyPrefix: prefix, StateTTL: time.Minute})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return backend
+		})
+	})
+}
+
+//nolint:contextcheck // Continuation contexts are intentionally owned by the recovered run, not the command deadline.
+func testPostgresDecisionSurvivesGracefulShutdown(t *testing.T, newBackend func(context.Context) sessionruntime.Backend) {
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	pool := openTurnAdmissionPostgres(t, ctx)
@@ -43,13 +63,8 @@ func TestPostgresRedisDecisionSurvivesGracefulShutdown(t *testing.T) {
 	runs := ledger.NewPostgres(q, pool)
 	inputs := userinput.NewService(nil, store)
 	service := &Service{messageService: messagepkg.NewService(nil, store), queries: store, userInput: inputs, sessionService: sessionpkg.NewService(nil, store, nil)}
-	prefix := "shutdown-test:" + uuid.NewString()
 	newManager := func(owner string) *sessionruntime.Manager {
-		backend, err := sessionruntime.NewRedisBackend(ctx, sessionruntime.RedisOptions{URL: redisURL, KeyPrefix: prefix, StateTTL: time.Minute})
-		if err != nil {
-			t.Fatal(err)
-		}
-		manager := sessionruntime.NewManager(backend, sessionruntime.Options{OwnerID: owner, OwnerLeaseTTL: 600 * time.Millisecond, Ledger: runs, Fence: runtimefence.NewActivator(store)})
+		manager := sessionruntime.NewManager(newBackend(ctx), sessionruntime.Options{OwnerID: owner, OwnerLeaseTTL: 600 * time.Millisecond, Ledger: runs, Fence: runtimefence.NewActivator(store)})
 		manager.SetDecisionStore(service)
 		return manager
 	}
@@ -159,5 +174,55 @@ func TestPostgresRedisDecisionSurvivesGracefulShutdown(t *testing.T) {
 	final, err := runs.Get(ctx, admission.RunID)
 	if err != nil || final.State != ledger.StateCompleted {
 		t.Fatalf("final=%+v err=%v", final, err)
+	}
+}
+
+// A run shutdown cannot hand over ends lost, and what it asked closes with it:
+// its ask_user request and its tool approval, under row-level security.
+func TestPostgresShutdownClosesDecisionsOfLostRun(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	pool := openTurnAdmissionPostgres(t, ctx)
+	botID, sessionID := createTurnAdmissionFixture(t, ctx, pool)
+	q := dbsqlc.New(pool)
+	store := postgresstore.NewQueriesWithPool(pool, q)
+	runs := ledger.NewPostgres(q, pool)
+	inputs := userinput.NewService(nil, store)
+	approvals := toolapproval.NewService(nil, store, nil)
+	service := &Service{queries: store, userInput: inputs, toolApproval: approvals}
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{OwnerID: "owner", Ledger: runs, Fence: runtimefence.NewActivator(store)})
+	manager.SetDecisionStore(service)
+	manager.SetLostRunDecisionCanceller(service.cancelRunDecisions)
+	admission, err := manager.Admit(ctx, sessionruntime.AdmitInput{BotID: botID, SessionID: sessionID, InvocationID: "lost", Payload: []byte(`{}`), Execution: sessionruntime.Execution{Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+		return sessionruntime.RunAdmissionView{}, nil
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerCtx := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID, SessionID: sessionID, Token: admission.Handle.FencingToken})
+	request, err := inputs.CreatePending(ownerCtx, userinput.CreatePendingInput{BotID: botID, SessionID: sessionID, ToolCallID: "ask", ToolName: userinput.ToolNameAskUser, Input: map[string]any{"questions": []any{map[string]any{"text": "Proceed?", "kind": userinput.QuestionKindText}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := approvals.CreatePending(ownerCtx, toolapproval.CreatePendingInput{BotID: botID, SessionID: sessionID, ToolCallID: "exec", ToolName: "exec", ToolInput: map[string]any{"command": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The run is still running, so shutdown has nothing to hand over.
+	if err := manager.InterruptForShutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.Get(ctx, admission.RunID)
+	if err != nil || run.State != ledger.StateLost {
+		t.Fatalf("run=%+v err=%v, want lost", run, err)
+	}
+	closedInput, err := inputs.Get(ctx, request.ID)
+	if err != nil || closedInput.Status != userinput.StatusCanceled {
+		t.Fatalf("user input=%+v err=%v, want canceled", closedInput, err)
+	}
+	closedApproval, err := approvals.Get(ctx, approval.ID)
+	if err != nil || closedApproval.Status != toolapproval.StatusCancelled {
+		t.Fatalf("tool approval=%+v err=%v, want cancelled", closedApproval, err)
 	}
 }

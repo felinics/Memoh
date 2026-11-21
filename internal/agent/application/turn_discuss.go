@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 
@@ -19,8 +20,8 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
-	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
@@ -159,7 +160,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		CurrentPlatform:   cmd.CurrentChannel,
 		ReplyTarget:       cmd.ReplyTarget,
 		ConversationType:  cmd.ConversationType,
-		ChatToken:         cmd.SessionToken,
+		ActorAccountID:    cmd.ActorAccountID,
 	})
 	if err != nil {
 		h.emitErr(err)
@@ -170,7 +171,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		return
 	}
 
-	external := resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType)
+	external := runtimekind.IsExternal(resolved.RuntimeType)
 	if external && !cmd.DiscussAddressed {
 		if h.emit(turn.DiscussEventSkipped, nil) {
 			h.contentLightTerminal = true
@@ -215,11 +216,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if budgetTokens <= 0 {
 		budgetTokens = s.contextAbsoluteMaxTokens()
 	}
-	// Summaries are compacted by the run's budget check like any history; only
-	// input that cannot fit on its own stops the turn here.
+	// What the history checkpoint holds is compacted by the run's budget
+	// check like any history; only input that cannot fit on its own stops the
+	// turn here.
 	unpinned := make([]turn.DiscussMessage, 0, len(cmd.DiscussMessages))
 	for _, message := range cmd.DiscussMessages {
-		if message.CompactionArtifactID == "" {
+		if !message.Pinned {
 			unpinned = append(unpinned, message)
 		}
 	}
@@ -378,7 +380,7 @@ events:
 	// Steps are already history. A failure is written after them before the
 	// terminal event proposes the run's end, after which no row can be written.
 	if committer != nil && !runOwnershipLost(ctx) {
-		s.recordStepRunFailure(terminalCtx, committer, uncommittedText.String(), outcome.failureCode())
+		s.recordStepRunFailure(terminalCtx, committer, uncommittedText.String(), outcome.failureCode(), outcome.failureArgs())
 		if storeErr := committer.finish(terminalCtx); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
 			outcome.setCause(historyErr)
@@ -394,10 +396,12 @@ events:
 	}
 	if committer == nil {
 		var failureCode apperror.Code
+		var failureArgs map[string]string
 		if timedOut {
 			failureCode = snapshotFailureCode(true, outcome.cause)
+			failureArgs = snapshotFailureArgs(true, outcome.cause)
 		}
-		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode); storeErr != nil {
+		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode, failureArgs); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
 			outcome.setCause(historyErr)
 			h.emitErr(historyErr)
@@ -440,6 +444,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	finalMessages json.RawMessage,
 	reasoningTiming []messagepkg.ReasoningTimingSegment,
 	failureCode apperror.Code,
+	failureArgs map[string]string,
 ) error {
 	var sdkMsgs []sdk.Message
 	if len(finalMessages) > 0 && json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
@@ -472,6 +477,13 @@ func (s *Service) persistDiscussTerminalSnapshot(
 			runConfig.ContextLifecycle,
 		)
 	}
+	assistantMetadata := map[string]any{
+		messagepkg.AgentStepInterruptedMetadataKey: true,
+		messagepkg.HistoryErrorCodeMetadataKey:     string(failureCode),
+	}
+	if len(failureArgs) > 0 {
+		assistantMetadata[messagepkg.HistoryErrorArgsMetadataKey] = maps.Clone(failureArgs)
+	}
 	return s.storeRoundWithOptions(ctx, ChatRequest{
 		RunID:                   runConfig.RunID,
 		BotID:                   cmd.BotID,
@@ -486,10 +498,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	}}, modelID, storeRoundOptions{
 		AllowEmptyAssistantText: true,
 		MessageMetadataByIndex: map[int]map[string]any{
-			0: {
-				messagepkg.AgentStepInterruptedMetadataKey: true,
-				messagepkg.HistoryErrorCodeMetadataKey:     string(failureCode),
-			},
+			0: assistantMetadata,
 		},
 		ContextLifecycle: runConfig.ContextLifecycle,
 		ReasoningTiming:  reasoningTiming,
@@ -715,8 +724,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 		CurrentChannel:           cmd.CurrentChannel,
 		ReplyTarget:              cmd.ReplyTarget,
 		ConversationType:         cmd.ConversationType,
-		Token:                    cmd.SessionToken,
-		ChatToken:                cmd.ChatToken,
+		ActorAccountID:           cmd.ActorAccountID,
 		ToolHTTPURL:              cmd.ToolHTTPURL,
 		Query:                    prompt,
 		RawQuery:                 prompt,
@@ -780,7 +788,11 @@ func (s *Service) resolveDiscussRunConfig(ctx context.Context, req RunConfigRequ
 	if s.turnHooks != nil && s.turnHooks.resolveRunConfig != nil {
 		return s.turnHooks.resolveRunConfig(ctx, req)
 	}
-	return s.ResolveRunConfig(ctx, req)
+	resolved, err := s.ResolveRunConfig(ctx, req)
+	if err == nil {
+		resolved.RunConfig = s.prepareRunConfig(ctx, resolved.RunConfig)
+	}
+	return resolved, err
 }
 
 func (s *Service) inlineDiscussImages(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) [][]sdk.ImagePart {
@@ -838,21 +850,7 @@ func (s *Service) storeDiscussRound(
 func discussMessagesToSDK(messages []turn.DiscussMessage) []sdk.Message {
 	result := make([]sdk.Message, 0, len(messages))
 	for _, m := range messages {
-		if len(m.RawContent) > 0 {
-			// RawContent is the stored content shape (arguments object, output
-			// value, nested annotations); the codec types it for the SDK.
-			msg := messageconv.ModelMessageToSDKMessage(turn.ModelMessage{Role: m.Role, Content: m.RawContent})
-			if msg.Role != "" && len(msg.Content) > 0 {
-				result = append(result, msg)
-				continue
-			}
-		}
-		switch m.Role {
-		case "assistant":
-			result = append(result, sdk.AssistantMessage(m.Content))
-		default:
-			result = append(result, sdk.UserMessage(m.Content))
-		}
+		result = append(result, contextview.DiscussMessageToSDK(m.Role, m.Content, m.RawContent))
 	}
 	return result
 }
@@ -866,30 +864,8 @@ func discussMessagesToTimeline(messages []turn.DiscussMessage) []timeline.Contex
 			Content:              message.Content,
 			RawContent:           message.RawContent,
 			CompactionArtifactID: message.CompactionArtifactID,
+			Pinned:               message.Pinned,
 		}
 	}
 	return result
-}
-
-// injectImagePartsIntoLastUserMessage appends ImageParts to the last user
-// message in msgs so the model receives inline vision input.
-func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePart) {
-	if len(parts) == 0 {
-		return
-	}
-	extra := make([]sdk.MessagePart, 0, len(parts))
-	for _, p := range parts {
-		if strings.TrimSpace(p.Image) != "" {
-			extra = append(extra, p)
-		}
-	}
-	if len(extra) == 0 {
-		return
-	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == sdk.MessageRoleUser {
-			msgs[i].Content = append(msgs[i].Content, extra...)
-			return
-		}
-	}
 }

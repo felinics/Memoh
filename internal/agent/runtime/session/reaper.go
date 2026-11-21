@@ -43,7 +43,7 @@ type Reaper struct {
 	terminalObserver       func(context.Context, TerminalRun)
 	terminalLiveReconciler func(context.Context, TerminalRun) error
 	terminalReconciler     func(context.Context) error
-	cancelLostRunDecisions func(context.Context, string, string, string, int64, string) error
+	cancelDecisions        func(context.Context, TerminalRun)
 
 	// generation is the liveness incarnation last observed. Runs stamped with
 	// anything else were claimed by a backend that no longer exists.
@@ -63,14 +63,14 @@ type Reaper struct {
 	done      chan struct{}
 }
 
-// SetLostRunDecisionCanceller installs the application-owned cleanup for
-// decisions created by a run that is durably marked lost. It is deliberately
-// run-scoped: canceling a whole session could expire a newer run's prompt.
-func (r *Reaper) SetLostRunDecisionCanceller(canceller func(context.Context, string, string, string, int64, string) error) {
+// SetUnfinalizedDecisionCanceller installs the cleanup for decisions a reaped
+// run left pending. It is deliberately run-scoped: canceling a whole session
+// could expire a newer run's prompt.
+func (r *Reaper) SetUnfinalizedDecisionCanceller(canceller func(context.Context, TerminalRun)) {
 	if r == nil || canceller == nil {
 		return
 	}
-	r.cancelLostRunDecisions = canceller
+	r.cancelDecisions = canceller
 }
 
 // SetWaitingDecisionRecoverer installs the owner-local half of parked-run
@@ -177,6 +177,9 @@ func (r *Reaper) loop(ctx context.Context) {
 	defer close(r.done)
 	ticker := time.NewTicker(r.tuning.reaperTick)
 	defer ticker.Stop()
+	// The first pass runs at once: what a previous incarnation left behind,
+	// such as a question parked across a restart, should not wait a tick.
+	r.tick(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -280,7 +283,14 @@ func (r *Reaper) reapExpiredLeases(ctx context.Context) error {
 // from, by design. What survives is the admission and whatever history already
 // reached bot_history_messages, so the honest durable outcome is `lost` rather
 // than a pretence of recovery. A new submission starts a new run under the new
-// generation; nothing is re-reserved.
+// generation.
+//
+// A native parked decision is the exception: nothing of it lived in the old
+// backend. Its tool call and request are durable and its continuation is
+// rebuilt from the database, so it is re-reserved under this generation
+// exactly as an expired lease is. On a memory backend this is the only way a
+// parked run is found again after a restart: there is no lease index, and the
+// generation stamped on the run is the pointer.
 //
 // The sweep is bounded and batched because the number of stranded rows is
 // proportional to traffic during the outage: one unbounded scan would turn
@@ -308,6 +318,18 @@ func (r *Reaper) recoverLostBackendGeneration(ctx context.Context) error {
 			break
 		}
 		for _, run := range runs {
+			if run.State == ledger.StateWaitingDecision && r.recoverWaitingDecision != nil {
+				recovered, err := r.recoverWaitingDecision(ctx, LeaseCandidate{
+					Key: Key{BotID: run.BotID, SessionID: run.SessionID}, RunID: run.RunID, FencingToken: run.FencingToken,
+				})
+				if err != nil {
+					errs = append(errs, fmt.Errorf("recover waiting-decision runtime run: %w", err))
+					continue
+				}
+				if recovered {
+					continue
+				}
+			}
 			if _, err := r.markLost(ctx, run.RunID, run.FencingToken, runErrorBackendLost, ""); err != nil {
 				errs = append(errs, err)
 			}
@@ -451,19 +473,11 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 			return false, nil
 		}
 	}
-	if r.cancelLostRunDecisions != nil && run.BotID != "" && run.SessionID != "" {
-		cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		cancelErr := r.cancelLostRunDecisions(cancelCtx, run.BotID, run.SessionID, run.RunID, run.FencingToken, errorCode)
-		cancel()
-		if cancelErr != nil {
-			// The run transition is authoritative and must not be rolled back.
-			// A later terminal reconciliation/reaper pass can retry decision
-			// cleanup without changing the lost outcome.
-			r.logger.WarnContext(ctx, "cancel lost run decisions failed", slog.String("run_id", run.RunID), slog.Any("error", cancelErr))
-		}
-	}
 	terminal := terminalRunFromLedger(run)
 	terminal.Applied = applied
+	if r.cancelDecisions != nil {
+		r.cancelDecisions(ctx, terminal)
+	}
 	var reconcileErr error
 	if r.terminalLiveReconciler != nil {
 		reconcileErr = r.terminalLiveReconciler(context.WithoutCancel(ctx), terminal)

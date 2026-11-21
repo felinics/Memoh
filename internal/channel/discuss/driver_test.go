@@ -103,8 +103,7 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 			CurrentPlatform:   "telegram",
 			ReplyTarget:       "chat-1",
 			ConversationType:  "group",
-			SessionToken:      "Bearer owner-token",
-			ChatToken:         "chat-token",
+			ActorAccountID:    "bot-owner",
 			ToolHTTPURL:       "http://example.test/bots/bot-1/tools",
 		},
 	}
@@ -115,8 +114,8 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 		t.Fatalf("StartTurn calls = %d, want 1", svc.calls)
 	}
 	cmd := svc.lastCmd
-	if cmd.SessionToken != "Bearer owner-token" || cmd.ChatToken != "chat-token" || cmd.ToolHTTPURL != "http://example.test/bots/bot-1/tools" {
-		t.Fatalf("credentials not passed: %+v", cmd)
+	if cmd.ActorAccountID != "bot-owner" || cmd.ToolHTTPURL != "http://example.test/bots/bot-1/tools" {
+		t.Fatalf("actor or tools URL not passed: %+v", cmd)
 	}
 	if cmd.RouteID != "route-1" || cmd.SourceChannelIdentityID != "acct-1" {
 		t.Fatalf("routing not passed: %+v", cmd)
@@ -134,26 +133,22 @@ func TestNotifyRCRefreshesExistingDiscussSessionConfig(t *testing.T) {
 	defer driver.StopSession("sess-1")
 
 	driver.NotifyRC(context.Background(), "sess-1", timeline.RenderedContext{}, DiscussSessionConfig{
-		BotID:        "bot-1",
-		ThreadID:     "sess-1",
-		RouteID:      "route-old",
-		ChatToken:    "chat-token-old",
-		SessionToken: "session-token-old",
-		ToolHTTPURL:  "http://old.example/tools",
+		BotID:       "bot-1",
+		ThreadID:    "sess-1",
+		RouteID:     "route-old",
+		ToolHTTPURL: "http://old.example/tools",
 	})
 	driver.NotifyRC(context.Background(), "sess-1", timeline.RenderedContext{}, DiscussSessionConfig{
-		BotID:        "bot-1",
-		ThreadID:     "sess-1",
-		RouteID:      "route-new",
-		ChatToken:    "chat-token-new",
-		SessionToken: "session-token-new",
-		ToolHTTPURL:  "http://new.example/tools",
+		BotID:       "bot-1",
+		ThreadID:    "sess-1",
+		RouteID:     "route-new",
+		ToolHTTPURL: "http://new.example/tools",
 	})
 
 	driver.mu.Lock()
 	got := driver.sessions["sess-1"].config
 	driver.mu.Unlock()
-	if got.RouteID != "route-new" || got.ChatToken != "chat-token-new" || got.SessionToken != "session-token-new" || got.ToolHTTPURL != "http://new.example/tools" {
+	if got.RouteID != "route-new" || got.ToolHTTPURL != "http://new.example/tools" {
 		t.Fatalf("config = %#v, want latest NotifyRC config", got)
 	}
 }

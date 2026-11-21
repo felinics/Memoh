@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/bots"
+	ctr "github.com/felinics/memoh/internal/container"
 	"github.com/felinics/memoh/internal/workdir"
 	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 var ErrExternalAgentWorkspaceTargetUnsupported = errors.New("workspace_target_id is not supported for external agent sessions")
@@ -73,7 +76,7 @@ func (s *Service) prepareWorkspaceRequest(ctx context.Context, req ChatRequest) 
 		}
 		return ctx, req, nil
 	}
-	resolved, err := s.workspaceTargets.ResolveWorkspaceTarget(ctx, req.BotID, requestedTargetID)
+	resolved, err := s.resolveStartupWorkspace(ctx, req.BotID, requestedTargetID, req.ShutdownResume)
 	if err != nil {
 		return ctx, req, err
 	}
@@ -121,4 +124,25 @@ func rejectExternalAgentWorkspaceTarget(req ChatRequest) error {
 		return nil
 	}
 	return ErrExternalAgentWorkspaceTargetUnsupported
+}
+
+// A readiness probe can succeed just before the workspace transport rolls.
+// Retry only target/config lookup, before any model or tool executes.
+func (s *Service) resolveStartupWorkspace(ctx context.Context, botID, targetID string, resume bool) (workspace.ResolvedWorkspaceTarget, error) {
+	until := time.Now().Add(30 * time.Second)
+	for {
+		if err := ctx.Err(); err != nil {
+			return workspace.ResolvedWorkspaceTarget{}, err
+		}
+		target, err := s.workspaceTargets.ResolveWorkspaceTarget(ctx, botID, targetID)
+		unavailable := errors.Is(err, bridge.ErrUnavailable) || errors.Is(err, ctr.ErrUnavailable)
+		if err == nil || !resume || !unavailable || !time.Now().Before(until) {
+			return target, err
+		}
+		select {
+		case <-ctx.Done():
+			return workspace.ResolvedWorkspaceTarget{}, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }

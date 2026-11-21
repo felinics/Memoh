@@ -22,6 +22,9 @@ func TestLoadMemoryContextMessage_NoProvider(t *testing.T) {
 		Query:  "hello",
 		BotID:  "bot-1",
 		ChatID: "chat-1",
+	}, func() memoryQuery {
+		t.Fatal("a bot without a memory provider must not build a memory query")
+		return memoryQuery{}
 	})
 	if got.Message != nil || got.Trace != nil {
 		t.Fatalf("expected empty memory load when no memory provider is configured: %#v", got)
@@ -38,7 +41,7 @@ func TestLoadMemoryContextMessageSkipsEmptyQuery(t *testing.T) {
 		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
 		logger:          slog.New(slog.DiscardHandler),
 	}
-	got := resolver.loadMemoryContext(context.Background(), ChatRequest{
+	got := loadMemoryFor(resolver, ChatRequest{
 		Query:      "",
 		ModelQuery: "The user activated the following skill for this turn without an additional prompt: alpha.",
 		BotID:      storeRoundBotID,
@@ -82,13 +85,13 @@ func TestLoadMemoryContextMessageUsesStaleCacheOnTimeout(t *testing.T) {
 		ChatID: "chat-1",
 	}
 
-	first := resolver.loadMemoryContext(context.Background(), req)
+	first := loadMemoryFor(resolver, req)
 	if first.Message == nil || !strings.Contains(first.Message.TextContent(), "cached memory") {
 		t.Fatalf("expected first memory context, got %#v", first)
 	}
 	assertMemoryTrace(t, first.Trace, "miss", "graph", "", "", 2, []string{"memory-1", "memory-2"}, len(provider.result.ContextText))
 
-	fresh := resolver.loadMemoryContext(context.Background(), req)
+	fresh := loadMemoryFor(resolver, req)
 	if fresh.Message == nil || !strings.Contains(fresh.Message.TextContent(), "cached memory") {
 		t.Fatalf("expected fresh cached memory context, got %#v", fresh)
 	}
@@ -99,7 +102,7 @@ func TestLoadMemoryContextMessageUsesStaleCacheOnTimeout(t *testing.T) {
 
 	now = now.Add(2 * time.Millisecond)
 	provider.waitForContext = true
-	second := resolver.loadMemoryContext(context.Background(), req)
+	second := loadMemoryFor(resolver, req)
 	if second.Message == nil || !strings.Contains(second.Message.TextContent(), "cached memory") {
 		t.Fatalf("expected stale memory context after timeout, got %#v", second)
 	}
@@ -109,7 +112,7 @@ func TestLoadMemoryContextMessageUsesStaleCacheOnTimeout(t *testing.T) {
 	}
 
 	now = now.Add(2 * time.Minute)
-	third := resolver.loadMemoryContext(context.Background(), req)
+	third := loadMemoryFor(resolver, req)
 	if third.Message != nil {
 		t.Fatalf("expired stale cache materialized context: %#v", third)
 	}
@@ -133,7 +136,7 @@ func TestLoadMemoryContextMessageClassifiesCacheFilledDuringProviderWait(t *test
 	req := ChatRequest{Query: "tea", BotID: storeRoundBotID, ChatID: "chat-1"}
 	result := make(chan memoryContextLoad, 1)
 	go func() {
-		result <- resolver.loadMemoryContext(context.Background(), req)
+		result <- loadMemoryFor(resolver, req)
 	}()
 
 	select {
@@ -180,14 +183,14 @@ func TestLoadMemoryContextMessageInvalidatesCacheWhenMemoryVersionChanges(t *tes
 	}
 	req := ChatRequest{Query: "tea", BotID: storeRoundBotID, ChatID: "chat-1"}
 
-	first := resolver.loadMemoryContext(context.Background(), req)
+	first := loadMemoryFor(resolver, req)
 	if first.Message == nil || first.Message.TextContent() != "memory v1" {
 		t.Fatalf("first memory context = %#v, want v1", first)
 	}
 	assertMemoryTrace(t, first.Trace, "miss", "", "", "v1", 0, nil, len("memory v1"))
 	provider.version = "v2"
 	provider.result = &memprovider.BeforeChatResult{ContextText: "memory v2"}
-	second := resolver.loadMemoryContext(context.Background(), req)
+	second := loadMemoryFor(resolver, req)
 	if second.Message == nil || second.Message.TextContent() != "memory v2" {
 		t.Fatalf("second memory context = %#v, want v2", second)
 	}
@@ -209,7 +212,7 @@ func TestLoadMemoryContextTracesEmptyResult(t *testing.T) {
 		logger:          slog.New(slog.DiscardHandler),
 	}
 
-	got := resolver.loadMemoryContext(context.Background(), ChatRequest{
+	got := loadMemoryFor(resolver, ChatRequest{
 		Query: "tea", BotID: storeRoundBotID, ChatID: "chat-1",
 	})
 	if got.Message != nil {
@@ -293,4 +296,9 @@ func assertMemoryTrace(t *testing.T, trace *contextfrag.MemoryRecallTrace, cache
 	if trace.Result.Count != count || trace.Result.ContextBytes != contextBytes || !slices.Equal(trace.Result.Refs, refs) {
 		t.Fatalf("result trace = %#v, want count=%d refs=%#v bytes=%d", trace.Result, count, refs, contextBytes)
 	}
+}
+
+// loadMemoryFor recalls memory for req with the query built from req alone.
+func loadMemoryFor(s *Service, req ChatRequest) memoryContextLoad {
+	return s.loadMemoryContext(context.Background(), req, func() memoryQuery { return defaultMemoryQueryBuilder().Build(req, nil) })
 }

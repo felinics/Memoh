@@ -57,7 +57,7 @@
       </div>
 
       <div
-        v-else-if="items.length > 0"
+        v-else-if="filteredItems.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
@@ -99,6 +99,12 @@
           {{ $t('mcp.addNew') }}
         </button>
       </div>
+
+      <SettingsSection v-else-if="items.length > 0">
+        <Empty class="py-16">
+          <EmptyTitle>{{ $t('common.noData') }}</EmptyTitle>
+        </Empty>
+      </SettingsSection>
 
       <SettingsSection v-else>
         <Empty class="py-16">
@@ -266,7 +272,7 @@ import type { McpImportRequest, McpToolDescriptor } from '@memohai/sdk'
 import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import McpServerDetail from './mcp-server-detail.vue'
 import type { McpItem } from './mcp-types'
-import MonacoEditor from '@/components/monaco-editor/index.vue'
+import { LazyMonacoEditor as MonacoEditor } from '@/components/monaco-editor/lazy'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -295,10 +301,14 @@ const importError = ref('')
 
 const showSearch = computed(() => items.value.length > 0)
 
+const orderedItems = computed(() =>
+  [...items.value].sort((a, b) => Number(Boolean(b.is_active)) - Number(Boolean(a.is_active))),
+)
+
 const filteredItems = computed(() => {
   const kw = searchText.value.trim().toLowerCase()
-  if (!kw) return items.value
-  return items.value.filter(i => (i.name || '').toLowerCase().includes(kw))
+  if (!kw) return orderedItems.value
+  return orderedItems.value.filter(i => (i.name || '').toLowerCase().includes(kw))
 })
 
 const selectedServer = computed(() => items.value.find(i => i.id === selectedId.value) ?? null)

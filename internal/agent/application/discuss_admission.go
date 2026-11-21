@@ -22,7 +22,7 @@ type discussAdmission struct {
 	ProtectedSources []turn.ContextMessageSource
 	ProtectedTokens  int
 	OmittedSources   []turn.ContextMessageSource
-	// ProtectedOverflow is set when artifact summaries plus the newest
+	// ProtectedOverflow is set when the pinned messages plus the newest
 	// message alone exceed the budget, or when the newest message is a tool
 	// response that cannot open a valid window; the turn must fail closed
 	// with a stable error instead of calling the provider (CM-ADM-002).
@@ -54,7 +54,7 @@ func admitDiscussAgentContext(messages []turn.DiscussMessage, budgetTokens, cont
 		if content := strings.TrimSpace(message.Content); content != "" {
 			cost = len(role) + len(content) + len("[]\n\n\n")
 		}
-		entries[i] = turn.AdmissionEntry{Source: message.Source, Cost: cost, Pinned: message.CompactionArtifactID != "", ToolResponse: strings.EqualFold(role, "tool")}
+		entries[i] = turn.AdmissionEntry{Source: message.Source, Cost: cost, Pinned: message.Pinned, ToolResponse: strings.EqualFold(role, "tool")}
 		total += cost
 	}
 	admission := discussAdmission{BudgetTokens: budgetTokens, EstimatedTokens: turn.EstimateTokensFromBytes(total) + imageTokens}
@@ -83,9 +83,9 @@ func admitDiscussAgentContext(messages []turn.DiscussMessage, budgetTokens, cont
 
 // admitDiscussMessages trims a composed discuss context to the token budget
 // before SDK conversion by delegating to the shared turn admission core.
-// Artifact-summary messages and the newest message are protected; older raw
-// messages are dropped as a contiguous prefix, never leaving an orphaned
-// tool response at the window start. The input slice is not modified; the
+// Pinned messages and the newest message are protected; older raw messages
+// are dropped as a contiguous prefix, never leaving an orphaned tool
+// response at the window start. The input slice is not modified; the
 // returned slice shares its backing payloads.
 func admitDiscussMessages(messages []turn.DiscussMessage, budgetTokens int) ([]turn.DiscussMessage, discussAdmission) {
 	admission := discussAdmission{BudgetTokens: budgetTokens, RecoveryBudgetTokens: budgetTokens}
@@ -97,7 +97,7 @@ func admitDiscussMessages(messages []turn.DiscussMessage, budgetTokens int) ([]t
 		entries[i] = turn.AdmissionEntry{
 			Cost:         discussMessageTokens(messages[i]),
 			Source:       messages[i].Source,
-			Pinned:       messages[i].CompactionArtifactID != "",
+			Pinned:       messages[i].Pinned,
 			ToolResponse: strings.EqualFold(strings.TrimSpace(messages[i].Role), "tool"),
 		}
 	}

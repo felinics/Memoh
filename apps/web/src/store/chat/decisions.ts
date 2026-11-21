@@ -22,6 +22,7 @@ interface PendingDecision {
   runId: string
   rollback: () => void
   optimistic: () => void
+  expire: () => void
 }
 
 interface PendingAbort {
@@ -43,6 +44,10 @@ export interface ChatDecisionDeps {
   resolveErrorMessage: (error: unknown, fallback: string) => string
   showError: (message: string) => void
 }
+
+// The server returns these when the decision no longer accepts an answer: it
+// was answered under another control, was closed, or its run ended.
+const closedDecisionCodes = new Set(['tool_approval.expired', 'user_input.expired'])
 
 function pendingKey(kind: DecisionKind, decisionId: string) {
   return `${kind}\u0000${decisionId}`
@@ -94,14 +99,17 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
       && pending.sessionId === event.session_id.trim()
       && pending.runId === event.run_id.trim()
     if (!matches) return false
-    if (!event.applied && event.code) {
-      finish(pending.controlId, true)
+    if (!event.applied) {
+      // An unapplied response never keeps its optimistic answer. A closed
+      // decision stops offering one until the transcript reloads its
+      // authoritative state; any other failure restores the request.
+      const closed = closedDecisionCodes.has(event.code ?? '')
+      finish(pending.controlId, !closed)
+      if (closed) pending.expire()
       deps.showError(deps.resolveErrorMessage(
         { code: event.code },
         'The response was not applied.',
       ))
-    } else if (!event.applied) {
-      finish(pending.controlId, false)
     }
     return true
   }
@@ -186,6 +194,7 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
         decisionId,
         decision === 'approve' ? 'approved' : 'rejected',
       ),
+      expire: () => transcript.markToolApprovalDecision(decisionId, 'expired'),
     })) return false
 
     transcript.markToolApprovalDecision(
@@ -244,6 +253,7 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
         payload.canceled ? 'canceled' : 'submitted',
         payload.answers,
       ),
+      expire: () => transcript.markUserInputDecision(decisionId, 'expired'),
     })) return
 
     transcript.markUserInputDecision(

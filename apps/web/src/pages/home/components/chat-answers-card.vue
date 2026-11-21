@@ -43,8 +43,9 @@ import { structuredToolResult } from '@/store/chat-list.normalize'
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
 
-// Both the canonical user-input projection and the legacy tool result use this
-// display-safe shape, so the card never touches the raw input JSON (#868).
+// Answered turns render from the canonical user-input projection or structured
+// tool result; legacyQuestions(props.block.input) remains only for terminal or
+// unanswered historical `ask_user` rows recorded before UIUserInput projection.
 type ResultAnswer = {
   question?: string
   selected?: { label?: string, label_key?: string }[]

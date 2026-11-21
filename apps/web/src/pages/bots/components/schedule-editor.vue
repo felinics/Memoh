@@ -72,7 +72,7 @@
                    both 15 characters and clipped inside 144px. Fixed rather
                    than auto so the row does not resize as the mode changes. -->
               <SelectTrigger class="w-44 shrink-0">
-                <SelectValue />
+                <SelectValue>{{ currentModeLabel }}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem
@@ -213,6 +213,72 @@
       />
     </SectionGroup>
 
+    <!-- When a run tells its owner: in Memoh (only when the bot asks, or after
+         every run), and whether it may also reach them on the bot's platforms. -->
+    <SettingsSection :title="t('bots.schedule.notify.title')">
+      <SettingsRow
+        :label="t('bots.schedule.notify.inApp')"
+        :description="notifyForm.policy === 'every_run' ? t('bots.schedule.notify.everyRunHelp') : t('bots.schedule.notify.importantHelp')"
+        stack="sm"
+      >
+        <div class="w-full sm:w-56">
+          <Select v-model="notifyForm.policy">
+            <SelectTrigger
+              class="w-full"
+              :aria-label="t('bots.schedule.notify.inApp')"
+            >
+              <SelectValue>{{ notifyForm.policy === 'every_run' ? t('bots.schedule.notify.everyRun') : t('bots.schedule.notify.important') }}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="important">
+                {{ t('bots.schedule.notify.important') }}
+              </SelectItem>
+              <SelectItem value="every_run">
+                {{ t('bots.schedule.notify.everyRun') }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </SettingsRow>
+      <SettingsRow stack="sm">
+        <!-- Own body: the platforms this bot is on, and the way to set them up,
+             ride under the label. -->
+        <template #content>
+          <div class="text-control font-medium text-foreground">
+            {{ t('bots.schedule.notify.contact') }}
+          </div>
+          <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-body text-muted-foreground">
+            <span
+              v-for="platform in configuredPlatforms"
+              :key="platform.type"
+              class="inline-flex items-center gap-1.5"
+            >
+              <ChannelIcon
+                :channel="platform.type"
+                size="0.875rem"
+              />
+              {{ platform.name }}
+            </span>
+            <span v-if="platformsLoaded && !configuredPlatforms.length">
+              {{ t('bots.schedule.notify.noPlatforms') }}
+            </span>
+            <TextButton
+              type="button"
+              @click="openPlatforms"
+            >
+              {{ t('bots.schedule.notify.configurePlatforms') }}
+              <ChevronRight class="size-3.5" />
+            </TextButton>
+          </div>
+        </template>
+        <Switch
+          :model-value="notifyForm.contactViaChannels"
+          :aria-label="t('bots.schedule.notify.contact')"
+          @update:model-value="(v: boolean) => notifyForm.contactViaChannels = !!v"
+        />
+      </SettingsRow>
+    </SettingsSection>
+
     <!-- Execution parameters used to hide behind a "More options" disclosure.
          A card that collapses to an empty bordered strip reads as broken, and
          these are three rows, not a thicket — they sit open like every other
@@ -312,12 +378,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
-import { Trash2 } from 'lucide-vue-next'
+import { ChevronRight, Trash2 } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
 import {
   Button,
   DialogFooter,
@@ -333,16 +400,20 @@ import {
   SettingsSection,
   Switch,
   Textarea,
+  TextButton,
   TimeInput,
 } from '@felinic/ui'
 import {
-  getBotsByBotIdSettings,
   postBotsByBotIdSchedule,
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
 import type { ScheduleCreateRequest, ScheduleSchedule, ScheduleUpdateRequest } from '@memohai/sdk'
 import ScheduleExecutionFields, { type ScheduleExecutionForm } from './schedule-execution-fields.vue'
+import ChannelIcon from '@/components/channel-icon/index.vue'
+import { useBotChannels } from '@/composables/api/useBotChannels'
+import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useBotEffectiveTimezone } from '@/composables/api/useBotTimezone'
 import { isAgentRuntimeType } from '@/store/chat-list.utils'
 import {
   describeCron,
@@ -388,6 +459,11 @@ const SCHEDULE_MODES: { value: ScheduleMode; labelKey: string }[] = [
   { value: 'advanced', labelKey: 'bots.schedule.mode.advanced' },
 ]
 
+const currentModeLabel = computed(() => {
+  const found = SCHEDULE_MODES.find(item => item.value === patternState.value.mode)
+  return found ? t(found.labelKey) : ''
+})
+
 interface SchedulePlainForm {
   name: string
   description: string
@@ -403,6 +479,21 @@ const form = reactive<SchedulePlainForm>({
   maxCalls: null,
   enabled: true,
 })
+type NotifyPolicy = 'important' | 'every_run'
+/** Both default to the quiet, keep-in-touch setting the server also defaults to. */
+const notifyForm = reactive({ policy: 'important' as NotifyPolicy, contactViaChannels: true })
+const router = useRouter()
+const { data: botChannels } = useBotChannels(() => props.botId)
+const platformsLoaded = computed(() => botChannels.value !== undefined)
+const configuredPlatforms = computed(() => (botChannels.value ?? [])
+  .filter(channel => channel.configured)
+  .map(channel => ({ type: channel.meta.type ?? '', name: channelTypeDisplayName(t, channel.meta.type, channel.meta.display_name) })))
+
+/** The bot's Platforms tab; the dialog closes so the page it opens is not hidden behind it. */
+function openPlatforms() {
+  emit('cancel')
+  void router.push({ name: 'bot-detail', params: { botName: props.botId }, query: { tab: 'channels' } })
+}
 const patternState = ref<ScheduleFormState>(defaultScheduleFormState())
 const execution = reactive<ScheduleExecutionForm>(defaultExecutionForm())
 const executionFields = ref<InstanceType<typeof ScheduleExecutionFields> | null>(null)
@@ -410,15 +501,12 @@ const manualCron = computed(() => toCron(patternState.value))
 const submitted = ref(false)
 const isSaving = ref(false)
 const submitError = ref<string | null>(null)
-const botTimezone = ref<string | undefined>(undefined)
 
 const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
 
-const effectiveTimezone = computed(() => {
-  const tz = botTimezone.value?.trim()
-  if (tz) return tz
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
-})
+// The pattern runs in the bot's effective timezone; the preview names it so a
+// viewer in another zone reads the times correctly.
+const { timezone: effectiveTimezone } = useBotEffectiveTimezone(() => props.botId)
 
 function patchState(patch: Partial<ScheduleFormState>) {
   patternState.value = { ...patternState.value, ...patch }
@@ -535,6 +623,8 @@ function resetForm() {
   form.command = ''
   form.maxCalls = null
   form.enabled = true
+  notifyForm.policy = 'important'
+  notifyForm.contactViaChannels = true
   patternState.value = defaultScheduleFormState()
   Object.assign(execution, defaultExecutionForm())
   submitError.value = null
@@ -549,6 +639,8 @@ function hydrateForm(schedule: ScheduleSchedule) {
   const raw = schedule.max_calls as unknown
   form.maxCalls = (typeof raw === 'number' && raw > 0) ? raw : null
   form.enabled = schedule.enabled ?? true
+  notifyForm.policy = schedule.notify_policy === 'every_run' ? 'every_run' : 'important'
+  notifyForm.contactViaChannels = schedule.contact_via_channels ?? true
   patternState.value = fromCron(schedule.pattern ?? '')
   hydrateExecution(schedule)
   submitError.value = null
@@ -560,17 +652,6 @@ function hydrateFromProps() {
     hydrateForm(props.schedule)
   } else {
     resetForm()
-  }
-}
-
-async function fetchBotSettings() {
-  if (!props.botId) return
-  try {
-    const { data } = await getBotsByBotIdSettings({ path: { bot_id: props.botId }, throwOnError: true })
-    const tz = (data as { timezone?: string } | undefined)?.timezone
-    botTimezone.value = tz?.trim() || undefined
-  } catch {
-    botTimezone.value = undefined
   }
 }
 
@@ -588,6 +669,8 @@ async function handleSubmit() {
       pattern: manualCron.value.trim(),
       enabled: form.enabled,
       max_calls: form.maxCalls ?? null,
+      notify_policy: notifyForm.policy,
+      contact_via_channels: notifyForm.contactViaChannels,
     }
     if (props.mode === 'create') {
       // Create carries the execution block flat; update sends it as one
@@ -613,8 +696,4 @@ watch(
   () => hydrateFromProps(),
   { immediate: true },
 )
-
-onMounted(() => {
-  void fetchBotSettings()
-})
 </script>

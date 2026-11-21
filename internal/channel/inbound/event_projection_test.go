@@ -38,7 +38,7 @@ func TestPersistAndProjectEventProjectsStampedCursor(t *testing.T) {
 	pipeline := timeline.NewPipeline(timeline.RenderParams{})
 	store := stampingEventStore{cursor: 4242, id: "event-1"}
 
-	id, rc := persistAndProjectEvent(context.Background(), store, pipeline, nil, "bot-1", "s1", inboundTestEvent())
+	id, rc := persistAndProjectEvent(context.Background(), store, pipeline.PushEvent, nil, "bot-1", "s1", inboundTestEvent())
 
 	if id != "event-1" {
 		t.Fatalf("event id = %q, want event-1", id)
@@ -52,7 +52,7 @@ func TestPersistAndProjectEventProjectsStampedCursorOnPersistFailure(t *testing.
 	pipeline := timeline.NewPipeline(timeline.RenderParams{})
 	store := stampingEventStore{cursor: 4243, err: errors.New("insert unavailable"), id: "ignored"}
 
-	id, rc := persistAndProjectEvent(context.Background(), store, pipeline, nil, "bot-1", "s1", inboundTestEvent())
+	id, rc := persistAndProjectEvent(context.Background(), store, pipeline.PushEvent, nil, "bot-1", "s1", inboundTestEvent())
 
 	if id != "" {
 		t.Fatalf("failed persist must not report an event id, got %q", id)
@@ -65,7 +65,7 @@ func TestPersistAndProjectEventProjectsStampedCursorOnPersistFailure(t *testing.
 func TestPersistAndProjectEventWithoutStore(t *testing.T) {
 	pipeline := timeline.NewPipeline(timeline.RenderParams{})
 
-	id, rc := persistAndProjectEvent(context.Background(), nil, pipeline, nil, "bot-1", "s1", inboundTestEvent())
+	id, rc := persistAndProjectEvent(context.Background(), nil, pipeline.PushEvent, nil, "bot-1", "s1", inboundTestEvent())
 
 	if id != "" || len(rc) != 1 || rc[0].LastEventCursor != 0 {
 		t.Fatalf("storeless projection must still render the event, got id=%q rc=%+v", id, rc)

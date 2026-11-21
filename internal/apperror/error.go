@@ -110,7 +110,6 @@ const (
 	CodeACPAccessForbidden                       Code = "acp.access_forbidden"
 	CodeACPRuntimeNotFound                       Code = "acp.runtime_not_found"
 	CodeACPRuntimeConflict                       Code = "acp.runtime_conflict"
-	CodeACPRuntimeLimitReached                   Code = "acp.runtime_limit_reached"
 	CodeACPOperationFailed                       Code = "acp.operation_failed"
 	CodeACPCommandNotFound                       Code = "acp.command_not_found"
 	CodeExternalAgentTurnReplacementUnsupported  Code = "external_agent.turn_replacement_unsupported"
@@ -151,6 +150,7 @@ const (
 	CodeExternalRuntimeOverloaded                Code = "external_runtime.overloaded"
 	CodeExternalRuntimeUpstreamUnreachable       Code = "external_runtime.upstream_unreachable"
 	CodeExternalRuntimeRequestBlocked            Code = "external_runtime.request_blocked"
+	CodeExternalRuntimeReported                  Code = "external_runtime.reported"
 	CodeToolApprovalForbidden                    Code = "tool_approval.forbidden"
 	CodeToolApprovalNotFound                     Code = "tool_approval.not_found"
 	CodeToolApprovalExpired                      Code = "tool_approval.expired"
@@ -227,7 +227,6 @@ const (
 	CodeAgentCredentialEncryptionUnavailable   Code = "agent_credential.encryption_unavailable"   //nolint:gosec // Stable public error code.
 	CodeAgentCredentialRuntimeBusy             Code = "agent_credential.runtime_busy"             //nolint:gosec // Stable public error code.
 	CodeAgentCredentialMaterializationFailed   Code = "agent_credential.materialization_failed"   //nolint:gosec // Stable public error code.
-	CodeAgentCredentialUsageAuthExpired        Code = "agent_credential.usage_auth_expired"       //nolint:gosec // Stable public error code.
 	CodeAgentCredentialUsageUnavailable        Code = "agent_credential.usage_unavailable"        //nolint:gosec // Stable public error code.
 
 	// Boundary codes for failures that carry no public error of their own:
@@ -301,8 +300,6 @@ const (
 	CodeACPAgentNotFound            Code = "acp_agent_not_found"
 	CodeACPAgentNotEnabled          Code = "acp_agent_not_enabled"
 	CodeACPAgentNotConfigured       Code = "acp_agent_not_configured"
-	CodeCodexOAuthIncomplete        Code = "codex_oauth_incomplete"
-	CodeCodexAuthTokenMissing       Code = "codex_auth_token_missing" //nolint:gosec // Stable public error code.
 	CodeACPAgentAuthInvalid         Code = "acp_agent_auth_invalid"
 	CodeNoWorkspaceExec             Code = "no_workspace_exec"
 	CodeACPRuntimeOwnerMissing      Code = "acp_runtime_owner_missing"
@@ -399,6 +396,10 @@ const (
 	CodeWorkspaceRestoreFailed                  Code = "workspace_restore_failed"
 )
 
+// ProviderErrorArgUpstream is the public argument key holding a length-bounded
+// verbatim summary of an upstream provider or internal error detail.
+const ProviderErrorArgUpstream = "upstream"
+
 // Fault is who a failure is attributed to. The values are the fault values of
 // the error contract: the fault field of a Problem and the fault metadata of
 // an RPC ErrorInfo. A catalog entry may declare client, server or dependency;
@@ -490,10 +491,6 @@ var catalog = map[Code]Definition{
 	CodeAgentCredentialMaterializationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Agent credential could not be prepared for this runtime.",
-	},
-	CodeAgentCredentialUsageAuthExpired: {
-		HTTPStatus: http.StatusConflict,
-		Detail:     "The account sign-in has expired. It renews after the next conversation; if usage still cannot load, connect the account again.",
 	},
 	CodeAgentCredentialUsageUnavailable: {
 		HTTPStatus: http.StatusBadGateway,
@@ -870,10 +867,6 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusConflict,
 		Detail:     "The Agent runtime is not ready for this operation. Refresh and try again.",
 	},
-	CodeACPRuntimeLimitReached: {
-		HTTPStatus: http.StatusTooManyRequests,
-		Detail:     "Too many Agent runtimes are active. Close one and try again.",
-	},
 	CodeACPOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Agent runtime operation failed. Please try again.",
@@ -901,7 +894,7 @@ var catalog = map[Code]Definition{
 	CodeRuntimeControlCancelled:               {HTTPStatus: http.StatusConflict, Detail: "The runtime operation was cancelled."},
 	CodeRuntimeControlSteerFailed:             {HTTPStatus: http.StatusConflict, Detail: "The additional instruction could not be delivered. Send it again after this turn finishes."},
 	CodeRuntimeControlForkLatestOnly:          {HTTPStatus: http.StatusConflict, Detail: "Only the latest reply can be forked. Select the latest reply and try again."},
-	CodeExternalRuntimeBusy:                   {HTTPStatus: http.StatusConflict, Detail: "This Agent is finishing an earlier operation. Try again when it has finished."},
+	CodeExternalRuntimeBusy:                   {HTTPStatus: http.StatusConflict, Detail: "This conversation is still in use by an earlier run of the Agent. Your context is intact; try again shortly."},
 	CodeRuntimeControlFailed:                  {HTTPStatus: http.StatusInternalServerError, Detail: "The runtime control could not be completed. Try again."},
 	CodeRuntimeControlForbidden:               {HTTPStatus: http.StatusForbidden, Detail: "You do not have access to this conversation."},
 	CodeRuntimeControlRequestInvalid:          {HTTPStatus: http.StatusBadRequest, Detail: "The runtime control request is invalid."},
@@ -913,15 +906,32 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The external agent runtime for this session is not available on this server.",
 	},
-	// The request to resume the external agent's own session (a Codex thread)
-	// failed before the agent could accept or refuse it, so a retry may still
-	// resume it. The turn is treated as not run; the user retries or starts a
-	// fresh conversation.
+	// The request to resume the external agent's own session (a Codex or Grok
+	// thread, an ACP session) failed before the agent could accept or refuse
+	// it, so a retry may still resume it. The turn is treated as not run; the
+	// user retries, starts a fresh conversation or, in an ACP chat, gives the
+	// session up.
 	CodeExternalRuntimeSessionResumeFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The session could not be resumed. Try again or start a new conversation.",
 		Fault:      FaultDependency,
 	},
+	// The external agent failed the turn and said why. Its own words are the
+	// copy, as the user would read them in the agent's own client; mapping
+	// them onto categories of ours could never cover every agent and only
+	// hid what happened. They are redacted of URLs and bounded before they
+	// become the argument.
+	CodeExternalRuntimeReported: {
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The external agent reported an error.",
+		AllowedArgs: []string{"message"},
+		Fault:       FaultDependency,
+	},
+	// The usage_limited, rate_limited, context_window_exceeded, overloaded,
+	// upstream_unreachable and request_blocked codes are no longer produced:
+	// the agent's own message is shown instead. They stay registered for the
+	// runs and history written with them.
+	//
 	// The external agent's own account has no usage left: a plan allowance
 	// that resets, a billing quota that does not, or a plan that does not
 	// include the agent. The agent reports them as one condition, so the copy
@@ -1112,8 +1122,12 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The conversation was deleted, but its running task could not be stopped. Refresh and try again.",
 	},
-	CodeSessionInterrupted:       {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server interrupted this run during shutdown. It can resume from saved progress after restart."},
-	CodeAgentToolTimeout:         {HTTPStatus: http.StatusGatewayTimeout, Detail: "The tool stopped reporting progress. Review its saved result before retrying."},
+	CodeSessionInterrupted: {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server interrupted this run during shutdown. It can resume from saved progress after restart."},
+	CodeAgentToolTimeout: {
+		HTTPStatus:  http.StatusGatewayTimeout,
+		Detail:      "The tool stopped reporting progress. Review its saved result before retrying.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+	},
 	CodeScheduleExecutionTimeout: {HTTPStatus: http.StatusGatewayTimeout, Detail: "This scheduled run reached its execution limit. Review its progress or increase the limit."},
 	CodeScheduleRunTargetConflict: {
 		HTTPStatus:  http.StatusBadRequest,
@@ -1147,50 +1161,59 @@ var catalog = map[Code]Definition{
 	// request Memoh refused. A content moderation refusal would be the one
 	// client fault.
 	CodeAgentResponseTimeout: {
-		HTTPStatus: http.StatusGatewayTimeout,
-		Detail:     "The model did not respond in time. Please try again.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusGatewayTimeout,
+		Detail:      "The model did not respond in time. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentResponseInterrupted: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The model response was interrupted. Please try again.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model response was interrupted. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderOverloaded: {
-		HTTPStatus: http.StatusServiceUnavailable,
-		Detail:     "The model provider is unavailable or overloaded right now. Please try again in a moment.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusServiceUnavailable,
+		Detail:      "The model provider is unavailable or overloaded right now. Please try again in a moment.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderRateLimited: {
-		HTTPStatus: http.StatusTooManyRequests,
-		Detail:     "The model provider rate limit was reached. Please wait a moment before sending again.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusTooManyRequests,
+		Detail:      "The model provider rate limit was reached. Please wait a moment before sending again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderQuotaExhausted: {
-		HTTPStatus: http.StatusPaymentRequired,
-		Detail:     "The model provider account has no remaining balance or quota.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusPaymentRequired,
+		Detail:      "The model provider account has no remaining balance or quota.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	// A provider's rejected key answers 502: a 401 would sign the Web client out.
 	CodeAgentProviderAuthFailed: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The model provider rejected the credentials. Check the provider API key.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model provider rejected the credentials. Check the provider API key.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderPermissionDenied: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The model provider denied access to this model or resource. Check that the provider account can use this model.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model provider denied access to this model or resource. Check that the provider account can use this model.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderRequestRejected: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The model provider rejected the request. Check the model settings, or try another model.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The model provider rejected the request. Check the model settings, or try another model.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeAgentProviderUnreachable: {
-		HTTPStatus: http.StatusBadGateway,
-		Detail:     "Memoh could not reach the model provider. Check the provider address and that the service is running.",
-		Fault:      FaultDependency,
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "Memoh could not reach the model provider. Check the provider address and that the service is running.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
 	},
 	CodeQueueSteerUnsupported: {
 		HTTPStatus: http.StatusConflict,
@@ -1261,7 +1284,11 @@ var catalog = map[Code]Definition{
 		Detail:     "Context lifecycle diagnostics could not be loaded. Please try again.",
 	},
 	// Returned when a failure has no public error of its own.
-	CodeInternal: {HTTPStatus: http.StatusInternalServerError, Detail: "Something went wrong on the server. Please try again."},
+	CodeInternal: {
+		HTTPStatus:  http.StatusInternalServerError,
+		Detail:      "Something went wrong on the server. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+	},
 	// 499 is the de facto status for a request the client canceled.
 	CodeCanceled:                      {HTTPStatus: 499, Detail: "The request was canceled."},
 	CodeHTTPBadRequest:                {HTTPStatus: http.StatusBadRequest, Detail: "The request is invalid."},
@@ -1336,8 +1363,6 @@ var catalog = map[Code]Definition{
 	CodeACPAgentNotFound:         {HTTPStatus: http.StatusBadRequest, Detail: "The selected external agent is unavailable."},
 	CodeACPAgentNotEnabled:       {HTTPStatus: http.StatusForbidden, Detail: "The selected external agent is disabled for this bot."},
 	CodeACPAgentNotConfigured:    {HTTPStatus: http.StatusBadRequest, Detail: "External agent setup is incomplete for this bot."},
-	CodeCodexOAuthIncomplete:     {HTTPStatus: http.StatusConflict, Detail: "Codex ChatGPT sign-in is not complete for this bot workspace."},
-	CodeCodexAuthTokenMissing:    {HTTPStatus: http.StatusConflict, Detail: "Codex authentication is missing or incomplete for this bot workspace."},
 	CodeACPAgentAuthInvalid:      {HTTPStatus: http.StatusConflict, Detail: "External agent authentication is invalid. Update the agent setup and try again."},
 	CodeNoWorkspaceExec:          {HTTPStatus: http.StatusForbidden, Detail: "You do not have permission to run workspace commands for this bot."},
 	CodeACPRuntimeOwnerMissing:   {HTTPStatus: http.StatusConflict, Detail: "This external-agent session has no runtime owner. Start a new session to continue."},
@@ -1358,8 +1383,17 @@ var catalog = map[Code]Definition{
 	CodeExternalAgentAccountUnbound:             {HTTPStatus: http.StatusForbidden, Detail: "Your chat account is not linked to a Memoh account, so it cannot use this bot's workspace. Link it from Profile, Connected Accounts, then try again.", AllowedArgs: []string{"link"}},
 	CodeExternalAgentContainerWorkspaceRequired: {HTTPStatus: http.StatusConflict, Detail: "This agent runtime needs a container workspace. Switch the bot to its container workspace, then try again."},
 	CodeAgentChatModelNotConfigured:             {HTTPStatus: http.StatusConflict, Detail: "No chat model is selected. Set a default chat model in Bot settings → General, then try again."},
-	CodeRuntimeRunFailed:                        {HTTPStatus: http.StatusInternalServerError, Detail: "The response could not be completed. Please try again."},
-	CodeRuntimePromptFailed:                     {HTTPStatus: http.StatusBadGateway, Detail: "The agent runtime could not complete this response. Please try again.", Fault: FaultDependency},
+	CodeRuntimeRunFailed: {
+		HTTPStatus:  http.StatusInternalServerError,
+		Detail:      "The response could not be completed. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+	},
+	CodeRuntimePromptFailed: {
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The agent runtime could not complete this response. Please try again.",
+		AllowedArgs: []string{ProviderErrorArgUpstream},
+		Fault:       FaultDependency,
+	},
 	// Reaper codes: the run was ended because its owner or live state disappeared.
 	CodeRuntimeOwnerLeaseExpired: {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server handling this response stopped responding, so the response was ended. Please try again."},
 	CodeRuntimeLiveBackendLost:   {HTTPStatus: http.StatusServiceUnavailable, Detail: "The live state of this response was lost, so the response was ended. Please try again."},

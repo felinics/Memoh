@@ -1,4 +1,5 @@
 import { getBotsByBotIdConnectorsByConnectionId, postBotsByBotIdConnectorsByConnectionIdReauth } from '@memohai/sdk'
+import { canOpenDesktopExternalUrl, openDesktopExternalUrl, parseSafeHttpUrl } from '@/lib/external-url'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
@@ -41,7 +42,7 @@ export function isConnectorOAuthCancelled(error: unknown): boolean {
 }
 
 export function prepareConnectorOAuthPopup(loadingMessage: string): Window | null {
-  if (window.api?.desktop?.openExternalUrl) return null
+  if (canOpenDesktopExternalUrl()) return null
   const popup = window.open('', 'connect-it-oauth', 'width=600,height=700')
   if (!popup) return null
 
@@ -64,15 +65,22 @@ export function prepareConnectorOAuthPopup(loadingMessage: string): Window | nul
 }
 
 export async function openConnectorOAuthURL(url: string, popup: Window | null): Promise<void> {
-  const desktopOpenExternal = window.api?.desktop?.openExternalUrl
-  if (desktopOpenExternal) {
-    await desktopOpenExternal(url)
+  let safeUrl: string
+  try {
+    safeUrl = parseSafeHttpUrl(url, 'oauth_failed')
+  } catch (error) {
+    popup?.close()
+    throw error
+  }
+  const desktopOpenResult = openDesktopExternalUrl(safeUrl)
+  if (desktopOpenResult) {
+    await desktopOpenResult
     return
   }
   if (!popup || popup.closed) {
     throw new Error('oauth_popup_blocked')
   }
-  popup.location.href = url
+  popup.location.href = safeUrl
 }
 
 export function waitForConnectorOAuth(
@@ -147,7 +155,10 @@ export async function reauthorizeConnector(botId: string, connectionId: string, 
     path: { bot_id: botId, connection_id: connectionId },
     throwOnError: true,
   })
-  if (!data.authorization_url) throw new Error('oauth_failed')
+  if (!data.authorization_url) {
+    popup?.close()
+    throw new Error('oauth_failed')
+  }
   await openConnectorOAuthURL(data.authorization_url, popup)
   await waitForConnectorOAuth(botId, connectionId, popup)
 }

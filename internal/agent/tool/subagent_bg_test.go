@@ -272,19 +272,7 @@ func (s *fakeAgentMessageService) ListBySession(_ context.Context, sessionID str
 	return append([]messagepkg.Message(nil), s.messages[sessionID]...), nil
 }
 
-func (*fakeAgentMessageService) List(context.Context, string) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*fakeAgentMessageService) ListSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
 func (*fakeAgentMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*fakeAgentMessageService) ListBefore(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
@@ -292,20 +280,24 @@ func (*fakeAgentMessageService) ListSinceBySession(context.Context, string, time
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
+func (*fakeAgentMessageService) ListHistoryWithinBytes(context.Context, string, messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
+}
+
+func (*fakeAgentMessageService) ListHistoryByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
-	return nil, nil
+func (*fakeAgentMessageService) HistoryPositionByID(context.Context, string, string) (messagepkg.HistoryPosition, error) {
+	return messagepkg.HistoryPosition{}, nil
 }
 
-func (*fakeAgentMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return nil, nil
+func (*fakeAgentMessageService) ListTurnResponseSourcesWithinBytes(context.Context, string, messagepkg.HistoryPosition, int64) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
 }
 
-func (*fakeAgentMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
-	return messagepkg.ActiveMessagesMeasure{}, nil
+func (*fakeAgentMessageService) ListTurnResponseSourcesByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
+	return nil, nil
 }
 
 func (*fakeAgentMessageService) ListLatestBySession(context.Context, string, int32) ([]messagepkg.Message, error) {
@@ -352,10 +344,6 @@ func (*fakeAgentMessageService) GetVisibleTurnByMessage(context.Context, string,
 }
 
 func (*fakeAgentMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
-	return messagepkg.HistoryTurn{}, nil
-}
-
-func (*fakeAgentMessageService) ReplaceTurn(context.Context, string, string, string, *int64, string, string, string) (messagepkg.HistoryTurn, error) {
 	return messagepkg.HistoryTurn{}, nil
 }
 

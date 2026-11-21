@@ -380,34 +380,6 @@ func (s *DBService) persistRoundInTx(ctx context.Context, inputs []PersistInput,
 					return fmt.Errorf("record runtime turn anchor: %w", anchorErr)
 				}
 			}
-			if options.AgentPublication != nil {
-				pgBotID, parseErr := dbpkg.ParseUUID(botID)
-				if parseErr != nil {
-					return parseErr
-				}
-				pgSessionID, parseErr := dbpkg.ParseUUID(sessionID)
-				if parseErr != nil {
-					return parseErr
-				}
-				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(options.AgentPublication.RunID))
-				if parseErr != nil {
-					return fmt.Errorf("runtime publication requires run_id: %w", parseErr)
-				}
-				moved, upsertErr := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
-					SessionID: pgSessionID,
-					BotID:     pgBotID,
-					RunID:     pgRunID,
-				})
-				if upsertErr != nil {
-					return fmt.Errorf("publish runtime session head: %w", upsertErr)
-				}
-				if moved == 0 {
-					// The guarded insert matched no run: the session's fencing
-					// generation moved underneath this round. Publishing nothing
-					// would silently promote a stale native context on restart.
-					return runtimefence.ErrStale
-				}
-			}
 			return nil
 		}
 		var err error
@@ -1016,39 +988,6 @@ func normalizeRuntimeType(runtimeType string) string {
 	return string(kind)
 }
 
-// List returns all messages for a bot.
-func (s *DBService) List(ctx context.Context, botID string) ([]Message, error) {
-	pgBotID, err := dbpkg.ParseUUID(botID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListMessages(ctx, pgBotID)
-	if err != nil {
-		return nil, err
-	}
-	msgs := toMessagesFromList(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
-}
-
-// ListSince returns bot messages since a given time.
-func (s *DBService) ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error) {
-	pgBotID, err := dbpkg.ParseUUID(botID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListMessagesSince(ctx, sqlc.ListMessagesSinceParams{
-		BotID:     pgBotID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	msgs := toMessagesFromSince(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
-}
-
 // ListLatest returns the latest N bot messages (newest first in DB; caller may reverse for ASC).
 func (s *DBService) ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
@@ -1063,25 +1002,6 @@ func (s *DBService) ListLatest(ctx context.Context, botID string, limit int32) (
 		return nil, err
 	}
 	msgs := toMessagesFromLatest(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
-}
-
-// ListBefore returns up to limit messages older than before (created_at < before), ordered oldest-first.
-func (s *DBService) ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error) {
-	pgBotID, err := dbpkg.ParseUUID(botID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListMessagesBefore(ctx, sqlc.ListMessagesBeforeParams{
-		BotID:     pgBotID,
-		CreatedAt: pgtype.Timestamptz{Time: before, Valid: true},
-		MaxCount:  limit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	msgs := toMessagesFromBefore(rows)
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
 }
@@ -1121,62 +1041,95 @@ func (s *DBService) ListSinceBySession(ctx context.Context, sessionID string, si
 	return msgs, nil
 }
 
-// time, admitted newest-first within the content byte budget (CM-ADM-001).
-// ListActiveSinceBySessionWithinBytes returns session messages since a given
-// time, admitted newest-first within the content byte budget (CM-ADM-001).
-func (s *DBService) ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64, foldSummarized bool) ([]Message, error) {
+// ListHistoryWithinBytes returns a session's raw history window, admitted
+// newest-first within the content byte budget (CM-ADM-001), and whether the
+// budget left older rows of the window out.
+func (s *DBService) ListHistoryWithinBytes(ctx context.Context, sessionID string, window HistoryWindow) (HistoryLoad, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return HistoryLoad{}, err
+	}
+	ids, truncated, err := s.historyWindow(ctx, pgSessionID, window)
+	if err != nil || len(ids) == 0 {
+		return HistoryLoad{}, err
+	}
+	msgs, err := s.listHistoryByIDs(ctx, pgSessionID, ids)
+	return HistoryLoad{Messages: msgs, Truncated: truncated}, err
+}
+
+// historyWindow walks a session's raw history window (ListHistoryWindow) and
+// returns the ids it admits, in history order, and whether the budget ended
+// the walk.
+func (s *DBService) historyWindow(ctx context.Context, sessionID pgtype.UUID, window HistoryWindow) ([]pgtype.UUID, bool, error) {
+	params := sqlc.ListHistoryWindowParams{
+		SessionID:           sessionID,
+		AfterTurnPosition:   window.After.Turn,
+		AfterTurnMessageSeq: window.After.Seq,
+		MaxBytes:            window.MaxBytes,
+	}
+	if window.Before != nil {
+		params.BeforeTurnPosition = pgtype.Int8{Int64: window.Before.Turn, Valid: true}
+		params.BeforeTurnMessageSeq = pgtype.Int8{Int64: window.Before.Seq, Valid: true}
+	}
+	rows, err := s.queries.ListHistoryWindow(ctx, params)
+	if err != nil || len(rows) == 0 {
+		return nil, false, err
+	}
+	ids := make([]pgtype.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids, rows[0].Truncated, nil
+}
+
+// ListHistoryByIDs returns the named context rows of a session in history
+// order, loaded as ListHistoryWithinBytes loads them.
+func (s *DBService) ListHistoryByIDs(ctx context.Context, sessionID string, ids []string) ([]Message, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListActiveMessagesSinceBySessionWithinBytes(ctx, sqlc.ListActiveMessagesSinceBySessionWithinBytesParams{
-		FoldSummarized: foldSummarized,
-		SessionID:      pgSessionID,
-		CreatedAt:      pgtype.Timestamptz{Time: since, Valid: true},
-		MaxBytes:       maxBytes,
-	})
+	pgIDs, err := parseUUIDs(ids)
 	if err != nil {
 		return nil, err
 	}
-	msgs := toMessagesFromActiveSinceBySessionWithinBytes(rows)
+	return s.listHistoryByIDs(ctx, pgSessionID, pgIDs)
+}
+
+func (s *DBService) listHistoryByIDs(ctx context.Context, sessionID pgtype.UUID, ids []pgtype.UUID) ([]Message, error) {
+	rows, err := s.queries.ListHistoryMessagesByIDs(ctx, sqlc.ListHistoryMessagesByIDsParams{SessionID: sessionID, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	msgs := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		msgs = append(msgs, toAdmissionMessage(row))
+	}
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
 }
 
-// MeasureActiveBySession aggregates a session's active message count and
-// content bytes on the database side (CM-ADM-001).
-func (s *DBService) MeasureActiveBySession(ctx context.Context, sessionID string, since time.Time) (ActiveMessagesMeasure, error) {
+// HistoryPositionByID reports where a visible message of the session is.
+func (s *DBService) HistoryPositionByID(ctx context.Context, sessionID string, messageID string) (HistoryPosition, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
-		return ActiveMessagesMeasure{}, err
+		return HistoryPosition{}, err
 	}
-	row, err := s.queries.MeasureActiveMessagesBySession(ctx, sqlc.MeasureActiveMessagesBySessionParams{
+	pgMessageID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return HistoryPosition{}, err
+	}
+	cursor, err := s.queries.GetVisibleMessageCursorByIDBySession(ctx, sqlc.GetVisibleMessageCursorByIDBySessionParams{
 		SessionID: pgSessionID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
+		MessageID: pgMessageID,
 	})
 	if err != nil {
-		return ActiveMessagesMeasure{}, err
+		return HistoryPosition{}, err
 	}
-	return ActiveMessagesMeasure{MessageCount: row.MessageCount, ContentBytes: row.ContentBytes}, nil
-}
-
-// ListActiveSinceBySessionWithinBytes returns session messages since a given
-// time, admitted newest-first within the content byte budget (CM-ADM-001).
-func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error) {
-	pgSessionID, err := dbpkg.ParseUUID(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListActiveMessagesSinceBySession(ctx, sqlc.ListActiveMessagesSinceBySessionParams{
-		SessionID: pgSessionID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	msgs := toMessagesFromActiveSinceBySession(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
+	return HistoryPosition{Turn: cursor.TurnPosition.Int64, Seq: cursor.TurnMessageSeq.Int64}, nil
 }
 
 // ListLatestBySession returns the latest N session messages.
@@ -1352,6 +1305,9 @@ func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID stri
 	return msgs, nil
 }
 
+// GetVisibleHistoryTurnRequestMessageIDByTurn returns the request message of
+// a session turn. Waiting-decision recovery rebuilds a parked run's view from
+// it (application.Service.ParkedRunMessages).
 func (s *DBService) GetVisibleHistoryTurnRequestMessageIDByTurn(ctx context.Context, sessionID string, turnID string) (string, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -1453,73 +1409,6 @@ func (s *DBService) updateReplacementSessionMetadata(ctx context.Context, sessio
 	return nil
 }
 
-func replaceHistoryTurn(
-	ctx context.Context,
-	queries dbstore.Queries,
-	sessionID string,
-	oldTurnID string,
-	replacementTurnID string,
-	replacementTurnPosition *int64,
-	requestMessageID string,
-	assistantMessageID string,
-	reason string,
-) (sqlc.ReplaceHistoryTurnRow, error) {
-	pgSessionID, err := dbpkg.ParseUUID(sessionID)
-	if err != nil {
-		return sqlc.ReplaceHistoryTurnRow{}, err
-	}
-	pgOldTurnID, err := dbpkg.ParseUUID(oldTurnID)
-	if err != nil {
-		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid old turn id: %w", err)
-	}
-	pgReplacementTurnID, err := dbpkg.ParseUUID(replacementTurnID)
-	if err != nil {
-		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid replacement turn id: %w", err)
-	}
-	if replacementTurnPosition == nil || *replacementTurnPosition <= 0 {
-		return sqlc.ReplaceHistoryTurnRow{}, errors.New("replacement turn position must be positive")
-	}
-	pgRequestMessageID, err := parseOptionalUUID(requestMessageID)
-	if err != nil {
-		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid request message id: %w", err)
-	}
-	pgAssistantMessageID, err := parseOptionalUUID(assistantMessageID)
-	if err != nil {
-		return sqlc.ReplaceHistoryTurnRow{}, fmt.Errorf("invalid assistant message id: %w", err)
-	}
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		reason = "replace"
-	}
-	return queries.ReplaceHistoryTurn(ctx, sqlc.ReplaceHistoryTurnParams{
-		OldTurnID:           pgOldTurnID,
-		SessionID:           pgSessionID,
-		ReplacementTurnID:   pgReplacementTurnID,
-		ReplacementPosition: *replacementTurnPosition,
-		RequestMessageID:    pgRequestMessageID,
-		AssistantMessageID:  pgAssistantMessageID,
-		SupersededAt:        pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		SupersededReason:    pgtype.Text{String: reason, Valid: true},
-	})
-}
-
-func (s *DBService) ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, replacementTurnID string, replacementTurnPosition *int64, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error) {
-	var row sqlc.ReplaceHistoryTurnRow
-	var err error
-	if _, fenced := runtimefence.FromContext(ctx); fenced {
-		err = runtimefence.InTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
-			row, err = replaceHistoryTurn(ctx, queries, sessionID, oldTurnID, replacementTurnID, replacementTurnPosition, requestMessageID, assistantMessageID, reason)
-			return err
-		})
-	} else {
-		row, err = replaceHistoryTurn(ctx, s.queries, sessionID, oldTurnID, replacementTurnID, replacementTurnPosition, requestMessageID, assistantMessageID, reason)
-	}
-	if err != nil {
-		return HistoryTurn{}, err
-	}
-	return toHistoryTurnFromReplaceRow(row), nil
-}
-
 // LinkAssets links asset refs to an existing persisted message.
 func (s *DBService) LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error {
 	pgMsgID, err := dbpkg.ParseUUID(messageID)
@@ -1580,20 +1469,38 @@ func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	// ClearHistoryByBot also removes the ACP publication heads, version
-	// headers, and line sets in the same statement: cleared history has no
-	// canonical ACP head, and a headless snapshot would be unreachable orphan
-	// storage a fresh runtime must never resurrect.
+	// ClearHistoryByBot also scrubs each session's runtime metadata in the same
+	// statement, so no runtime resumes the cleared conversation from its own
+	// native thread.
 	return runtimefence.InResetTransaction(ctx, s.queries, botID, "", func(queries dbstore.Queries) error {
 		return queries.ClearHistoryByBot(ctx, pgBotID)
 	})
 }
 
-// DeleteByIDs deletes specific messages by id.
+// DeleteByIDs deletes specific messages by id. A run deletes under its
+// persistence fence, so an owner that lost the session cannot delete rows its
+// successor reads.
 func (s *DBService) DeleteByIDs(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
+	pgIDs, err := parseUUIDs(ids)
+	if err != nil {
+		return err
+	}
+	if len(pgIDs) == 0 {
+		return nil
+	}
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		return runtimefence.InTransaction(ctx, s.queries, "", "", func(queries dbstore.Queries) error {
+			return queries.DeleteMessagesByIDs(ctx, pgIDs)
+		})
+	}
+	return s.queries.DeleteMessagesByIDs(ctx, pgIDs)
+}
+
+// parseUUIDs parses message ids, skipping blank ones.
+func parseUUIDs(ids []string) ([]pgtype.UUID, error) {
 	pgIDs := make([]pgtype.UUID, 0, len(ids))
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
@@ -1602,14 +1509,11 @@ func (s *DBService) DeleteByIDs(ctx context.Context, ids []string) error {
 		}
 		pgID, err := dbpkg.ParseUUID(id)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		pgIDs = append(pgIDs, pgID)
 	}
-	if len(pgIDs) == 0 {
-		return nil
-	}
-	return s.queries.DeleteMessagesByIDs(ctx, pgIDs)
+	return pgIDs, nil
 }
 
 // DeleteBySession deletes all messages for a session.
@@ -1618,10 +1522,9 @@ func (s *DBService) DeleteBySession(ctx context.Context, sessionID string) error
 	if err != nil {
 		return err
 	}
-	// ClearHistoryBySession also removes the ACP publication head, version
-	// headers, and line set in the same statement: cleared history has no
-	// canonical ACP head, and a headless snapshot would be unreachable orphan
-	// storage a fresh runtime must never resurrect.
+	// ClearHistoryBySession also scrubs the session's runtime metadata in the
+	// same statement, so no runtime resumes the cleared conversation from its
+	// own native thread.
 	return runtimefence.InResetTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
 		return queries.ClearHistoryBySession(ctx, pgSessionID)
 	})
@@ -1746,55 +1649,7 @@ func extractPlatformFromMetadataMap(m map[string]any) pgtype.Text {
 	return pgtype.Text{}
 }
 
-func toMessageFromListRow(row sqlc.ListMessagesRow) Message {
-	return toMessageFields(
-		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
-		row.CreatedAt,
-	)
-}
-
 func toMessageFromSessionListRow(row sqlc.ListMessagesBySessionRow) Message {
-	return toMessageFields(
-		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
-		row.CreatedAt,
-	)
-}
-
-func toMessageFromSinceRow(row sqlc.ListMessagesSinceRow) Message {
 	return toMessageFields(
 		row.ID,
 		row.BotID,
@@ -1840,34 +1695,6 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 		row.DisplayText,
 		row.CreatedAt,
 	)
-}
-
-func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
-	m := toMessageFields(
-		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
-		row.CreatedAt,
-	)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
-	return m
 }
 
 func toMessageFromLatestRow(row sqlc.ListMessagesLatestRow) Message {
@@ -1946,30 +1773,6 @@ func toMessageFromLatestUIBySessionRow(row sqlc.ListMessagesLatestUIBySessionRow
 	message.TurnID = uuidString(row.TurnID)
 	message.TurnPosition = int8Ptr(row.TurnPosition)
 	return message
-}
-
-func toMessageFromBeforeRow(row sqlc.ListMessagesBeforeRow) Message {
-	return toMessageFields(
-		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
-		row.CreatedAt,
-	)
 }
 
 func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Message {
@@ -2224,26 +2027,10 @@ func toMessageFieldsWithMetadataMode(
 	return m
 }
 
-func toMessagesFromList(rows []sqlc.ListMessagesRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toMessageFromListRow(row))
-	}
-	return messages
-}
-
 func toMessagesFromSessionList(rows []sqlc.ListMessagesBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromSessionListRow(row))
-	}
-	return messages
-}
-
-func toMessagesFromSince(rows []sqlc.ListMessagesSinceRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toMessageFromSinceRow(row))
 	}
 	return messages
 }
@@ -2256,36 +2043,10 @@ func toMessagesFromSinceBySession(rows []sqlc.ListMessagesSinceBySessionRow) []M
 	return messages
 }
 
-func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySessionRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toMessageFromActiveSinceBySessionRow(row))
-	}
-	return messages
-}
-
-func toMessagesFromActiveSinceBySessionWithinBytes(rows []sqlc.ListActiveMessagesSinceBySessionWithinBytesRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		message := toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow{
-			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
-			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
-			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
-			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
-			SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, EventID: row.EventID,
-			DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
-			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl, Platform: row.Platform,
-		})
-		message.Summarized = row.Summarized
-		messages = append(messages, message)
-	}
-	return messages
-}
-
 // toAdmissionMessage leaves metadata undecoded for the byte-budgeted loaders:
 // the budget only covers content, and decoding every row up front holds all
 // of their metadata, legacy lifecycle audits included, at once (CM-ADM-001).
-func toAdmissionMessage(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
+func toAdmissionMessage(row sqlc.ListHistoryMessagesByIDsRow) Message {
 	m := toMessageFieldsWithMetadata(
 		row.ID,
 		row.BotID,
@@ -2308,9 +2069,6 @@ func toAdmissionMessage(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
 		row.CreatedAt,
 		nil,
 	)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
 	return m
 }
 
@@ -2334,15 +2092,6 @@ func toMessagesFromLatestUIBySession(rows []sqlc.ListMessagesLatestUIBySessionRo
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromLatestUIBySessionRow(row))
-	}
-	return messages
-}
-
-// toMessagesFromBefore returns messages in oldest-first order (ListMessagesBefore returns DESC; we reverse).
-func toMessagesFromBefore(rows []sqlc.ListMessagesBeforeRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for i := len(rows) - 1; i >= 0; i-- {
-		messages = append(messages, toMessageFromBeforeRow(rows[i]))
 	}
 	return messages
 }
@@ -2402,9 +2151,6 @@ func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySess
 		row.CreatedAt,
 	)
 	m.TurnID = uuidString(row.TurnID)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
 	return m
 }
 
@@ -2419,22 +2165,6 @@ func toHistoryTurn(row dbstore.HistoryTurn) HistoryTurn {
 		SupersededByTurnID: uuidString(row.SupersededByTurnID),
 		SupersededAt:       timeFromTimestamptz(row.SupersededAt),
 		SupersededReason:   row.SupersededReason,
-		CreatedAt:          timeFromTimestamptz(row.CreatedAt),
-		UpdatedAt:          timeFromTimestamptz(row.UpdatedAt),
-	}
-}
-
-func toHistoryTurnFromReplaceRow(row sqlc.ReplaceHistoryTurnRow) HistoryTurn {
-	return HistoryTurn{
-		ID:                 uuidString(row.ID),
-		BotID:              uuidString(row.BotID),
-		SessionID:          uuidString(row.SessionID),
-		Position:           row.Position,
-		RequestMessageID:   uuidString(row.RequestMessageID),
-		AssistantMessageID: uuidString(row.AssistantMessageID),
-		SupersededByTurnID: uuidString(row.SupersededByTurnID),
-		SupersededAt:       timeFromTimestamptz(row.SupersededAt),
-		SupersededReason:   textString(row.SupersededReason),
 		CreatedAt:          timeFromTimestamptz(row.CreatedAt),
 		UpdatedAt:          timeFromTimestamptz(row.UpdatedAt),
 	}
@@ -2459,13 +2189,6 @@ func timeFromTimestamptz(value pgtype.Timestamptz) time.Time {
 		return time.Time{}
 	}
 	return value.Time
-}
-
-func textString(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
 }
 
 func toPgText(value string) pgtype.Text {

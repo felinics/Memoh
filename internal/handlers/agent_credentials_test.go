@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -21,10 +20,10 @@ func TestAgentCredentialHandlerDeleteAnswersPurgeFailures(t *testing.T) {
 				rows: []sqlc.BotAgent{botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, true)},
 			}
 			handler := NewAgentCredentialHandler(nil, botagents.NewService(nil, queries), bots.NewService(nil, queries),
-				newTestAdminAccountService("admin"), external.Drivers{purgeDriver{
+				newTestAdminAccountService("admin"), testRuntimeRegistry(purgeDriver{
 					plainDriver: plainDriver{runtimeType: botagents.RuntimeCodex},
 					err:         tc.err,
-				}})
+				}))
 			ctx, _ := botAgentsRequest(t, http.MethodDelete, "/bots/"+botAgentsTestBotID+"/agents/"+botAgentsTestCodexID+"/credential", "")
 			ctx.SetParamNames("bot_id", "id")
 			ctx.SetParamValues(botAgentsTestBotID, botAgentsTestCodexID)

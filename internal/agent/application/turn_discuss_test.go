@@ -23,6 +23,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 type fakeAgentStreamer struct {
@@ -120,6 +121,7 @@ type testDiscussService interface {
 
 func newDiscussTestService(streamer testChatStreamer, agent testAgentStreamer, resolver testDiscussService) *Service {
 	service := newTurnTestService(streamer)
+	service.checkpoints = emptyHistoryCheckpoints()
 	if service.logger == nil {
 		service.logger = slog.New(slog.DiscardHandler)
 	}
@@ -665,7 +667,7 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 }
 
 func TestDiscussMetadataOnlyRejectionNeverStartsRuntime(t *testing.T) {
-	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, sessionpkg.RuntimeCodex} {
+	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, string(runtimekind.Codex)} {
 		t.Run(runtimeType, func(t *testing.T) {
 			runner := &fakeRunner{}
 			agent := &fakeAgentStreamer{}
@@ -787,8 +789,7 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	cmd.CurrentChannel = "telegram"
 	cmd.ReplyTarget = "chat-1"
 	cmd.ConversationType = "group"
-	cmd.SessionToken = "Bearer owner-token"
-	cmd.ChatToken = "chat-token"
+	cmd.ActorAccountID = "bot-owner"
 	cmd.ToolHTTPURL = "http://example.test/bots/bot-1/tools"
 	cmd.DiscussMessages = []turn.DiscussMessage{{Role: "user", Content: "please inspect the app"}}
 
@@ -808,8 +809,8 @@ func TestDiscussACPUsesChatStreamer(t *testing.T) {
 	if req.RunID != h.RunID() {
 		t.Fatalf("ACP discuss RunID = %q, want admitted run ID %q", req.RunID, h.RunID())
 	}
-	if req.RouteID != "route-1" || req.ChatToken != "chat-token" || req.Token != "Bearer owner-token" {
-		t.Fatalf("runtime context = route %q chat token %q token %q", req.RouteID, req.ChatToken, req.Token)
+	if req.RouteID != "route-1" || req.ActorAccountID != "bot-owner" {
+		t.Fatalf("runtime context = route %q actor %q", req.RouteID, req.ActorAccountID)
 	}
 	if req.ToolHTTPURL != "http://example.test/bots/bot-1/tools" {
 		t.Fatalf("ToolHTTPURL = %q", req.ToolHTTPURL)
@@ -944,7 +945,7 @@ func TestDiscussCarriesComposedMessagesThroughTypedFragments(t *testing.T) {
 	cmd.DiscussMessages = []turn.DiscussMessage{
 		{Role: "user", Content: "first user"},
 		{Role: "user", Content: "second user"},
-		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1"},
+		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1", Pinned: true},
 		{
 			Role:       "assistant",
 			Content:    "tool call fallback",
@@ -1053,48 +1054,6 @@ func contextFragByID(frags []contextfrag.ContextFrag, id string) *contextfrag.Co
 		}
 	}
 	return nil
-}
-
-func TestInjectImagePartsIntoLastUserMessage(t *testing.T) {
-	msgs := []sdk.Message{
-		sdk.UserMessage("hello"),
-		sdk.AssistantMessage("hi"),
-		sdk.UserMessage("look at this"),
-	}
-	parts := []sdk.ImagePart{
-		{Image: "data:image/png;base64,abc", MediaType: "image/png"},
-	}
-
-	injectImagePartsIntoLastUserMessage(msgs, parts)
-
-	lastUser := msgs[2]
-	if len(lastUser.Content) != 2 {
-		t.Fatalf("expected 2 content parts, got %d", len(lastUser.Content))
-	}
-	imgPart, ok := lastUser.Content[1].(sdk.ImagePart)
-	if !ok {
-		t.Fatalf("expected ImagePart, got %T", lastUser.Content[1])
-	}
-	if imgPart.Image != "data:image/png;base64,abc" {
-		t.Fatalf("unexpected image: %q", imgPart.Image)
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_Empty(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	injectImagePartsIntoLastUserMessage(msgs, nil)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_SkipsEmptyImage(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	parts := []sdk.ImagePart{{Image: "", MediaType: "image/png"}}
-	injectImagePartsIntoLastUserMessage(msgs, parts)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
-	}
 }
 
 func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) bool {

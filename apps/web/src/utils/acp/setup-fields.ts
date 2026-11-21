@@ -1,23 +1,7 @@
 import { isACPAgent, normalizeAgentID } from '@/utils/external-agent'
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
 
-export type AcpSetupModeLabelTranslate = (key: string) => string
-
-export function acpSetupModes(profile: AcpprofilePublicProfile): string[] {
-  const modes = (profile.setup_modes ?? []).filter(Boolean)
-  return modes.length > 0 ? modes : ['api_key']
-}
-
-export function acpSetupModeLabel(
-  _profile: AcpprofilePublicProfile,
-  mode: string,
-  t: AcpSetupModeLabelTranslate,
-): string {
-  if (mode === 'api_key') return t('bots.settings.acpSetupApiKey')
-  if (mode === 'oauth') return t('bots.settings.acpSetupOAuth')
-  if (mode === 'self') return t('bots.settings.acpSetupSelf')
-  return mode
-}
+type Translate = (key: string) => string
 
 export function acpInputType(type: string | undefined): string {
   if (type === 'password') return 'password'
@@ -28,7 +12,7 @@ export function acpInputType(type: string | undefined): string {
 export function acpManagedFieldLabel(
   profile: AcpprofilePublicProfile,
   field: AcpprofileManagedField,
-  t: AcpSetupModeLabelTranslate,
+  t: Translate,
 ): string {
   if (isACPAgent(profile.id)) {
     const id = normalizeAgentID(field.id)
@@ -65,29 +49,4 @@ export function acpManagedFieldName(profile: AcpprofilePublicProfile, field: Acp
 
 export function acpManagedFieldAutocomplete(field: AcpprofileManagedField): string {
   return field.type === 'password' ? 'new-password' : 'off'
-}
-
-/** Fields shown on create surfaces (new bot + onboarding) in api_key mode only. */
-export function filterCreateVisibleManagedFields(
-  profile: AcpprofilePublicProfile,
-  _managed: Record<string, string>,
-  setupMode: string,
-): AcpprofileManagedField[] {
-  if (setupMode !== 'api_key') return []
-  return (profile.managed_fields ?? []).filter((field) => {
-    const id = normalizeAgentID(field.id)
-    return !(!id || id === 'provider_id' || id === 'oauth_token')
-  })
-}
-
-/** Fields shown in bot settings for the active setup mode. */
-export function filterSettingsVisibleManagedFields(
-  profile: AcpprofilePublicProfile,
-  _managed: Record<string, string>,
-  _setupMode: string,
-): AcpprofileManagedField[] {
-  return (profile.managed_fields ?? []).filter((field) => {
-    const id = normalizeAgentID(field.id)
-    return id !== 'provider_id'
-  })
 }

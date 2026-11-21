@@ -18,6 +18,7 @@ export interface RuntimeProjectionChange {
   previous: RuntimeProjectionState
   current: RuntimeProjectionState
   event: Exclude<UIRuntimeEvent, { type: 'runtime_dropped' }>
+  reconnected?: boolean
 }
 
 export interface RuntimeClientDeps {
@@ -76,6 +77,14 @@ export function createRuntimeClient({ send, onProjection, scheduleFrame }: Runti
     if (!sid || !subscriptions.delete(sid)) return
     awaitingSnapshots.delete(sid)
     pendingDeltaBatches.delete(sid)
+    const previous = projections.get(sid)
+    if (previous?.currentRunView) {
+      projections.set(sid, {
+        ...previous,
+        currentRunView: null,
+        transcript: projectRuntimeTranscript(null),
+      })
+    }
     if (connected) {
       try {
         send({ type: 'runtime_unsubscribe', session_id: sid })

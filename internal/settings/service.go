@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/acl"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -926,7 +926,7 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings, resolveSe
 	if !setup.Enabled {
 		return fmt.Errorf("%w: %q", ErrACPAgentNotEnabled, agentID)
 	}
-	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+	if field, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 		return fmt.Errorf("%w: ACP agent %q is missing required field %q", ErrACPAgentNotConfigured, agentID, field.ID)
 	}
 	return nil

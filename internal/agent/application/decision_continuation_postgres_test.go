@@ -136,3 +136,40 @@ func TestPostgresNativeDecisionAcceptanceAndShutdownRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestPostgresNativeDecisionAcceptanceCancelsTheApprovalAStoppedRunLeftPending(t *testing.T) {
+	ctx := t.Context()
+	pool := openTurnAdmissionPostgres(t, ctx)
+	botID, sessionID := createTurnAdmissionFixture(t, ctx, pool)
+	q := sqlc.New(pool)
+	store := postgresstore.NewQueriesWithPool(pool, q)
+	runs := ledger.NewPostgres(q, pool)
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{Ledger: runs, Fence: runtimefence.NewActivator(store)})
+	t.Cleanup(func() { _ = manager.CloseContext(context.Background()) })
+	admission, err := manager.Admit(ctx, sessionruntime.AdmitInput{BotID: botID, SessionID: sessionID, InvocationID: "native-decision", Payload: []byte(`{"resume":{"version":1,"chat_id":"chat","query":"stopped work"}}`), Execution: sessionruntime.Execution{Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+		return sessionruntime.RunAdmissionView{}, nil
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerCtx := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID, SessionID: sessionID, Token: admission.Handle.FencingToken})
+	approvals := toolapproval.NewService(nil, store, nil)
+	approval, err := approvals.CreatePending(ownerCtx, toolapproval.CreatePendingInput{BotID: botID, SessionID: sessionID, ToolCallID: "parked-tool", ToolName: "write", ToolInput: map[string]any{"path": "/data/parked"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _ = runs.SetWaitingDecision(ctx, admission.RunID, admission.Handle.FencingToken)
+	_, _, _ = runs.RequestAbort(ctx, admission.RunID)
+
+	svc := &Service{queries: store, toolApproval: approvals}
+	if err := svc.finalizeRuntimeDecisions(ctx, admission.Handle); err != nil {
+		t.Fatal(err)
+	}
+	row, err := q.GetToolApprovalRequest(ctx, db.ParseUUIDOrEmpty(approval.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != toolapproval.StatusCancelled {
+		t.Fatalf("status = %q, want %q: nobody decided against it", row.Status, toolapproval.StatusCancelled)
+	}
+}

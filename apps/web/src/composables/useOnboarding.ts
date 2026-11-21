@@ -6,7 +6,13 @@ import { toast } from '@felinic/ui'
 import { useUserStore } from '@/store/user'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { readOnboardingBotResult, resetOnboardingSession } from '@/pages/onboarding/session'
+import { toReturnToParam } from '@/router-guards/return-to'
 import { safeLocalGet, safeLocalRemove, safeLocalSet } from '@/utils/safe-storage'
+
+export interface CompleteOnboardingOptions {
+  /** Keep the default new-bot destination even when `?return_to=` is present (e.g. starter prompt selected). */
+  preferCreatedBot?: boolean
+}
 
 export const LAST_STEP_INDEX = 5
 export const STEP_COUNT = 6
@@ -63,7 +69,10 @@ export function useOnboarding() {
     currentStep.value = LAST_STEP_INDEX
   }
 
-  async function complete(minTransitionMs = 0): Promise<boolean> {
+  async function complete(
+    minTransitionMs = 0,
+    options: CompleteOnboardingOptions = {},
+  ): Promise<boolean> {
     completing.value = true
     const minWait = new Promise<void>((resolve) => setTimeout(resolve, minTransitionMs))
     try {
@@ -76,18 +85,29 @@ export function useOnboarding() {
     await minWait
     const result = readOnboardingBotResult()
     const launchAgentId = result?.agent?.agentId ?? ''
+    // Like a Bot created outside onboarding, an Agent that has yet to sign in
+    // lands on its settings rather than on a chat that cannot run.
+    const signInAgentId = result?.agent?.signInFirst ? result.agent.botAgentId : ''
+    const returnTo = options.preferCreatedBot
+      ? undefined
+      : toReturnToParam(router.currentRoute?.value?.query?.return_to)
     const forceOnboarding = safeLocalGet(ONBOARDING_KEYS.forceOnboarding)
     safeLocalRemove(ONBOARDING_KEYS.forceOnboarding)
     try {
       // Use the `bot` route directly (not the `/chat/...` redirect, which drops
       // the query) so the chat page can read `?agent=` on landing.
-      const destination = result?.botId
-        ? launchAgentId
-          ? { name: 'bot', params: { botName: result.botId }, query: { agent: launchAgentId } }
-          : { name: 'bot', params: { botName: result.botId } }
-        : '/'
+      const destination = returnTo
+        ? returnTo
+        : result?.botId
+          ? signInAgentId
+            ? { name: 'bot-detail', params: { botName: result.botId }, query: { tab: 'agents', openAgent: signInAgentId } }
+            : launchAgentId
+              ? { name: 'bot', params: { botName: result.botId }, query: { agent: launchAgentId } }
+              : { name: 'bot', params: { botName: result.botId } }
+          : '/'
       const navigationFailure = await router.replace(destination)
       if (navigationFailure) throw navigationFailure
+      if (!returnTo && signInAgentId) toast.info(t('bots.createBotSignInFirst'))
     } catch {
       if (forceOnboarding !== null) {
         safeLocalSet(ONBOARDING_KEYS.forceOnboarding, forceOnboarding)

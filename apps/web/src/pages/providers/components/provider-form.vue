@@ -219,6 +219,12 @@
             <template v-else>
               {{ testError }}
             </template>
+            <p
+              v-if="testUpstreamError"
+              class="mt-1.5 select-text border-t border-border-soft pt-1.5 font-mono text-caption leading-relaxed text-muted-foreground"
+            >
+              {{ testUpstreamError }}
+            </p>
           </HoverCardContent>
         </HoverCard>
 
@@ -253,7 +259,7 @@
              ui-allow-shape: skeleton borrowing the row height, not a data row. -->
         <div
           v-if="oauthStatusLoading && !oauthStatus"
-          class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+          class="flex min-h-[3.75rem] items-center justify-center py-3"
         >
           <Spinner class="size-5 text-muted-foreground" />
         </div>
@@ -335,7 +341,7 @@
                贴着分隔线的英雄内容需要更大的呼吸(人眼裁决 2026-07-13)。 -->
           <div
             v-if="devicePending"
-            class="mx-4 border-b border-border py-6 last:border-b-0"
+            class="border-b border-border py-6 last:border-b-0"
           >
             <DeviceCodePanel
               :code="oauthStatus?.device?.user_code ?? ''"
@@ -405,7 +411,7 @@ import type {
 import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, DeviceCodePanel, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { modelSourceNeedsApiKey, providerCatalogEntry } from '@/constants/model-sources'
 
 const { t, te } = useI18n()
@@ -450,6 +456,7 @@ let testGeneration = 0
 const testLoading = ref(false)
 const testResult = ref<ProvidersTestResponse | null>(null)
 const testError = ref('')
+const testUpstreamError = ref('')
 const oauthStatus = ref<ProvidersOAuthStatus | null>(null)
 const oauthStatusLoading = ref(false)
 const authorizeLoading = ref(false)
@@ -486,6 +493,7 @@ async function runTest() {
   testLoading.value = true
   testResult.value = null
   testError.value = ''
+  testUpstreamError.value = ''
   try {
     const { data } = await postProvidersByIdTest({
       path: { id: props.provider.id },
@@ -495,10 +503,14 @@ async function runTest() {
     testResult.value = data ?? null
     if (testResult.value?.status !== 'ok') {
       testError.value = testFailureText(testResult.value)
+      const upstream = testResult.value?.args?.upstream
+      testUpstreamError.value = typeof upstream === 'string' ? upstream.trim() : ''
     }
   } catch (err: unknown) {
     if (generation !== testGeneration) return
     testError.value = resolveApiErrorMessage(err, t('provider.testFailed'))
+    const upstream = parseMemohError(err)?.args?.upstream
+    testUpstreamError.value = typeof upstream === 'string' ? upstream.trim() : ''
   } finally {
     testLoading.value = false
   }
@@ -508,6 +520,7 @@ watch(() => props.provider?.id, () => {
   testGeneration++
   testResult.value = null
   testError.value = ''
+  testUpstreamError.value = ''
 })
 
 const clientTypeOptions = computed(() =>
@@ -648,6 +661,7 @@ watch(
     testGeneration++
     testResult.value = null
     testError.value = ''
+    testUpstreamError.value = ''
   },
 )
 
@@ -709,8 +723,8 @@ const onSubmit = form.handleSubmit(async (value) => {
 
   try {
     await props.saveProvider(payload)
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  } catch {
+    // Error toast is emitted by model-setting's saveProvider mutation onError.
     return
   }
   // The saved values are the new server baseline until the refetch lands;

@@ -23,7 +23,7 @@ func threadError(err error) error {
 		code = apperror.CodeACPAgentNotFound
 	case errors.Is(err, sessionpkg.ErrACPAgentNotEnabled):
 		code = apperror.CodeACPAgentNotEnabled
-	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
+	case errors.Is(err, sessionpkg.ErrRuntimeOwnerMissing):
 		code = apperror.CodeACPRuntimeOwnerMissing
 	default:
 		return err

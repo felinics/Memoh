@@ -53,7 +53,6 @@ const notice = computed(() => {
 <template>
   <SettingsRow
     :label="t(`settings.keyboard.commands.${binding.i18nKey}.label`)"
-    :description="t(`settings.keyboard.commands.${binding.i18nKey}.description`)"
   >
     <template
       v-if="notice"
@@ -62,9 +61,6 @@ const notice = computed(() => {
       <div class="truncate text-control font-medium text-foreground">
         {{ t(`settings.keyboard.commands.${binding.i18nKey}.label`) }}
       </div>
-      <p class="mt-0.5 text-body text-muted-foreground">
-        {{ t(`settings.keyboard.commands.${binding.i18nKey}.description`) }}
-      </p>
       <FieldError class="mt-1">
         {{ notice }}
       </FieldError>

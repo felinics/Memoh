@@ -25,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
@@ -74,6 +75,10 @@ const (
 	// detection aborts the run. The abort follows no error event, and its
 	// cause carries no catalogued code.
 	wsStepHistoryTextLoop wsStepHistoryModel = "text_loop"
+	// wsStepHistoryReadImage answers the first call with a call to the read
+	// tool and every later call with text. The image the tool reads reaches
+	// the second call as internal feedback.
+	wsStepHistoryReadImage wsStepHistoryModel = "read_image"
 )
 
 // wsStepHistoryTransport answers streaming model requests with the scripted
@@ -112,6 +117,19 @@ func (t *wsStepHistoryTransport) RoundTrip(r *http.Request) (*http.Response, err
 		}
 	}
 	switch t.mode {
+	case wsStepHistoryReadImage:
+		if call == 1 {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(
+					"data: {\"id\":\"chatcmpl-ws-step\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_read_image\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"/data/screenshot.png\\\"}\"}}]},\"finish_reason\":null}]}\n\n" +
+						"data: {\"id\":\"chatcmpl-ws-step\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")),
+				Request: r,
+			}, nil
+		}
+		return stream(strings.NewReader("data: {\"id\":\"chatcmpl-ws-step\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")), nil
 	case wsStepHistoryToolThenBrokenStream, wsStepHistoryToolThenAuthFailure:
 		if call == 1 {
 			return &http.Response{
@@ -243,6 +261,7 @@ func newWSStepHistoryService(t *testing.T, mode wsStepHistoryModel, queries dbst
 	service := fixture.service
 	messages := messagepkg.NewService(service.logger, queries)
 	service.messageService = messages
+	service.checkpoints = checkpoint.NewStore(service.logger, queries)
 	service.streamHTTPClient = &http.Client{Transport: &wsStepHistoryTransport{base: service.streamHTTPClient.Transport, mode: mode}}
 	if mode == wsStepHistoryContextBudget {
 		service.agent = native.New(native.Deps{

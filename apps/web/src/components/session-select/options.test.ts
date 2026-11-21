@@ -89,18 +89,11 @@ describe('sessionMark', () => {
     expect(mark).toEqual({ kind: 'schedule', agentId: 'codex', label: 'Scheduled Task' })
   })
 
-  it('marks ACP chats with the agent that runs them', () => {
-    const mark = sessionMark(
-      session('a', { runtime_type: 'acp_agent', runtime_metadata: { acp_agent_id: 'claude-code' } }),
-      labels,
-    )
+  it('reads the ACP agent from the session\'s Agent instance', () => {
+    const agents = [{ id: 'agent-1', runtime: 'acp', metadata: { provider: 'gemini' } }]
+    const mark = sessionMark(session('a', { runtime_type: 'acp_agent', bot_agent_id: 'agent-1' }), labels, agents)
 
-    expect(mark.kind).toBe('acp')
-    expect(mark.agentId).toBe('claude-code')
-  })
-
-  it('resolves the legacy acp_agent type with no runtime_type', () => {
-    expect(sessionMark(session('a', { type: 'acp_agent', session_mode: '' }), labels).kind).toBe('acp')
+    expect(mark).toMatchObject({ kind: 'acp', agentId: 'gemini' })
   })
 
   it('leaves plain model chats unmarked', () => {

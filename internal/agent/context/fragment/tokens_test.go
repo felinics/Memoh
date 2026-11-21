@@ -34,6 +34,21 @@ func TestTokensFromBytes(t *testing.T) {
 	}
 }
 
+// A provider byte budget is priced within the tokens it was made for.
+func TestProviderBudgetBytesForTokensStaysWithinTheTokens(t *testing.T) {
+	t.Parallel()
+
+	for _, tokens := range []int{-5, 0, 1, 4, 5, 999, 1000, 4096, 123457} {
+		bytes := ProviderBudgetBytesForTokens(tokens)
+		if priced := ProviderBudgetTokensFromBytes(int(bytes)); priced > max(tokens, 0) || bytes < 0 {
+			t.Fatalf("ProviderBudgetBytesForTokens(%d) = %d bytes, priced at %d tokens", tokens, bytes, priced)
+		}
+	}
+	if got := ProviderBudgetBytesForTokens(1000); got != 3200 {
+		t.Fatalf("ProviderBudgetBytesForTokens(1000) = %d, want 3200", got)
+	}
+}
+
 func TestProviderBudgetTokensFromBytesUsesCeilingAndSafetyMargin(t *testing.T) {
 	t.Parallel()
 

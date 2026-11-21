@@ -4,12 +4,23 @@ interface FormatDateOptions {
   locale?: string
 }
 
-function parseDate(value: string | null | undefined): Date | null {
-  if (!value) {
-    return null
-  }
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
+type DateResolution =
+  | { kind: 'missing' }
+  | { kind: 'invalid' }
+  | { kind: 'valid'; date: Date }
+
+function isGoZeroDate(date: Date): boolean {
+  // Go serializes zero time.Time{} values as year 0001 (e.g. "0001-01-01T00:00:00Z").
+  // Treat them as unset so callers render their empty fallback instead of "1/1/1".
+  return date.getUTCFullYear() <= 1
+}
+
+function resolveDate(value: string | Date | null | undefined): DateResolution {
+  if (!value) return { kind: 'missing' }
+  const parsed = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(parsed.getTime())) return { kind: 'invalid' }
+  if (isGoZeroDate(parsed)) return { kind: 'missing' }
+  return { kind: 'valid', date: parsed }
 }
 
 /**
@@ -27,29 +38,30 @@ export function formatDateTime(
   value: string | null | undefined,
   options: FormatDateOptions = {},
 ): string {
-  if (!value) return options.fallback ?? ''
-  const parsed = parseDate(value)
-  if (!parsed) return resolveInvalid(value, options)
-  return parsed.toLocaleString(options.locale)
+  const resolved = resolveDate(value)
+  if (resolved.kind === 'missing') return options.fallback ?? ''
+  if (resolved.kind === 'invalid') return resolveInvalid(value ?? '', options)
+  return resolved.date.toLocaleString(options.locale)
 }
 
 export function formatDate(
   value: string | null | undefined,
   options: FormatDateOptions = {},
 ): string {
-  if (!value) return options.fallback ?? ''
-  const parsed = parseDate(value)
-  if (!parsed) return resolveInvalid(value, options)
-  return parsed.toLocaleDateString(options.locale)
+  const resolved = resolveDate(value)
+  if (resolved.kind === 'missing') return options.fallback ?? ''
+  if (resolved.kind === 'invalid') return resolveInvalid(value ?? '', options)
+  return resolved.date.toLocaleDateString(options.locale)
 }
 
 export function formatDateTimeSeconds(
   value: string | null | undefined,
   options: FormatDateOptions = {},
 ): string {
-  if (!value) return options.fallback ?? ''
-  const parsed = parseDate(value)
-  if (!parsed) return resolveInvalid(value, options)
+  const resolved = resolveDate(value)
+  if (resolved.kind === 'missing') return options.fallback ?? ''
+  if (resolved.kind === 'invalid') return resolveInvalid(value ?? '', options)
+  const parsed = resolved.date
 
   const year = parsed.getFullYear()
   const month = String(parsed.getMonth() + 1).padStart(2, '0')
@@ -70,10 +82,10 @@ export function formatDateTimeShort(
   value: string | null | undefined,
   options: FormatDateOptions = {},
 ): string {
-  if (!value) return options.fallback ?? ''
-  const parsed = parseDate(value)
-  if (!parsed) return resolveInvalid(value, options)
-  return parsed.toLocaleString(options.locale, {
+  const resolved = resolveDate(value)
+  if (resolved.kind === 'missing') return options.fallback ?? ''
+  if (resolved.kind === 'invalid') return resolveInvalid(value ?? '', options)
+  return resolved.date.toLocaleString(options.locale, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -97,9 +109,10 @@ export function formatCalendarTime(
   value: string | null | undefined,
   options: FormatDateOptions & { hour12?: boolean } = {},
 ): string {
-  if (!value) return options.fallback ?? ''
-  const parsed = parseDate(value)
-  if (!parsed) return resolveInvalid(value, options)
+  const resolved = resolveDate(value)
+  if (resolved.kind === 'missing') return options.fallback ?? ''
+  if (resolved.kind === 'invalid') return resolveInvalid(value ?? '', options)
+  const parsed = resolved.date
 
   const hour12 = options.hour12 ?? true
   const clock: Intl.DateTimeFormatOptions = {
@@ -139,9 +152,10 @@ export function formatRelativeTime(
   value: string | Date | null | undefined,
   options: FormatDateOptions = {},
 ): string {
-  if (!value) return options.fallback ?? ''
-  const date = value instanceof Date ? value : parseDate(value)
-  if (!date) return resolveInvalid(value as string, options)
+  const resolved = resolveDate(value)
+  if (resolved.kind === 'missing') return options.fallback ?? ''
+  if (resolved.kind === 'invalid') return resolveInvalid(String(value ?? ''), options)
+  const date = resolved.date
 
   const diffMs = date.getTime() - Date.now()
   const absDiffSec = Math.abs(diffMs) / 1000

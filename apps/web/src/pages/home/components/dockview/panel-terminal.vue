@@ -15,9 +15,11 @@ import { ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
-import TerminalPane from '../terminal-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
 import DockPanelFrame from './panel-frame.vue'
+import { lazyPanelContent } from './lazy-panel-content'
+
+const TerminalPane = lazyPanelContent(() => import('../terminal-pane.vue').then(m => m.default))
 
 const props = defineProps<{
   params: {

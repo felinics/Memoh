@@ -308,7 +308,7 @@ func TestHandleMCPToolsCallRoutesPublicEventHeadersWithoutTrustingIdentity(t *te
 	if delivered[0].Type != "tool_call_start" || delivered[1].Type != "tool_call_end" {
 		t.Fatalf("unexpected delivered events: %#v", delivered)
 	}
-	if executor.lastSession.ChannelIdentityID != "" || executor.lastSession.SessionToken != "" {
+	if executor.lastSession.ChannelIdentityID != "" {
 		t.Fatalf("public identity/credential headers were trusted: %#v", executor.lastSession)
 	}
 }
@@ -324,7 +324,6 @@ func TestBuildToolSessionContextPreservesRoutingHeadersAndIgnoresIdentityHeaders
 	req.Header.Set(headerSessionType, "acp_agent")
 	req.Header.Set(headerRouteID, "route-1")
 	req.Header.Set(headerChannelIdentityID, "user-1")
-	req.Header.Set(headerSessionToken, "token-1")
 	req.Header.Set(headerCurrentPlatform, "web")
 	req.Header.Set(headerReplyTarget, "reply-1")
 	req.Header.Set(headerConversationType, "private")
@@ -347,7 +346,7 @@ func TestBuildToolSessionContextPreservesRoutingHeadersAndIgnoresIdentityHeaders
 		!session.IsSubagent {
 		t.Fatalf("routing headers were not preserved: %#v", session)
 	}
-	if session.RuntimeToken != "" || session.ChannelIdentityID != "" || session.SessionToken != "" {
+	if session.RuntimeToken != "" || session.ChannelIdentityID != "" {
 		t.Fatalf("public identity/credential headers should be ignored: %#v", session)
 	}
 	if session.SupportsImageInput {

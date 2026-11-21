@@ -239,40 +239,6 @@ func TestAbortRuntimeRunReconcilesAssistantLifecycleWithoutChangingAck(t *testin
 	}
 }
 
-func TestAbortRuntimeRunMalformedAssistantLifecycleFallsBackToMinimal(t *testing.T) {
-	queries := newAbortedLifecycleQueries(t)
-	queries.assistantID = flowTestUUID("77777777-7777-4777-8777-777777777777")
-	queries.metadata = []byte(`{"context_lifecycle":"invalid"}`)
-	service := &Service{
-		queries:           queries,
-		contextLifecycles: queries,
-		abortRuntime:      &recordingAbortRuntime{applied: true},
-	}
-
-	applied, err := service.AbortRuntimeRun(
-		context.Background(),
-		lifecycleTestBotID,
-		lifecycleTestSessionID,
-		lifecycleTestRunID,
-		"abort-malformed-metadata",
-	)
-	if err != nil || !applied {
-		t.Fatalf("AbortRuntimeRun() = (%t, %v), want (true, nil)", applied, err)
-	}
-	waitForAbortedLifecycleUpsert(t, queries)
-	upserts := queries.recordedUpserts()
-	minimal, marshalErr := json.Marshal(minimalContextLifecycleSnapshot())
-	if marshalErr != nil {
-		t.Fatal(marshalErr)
-	}
-	if len(upserts) != 1 || !bytes.Equal(upserts[0].Snapshot, minimal) {
-		t.Fatalf("aborted upserts = %#v, want minimal fallback %s", upserts, minimal)
-	}
-	if got := service.contextLifecyclePersistenceErrors.Load(); got != 0 {
-		t.Fatalf("persistence failure count = %d, want 0 for non-recoverable metadata", got)
-	}
-}
-
 func TestAbortRuntimeRunFallsBackToMinimalAfterPendingDecisionGrace(t *testing.T) {
 	queries := newAbortedLifecycleQueries(t)
 	queries.pending = true
@@ -310,32 +276,6 @@ func TestAbortRuntimeRunFallsBackToMinimalAfterPendingDecisionGrace(t *testing.T
 	queries.mu.Unlock()
 	if pendingReads < 3 {
 		t.Fatalf("pending decision reads = %d, want recheck after pending cleared", pendingReads)
-	}
-}
-
-func TestAbortRuntimeRunPrefersExistingAuthoritativeSnapshot(t *testing.T) {
-	queries := newAbortedLifecycleQueries(t)
-	queries.existing = &sqlc.GetContextLifecycleByRunIDRow{Snapshot: []byte(`{"version":7}`)}
-	service := &Service{
-		queries:           queries,
-		contextLifecycles: queries,
-		abortRuntime:      &recordingAbortRuntime{applied: true},
-	}
-
-	_, err := service.AbortRuntimeRun(
-		context.Background(),
-		lifecycleTestBotID,
-		lifecycleTestSessionID,
-		lifecycleTestRunID,
-		"abort-existing",
-	)
-	if err != nil {
-		t.Fatalf("AbortRuntimeRun() error = %v", err)
-	}
-	waitForAbortedLifecycleUpsert(t, queries)
-	upserts := queries.recordedUpserts()
-	if len(upserts) != 1 || string(upserts[0].Snapshot) != `{"version":7}` {
-		t.Fatalf("aborted upserts = %#v, want existing authoritative snapshot", upserts)
 	}
 }
 

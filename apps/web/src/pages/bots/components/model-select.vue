@@ -13,7 +13,8 @@
         :class="[selectTriggerClass, 'w-full']"
       >
         <span
-          class="line-clamp-1"
+          class="min-w-0 flex-1 truncate text-left"
+          :class="isUnavailableSelection ? 'text-muted-foreground' : undefined"
           :title="displayLabel || placeholder"
         >
           {{ displayLabel || placeholder }}
@@ -90,17 +91,28 @@ watch(selected, () => {
 
 const { t } = useI18n()
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+const matchedModel = computed(() =>
+  props.models.find((m) => (m.id || m.model_id) === selected.value),
+)
+
+const isUnavailableSelection = computed(() =>
+  Boolean(selected.value && !matchedModel.value && (props.models.length > 0 || UUID_RE.test(selected.value))),
+)
+
 const modelLabel = computed(() => {
-  const model = props.models.find((m) => (m.id || m.model_id) === selected.value)
-  return model?.name || model?.model_id || selected.value
+  if (matchedModel.value) return matchedModel.value.name || matchedModel.value.model_id || selected.value
+  if (isUnavailableSelection.value) return t('common.unavailableOption')
+  return selected.value
 })
 
 // The effort moved inside this menu, so the trigger has to carry it — otherwise
 // the value is invisible until the menu is reopened. "Off" is not appended: a
 // bare model name leaves the provider's reasoning behavior unspecified.
 const displayLabel = computed(() => {
-  if (!props.showReasoning || !modelLabel.value) return modelLabel.value
-  const model = props.models.find(m => (m.id || m.model_id) === selected.value)
+  if (isUnavailableSelection.value || !props.showReasoning || !modelLabel.value) return modelLabel.value
+  const model = matchedModel.value
   const effort = props.reasoningOptions !== undefined
     ? reasoningEffort.value
     : displayedEffort(reasoningEffort.value, model?.reasoning)

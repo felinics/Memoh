@@ -117,3 +117,26 @@ func FuzzPipelineIncrementalRenderEquivalence(f *testing.F) {
 		}
 	})
 }
+
+// A session that is not resident renders the event without becoming resident,
+// so its next access still loads its history; a resident one takes the event
+// exactly as PushEvent would.
+func TestPipelinePushResidentEventNeverMakesASessionResident(t *testing.T) {
+	t.Parallel()
+	params := RenderParams{BotUserID: "bot"}
+	pipeline := NewPipelineWithOptions(params, PipelineOptions{MaxSessions: -1, MaxResidentByte: -1, TTL: -1})
+	first := MessageEvent{SessionID: "s", MessageID: "m1", ReceivedAtMs: 1, TimestampSec: 1, Content: []ContentNode{{Type: "text", Text: "one"}}}
+	second := MessageEvent{SessionID: "s", MessageID: "m2", ReceivedAtMs: 2, TimestampSec: 2, Content: []ContentNode{{Type: "text", Text: "two"}}}
+
+	alone := pipeline.PushResidentEvent("s", first)
+	if want := Render(Reduce(NewEmptyIC("s"), first), params); !reflect.DeepEqual(alone, want) || pipeline.HasSession("s") {
+		t.Fatalf("cold session: rendered %#v, resident %v; want %#v, not resident", alone, pipeline.HasSession("s"), want)
+	}
+
+	pipeline.ReplaySession("s", []CanonicalEvent{first})
+	got := pipeline.PushResidentEvent("s", second)
+	want := Render(Reduce(Reduce(NewEmptyIC("s"), first), second), params)
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(pipeline.GetRC("s"), want) {
+		t.Fatalf("resident session: rendered %#v, stored %#v; want %#v", got, pipeline.GetRC("s"), want)
+	}
+}

@@ -14,9 +14,11 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel/adapters/local"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/errs"
@@ -101,18 +103,6 @@ type queueScope struct {
 	IdentityID string
 }
 
-func (s queueScope) input(invocationID, text string) application.QueueInput {
-	return application.QueueInput{
-		TeamID:                  s.TeamID,
-		BotID:                   s.BotID,
-		SessionID:               s.SessionID,
-		InvocationID:            invocationID,
-		UserID:                  s.IdentityID,
-		SourceChannelIdentityID: s.IdentityID,
-		Text:                    text,
-	}
-}
-
 func (h *SessionQueueHandler) authorize(c echo.Context) (queueScope, error) {
 	identityID, err := auth.UserIDFromContext(c)
 	if err != nil {
@@ -182,6 +172,27 @@ func (h *SessionQueueHandler) authorizeQueueAccess(ctx context.Context, identity
 	default:
 		return echo.NewHTTPError(http.StatusForbidden, "bot access denied")
 	}
+}
+
+// queuedText authorizes a text the Web client queues and returns the turn
+// the Web chat would have started with it; the session's team admits it
+// later.
+func (h *SessionQueueHandler) queuedText(c echo.Context) (string, turn.StartTurnCommand, error) {
+	scope, err := h.authorize(c)
+	if err != nil {
+		return "", turn.StartTurnCommand{}, err
+	}
+	req, err := decodeQueueRequest(c)
+	if err != nil {
+		return "", turn.StartTurnCommand{}, err
+	}
+	turns := localTurns{channel: local.WebType, agentService: h.agentService, botService: h.botService, accountService: h.accountService}
+	cmd, _, err := turns.text(c.Request().Context(), c, scope.IdentityID, scope.BotID, scope.SessionID, req.Text)
+	if err != nil {
+		return "", turn.StartTurnCommand{}, err
+	}
+	cmd.TeamID = scope.TeamID
+	return req.InvocationID, cmd, nil
 }
 
 func decodeQueueRequest(c echo.Context) (enqueueQueueRequest, error) {
@@ -297,15 +308,11 @@ func validateReorderRefs(item, before string) error {
 // @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue [post].
 func (h *SessionQueueHandler) EnqueueSteer(c echo.Context) error {
-	scope, err := h.authorize(c)
+	invocationID, cmd, err := h.queuedText(c)
 	if err != nil {
 		return err
 	}
-	req, err := decodeQueueRequest(c)
-	if err != nil {
-		return err
-	}
-	item, err := h.agentService.EnqueueSteer(c.Request().Context(), scope.input(req.InvocationID, req.Text))
+	item, err := h.agentService.EnqueueSteer(c.Request().Context(), invocationID, cmd)
 	if err = queueAdmissionError(err); err != nil {
 		return err
 	}
@@ -324,15 +331,11 @@ func (h *SessionQueueHandler) EnqueueSteer(c echo.Context) error {
 // @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue [post].
 func (h *SessionQueueHandler) EnqueueFollowUp(c echo.Context) error {
-	scope, err := h.authorize(c)
+	invocationID, cmd, err := h.queuedText(c)
 	if err != nil {
 		return err
 	}
-	req, err := decodeQueueRequest(c)
-	if err != nil {
-		return err
-	}
-	item, err := h.agentService.EnqueueFollowUp(c.Request().Context(), scope.input(req.InvocationID, req.Text))
+	item, err := h.agentService.EnqueueFollowUp(c.Request().Context(), invocationID, cmd)
 	if err = queueAdmissionError(err); err != nil {
 		return err
 	}

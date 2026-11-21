@@ -7,6 +7,9 @@ import (
 // ToolName identifies a built-in Memoh agent tool.
 type ToolName = toolname.Name
 
+func ToolDescribe() ToolName { return toolname.ToolDescribe() }
+func ToolCall() ToolName     { return toolname.ToolCall() }
+
 func ToolMCPManage() ToolName { return toolname.ToolMCPManage() }
 func ToolAppSearch() ToolName { return toolname.ToolAppSearch() }
 func ToolAppManage() ToolName { return toolname.ToolAppManage() }
@@ -53,6 +56,7 @@ func ToolGetSchedule() ToolName    { return toolname.ToolGetSchedule() }
 func ToolCreateSchedule() ToolName { return toolname.ToolCreateSchedule() }
 func ToolUpdateSchedule() ToolName { return toolname.ToolUpdateSchedule() }
 func ToolDeleteSchedule() ToolName { return toolname.ToolDeleteSchedule() }
+func ToolNotifyUser() ToolName     { return toolname.ToolNotifyUser() }
 
 func ToolBrowserAction() ToolName        { return toolname.ToolBrowserAction() }
 func ToolBrowserObserve() ToolName       { return toolname.ToolBrowserObserve() }

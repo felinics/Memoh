@@ -75,6 +75,7 @@ func TestFederationProviderSkipsBuiltInNameCollisions(t *testing.T) {
 				Name:        "remote_observe",
 				Description: "Federated remote tool",
 				InputSchema: emptyObjectSchema(),
+				Group:       "mcp:remote",
 			},
 		},
 	}
@@ -84,8 +85,67 @@ func TestFederationProviderSkipsBuiltInNameCollisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tools() error = %v", err)
 	}
-	if len(tools) != 1 || tools[0].Name != "remote_observe" {
-		t.Fatalf("Tools() = %#v, want only non-built-in federated tool", tools)
+	if len(tools) != 1 || tools[0].Name != "remote_observe" || tools[0].Group != "mcp:remote" {
+		t.Fatalf("Tools() = %#v, want only non-built-in federated tool in group mcp:remote", tools)
+	}
+}
+
+func TestFederationProviderGroupsConnectorToolsBySourceInsteadOfToolNameVerb(t *testing.T) {
+	t.Parallel()
+
+	source := &federationTestSource{
+		tools: []mcp.ToolDescriptor{
+			{
+				Name:        "list_email",
+				Description: "List emails in the mailbox.",
+				InputSchema: emptyObjectSchema(),
+				Group:       "connector:email",
+			},
+			{
+				Name:        "list_email_accounts",
+				Description: "List configured email accounts.",
+				InputSchema: emptyObjectSchema(),
+				Group:       "connector:email",
+			},
+			{
+				Name:        "send_email",
+				Description: "Send an email message.",
+				InputSchema: emptyObjectSchema(),
+				Group:       "connector:email",
+			},
+			{
+				Name:        "get_issue",
+				Description: "Get a repository issue by number.",
+				InputSchema: emptyObjectSchema(),
+				Group:       "connector:github",
+			},
+			{
+				Name:        "unscoped_action",
+				Description: "Tool from a source that left Group empty.",
+				InputSchema: emptyObjectSchema(),
+			},
+		},
+	}
+	provider := NewFederationProvider(nil, source)
+
+	tools, err := provider.Tools(context.Background(), SessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	wantGroups := map[string]string{
+		"list_email":          "connector:email",
+		"list_email_accounts": "connector:email",
+		"send_email":          "connector:email",
+		"get_issue":           "connector:github",
+		"unscoped_action":     "mcp",
+	}
+	if len(tools) != len(wantGroups) {
+		t.Fatalf("len(tools) = %d, want %d", len(tools), len(wantGroups))
+	}
+	for _, tool := range tools {
+		if want := wantGroups[tool.Name]; tool.Group != want {
+			t.Fatalf("tool %q Group = %q, want %q", tool.Name, tool.Group, want)
+		}
 	}
 }
 

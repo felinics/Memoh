@@ -8,63 +8,7 @@
         {{ $t('sidebar.about') }}
       </h1>
 
-      <!-- Identity: logo, name, tagline, blurb and the resource links all live in
-           one card so About reads like the rest of Settings (cf. Profile). -->
-      <SettingsSection>
-        <div class="p-5">
-          <div class="flex items-center gap-4">
-            <div class="flex size-14 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
-              <img
-                src="/logo.svg"
-                alt="Memoh"
-                class="size-9"
-              >
-            </div>
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <h2 class="text-base font-semibold text-foreground">
-                  Memoh
-                </h2>
-                <Badge
-                  v-if="displayVersion"
-                  variant="secondary"
-                  size="sm"
-                  class="font-medium"
-                >
-                  {{ $t('settings.versionTag', { version: displayVersion }) }}
-                </Badge>
-              </div>
-              <p class="mt-0.5 text-[13px] leading-[18px] tracking-[-0.08px] font-[360] text-muted-foreground">
-                {{ $t('about.tagline') }}
-              </p>
-            </div>
-          </div>
-
-          <p class="mt-4 text-[13px] leading-[19px] tracking-[-0.06px] font-[380] text-muted-foreground">
-            {{ $t('about.description') }}
-          </p>
-
-          <div class="mt-5 flex flex-wrap gap-2">
-            <Button
-              v-for="link in links"
-              :key="link.href"
-              as="a"
-              :href="link.href"
-              target="_blank"
-              rel="noopener noreferrer"
-              variant="outline"
-              size="sm"
-              class="text-[13px] leading-[18px] tracking-[-0.08px] font-[420] text-foreground/82"
-            >
-              <component
-                :is="link.icon"
-                class="size-4"
-              />
-              {{ $t(link.labelKey) }}
-            </Button>
-          </div>
-        </div>
-      </SettingsSection>
+      <AboutIdentityCard :version="displayVersion" />
 
       <!-- Browser release checks retain their server-update flow. -->
       <SettingsSection
@@ -211,7 +155,7 @@
         <DialogHeader>
           <DialogTitle>{{ $t('about.updatesSection') }}</DialogTitle>
           <DialogDescription>
-            {{ $t('about.currentVersion', { version: displayVersion || '—' }) }}
+            {{ $t('about.currentVersion', { version: formatVersionLabel(displayVersion) || '—' }) }}
           </DialogDescription>
         </DialogHeader>
         <DialogBody>
@@ -280,14 +224,12 @@
 </template>
 
 <script setup lang="ts">
-import type { Component } from 'vue'
 import { computed, inject, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDark } from '@vueuse/core'
-import { BookOpen, Github, MessageSquare, RefreshCw, RotateCcw, SlidersHorizontal } from 'lucide-vue-next'
+import { RefreshCw, RotateCcw, SlidersHorizontal } from 'lucide-vue-next'
 import {
   ActionCard,
-  Badge,
   Switch,
   Button,
   Dialog,
@@ -311,11 +253,11 @@ import {
 import { useDesktopUpdates } from '@/composables/useDesktopUpdates'
 import { SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatVersionLabel, normalizeVersion } from '@/utils/version'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'
-
-const GITHUB_REPO = 'felinics/memoh'
+import AboutIdentityCard from './components/about-identity-card.vue'
 
 // Release notes are arbitrary upstream markdown and can contain fenced code
 // blocks. markstream 2.0's built-in code block needs the optional stream-diffs
@@ -324,12 +266,6 @@ const GITHUB_REPO = 'felinics/memoh'
 // Idempotent-guarded by the registry; the appearance mermaid scopes need no
 // registration — their content is mermaid-only, served by the global override.
 registerSharedMarkdownComponents('release-notes', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
-
-interface ResourceLink {
-  icon: Component
-  labelKey: string
-  href: string
-}
 
 const { t } = useI18n()
 const router = useRouter()
@@ -352,9 +288,9 @@ const actionPending = ref(false)
 
 const capabilitiesStore = useCapabilitiesStore()
 const { serverVersion, commitHash } = storeToRefs(capabilitiesStore)
-const normalizedServerVersion = computed(() => (serverVersion.value ?? '').replace(/^v/i, ''))
+const normalizedServerVersion = computed(() => normalizeVersion(serverVersion.value))
 const displayVersion = computed(() => (
-  desktopUpdate.value?.currentVersion.replace(/^v/i, '')
+  normalizeVersion(desktopUpdate.value?.currentVersion)
   || normalizedServerVersion.value
 ))
 
@@ -366,29 +302,23 @@ const codeBlockTheme = computed(() => ({
   dark: settingsStore.shikiThemeDark,
 }))
 
-const links: ResourceLink[] = [
-  { icon: Github, labelKey: 'about.github', href: `https://github.com/${GITHUB_REPO}` },
-  { icon: BookOpen, labelKey: 'about.docs', href: 'https://docs.memoh.ai' },
-  { icon: MessageSquare, labelKey: 'about.feedback', href: `https://github.com/${GITHUB_REPO}/issues` },
-]
-
 // Update row copy: the label states the headline status, the description carries
 // the running version or a hint, depending on whether a check has run yet.
 const updateLabel = computed(() => {
   if (desktopUpdates.value) {
     const state = desktopUpdate.value
-    if (!state) return t('about.currentVersion', { version: displayVersion.value || '—' })
+    if (!state) return t('about.currentVersion', { version: formatVersionLabel(displayVersion.value) || '—' })
     if (state.status === 'up-to-date') return t('about.upToDate')
     if (state.status === 'installing') return t('about.applyingUpdate')
     if (state.status === 'downloaded') return t('about.readyToRestart')
     if (state.status === 'downloading') return t('about.updatingVersion', { version: state.latestVersion || '—' })
     if (state.status === 'error') return t('about.desktopUpdateFailed')
     if (state.status === 'unavailable') return t('about.desktopUpdatesUnavailable')
-    return t('about.currentVersion', { version: state.currentVersion })
+    return t('about.currentVersion', { version: formatVersionLabel(state.currentVersion) || '—' })
   }
   if (update.hasUpdate) return t('about.newVersionTitle', { version: update.latestVersion })
   if (update.checked) return t('about.upToDate')
-  return t('about.currentVersion', { version: normalizedServerVersion.value || '—' })
+  return t('about.currentVersion', { version: formatVersionLabel(normalizedServerVersion.value) || '—' })
 })
 const updateDesc = computed(() => {
   if (desktopUpdates.value) {
@@ -407,8 +337,9 @@ const updateDesc = computed(() => {
   }
   if (update.hasUpdate) return t('about.newVersionDesc')
   if (update.checked) {
-    return normalizedServerVersion.value
-      ? t('about.currentVersion', { version: normalizedServerVersion.value })
+    const version = formatVersionLabel(normalizedServerVersion.value)
+    return version
+      ? t('about.currentVersion', { version })
       : ''
   }
   return t('about.checkHint')

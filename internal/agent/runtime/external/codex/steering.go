@@ -1,0 +1,127 @@
+package codex
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocol"
+	"github.com/felinics/memoh/internal/errs"
+)
+
+type pendingSteer struct {
+	input    external.SteerInput
+	observed bool
+	step     int
+	settled  chan error
+}
+
+// startSteering delivers same-turn input through Codex's turn/steer.
+func startSteering(ctx context.Context, client *conn, turn *turnState) func() {
+	if turn.input.Command != "" {
+		return func() {}
+	}
+	return external.PumpSteering(ctx, turn.input.Steering, turn.done, nil, nil,
+		func(ctx context.Context, input external.SteerInput) error {
+			return submitSteer(ctx, client, turn, input)
+		},
+		func(err error) {
+			turn.logger.WarnContext(ctx, "codex steer was not delivered", slog.Any("error", err))
+			turn.emit(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
+		})
+}
+
+func submitSteer(ctx context.Context, client *conn, turn *turnState, input external.SteerInput) error {
+	turn.mu.Lock()
+	if turn.steers == nil {
+		turn.steers = make(map[string]*pendingSteer)
+	}
+	pending := &pendingSteer{input: input, step: len(turn.steers), settled: make(chan error, 1)}
+	turn.steers[input.ID] = pending
+	expected := turn.turnID
+	turn.mu.Unlock()
+	if expected == "" || input.ID == "" || input.Text == "" {
+		return errs.New("invalid steer input or active turn")
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	watcherDone := make(chan struct{})
+	go func() {
+		select {
+		case <-turn.done:
+			cancel()
+		case <-requestCtx.Done():
+		}
+		close(watcherDone)
+	}()
+	var response protocol.TurnSteerResponse
+	err := client.Call(requestCtx, protocol.MethodTurnSteer, protocol.TurnSteerParams{
+		ThreadID: turn.threadID, ExpectedTurnID: expected, ClientUserMessageID: &input.ID,
+		Input: []protocol.UserInput{{Text: &protocol.TextUserInput{Text: input.Text}}},
+	}, &response)
+	cancel()
+	<-watcherDone
+	if err == nil && response.TurnID != expected {
+		err = errs.NewDependency("codex accepted steer for a different turn")
+	}
+	if err == nil {
+		// The RPC accepts into Codex's input buffer. Only the correlated item
+		// notification locates actual consumption amongst tool/text output.
+		select {
+		case deliveryErr := <-pending.settled:
+			return deliveryErr
+		case <-turn.done:
+			err = errs.New("turn ended before the steer input was consumed")
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
+	}
+	turn.mu.Lock()
+	observed := pending.observed
+	turn.mu.Unlock()
+	if !observed {
+		return err
+	}
+	// A correlated userMessage is authoritative even if the RPC response was
+	// lost. Drain its delivery barrier independently of a simultaneous Stop.
+	select {
+	case deliveryErr := <-pending.settled:
+		return deliveryErr
+	case <-time.After(6 * time.Second):
+		return errs.New("steer projection did not settle")
+	}
+}
+
+func (t *turnState) recordSteerInput(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	pending := t.steers[id]
+	if pending == nil || pending.observed || t.closed {
+		return
+	}
+	pending.observed = true
+	// Queueing the markers and the input under one lock places the input
+	// precisely between surrounding output. Started/completed repeats for the
+	// same client ID dedupe.
+	for _, ev := range []event.StreamEvent{
+		{Type: event.TextEnd},
+		{Type: event.ReasoningEnd},
+		{Type: event.StepEnd, StepNumber: pending.step},
+	} {
+		t.stream.EmitStreamEvent(ev)
+	}
+	t.stream.SteerInput(id, pending.input.Text, func() { t.deliverSteerInput(t.ctx, id) })
+}
+
+func (t *turnState) deliverSteerInput(parent context.Context, id string) {
+	t.mu.Lock()
+	pending := t.steers[id]
+	t.mu.Unlock()
+	if pending == nil || t.input.Steering == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+	defer cancel()
+	pending.settled <- t.input.Steering.Accepted(ctx, id, pending.step)
+}

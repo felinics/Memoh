@@ -10,7 +10,7 @@
 
     <!-- Loading (initial) -->
     <div
-      v-else-if="isLoading && schedules.length === 0"
+      v-else-if="(isLoading && schedules.length === 0) || (schedules.length > 0 && isTimezonePending)"
       class="flex items-center gap-2 px-[23px] pt-3 text-caption text-muted-foreground/60"
     >
       <Spinner class="size-3" />
@@ -81,8 +81,11 @@
               :expanded="expandedScheduleId === item.id"
               :pinned-session="!!pinnedSessionId(item)"
               :running="isPinnedSessionRunning(item)"
+              :unread-count="unreadOf(item).length"
+              :unread-kinds="unreadOf(item)"
               @open="handleOpen(item)"
               @edit="handleOpenTask(item)"
+              @read-all="readAllRuns(item)"
               @delete="deleteTarget = item"
               @toggle="(enabled) => handleToggleEnabled(item, enabled)"
             >
@@ -92,6 +95,8 @@
                 :schedule-id="item.id"
                 :schedule-name="item.name ?? ''"
                 :revision="currentScheduleRevision"
+                :focus-session-id="attentionFocus.scheduleRun?.scheduleId === item.id ? attentionFocus.scheduleRun.sessionId : ''"
+                @focused="attentionFocus.scheduleRun = null"
               />
             </ScheduleItem>
           </div>
@@ -126,7 +131,10 @@ import {
 import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdScheduleById } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
+import { useBotEffectiveTimezone } from '@/composables/api/useBotTimezone'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useUnreadStore, type AttentionKind } from '@/store/unread'
+import { useAttentionFocusStore } from '@/store/attention-focus'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import { scheduleDeleteConfirmKey } from '@/utils/schedule-delete'
@@ -143,6 +151,8 @@ const { t, locale } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId, scheduleActivityRevisions } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
+const unread = useUnreadStore()
+const attentionFocus = useAttentionFocusStore()
 const { sidebarView } = storeToRefs(workspaceTabs)
 
 const isLoading = ref(false)
@@ -154,9 +164,9 @@ const busyIds = reactive(new Set<string>())
 const cronLocale = computed<'en' | 'zh' | 'ja'>(() => (locale.value.startsWith('zh') ? 'zh' : locale.value.startsWith('ja') ? 'ja' : 'en'))
 const uiLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : locale.value.startsWith('ja') ? 'ja-JP' : 'en-US')
 
-const effectiveTimezone = computed(() => {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
-})
+// Schedules fire in the bot's effective timezone, which may differ from the
+// viewer's; next runs are computed there and shown in local time.
+const { timezone: effectiveTimezone, isPending: isTimezonePending } = useBotEffectiveTimezone(currentBotId)
 
 // --- Grouping by day; each item carries its own next-run time. ---
 
@@ -179,10 +189,10 @@ function groupLabel(date: Date, now: Date): string {
   const week = 7 * 86_400_000
 
   if (isSameDay(date, now)) {
-    return locale.value.startsWith('zh') ? '今天' : locale.value.startsWith('ja') ? '今日' : 'Today'
+    return t('bots.schedule.today')
   }
   if (isSameDay(date, tomorrow)) {
-    return locale.value.startsWith('zh') ? '明天' : locale.value.startsWith('ja') ? '明日' : 'Tomorrow'
+    return t('bots.schedule.tomorrow')
   }
   if (diff < week) {
     return date.toLocaleDateString(uiLocale.value, { weekday: 'short' })
@@ -193,6 +203,10 @@ function groupLabel(date: Date, now: Date): string {
 const groupedSchedules = computed<ScheduleGroup[]>(() => {
   const now = new Date()
   const tz = effectiveTimezone.value
+  // Keep tasks accessible when settings fail, without inventing local run times.
+  if (!tz) return schedules.value.length
+    ? [{ key: 'schedule', label: t('bots.schedule.title'), tasks: schedules.value }]
+    : []
 
   const pairs = schedules.value.flatMap(task => {
     if (!task.pattern) return []
@@ -231,11 +245,12 @@ function describeItem(pattern: string | undefined): string | undefined {
 }
 
 function nextRunForItem(item: ScheduleSchedule): Date | null {
-  if (!item.pattern) return null
+  if (!item.pattern || !effectiveTimezone.value) return null
   return nextRuns(item.pattern, effectiveTimezone.value, 1)[0] ?? null
 }
 
 function nextRunTimeLabel(item: ScheduleSchedule): string {
+  if (!effectiveTimezone.value) return ''
   const next = nextRunForItem(item)
   if (!next) return item.pattern ?? ''
   return next.toLocaleTimeString(uiLocale.value, { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -331,6 +346,43 @@ function pinnedSessionId(item: ScheduleSchedule): string {
   return item.target_session_id?.trim() ?? ''
 }
 
+/**
+ * Unread kinds of a schedule's sessions: the runs it created, or the one
+ * conversation a pinned schedule runs in.
+ */
+function unreadOf(item: ScheduleSchedule): AttentionKind[] {
+  const pinned = pinnedSessionId(item)
+  if (pinned) {
+    const kind = unread.kindOf(pinned)
+    return kind ? [kind] : []
+  }
+  return (unread.bySchedule[item.id ?? ''] ?? []).map(entry => entry.kind)
+}
+
+/**
+ * Reads every unread run of a schedule. The toast's undo marks them unread
+ * again, as the "Needs you" clear-all does.
+ */
+async function readAllRuns(item: ScheduleSchedule) {
+  const ids = (unread.bySchedule[item.id ?? ''] ?? []).map(entry => entry.sessionId)
+  let cleared: string[]
+  try {
+    cleared = await unread.markSessionsRead(ids)
+  }
+  catch {
+    toast.error(t('notifications.updateFailed'))
+    return
+  }
+  if (!cleared.length) return
+  toast(t('notifications.clearedAll', { count: cleared.length }), {
+    duration: 8000,
+    action: {
+      label: t('notifications.undo'),
+      onClick: () => { unread.markUnread(cleared).catch(() => toast.error(t('notifications.updateFailed'))) },
+    },
+  })
+}
+
 function isPinnedSessionRunning(item: ScheduleSchedule): boolean {
   const sessionId = pinnedSessionId(item)
   return !!sessionId && chatStore.isSessionStreaming(currentBotId.value, sessionId)
@@ -363,5 +415,20 @@ function handleOpen(item: ScheduleSchedule) {
     [botId]: expandedScheduleId.value === id ? '' : id,
   }
 }
+
+// Opening a schedule run from "Needs you" or a notification brings it into
+// view: its card opens here, once the schedules are loaded, and the run list
+// scrolls to it (focus-session-id).
+watch(
+  () => [attentionFocus.scheduleRun?.scheduleId, schedules.value] as const,
+  ([scheduleId, items]) => {
+    const botId = (currentBotId.value ?? '').trim()
+    if (!scheduleId || !botId || !items.some(item => item.id === scheduleId)) return
+    if (expandedScheduleId.value !== scheduleId) {
+      expandedScheduleByBot.value = { ...expandedScheduleByBot.value, [botId]: scheduleId }
+    }
+  },
+  { immediate: true },
+)
 
 </script>

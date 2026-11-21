@@ -68,7 +68,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { Input } from '@felinic/ui'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
@@ -76,12 +76,14 @@ import { postAuthLogin, putUsersMe } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'
 import PasswordInput from '@/components/password-input/index.vue'
 import DotMatrixBg from '@/pages/login/components/dot-matrix-bg.vue'
+import { sanitizeReturnTo } from '@/router-guards/return-to'
 import { submitLogin } from './login-submit'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { LOGIN_ENTRY_ANIMATION_KEY } from './transition'
 
+const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 
@@ -119,6 +121,7 @@ const readBrowserTimezone = (): string | null => {
 
 const login = async () => {
   if (!canSubmit.value || isSubmitting.value) return
+  const destination = sanitizeReturnTo(route.query.return_to)
   await submitLogin(
     { username: username.value.trim(), password: password.value },
     isSubmitting,
@@ -149,7 +152,7 @@ const login = async () => {
         exiting.value = true
         safeSessionSet(ONBOARDING_KEYS.entryAnimation, '1')
         await new Promise<void>(resolve => setTimeout(resolve, 175))
-        await router.replace({ path: '/' })
+        await router.replace(destination)
       },
       notifyInvalidCredentials: () => {
         // 可显隐密码框:失败不清空,用户多半只改账号或笔误。

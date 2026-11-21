@@ -11,7 +11,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
@@ -79,6 +79,7 @@ type SessionService interface {
 	UpdateTitle(ctx context.Context, sessionID, title string) (session.Thread, error)
 	UpdateMetadata(ctx context.Context, sessionID string, metadata map[string]any) (session.Thread, error)
 	MergeRuntimeMetadata(ctx context.Context, sessionID, runtimeType string, delta map[string]any) (session.Thread, error)
+	ExternalIdentity(ctx context.Context, sess session.Thread) (session.ExternalIdentity, error)
 }
 
 // SetSessionService configures the session service used for auto title generation.
@@ -123,7 +124,7 @@ func (s *Service) generateSessionTitle(ctx context.Context, req ChatRequest, ses
 	// DB title (rather than an in-memory cache) keeps this guard restart-safe:
 	// a session that already has an LLM-generated title is never re-run, even
 	// after a server restart.
-	if !shouldGenerateSessionTitle(sess) {
+	if !shouldGenerateSessionTitle(sess, s.sessionACPAgentID(ctx, sess)) {
 		job.Annotate(ctx, slog.String("skipped", "titled"))
 		return nil
 	}
@@ -186,7 +187,10 @@ func (s *Service) resolveTitleModel(ctx context.Context, botID string) (modelID,
 	return strings.TrimSpace(account.TitleModelID), ownerUserID, nil
 }
 
-func shouldGenerateSessionTitle(sess session.Thread) bool {
+// shouldGenerateSessionTitle reports whether a session still carries no
+// title of its own: none, or the placeholder an ACP session starts with, its
+// agent profile's id or display name.
+func shouldGenerateSessionTitle(sess session.Thread, acpAgentID string) bool {
 	title := strings.TrimSpace(sess.Title)
 	if title == "" {
 		return true
@@ -195,8 +199,7 @@ func shouldGenerateSessionTitle(sess session.Thread) bool {
 		return false
 	}
 
-	agentID := metadataString(sess.Metadata, "acp_agent_id")
-	normalized := acpprofile.NormalizeAgentID(agentID)
+	normalized := acpprofile.NormalizeAgentID(acpAgentID)
 	if normalized == "" {
 		return false
 	}
@@ -208,6 +211,19 @@ func shouldGenerateSessionTitle(sess session.Thread) bool {
 		return true
 	}
 	return false
+}
+
+// sessionACPAgentID is the agent profile an ACP session runs, empty for any
+// other session or when it cannot be read.
+func (s *Service) sessionACPAgentID(ctx context.Context, sess session.Thread) string {
+	if s.sessionService == nil || !session.IsACPRuntime(sess) {
+		return ""
+	}
+	identity, err := s.sessionService.ExternalIdentity(ctx, sess)
+	if err != nil {
+		return ""
+	}
+	return identity.ACPAgentID
 }
 
 const (

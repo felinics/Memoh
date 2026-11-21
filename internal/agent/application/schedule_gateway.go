@@ -18,9 +18,9 @@ func NewScheduleGateway(service *Service) *ScheduleGateway {
 }
 
 // TriggerSchedule delegates a schedule trigger to the chat Service.
-func (g *ScheduleGateway) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (schedule.TriggerResult, error) {
+func (g *ScheduleGateway) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload) (schedule.TriggerResult, error) {
 	if g == nil || g.service == nil {
 		return schedule.TriggerResult{}, errors.New("agent application service not configured")
 	}
-	return g.service.TriggerSchedule(ctx, botID, payload, token)
+	return g.service.TriggerSchedule(ctx, botID, payload)
 }

@@ -1975,3 +1975,38 @@ func TestSegmentEnd_EmptyBufferIsNoOp(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamLimiterIsPerChannelConfig(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	busy := adapter.streamLimiter("cfg-busy")
+	for i := 0; i < 3; i++ {
+		if !busy.Allow() {
+			t.Fatalf("burst request %d was refused", i+1)
+		}
+	}
+	if busy.Allow() {
+		t.Fatal("cfg-busy should be out of burst")
+	}
+	if adapter.streamLimiter("cfg-busy") != busy {
+		t.Fatal("streams of one config must share a limiter")
+	}
+	if !adapter.streamLimiter("cfg-other").Allow() {
+		t.Fatal("another bot must not wait on cfg-busy's limiter")
+	}
+}
+
+func TestDropStreamLimiterForgetsTheConfig(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	stale := adapter.streamLimiter("cfg-stopped")
+	adapter.streamLimiter("cfg-running")
+	adapter.dropStreamLimiter("cfg-stopped")
+	if _, ok := adapter.streamLimiters["cfg-stopped"]; ok {
+		t.Fatal("a stopped config's limiter is still kept")
+	}
+	if _, ok := adapter.streamLimiters["cfg-running"]; !ok {
+		t.Fatal("dropping one config removed another")
+	}
+	if adapter.streamLimiter("cfg-stopped") == stale {
+		t.Fatal("a reconnected config reused the dropped limiter")
+	}
+}

@@ -3,6 +3,7 @@ import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { focusIsInTextInput } from '@/lib/keyboard-context'
 import type { DockviewApi, DockviewGroupPanel, SerializedDockview } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { routeConversationLabel } from '@/store/chat-list.utils'
@@ -17,7 +18,7 @@ import {
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
 import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManagerProvider'
-import i18n from '@/i18n'
+import i18n, { type Locale } from '@/i18n'
 
 // Workspace shell state (activity bar + side panel + dockview layout):
 // - the dockview layout in the center area (chat / file / terminal / browser /
@@ -42,6 +43,14 @@ const DEFAULT_TERMINAL_TITLE = 'Terminal'
 // Persisted layouts from older releases used this value as the terminal title.
 // It is only recognized for migration; it is never used as a new title.
 const LEGACY_TERMINAL_TITLE = 'zsh'
+const PREVIEW_TAB_FORMATTERS = [
+  (name: string) => `Preview: ${name}`,
+  (name: string) => `预览：${name}`,
+  (name: string) => `プレビュー: ${name}`,
+]
+const TERMINAL_FALLBACK_PREFIXES = ['Terminal', '终端']
+const BROWSER_FALLBACK_PREFIXES = ['Browser', '浏览器', 'ブラウザ']
+const DISPLAY_FALLBACK_TITLES = ['Desktop', '桌面', 'デスクトップ']
 
 export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule'
 
@@ -92,6 +101,14 @@ function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id.startsWith('schedule:')) return 'schedule'
   return null
 }
+
+// Menus and dialogs a conversation can be entered from; how long (in frames,
+// about two seconds) to wait for one to give focus back before the entry gives
+// up on moving the caret; and how long, once one has unmounted, to wait for the
+// focus it returns to its trigger to land.
+const ENTRY_OVERLAY = '[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"], [role="listbox"]'
+const ENTRY_OVERLAY_MAX_FRAMES = 120
+const ENTRY_FOCUS_RETURN_MAX_FRAMES = 6
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const selection = useChatSelectionStore()
@@ -164,16 +181,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   let dockHoldsMobileStack = false
   let apiDisposables: Array<{ dispose(): void }> = []
   let draftChatQueued = false
-  // initialize() may auto-pick the latest conversation without a user click.
-  // That pick may fill the draft only when the dock restored empty (the draft
-  // is then the store's own fallback); a restored workspace is the user's, so
-  // the pick is dropped instead.
-  let autoPickMayFillDraft = false
   const deletedSessionIdsByBot = new Map<string, Set<string>>()
   const chatActivationExplicitOverrides = new Map<string, boolean>()
 
   function ensureBotLayout(botId: string | null | undefined): BotLayoutState | null {
-    const bid = (botId ?? '').trim()
+    const bid = botId ?? ''
     if (!bid) return null
     if (!storage.value[bid]) {
       storage.value = { ...storage.value, [bid]: emptyBotLayout() }
@@ -293,22 +305,22 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function terminalTitleFallback(id: string): string {
-    const prefix = i18n.global.t('bots.terminal.defaultTabLabel').trim() || DEFAULT_TERMINAL_TITLE
+    const prefix = i18n.global.t('bots.terminal.defaultTabLabel') || DEFAULT_TERMINAL_TITLE
     return numberedFallbackTitle(prefix, id)
   }
 
   // System-titled panels always label from the current locale; the English
   // constants are only guards against a missing key.
   function defaultChatTitle(): string {
-    return i18n.global.t('chat.newSession').trim() || DEFAULT_CHAT_TITLE
+    return i18n.global.t('chat.newSession') || DEFAULT_CHAT_TITLE
   }
 
   function browserTabTitle(): string {
-    return i18n.global.t('chat.tabs.browser').trim() || 'Browser'
+    return i18n.global.t('chat.tabs.browser') || 'Browser'
   }
 
   function scheduleTabTitle(): string {
-    return i18n.global.t('chat.tabs.schedule').trim() || 'Schedule'
+    return i18n.global.t('chat.tabs.schedule') || 'Schedule'
   }
 
   // Per-session chat title fallback (syncChatTitles overlays the server title
@@ -352,10 +364,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
   }
 
+  function matchesLocalizedTitle(
+    title: string,
+    resolve: (locale: Locale) => string,
+    knownTitles: readonly string[] = [],
+  ): boolean {
+    if (knownTitles.includes(title)) return true
+    return i18n.global.availableLocales.some(loc => resolve(loc as Locale) === title)
+  }
+
   // Beyond filling empty titles, regenerate system-titled panels (draft chat,
-  // unsaved schedule, terminal/browser/display fallbacks) from the current
-  // locale: titles are persisted in the layout, so a workspace saved under
-  // another language would otherwise keep stale foreign titles forever.
+  // unsaved schedule, preview, and terminal/browser/display fallbacks) from the
+  // current locale: titles are persisted in the layout, and live language
+  // switches re-derive them in place without a reload.
   function repairPanelTitles(): boolean {
     const dock = api.value
     if (!dock) return false
@@ -369,8 +390,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return repaired
   }
 
-  // The title this panel should have after restore, or null to keep the
-  // persisted one (sessions, files, user-named schedules, live terminal titles).
+  // The title this panel should have after restore or locale change, or null to
+  // keep the existing one (sessions, non-preview files, user-named schedules,
+  // live shell titles).
   function repairedPanelTitle(panel: { id: string, api: { title?: string }, params?: Record<string, unknown> }): string | null {
     const title = (panel.api.title ?? '').trim()
     const component = panelComponentOf(panel.id)
@@ -380,17 +402,44 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (component === 'chat' && panelSessionId(panel) === null) return defaultChatTitle()
     if (component === 'schedule' && panel.id.startsWith('schedule:new:')) return scheduleTabTitle()
     if (!title) return panelTitleFallback(panel)
-    // Pre-localization builds persisted English fallback titles; recognize those
-    // exact shapes so old layouts migrate. A live page or shell reporting
-    // exactly "Browser 2"-style text is negligible.
-    if (component === 'terminal'
-      && (title.toLowerCase() === LEGACY_TERMINAL_TITLE || /^Terminal( \d+)?$/.test(title))) {
-      return terminalTitleFallback(panel.id)
+    if (component === 'preview') {
+      const name = fileBaseName(panel.id.slice('preview:'.length))
+      if (matchesLocalizedTitle(
+        title,
+        loc => i18n.global.t('chat.previewTab', { name }, { locale: loc }),
+        PREVIEW_TAB_FORMATTERS.map(format => format(name)),
+      )) {
+        return i18n.global.t('chat.previewTab', { name })
+      }
+      return null
     }
-    if (component === 'browser' && /^Browser( \d+)?$/.test(title)) {
-      return numberedFallbackTitle(browserTabTitle(), panel.id)
+    if (component === 'terminal') {
+      const isDefaultTerminal = title.toLowerCase() === LEGACY_TERMINAL_TITLE
+        || matchesLocalizedTitle(
+          title,
+          (loc) => {
+            const prefix = i18n.global.t('bots.terminal.defaultTabLabel', {}, { locale: loc })
+            return prefix ? numberedFallbackTitle(prefix, panel.id) : ''
+          },
+          TERMINAL_FALLBACK_PREFIXES.map(prefix => numberedFallbackTitle(prefix, panel.id)),
+        )
+      return isDefaultTerminal ? terminalTitleFallback(panel.id) : null
     }
-    if (component === 'display' && /^Desktop( \d+)?$/.test(title)) {
+    if (component === 'browser') {
+      const address = typeof panel.params?.address === 'string' ? panel.params.address.trim() : ''
+      if (address) return null
+      const isDefaultBrowser = matchesLocalizedTitle(
+        title,
+        loc => numberedFallbackTitle(i18n.global.t('chat.tabs.browser', {}, { locale: loc }), panel.id),
+        BROWSER_FALLBACK_PREFIXES.map(prefix => numberedFallbackTitle(prefix, panel.id)),
+      )
+      return isDefaultBrowser ? numberedFallbackTitle(browserTabTitle(), panel.id) : null
+    }
+    if (component === 'display' && matchesLocalizedTitle(
+      title,
+      loc => i18n.global.t('chat.display.title', {}, { locale: loc }),
+      DISPLAY_FALLBACK_TITLES,
+    )) {
       return i18n.global.t('chat.display.title')
     }
     return null
@@ -451,12 +500,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
     if (repairedEmptyTitles && !dockEmptyAfterRestore) persistLayout()
     // Non-empty restore is authoritative for this tab's panels. Empty restore
-    // still needs the draft fallback, and may accept initialize()'s auto-pick
-    // (filling that draft).
-    autoPickMayFillDraft = dockEmptyAfterRestore
+    // still needs the draft fallback.
     if (dockEmptyAfterRestore) ensureDraftChatPanel()
     syncDraftChatExplicitSelection()
     alignSelectionWithDock()
+    focusChatInputAfterEntry()
   }
 
   function domListener<K extends keyof DocumentEventMap>(
@@ -464,7 +512,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     handler: (event: DocumentEventMap[K]) => void,
     options?: AddEventListenerOptions,
   ): { dispose(): void } {
-    if (typeof document === 'undefined') return { dispose() {} }
     document.addEventListener(type, handler as EventListener, options)
     return {
       dispose() {
@@ -552,7 +599,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         // so Recents must stop highlighting it. A chat tab taking focus instead
         // updates the selection through its own activation.
         else if (!suppressPersist && panelComponentOf(panel.id) === 'chat') {
-          const sid = (chatStore.sessionId ?? '').trim()
+          const sid = chatStore.sessionId ?? ''
           const active = dock.activePanel
           if (
             sid
@@ -593,7 +640,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       domListener('dragend', () => { panelDragging.value = false }, { capture: true }),
       domListener('pointerup', () => { panelDragging.value = false }, { capture: true }),
     ]
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (bid) {
       restoreLayout(bid)
       reconcileDeletedChatPanels()
@@ -608,7 +655,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     loadedBotId = null
     panelDragging.value = false
     draftChatQueued = false
-    autoPickMayFillDraft = false
   }
 
   // ---- panel operations ----------------------------------------------------
@@ -619,6 +665,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function requestChatInputFocus() {
     if (!activePanelId.value || panelComponentOf(activePanelId.value) !== 'chat') activateChatPanel()
+    requestActiveChatInputFocus()
+  }
+
+  function requestActiveChatInputFocus() {
     const panel = api.value?.activePanel
     if (!activePanelIsChat.value || !panel || !currentBotId.value) return
     pendingChatInputFocus.value = {
@@ -626,6 +676,58 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       botId: currentBotId.value,
       sessionId: panel.params?.sessionId ?? null,
     }
+  }
+
+  // Desktop: entering a conversation — cold start, a bot switch, New Chat, a
+  // session opened from the sidebar, a menu or search — leaves the caret in its
+  // composer. Requested a tick later, once the activation and selection changes
+  // it rides on (which drop pending requests) have settled. It never takes
+  // focus from another input, never switches away from a non-chat tab, and
+  // never runs on phones, where focusing would raise a keyboard the user did
+  // not ask for.
+  let entryFocusRun = 0
+  function focusChatInputAfterEntry() {
+    if (isMobile.value) return
+    const run = ++entryFocusRun
+    void nextTick(() => {
+      if (isMobile.value || run !== entryFocusRun) return
+      // Entered from a menu or dialog: it still holds focus and hands it back
+      // to its trigger as it closes, which would undo an earlier request.
+      // Wait until focus has left it.
+      const overlay = document.activeElement?.closest<HTMLElement>(ENTRY_OVERLAY)
+      if (overlay) {
+        afterOverlayReleasesFocus(overlay, run)
+        return
+      }
+      if (focusIsInTextInput()) return
+      requestActiveChatInputFocus()
+    })
+  }
+
+  function afterOverlayReleasesFocus(
+    overlay: HTMLElement,
+    run: number,
+    framesLeft = ENTRY_OVERLAY_MAX_FRAMES,
+    returnFramesLeft = ENTRY_FOCUS_RETURN_MAX_FRAMES,
+  ) {
+    requestAnimationFrame(() => {
+      if (run !== entryFocusRun || isMobile.value) return
+      const active = document.activeElement
+      if (overlay.isConnected && active && overlay.contains(active)) {
+        if (framesLeft > 0) afterOverlayReleasesFocus(overlay, run, framesLeft - 1, returnFramesLeft)
+        return
+      }
+      // Unmounted while it held focus: focus fell to the page, and the
+      // overlay's focus scope gives it back to the trigger in a task queued
+      // after unmounting (reka-ui FocusScope). A request made before that
+      // lands would be undone by it.
+      if (!overlay.isConnected && (!active || active === document.body) && returnFramesLeft > 0) {
+        afterOverlayReleasesFocus(overlay, run, framesLeft, returnFramesLeft - 1)
+        return
+      }
+      if (focusIsInTextInput()) return
+      requestActiveChatInputFocus()
+    })
   }
 
   function focusAdjacentTab(direction: -1 | 1): boolean {
@@ -756,7 +858,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // The session a chat panel renders, read from its dockview params (null = draft).
   function panelSessionId(panel: { params?: Record<string, unknown> }): string | null {
     const sid = panel.params?.sessionId
-    return typeof sid === 'string' && sid.trim() ? sid : null
+    const trimmed = typeof sid === 'string' ? sid.trim() : ''
+    return trimmed || null
   }
 
   function chatPanelForSession(sid: string) {
@@ -778,7 +881,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function isDeletedSessionForCurrentBot(sid: string | null): boolean {
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid || !sid) return false
     const latestDeleted = chatStore.deletedSession
     if (latestDeleted?.botId === bid && latestDeleted.id === sid) return true
@@ -808,12 +911,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const sid = opts.sessionId.trim()
     if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
     const explicitSelection = opts.explicitSelection !== false
     const activate = opts.activate !== false
+    if (activate) focusChatInputAfterEntry()
     const existing = opts.groupLocal && opts.groupId
       ? dock.getGroup(opts.groupId)?.panels.find(
           panel => panelComponentOf(panel.id) === 'chat' && panelSessionId(panel) === sid,
@@ -901,12 +1005,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const sid = opts.sessionId.trim()
     if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     // Same guard as openSessionChat: a row mid-deletion can still be visible in
     // the sidebar, so refuse to (re)open a session being deleted for this bot.
     if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
+    focusChatInputAfterEntry()
     const existing = chatPanelForSession(sid)
     if (existing) {
       existing.api.setTitle(title)
@@ -937,7 +1042,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const sid = opts.sessionId.trim()
     if (!sid) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
@@ -974,8 +1079,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function openDraftChat(opts?: { title?: string, groupId?: string, explicitSelection?: boolean }) {
     const dock = api.value
     if (!dock) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
+    focusChatInputAfterEntry()
     const draftCandidates = opts?.groupId
       ? dock.getGroup(opts.groupId)?.panels ?? []
       : dock.panels
@@ -1053,7 +1159,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function alignSelectionWithDock() {
     const dock = api.value
     if (!dock) return
-    const sid = (chatStore.sessionId ?? '').trim()
+    const sid = chatStore.sessionId ?? ''
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
     // A non-explicit pick may still be overridden by the default External
     // Agent while chats load; the loadingChats watcher runs this again.
@@ -1082,14 +1188,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       selectChatSession(activeSid, false)
       return
     }
-    // The focused tab is a draft. It may take a selected session that has no
-    // tab yet — filling it changes the draft's content, not which tab has
-    // focus. An auto-pick fills only the store's own empty-dock draft.
+    // The focused tab is a draft. It may take an explicitly selected session
+    // that has no tab yet — filling it changes the draft's content, not which
+    // tab has focus. A non-explicit selection never fills it: the draft's
+    // composer is already on screen, and swapping in a history afterwards
+    // would move it under the user.
     if (
       sid
+      && explicitSelection
       && !isDeletedSessionForCurrentBot(sid)
       && !chatPanelForSession(sid)
-      && (explicitSelection || autoPickMayFillDraft)
     ) {
       active.api.updateParameters({ sessionId: sid, explicitSelection })
       active.api.setTitle(chatTitleFallbackFor(sid))
@@ -1141,7 +1249,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // valid even when it is not present in the current sidebar page.
   function reconcileDeletedChatPanels(targetBotId?: string | null) {
     const dock = api.value
-    const bid = (targetBotId ?? loadedBotId ?? currentBotId.value ?? '').trim()
+    const bid = targetBotId ?? loadedBotId ?? currentBotId.value ?? ''
     if (!dock || !bid) return
     if (!targetBotId && loadedBotId && loadedBotId !== bid) return
     const deletedSessionIds = deletedSessionIdsByBot.get(bid)
@@ -1169,25 +1277,22 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const dock = api.value
     if (!dock || suppressPersist || draftChatQueued) return
     if (dock.panels.length > 0) return
-    if (!(currentBotId.value ?? '').trim()) return
+    if (!currentBotId.value) return
 
     draftChatQueued = true
     void nextTick(() => {
       draftChatQueued = false
       const latestDock = api.value
       if (!latestDock || suppressPersist || latestDock.panels.length > 0) return
-      if (!(currentBotId.value ?? '').trim()) return
-      // Only an EXPLICIT selection may refill as that session. initialize()'s
-      // auto-pick leaves a non-explicit sessionId even when we refused to open
-      // its tab over a File/Preview restore; honoring it here would surface a
-      // random Untitled Session the moment the user closes the last file tab.
-      // Live tabs that already selected a session explicitly keep that refill,
-      // and so does a cold start that restored nothing once initialize() is done.
-      const sid = (chatStore.sessionId ?? '').trim()
+      if (!currentBotId.value) return
+      // Only an EXPLICIT selection may refill as that session. A non-explicit
+      // sessionId is layout bookkeeping (or a stale leftover); honoring it here
+      // would surface a random Untitled Session the moment the user closes the
+      // last file tab. Live tabs that already selected a session explicitly
+      // keep that refill.
+      const sid = chatStore.sessionId ?? ''
       const explicitSelection = chatStore.hasExplicitSessionSelection === true
-      const acceptAutoPick = autoPickMayFillDraft && !chatStore.loadingChats
-      if (acceptAutoPick) autoPickMayFillDraft = false
-      if (sid && (explicitSelection || acceptAutoPick) && !isDeletedSessionForCurrentBot(sid)) {
+      if (sid && explicitSelection && !isDeletedSessionForCurrentBot(sid)) {
         openSessionChat({
           sessionId: sid,
           explicitSelection,
@@ -1204,11 +1309,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // the next file open evicts another panel from its ephemeral slot.
   function activateChatPanel() {
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     // Do not focus the previous bot's panels while its replacement is queued.
     if (!dock || !bid || loadedBotId !== bid) return
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
-    const sid = (selection.sessionId ?? '').trim()
+    const sid = selection.sessionId ?? ''
     if (sid && !isDeletedSessionForCurrentBot(sid)) {
       const current = chatPanelForSession(sid)
       if (current) {
@@ -1397,7 +1502,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function openTerminal(groupId?: string) {
     if (!hasCurrentPermission('workspace_exec')) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     const state = ensureBotLayout(bid)
     const dock = api.value
     if (!state || !dock) return
@@ -1454,7 +1559,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // link-click path (after a dedup miss, titled with the address). Returns false
   // when there is no dock/bot layout.
   function addBrowserPanel(address: string, title: string | undefined, groupId?: string): boolean {
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     const state = ensureBotLayout(bid)
     if (!state || !api.value) return false
     const next = nextTabNumber('browser', state.browserCounter)
@@ -1555,7 +1660,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
     switch (comp) {
       case 'chat': {
-        const bid = (currentBotId.value ?? '').trim()
+        const bid = currentBotId.value ?? ''
         if (!bid) return
         const id = nextChatPanelId(bid)
         const explicitSelection = typeof params?.explicitSelection === 'boolean'
@@ -1580,7 +1685,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       case 'terminal': {
         if (!hasCurrentPermission('workspace_exec')) return
-        const bid = (currentBotId.value ?? '').trim()
+        const bid = currentBotId.value ?? ''
         const state = ensureBotLayout(bid)
         if (!state) return
         const next = nextTabNumber('terminal', state.terminalCounter)
@@ -1610,7 +1715,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       case 'browser': {
         if (!hasCurrentPermission('manage')) return
-        const bid = (currentBotId.value ?? '').trim()
+        const bid = currentBotId.value ?? ''
         const state = ensureBotLayout(bid)
         if (!state) return
         const next = nextTabNumber('browser', state.browserCounter)
@@ -1659,7 +1764,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function openSchedule(scheduleId?: string, title?: string, groupId?: string) {
     if (!hasCurrentPermission('manage')) return
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!bid) return
     const panelTitle = title?.trim() || scheduleTabTitle()
     const state = ensureBotLayout(bid)
@@ -1916,12 +2021,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // ---- lifecycle -----------------------------------------------------------
 
   function resetBot(botId: string) {
-    const bid = (botId ?? '').trim()
-    if (!bid) return
+    if (!botId) return
     const next = { ...storage.value }
-    delete next[bid]
+    delete next[botId]
     storage.value = next
-    if (loadedBotId === bid && api.value) {
+    if (loadedBotId === botId && api.value) {
       suppressPersist = true
       try {
         api.value.clear()
@@ -1929,7 +2033,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         suppressPersist = false
       }
     }
-    void nextTick(() => clearTerminalSnapshotsForBot(bid))
+    void nextTick(() => clearTerminalSnapshotsForBot(botId))
   }
 
   function resetAll() {
@@ -1950,7 +2054,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   onAuthSessionCleared(() => resetAll())
 
   watch(currentBotId, (bid) => {
-    const next = (bid ?? '').trim()
+    const next = bid ?? ''
     if (!next) {
       loadedBotId = null
       return
@@ -2003,7 +2107,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.draftPromoted, (sig) => {
     if (!sig) return
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!dock || !bid || sig.botId !== bid) return
     const panel = dock.getPanel(sig.viewId)
     if (!panel || panelComponentOf(panel.id) !== 'chat') return
@@ -2020,7 +2124,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.userSentInSession, (sig) => {
     if (!sig) return
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!dock || !bid || sig.botId !== bid) return
     const panel = dock.getPanel(sig.viewId)
     if (!panel || panelComponentOf(panel.id) !== 'chat') return
@@ -2043,7 +2147,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.draftViewRequested, (request) => {
     if (!request) return
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!dock || request.botId !== bid) return
     const panel = dock.getPanel(request.viewId)
     if (!panel || panelComponentOf(panel.id) !== 'chat') return
@@ -2083,7 +2187,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.forkedSessionRequested, (request) => {
     if (!request) return
     const dock = api.value
-    const bid = (currentBotId.value ?? '').trim()
+    const bid = currentBotId.value ?? ''
     if (!dock || request.botId !== bid) return
     const panel = dock.getPanel(request.viewId)
     if (!panel || panelComponentOf(panel.id) !== 'chat') return
@@ -2126,9 +2230,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.loadingChats, (loading) => {
     if (loading) return
     alignSelectionWithDock()
-    // An empty dock has not drawn its draft yet; ensureDraftChatPanel takes
-    // the pick when it does.
-    if (api.value?.activePanel) autoPickMayFillDraft = false
+  })
+
+  watch(() => i18n.global.locale.value, () => {
+    if (repairPanelTitles()) persistLayout()
   })
 
   return {

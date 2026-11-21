@@ -4,7 +4,7 @@
          list rows with an inset hairline between them (same language as the
          Configuration card), not nested cards. No rule under the toolbar —
          spacing alone separates it from the first row. -->
-    <div class="flex items-center gap-2 p-4">
+    <div class="flex items-center gap-2 py-4">
       <InputGroup
         v-if="searchVisible"
         size="sm"
@@ -70,47 +70,50 @@
         />
       </div>
 
-      <div
-        v-if="totalPages > 1"
-        class="flex items-center justify-between border-t border-border px-4 py-3"
-      >
-        <span class="text-xs text-muted-foreground whitespace-nowrap">
-          {{ $t('models.showingCount', { count: `${pageStart}-${pageEnd}`, total: filteredModels.length }) }}
-        </span>
-        <Pagination
-          :total="filteredModels.length"
-          :items-per-page="PAGE_SIZE"
-          :sibling-count="1"
-          :page="currentPage"
-          show-edges
-          @update:page="currentPage = $event"
+      <!-- The pager's rule runs the full card width, so the strip bleeds to
+           the card edges and re-pads its content by the same inset. -->
+      <SettingsBleed v-if="totalPages > 1">
+        <div
+          class="flex items-center justify-between border-t border-border px-(--settings-inset) py-3"
         >
-          <PaginationContent v-slot="{ items }">
-            <PaginationFirst />
-            <PaginationPrevious />
-            <template
-              v-for="(item, index) in items"
-              :key="index"
-            >
-              <PaginationEllipsis
-                v-if="item.type === 'ellipsis'"
-                :index="index"
-              />
-              <PaginationItem
-                v-else
-                :value="item.value"
-                :is-active="item.value === currentPage"
-              />
-            </template>
-            <PaginationNext />
-            <PaginationLast />
-          </PaginationContent>
-        </Pagination>
-      </div>
+          <span class="text-xs text-muted-foreground whitespace-nowrap">
+            {{ $t('models.showingCount', { count: `${pageStart}-${pageEnd}`, total: filteredModels.length }) }}
+          </span>
+          <Pagination
+            :total="filteredModels.length"
+            :items-per-page="PAGE_SIZE"
+            :sibling-count="1"
+            :page="currentPage"
+            show-edges
+            @update:page="currentPage = $event"
+          >
+            <PaginationContent v-slot="{ items }">
+              <PaginationFirst />
+              <PaginationPrevious />
+              <template
+                v-for="(item, index) in items"
+                :key="index"
+              >
+                <PaginationEllipsis
+                  v-if="item.type === 'ellipsis'"
+                  :index="index"
+                />
+                <PaginationItem
+                  v-else
+                  :value="item.value"
+                  :is-active="item.value === currentPage"
+                />
+              </template>
+              <PaginationNext />
+              <PaginationLast />
+            </PaginationContent>
+          </Pagination>
+        </div>
+      </SettingsBleed>
 
       <Empty
         v-if="filteredModels.length === 0"
-        class="flex flex-col items-center justify-center px-4 py-10"
+        class="flex flex-col items-center justify-center py-10"
       >
         <EmptyHeader>
           <EmptyMedia variant="icon">
@@ -123,7 +126,7 @@
 
     <Empty
       v-else-if="!previewLoading"
-      class="flex flex-col items-center justify-center px-4 py-10"
+      class="flex flex-col items-center justify-center py-10"
     >
       <EmptyHeader>
         <EmptyMedia variant="icon">
@@ -168,7 +171,7 @@ import {
   PaginationPrevious,
 } from '@felinic/ui'
 import { Search, List } from 'lucide-vue-next'
-import { SettingsSection } from '@felinic/ui'
+import { SettingsBleed, SettingsSection } from '@felinic/ui'
 import CreateModel from '@/components/create-model/index.vue'
 import ImportModelsDialog from '@/components/import-models-dialog/index.vue'
 import ModelItem from './model-item.vue'

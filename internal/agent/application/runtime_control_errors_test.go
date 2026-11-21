@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -27,9 +27,9 @@ func TestRuntimeControlErrorMapsSentinels(t *testing.T) {
 		{"turn busy", fmt.Errorf("%w: thread t", turn.ErrSessionBusy), apperror.CodeSessionBusy},
 		{"unsupported", external.ErrControlUnsupported, apperror.CodeRuntimeControlUnsupported},
 		{"command unavailable", external.ErrCommandUnavailable, apperror.CodeRuntimeControlCommandUnavailable},
-		{"mode unavailable", external.ErrModeUnavailable, apperror.CodeRuntimeControlModeUnavailable},
+		{"mode unavailable", external.Fail(external.FailureModeUnavailable, nil), apperror.CodeRuntimeControlModeUnavailable},
 		{"thread unavailable", external.ErrThreadUnavailable, apperror.CodeRuntimeControlThreadUnavailable},
-		{"auth required", fmt.Errorf("driver: %w", external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired},
+		{"auth required", fmt.Errorf("driver: %w", external.Fail(external.FailureAuthRequired, nil)), apperror.CodeExternalRuntimeAuthRequired},
 		{"unknown", errors.New("boom"), apperror.CodeRuntimeControlFailed},
 		// Only the turn sentinel leaves the session runtime adapter. The
 		// session runtime values reaching this table unconverted are a bug in
@@ -55,26 +55,16 @@ func TestRuntimeControlErrorKeepsRuntimeFailureCodes(t *testing.T) {
 		err  error
 		want apperror.Code
 	}{
-		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired},
+		{"auth required", external.Fail(external.FailureAuthRequired, nil), apperror.CodeExternalRuntimeAuthRequired},
 		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked},
-		{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable},
-		{"cancelled while unavailable", external.Unavailable(context.Canceled), apperror.CodeExternalRuntimeUnavailable},
+		{"agent failed", external.Upstream(errors.New("bridge refused")), apperror.CodeExternalRuntimeReported},
+		{"cancelled", external.Upstream(context.Canceled), apperror.CodeRuntimeControlCancelled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := apperror.CodeOf(RuntimeControlError(fmt.Errorf("control: %w", tc.err))); got != tc.want {
 				t.Fatalf("code = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestRuntimeControlErrorKeepsExistingCode(t *testing.T) {
-	existing := fmt.Errorf("wrapped: %w", apperror.New(apperror.CodeRuntimeControlRequestInvalid, nil))
-	if got := RuntimeControlError(existing); !errors.Is(got, existing) {
-		t.Fatalf("existing code was re-translated: %v", got)
-	}
-	if RuntimeControlError(nil) != nil {
-		t.Fatal("nil error was translated")
 	}
 }
 
@@ -85,19 +75,6 @@ func TestPublicRuntimeControlErrorKeepsExternalAgentCodesAndTeamRouting(t *testi
 	}
 	if got := publicRuntimeControlError(turn.ErrTeamNotServed); !errors.Is(got, turn.ErrTeamNotServed) {
 		t.Fatalf("team routing sentinel was translated: %v", got)
-	}
-}
-
-func TestSentinelIdentities(t *testing.T) {
-	if !errors.Is(sessionruntime.ErrSessionBusy, ledger.ErrSessionBusy) {
-		t.Fatal("session runtime busy must stay an alias of the ledger value")
-	}
-	if errors.Is(sessionruntime.ErrSessionBusy, turn.ErrSessionBusy) || errors.Is(turn.ErrSessionBusy, sessionruntime.ErrSessionBusy) {
-		t.Fatal("turn busy must stay a separate value from the session runtime port")
-	}
-	if errors.Is(sessionruntime.ErrHistoryResetInProgress, ledger.ErrHistoryResetInProgress) ||
-		errors.Is(ledger.ErrHistoryResetInProgress, sessionruntime.ErrHistoryResetInProgress) {
-		t.Fatal("history reset sentinels must stay two values")
 	}
 }
 

@@ -17,7 +17,10 @@
           :aria-label="ariaLabel || placeholder"
           :class="[selectTriggerClass, 'w-full']"
         >
-          <span class="line-clamp-1">{{ displayLabel || placeholder }}</span>
+          <span
+            class="min-w-0 flex-1 truncate text-left"
+            :class="isUnavailableSelection ? 'text-muted-foreground' : undefined"
+          >{{ displayLabel || placeholder }}</span>
           <ChevronsUpDown class="opacity-50" />
         </button>
       </slot>
@@ -134,6 +137,7 @@ import {
   MenuScrollArea,
 } from '@felinic/ui'
 import { computed, nextTick, ref, useId, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 import { measureVirtualRow } from '@/utils/virtual-row-measure'
@@ -198,19 +202,28 @@ const props = withDefaults(defineProps<{
   alignOffset: menuAlignOffset,
 })
 
+const { t } = useI18n()
 const selected = defineModel<string>({ default: '' })
 const searchTerm = ref('')
 const open = ref(false)
 const scrollElArea = ref<InstanceType<typeof MenuScrollArea> | null>(null)
 const scrollEl = computed(() => scrollElArea.value?.viewportElement ?? null)
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 const selectedOption = computed(() =>
   props.options.find((option) => option.value === selected.value),
 )
 
-const displayLabel = computed(() =>
-  selectedOption.value?.label ?? selected.value,
+const isUnavailableSelection = computed(() =>
+  Boolean(selected.value && !selectedOption.value && (props.options.length > 0 || UUID_RE.test(selected.value))),
 )
+
+const displayLabel = computed(() => {
+  if (selectedOption.value) return selectedOption.value.label
+  if (isUnavailableSelection.value) return t('common.unavailableOption')
+  return selected.value
+})
 
 const filteredOptions = computed(() => {
   const keyword = searchTerm.value.trim().toLowerCase()

@@ -1,7 +1,8 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, onScopeDispose } from 'vue'
 import { toast } from '@felinic/ui'
 import { useChatSelectionStore } from '@/store/chat-selection'
+import { useUnreadStore } from '@/store/unread'
 import { useWorkdirsStore } from '@/store/workdirs'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -55,6 +56,7 @@ export type { ChatViewEntry, ChatViewTarget } from './chat/view-registry'
 
 export const useChatStore = defineStore('chat', () => {
   const selectionStore = useChatSelectionStore()
+  const unreadStore = useUnreadStore()
   const workdirsStore = useWorkdirsStore()
   const { currentBotId, sessionId, draftIntent, explicitSelection: explicitSessionSelection } = storeToRefs(selectionStore)
   const fsBeacon = createFsChangeBeacon({ currentBotId, sessionId })
@@ -82,7 +84,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   const {
     focusedViewId: focusedChatViewId,
-    draftPromoted,
+    draftPromoted, userSentInSession, recordUserSent,
     projectionVersion: runtimeProjectionVersion,
     chatViews, assistantStreams, firstSend, draftSessionCreations,
     draftCreationKey: draftSessionCreationKey,
@@ -92,12 +94,12 @@ export const useChatStore = defineStore('chat', () => {
     chatView, transcriptForTarget, sessionTranscript, transcriptForTurn,
     messages, loadingMessages, loadingOlder, hasMoreOlder, hasLoadedOlder,
     clearHistoryView, prepareForInitialization, markHistoryEmpty,
-    refreshCurrentSession, resyncRuntimeTranscript, loadInitialMessages, fetchSessionWindow,
+    refreshCurrentSession, resyncRuntimeTranscript, retryInitialSessionLoad, loadInitialMessages, fetchSessionWindow,
     loadOlderMessages, findMessageIdByExternalId, locateMessageByExternalId,
-    isSessionStreaming, streamingSessionId, streamingSessionIds, streaming, isChatViewStreaming,
+    isSessionStreaming, streamingSessionId, streamingSessionIds, streaming, isChatViewStreaming, isChatViewStopping, canRefreshIdleSession,
     workspaceTargetSelectionFor, setWorkspaceTargetSelection,
     initializeWorkspaceTargetSelection, resetWorkspaceTargetSelection,
-    releaseHiddenSessionView, bindChatView, setChatViewVisible, unbindChatView,
+    releaseHiddenSessionView, releaseSessionRuntime, bindChatView, setChatViewVisible, unbindChatView,
     focusChatView, promoteDraftChatView,
     configure: configureChatViews,
     reset: resetTranscriptUserScope,
@@ -115,7 +117,7 @@ export const useChatStore = defineStore('chat', () => {
     transcriptForTurn(assistantTurn)?.finalizeStreamFailure(assistantTurn, botId, targetSessionId, error, keepTurn)
   }
   const {
-    trackAssistantStream, discardAssistantStream,
+    trackAssistantStream, discardAssistantStream, takeStopRequest,
     createdSessionIdForInvocation, forgetCreatedSession, clearStreamHistory,
   } = assistantStreams
 
@@ -152,11 +154,11 @@ export const useChatStore = defineStore('chat', () => {
   })
   const { refreshSessionsList, resetRefreshCoordinator } = refreshCoordinator
   const {
-    ensureSessionSummary, ensureVisibleSessionSummary, loadMoreSessions,
-    handleActivity: handleBotSessionsActivityEvent,
+    ensureSessionSummary, ensureVisibleSessionSummary, visibleSessionSummaryFailed, loadMoreSessions,
+    handleActivity: handleBotSessionsActivityEvent, handleRuntimeSnapshotReconnected,
     scheduleActivityRevisions,
     isSessionCompacting, beginSessionCompaction,
-    reset: resetSessionActivity,
+    dispose: disposeSessionActivity, reset: resetSessionActivity,
   } = createSessionActivity({
     currentBotId,
     sessionId,
@@ -180,6 +182,8 @@ export const useChatStore = defineStore('chat', () => {
     },
     markSessionViewStale: chatViews.markSessionStale,
     markAllSessionViewsStale: chatViews.markAllSessionsStale,
+    reconcileOnVisibilityResume: true,
+    canRefreshIdleSession,
   })
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder
@@ -210,23 +214,6 @@ export const useChatStore = defineStore('chat', () => {
     commandEvent, commandEventForScope, rememberCommandEvent, beginCommandEvent, showCommandError,
     clearCommandEvent, rescopeSessionCommandEventToComposer, resetCommandEvents,
   } = commandEventRegistry
-  const userSentInSession = ref<{
-    id: string
-    botId: string
-    viewId: string
-    wasDraft: boolean
-    seq: number
-  } | null>(null)
-  let userSendSeq = 0
-  function recordUserSent(botId: string, targetSessionId: string, viewId: string, wasDraft: boolean) {
-    userSentInSession.value = {
-      id: targetSessionId,
-      botId,
-      viewId,
-      wasDraft,
-      seq: ++userSendSeq,
-    }
-  }
   const { realtime, decisions, integration: runtimeIntegration } =
     createChatRuntimeLayer({
     currentBotId,
@@ -263,6 +250,7 @@ export const useChatStore = defineStore('chat', () => {
     showError: message => toast.error(message),
     onBotSessionsActivityEvent: handleBotSessionsActivityEvent,
     onActivityStreamCoverageChanged: chatViews.setActivityStreamCoverage,
+    onRuntimeSnapshotReconnected: handleRuntimeSnapshotReconnected,
   })
   const {
     startWebSocket,
@@ -270,10 +258,14 @@ export const useChatStore = defineStore('chat', () => {
     ensureWebSocket,
     sendWebSocketMessage,
     startSessionRuntime,
-    stopSessionRuntime,
+    stopSessionRuntime: stopRealtimeSessionRuntime,
     startBotSessionsActivityStream,
     stopStreams,
   } = realtime
+  const stopSessionRuntime = (botId?: string, sessionId?: string) => {
+    stopRealtimeSessionRuntime(botId, sessionId)
+    runtimeProjectionVersion.value += 1
+  }
   const {
     respondToolApproval,
     respondUserInput,
@@ -301,6 +293,7 @@ export const useChatStore = defineStore('chat', () => {
     draftCreationKey: draftSessionCreationKey,
     draftSessionCreations,
     stopSessionRuntime,
+    releaseSessionRuntime,
     clearHistoryView,
     resetWorkspaceTargetSelection,
     upsertSession,
@@ -312,8 +305,8 @@ export const useChatStore = defineStore('chat', () => {
     },
     removeSessionFromList,
     ensureBot,
-    knownSession: knownSessionSummary,
     draftWorkdirIdFor: (botId, opts) => workdirsStore.sessionWorkdirIdFor(botId, opts),
+    draftFolderPathFor: botId => (workdirsStore.sessionWorkdirIdFor(botId, { externalAgent: true }) && workdirsStore.workingWorkdirFor(botId)?.path) || '',
   })
   const {
     acpRuntimeStatuses, acpRuntimePending, acpRuntimeKey, clearACPRuntimeStatus, ensureACPRuntime,
@@ -322,7 +315,7 @@ export const useChatStore = defineStore('chat', () => {
   } = externalAgents.runtimeRegistry
   const { cacheDefaultExternalAgentSession, clearPendingExternalAgentSession } = externalAgents.staging
   const {
-    pendingExternalAgentSessionInput, pendingACPRuntimeId, pendingExternalAgentSessionMetadata,
+    pendingExternalAgentSessionInput, pendingExternalAgentSessionMetadata,
     pendingACPRuntimeStatus, pendingACPRuntimeEnsuring, pendingExternalAgentStateFor,
     pendingExternalAgentMatchesInput,
     stageExternalAgentSession, stageDefaultExternalAgentSession, resetToEmptyComposer,
@@ -335,8 +328,7 @@ export const useChatStore = defineStore('chat', () => {
     stageFromSettings: stageDefaultExternalAgentFromSettings,
   } = externalAgents.defaults
   const {
-    createExternalAgentSession, updateCurrentSessionAgent,
-    updateCurrentSessionToMemoh, ensureChatViewSession,
+    createExternalAgentSession, ensureChatViewSession,
   } = externalAgents.sessions
   const {
     draftViewRequested, applyDraftViewRequest, requestDraftView,
@@ -398,7 +390,7 @@ export const useChatStore = defineStore('chat', () => {
     resetBootstrap()
     resetStartupSendFailures()
     resetSessionActions()
-    resetSessionActivity()
+    resetSessionActivity({ userScope: true })
     draftSessionCreations.clear()
     resetCommandEvents()
     resetFsBeacon()
@@ -494,6 +486,7 @@ export const useChatStore = defineStore('chat', () => {
         .replaceHistoryView(turns, targetSessionId)
     },
     rescopeCommandToComposer: rescopeSessionCommandEventToComposer,
+    removeUnreadSession: targetSessionId => unreadStore.remove(targetSessionId),
     forkFailedMessage,
   })
 
@@ -511,6 +504,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   onScopeDispose(() => {
     stopAuthSessionListener()
+    disposeSessionActivity()
     stopStreams()
     stopWebSocket()
   })
@@ -553,6 +547,11 @@ export const useChatStore = defineStore('chat', () => {
     clearCommandEvent,
     chatReadOnlyFor,
     isChatViewStreaming,
+    isSessionStreaming,
+    markSessionRead: targetSessionId => {
+      void unreadStore.markRead(targetSessionId)
+    },
+    removeUnreadSession: targetSessionId => unreadStore.remove(targetSessionId),
     isChatViewCreatingSession,
     pendingExternalAgentStateFor,
     ensureChatViewSession,
@@ -570,7 +569,7 @@ export const useChatStore = defineStore('chat', () => {
     finalizeStreamFailure,
     removeTurnFromSession,
     cleanupFailedDeferredSession,
-    discardAssistantStream,
+    discardAssistantStream, takeStopRequest,
     rememberStartupSendFailure,
     draftWorkdirIdFor: botId => workdirsStore.sessionWorkdirIdFor(botId, { externalAgent: false }),
     firstSend,
@@ -585,17 +584,17 @@ export const useChatStore = defineStore('chat', () => {
     focusChatView, promoteDraftChatView, chatTargetFor,
     workspaceTargetSelectionFor, setWorkspaceTargetSelection,
     initializeWorkspaceTargetSelection, resetWorkspaceTargetSelection,
-    chatReadOnlyFor, chatCanForkFor, isChatViewStreaming,
+    chatReadOnlyFor, chatCanForkFor, isChatViewStreaming, isChatViewStopping,
     isChatViewCreatingSession, streaming, streamingSessionId, streamingSessionIds,
     isSessionCompacting, beginSessionCompaction,
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
     scheduleActivityRevisions,
-    loadMoreSessions, activeSession, knownSessions, knownSessionSummary,
+    loadMoreSessions, activeSession, knownSessions, knownSessionSummary, ensureVisibleSessionSummary, visibleSessionSummaryFailed,
     workdirSessionsFor, workdirSessionsState,
     ensureWorkdirSessions, loadMoreWorkdirSessions,
     activeChatReadOnly, activeChatCanFork,
     acpRuntimeStatuses, acpRuntimePending, pendingExternalAgentSessionInput,
-    pendingExternalAgentSessionMetadata, pendingACPRuntimeId, pendingACPRuntimeStatus,
+    pendingExternalAgentSessionMetadata, pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring, pendingExternalAgentStateFor,
     pendingExternalAgentMatchesInput,
     sessionId, hasExplicitSessionSelection, currentBotId, bots,
@@ -610,13 +609,13 @@ export const useChatStore = defineStore('chat', () => {
     commandEvent, commandEventForScope, rememberCommandEvent, beginCommandEvent, showCommandError,
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
     backgroundTaskFor,
-    initialize, initializeWithRecovery, refreshBots, selectBot, selectSession, createNewSession,
+    initialize, initializeWithRecovery, retryInitialSessionLoad, refreshBots, selectBot, selectSession, createNewSession,
     selectDraft, userSentInSession, draftPromoted, draftViewRequested, applyDraftViewRequest,
     forkedSessionRequested, deletedSession,
     stageExternalAgentSession, stageDefaultExternalAgentSession, cacheDefaultExternalAgentSession,
     resetToEmptyComposer, ensurePendingACPRuntime,
     setPendingACPModel, setPendingACPMode, setPendingRuntimeMode, setPendingACPReasoning, clearPendingExternalAgentSession,
-    createExternalAgentSession, updateCurrentSessionAgent, updateCurrentSessionToMemoh,
+    createExternalAgentSession,
     acpRuntimeKey, ensureACPRuntime, setACPRuntimeMode, setACPRuntimeModel, setACPRuntimeReasoning,
     removeSession, removeSessions, renameSession, forkTurn,
     sendMessage, retryLatestAssistant, editLatestUser,

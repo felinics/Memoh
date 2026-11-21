@@ -221,6 +221,17 @@ describe('chat view registry', () => {
     expect(rebound.transcript.messages).toEqual([])
   })
 
+  it('clears a failed initial load once history is applied', async () => {
+    const { registry } = makeRegistry()
+    const view = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-1', viewId: 'chat:1' })
+    expect(view.initialLoadFailed.value).toBe(false)
+    view.initialLoadFailed.value = true
+
+    await view.transcript.refreshCurrentSession('bot-1', 'session-1')
+
+    expect(view.initialLoadFailed.value).toBe(false)
+  })
+
   it('counts attached hidden Sessions against the shared cache limit', () => {
     const { registry } = makeRegistry({ cacheLimit: 1 })
     registry.bindPanel('chat:1', {

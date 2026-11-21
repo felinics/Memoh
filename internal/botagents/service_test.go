@@ -243,12 +243,11 @@ func TestDirectRuntimeCredentialContract(t *testing.T) {
 		configured bool
 	}{
 		{RuntimeCodex, map[string]any{"auth": "api_key"}, agentcredential.AuthKindOpenAIAPIKey, true},
-		{RuntimeCodex, map[string]any{"auth": "chatgpt"}, agentcredential.AuthKindOpenAICodexOAuth, true},
+		{RuntimeCodex, map[string]any{"auth": "chatgpt"}, "", true},
 		{RuntimeClaudeCode, map[string]any{"auth": "api_key"}, agentcredential.AuthKindAnthropicAPIKey, true},
-		{RuntimeClaudeCode, map[string]any{"auth": "oauth_token"}, agentcredential.AuthKindClaudeCodeOAuth, true},
-		{RuntimeClaudeCode, map[string]any{"auth": "workspace"}, "", true},
+		{RuntimeClaudeCode, map[string]any{"auth": "claude_account"}, "", true},
 		{RuntimeGrokBuild, map[string]any{"auth": "api_key", "permission_mode": "always-approve"}, agentcredential.AuthKindXAIAPIKey, true},
-		{RuntimeGrokBuild, map[string]any{"auth": "grok_account"}, agentcredential.AuthKindXAIGrokOAuth, true},
+		{RuntimeGrokBuild, map[string]any{"auth": "grok_account"}, "", true},
 		{RuntimeGrokBuild, map[string]any{"auth": "oauth"}, "", false},
 		{RuntimeCodex, map[string]any{"auth": "oauth"}, "", false},
 	}
@@ -271,8 +270,10 @@ func TestDirectRuntimeCredentialContract(t *testing.T) {
 			t.Fatalf("%s: configuration error field = %q, want %q", name, got, wantField)
 		}
 		if tc.configured {
-			if got := configurationErrorField(ValidateConfigurationWithStore(agent, nil, "other_kind")); got != "agent_credential_id" {
-				t.Fatalf("%s: foreign credential error field = %q, want agent_credential_id", name, got)
+			// A mode that stores no credential ignores one an earlier mode left attached.
+			want := map[bool]string{true: "agent_credential_id", false: ""}[tc.authKind != ""]
+			if got := configurationErrorField(ValidateConfigurationWithStore(agent, nil, "other_kind")); got != want {
+				t.Fatalf("%s: foreign credential error field = %q, want %q", name, got, want)
 			}
 		}
 	}
@@ -346,5 +347,37 @@ func TestCreateHonorsEnabledFlag(t *testing.T) {
 				t.Fatalf("Create() returned enabled = %v, want %v", created.Enabled, tc.want)
 			}
 		})
+	}
+}
+
+// Claude account Agents stored under the earlier auth values read as one.
+func TestFromRowReadsLegacyClaudeAccount(t *testing.T) {
+	for _, legacy := range []string{"oauth_token", "workspace"} {
+		agent, err := fromRow(sqlc.BotAgent{Runtime: RuntimeClaudeCode, Metadata: []byte(`{"auth":"` + legacy + `"}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if agent.Metadata["auth"] != "claude_account" {
+			t.Errorf("%s reads as %v", legacy, agent.Metadata["auth"])
+		}
+	}
+}
+
+// An account the Agent signs in to itself has no stored credential; an API key does.
+func TestSignsInOnAgent(t *testing.T) {
+	for _, tc := range []struct {
+		runtime string
+		auth    string
+		want    bool
+	}{
+		{RuntimeCodex, "chatgpt", true},
+		{RuntimeClaudeCode, "claude_account", true},
+		{RuntimeGrokBuild, "grok_account", true},
+		{RuntimeClaudeCode, "api_key", false},
+		{"acp", "api_key", false},
+	} {
+		if got := SignsInOnAgent(BotAgent{Runtime: tc.runtime, Metadata: map[string]any{"auth": tc.auth}}); got != tc.want {
+			t.Errorf("%s/%s = %v, want %v", tc.runtime, tc.auth, got, tc.want)
+		}
 	}
 }

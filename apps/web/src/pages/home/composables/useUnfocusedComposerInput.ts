@@ -1,7 +1,7 @@
 import { onBeforeUnmount, onMounted, type Ref } from 'vue'
 import { detectPlatform } from '@/lib/keyboard-bindings'
+import { TEXT_INPUT_OWNER as INPUT_OWNER } from '@/lib/keyboard-context'
 
-const INPUT_OWNER = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="listbox"], [role="menu"], [role="tree"], [role="grid"], [role="slider"], [role="spinbutton"], .monaco-editor, .cm-editor, .xterm'
 const OPEN_OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
 
 /** Only the active chat pane may recover text that otherwise has no input owner. */

@@ -15,11 +15,14 @@ export const AUTH_SESSION_CLEARED_EVENT = 'memoh:auth-session-cleared'
 // `chat-input-drafts` and `pinned-bot-ids` remain localStorage-only.
 const USER_SCOPED_STORAGE_KEYS = [
   'chat-bot-id',
+  'chat-bot-route',
   'chat-session-id',
   'chat-explicit-selection',
   'chat-draft-intent',
   'chat-input-drafts',
   'pinned-bot-ids',
+  'bot-order',
+  'workspace-working-workdir',
   // Was 'workspace-tabs' — a long-dead key. The live dockview layout key is
   // 'workspace-layout'; logout never actually cleared it before this fix.
   'workspace-layout',
@@ -38,15 +41,12 @@ export function clearPersistedUserScopedState() {
 export function notifyAuthSessionCleared(reason: AuthSessionClearReason) {
   clearPersistedUserScopedState()
 
-  if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent<AuthSessionClearedDetail>(AUTH_SESSION_CLEARED_EVENT, {
     detail: { reason },
   }))
 }
 
 export function onAuthSessionCleared(callback: (detail: AuthSessionClearedDetail) => void) {
-  if (typeof window === 'undefined') return () => {}
-
   const listener = (event: Event) => {
     callback((event as CustomEvent<AuthSessionClearedDetail>).detail)
   }

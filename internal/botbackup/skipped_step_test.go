@@ -86,9 +86,9 @@ func (failingWorkspace) ImportData(context.Context, string, io.Reader) error {
 
 func (failingWorkspace) CountData(context.Context, string) (int, error) { return 0, nil }
 
-type noopACPRuntimes struct{}
+type noopRuntimeResets struct{}
 
-func (noopACPRuntimes) BeginBotHistoryReset(ctx context.Context, _ string) (context.Context, func(), error) {
+func (noopRuntimeResets) BeginBotHistoryReset(ctx context.Context, _ string) (context.Context, func(), error) {
 	return ctx, func() {}, nil
 }
 
@@ -245,7 +245,7 @@ func TestImportWorkspaceWarningOmitsCause(t *testing.T) {
 	// is read back as it is.
 	legacy := "sessions export failed: ERROR: relation does not exist (SQLSTATE 42P01)"
 	logger, logs := captureLogger()
-	svc := &Service{logger: logger, workspace: failingWorkspace{}, acpRuntimes: noopACPRuntimes{}}
+	svc := &Service{logger: logger, workspace: failingWorkspace{}, runtimeResets: noopRuntimeResets{}}
 
 	result, err := svc.Import(context.Background(), "user-1", buildWorkspaceBundle(t, []string{legacy}), ImportOptions{
 		Mode:        ImportModeOverwrite,

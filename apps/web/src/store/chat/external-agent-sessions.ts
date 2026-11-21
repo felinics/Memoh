@@ -2,7 +2,6 @@ import type { Ref } from 'vue'
 import {
   createSession,
   deleteSession,
-  updateSessionAgent,
   type SessionSummary,
 } from '@/composables/api/useChat'
 import { provisionalSessionTitle } from '../chat-list.utils'
@@ -12,7 +11,6 @@ import type { ExternalAgentSessionInput, ChatViewTarget } from './types'
 
 interface PendingExternalAgentState {
   input: ExternalAgentSessionInput
-  runtimeId: string
 }
 
 export interface ExternalAgentSessionDeps {
@@ -22,7 +20,6 @@ export interface ExternalAgentSessionDeps {
   explicitSessionSelection: Ref<boolean>
   focusedViewId: Ref<string>
   userScopeGeneration: () => number
-  normalizeTarget: (target?: Partial<ChatViewTarget>) => ChatViewTarget
   targetDraftForExternalAgent: (target?: ChatViewTarget) => ChatViewTarget
   pendingExternalAgentStateFor: (target: ChatViewTarget) => PendingExternalAgentState | null
   isFocusedTarget: (target: ChatViewTarget) => boolean
@@ -31,10 +28,9 @@ export interface ExternalAgentSessionDeps {
   promoteDraftView: (target: ChatViewTarget, sessionId: string) => void
   clearRuntimeStatus: (botId: string, runtimeId: string) => void
   forgetDraftStage: (target: ChatViewTarget) => void
-  discardDraftStage: (target: ChatViewTarget) => void
   rememberDraftStage: (
     target: ChatViewTarget,
-    detached: { botId: string; input: ExternalAgentSessionInput; runtimeId: string },
+    detached: { botId: string; input: ExternalAgentSessionInput },
   ) => void
   activateDraftStage: (target: ChatViewTarget) => void
   markSessionDeleted: (botId: string, sessionId: string) => void
@@ -42,7 +38,6 @@ export interface ExternalAgentSessionDeps {
   removeSessionView: (botId: string, sessionId: string) => void
   removeSessionFromList: (sessionId: string) => void
   ensureBot: () => Promise<string | null>
-  knownSessionSummary: (sessionId: string) => SessionSummary | null | undefined
   isDraftCreationActive: (target: ChatViewTarget) => boolean
   beginDraftCreation: (target: ChatViewTarget) => void
   endDraftCreation: (target: ChatViewTarget) => void
@@ -58,8 +53,16 @@ function agentSessionRuntimeType(input: ExternalAgentSessionInput): string {
 }
 
 export function externalAgentSessionMetadata(input: ExternalAgentSessionInput): Record<string, unknown> {
+  const acp = agentSessionRuntimeType(input) === 'acp_agent'
+  const botAgentId = input.botAgentId?.trim()
   return {
-    ...(agentSessionRuntimeType(input) === 'acp_agent' ? externalAgentDraftMetadata(input) : {}),
+    ...(acp ? externalAgentDraftMetadata(input) : {}),
+    // The Agent instance names the ACP profile. A request with none names the
+    // profile, and the server binds the session to the bot's instance of it.
+    ...(acp && !botAgentId ? { acp_agent_id: input.agentId.trim() } : {}),
+    // The agent picks these up when the session's first process starts.
+    ...(acp && input.acpModelId ? { acp_model_id: input.acpModelId } : {}),
+    ...(acp && input.acpReasoningEffort ? { acp_reasoning_effort: input.acpReasoningEffort } : {}),
     ...(input.permissionMode ? { permission_mode: input.permissionMode } : {}),
     ...(input.planMode !== undefined ? { collaboration_mode: input.planMode ? 'plan' : 'default' } : {}),
   }
@@ -74,7 +77,6 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
     if (!id) throw new Error('Bot not ready')
     const runtimeType = agentSessionRuntimeType(input)
     const runtimeMetadata = externalAgentSessionMetadata(input)
-    const runtimeId = input.runtimeId?.trim() ?? ''
     const sessionMode = input.sessionMode === 'discuss' ? 'discuss' : 'chat'
     const workdirId = deps.draftWorkdirIdFor(id, { externalAgent: true })
     return createSession(id, {
@@ -85,7 +87,6 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
       runtimeType,
       metadata: {},
       runtimeMetadata,
-      acpRuntimeId: runtimeType === 'acp_agent' ? runtimeId || undefined : undefined,
       workdirId: workdirId || undefined,
     })
   }
@@ -94,7 +95,6 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
     created: SessionSummary,
     draft: ChatViewTarget,
     stagedInput: ExternalAgentSessionInput,
-    stagedRuntimeId: string,
     generation: number,
   ) {
     if (generation !== deps.userScopeGeneration()) return
@@ -102,7 +102,6 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
     deps.stopSessionRuntime(draft.botId, created.id)
     deps.removeSessionView(draft.botId, created.id)
     deps.clearRuntimeStatus(draft.botId, created.id)
-    if (stagedRuntimeId) deps.clearRuntimeStatus(draft.botId, stagedRuntimeId)
     if ((deps.currentBotId.value ?? '').trim() === draft.botId) {
       deps.removeSessionFromList(created.id)
     }
@@ -110,8 +109,7 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
     deps.forgetDraftStage(draft)
     deps.rememberDraftStage(draft, {
       botId: draft.botId,
-      input: normalizedExternalAgentInput({ ...stagedInput, runtimeId: undefined }),
-      runtimeId: '',
+      input: normalizedExternalAgentInput(stagedInput),
     })
     if (deps.isFocusedTarget(draft)) deps.activateDraftStage(draft)
     try {
@@ -128,7 +126,6 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
     const draft = deps.targetDraftForExternalAgent(target)
     const generation = deps.userScopeGeneration()
     const stagedBeforeCreate = deps.pendingExternalAgentStateFor(draft)
-    const runtimeId = input.runtimeId?.trim() ?? ''
     const created = await createExternalAgentSessionRecord(draft.botId, input)
     if (
       generation !== deps.userScopeGeneration()
@@ -138,7 +135,6 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
         created,
         draft,
         stagedBeforeCreate?.input ?? input,
-        runtimeId,
         generation,
       )
       const error = new Error('Chat scope changed during external-agent session creation')
@@ -148,15 +144,8 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
 
     deps.upsertSession(created)
     deps.rememberSession(created)
-    if (runtimeId) deps.clearRuntimeStatus(draft.botId, runtimeId)
     deps.promoteDraftView(draft, created.id)
-    if (stagedBeforeCreate) {
-      if (runtimeId && stagedBeforeCreate.runtimeId === runtimeId) {
-        deps.forgetDraftStage(draft)
-      } else {
-        deps.discardDraftStage(draft)
-      }
-    }
+    if (stagedBeforeCreate) deps.forgetDraftStage(draft)
     if (deps.isFocusedTarget(draft)) {
       deps.sessionId.value = created.id
       deps.explicitSessionSelection.value = true
@@ -173,74 +162,6 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
       sessionId: null,
       viewId: deps.focusedViewId.value,
     })
-  }
-
-  async function updateCurrentSessionAgent(
-    input: ExternalAgentSessionInput,
-    target?: ChatViewTarget,
-  ): Promise<{ session: SessionSummary }> {
-    const resolved = deps.normalizeTarget(target)
-    if (!resolved.sessionId) return createForTarget(input, resolved)
-    const botId = resolved.botId
-    const targetSessionId = resolved.sessionId
-    if (!botId) throw new Error('Bot not selected')
-    const runtimeType = agentSessionRuntimeType(input)
-    const runtimeMetadata = externalAgentSessionMetadata(input)
-    const current = deps.knownSessionSummary(targetSessionId)
-    const sessionMode = current?.session_mode
-      || (current?.type === 'discuss' ? 'discuss' : 'chat')
-    const generation = deps.userScopeGeneration()
-    const updated = await updateSessionAgent(botId, targetSessionId, {
-      botAgentId: input.botAgentId,
-      type: sessionMode,
-      sessionMode,
-      runtimeType,
-      metadata: runtimeMetadata,
-      runtimeMetadata,
-    })
-    if (
-      generation !== deps.userScopeGeneration()
-      || (deps.currentBotId.value ?? '').trim() !== botId
-    ) return { session: updated }
-    deps.upsertSession(updated)
-    if (deps.isFocusedTarget(resolved)) {
-      deps.explicitSessionSelection.value = true
-      deps.draftIntent.value = false
-    }
-    deps.clearRuntimeStatus(botId, targetSessionId)
-    return { session: updated }
-  }
-
-  async function updateCurrentSessionToMemoh(
-    target?: ChatViewTarget,
-  ): Promise<SessionSummary | null> {
-    const resolved = deps.normalizeTarget(target)
-    const botId = resolved.botId
-    const targetSessionId = resolved.sessionId ?? ''
-    if (!botId || !targetSessionId) return null
-    const current = deps.knownSessionSummary(targetSessionId)
-    const sessionMode = current?.session_mode
-      || (current?.type === 'discuss' ? 'discuss' : 'chat')
-    const generation = deps.userScopeGeneration()
-    const updated = await updateSessionAgent(botId, targetSessionId, {
-      botAgentId: '',
-      type: sessionMode === 'discuss' ? 'discuss' : 'chat',
-      sessionMode,
-      runtimeType: 'model',
-      metadata: {},
-      runtimeMetadata: {},
-    })
-    if (
-      generation !== deps.userScopeGeneration()
-      || (deps.currentBotId.value ?? '').trim() !== botId
-    ) return null
-    deps.upsertSession(updated)
-    if (deps.isFocusedTarget(resolved)) {
-      deps.explicitSessionSelection.value = true
-      deps.draftIntent.value = false
-    }
-    deps.clearRuntimeStatus(botId, targetSessionId)
-    return updated
   }
 
   // Creates the session a pending External Agent draft sends into. Native
@@ -260,10 +181,7 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
     }
     deps.beginDraftCreation(target)
     try {
-      const { session: created } = await createForTarget({
-        ...pendingExternalAgent.input,
-        runtimeId: pendingExternalAgent.runtimeId,
-      }, target)
+      const { session: created } = await createForTarget(pendingExternalAgent.input, target)
       if (firstPrompt?.trim() && !created.title?.trim()) {
         created.title = provisionalSessionTitle(firstPrompt)
         deps.upsertSession(created)
@@ -277,8 +195,6 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
 
   return {
     createExternalAgentSession,
-    updateCurrentSessionAgent,
-    updateCurrentSessionToMemoh,
     ensureChatViewSession,
   }
 }

@@ -64,7 +64,7 @@ const options = computed<SearchableSelectOption[]>(() => {
     value: provider.id || '',
     label: provider.name || provider.id || '',
     description: provider.enable === false ? t('common.disabled') : provider.provider,
-    keywords: [provider.name ?? '', provider.provider ?? '', provider.enable === false ? t('common.disabled') : '', t(`webSearch.providerNames.${provider.provider}`, '')],
+    keywords: [provider.name ?? '', provider.provider ?? '', provider.enable === false ? t('common.disabled') : '', t(`webSearch.fetchProviderNames.${provider.provider}`, '')],
   }))
 })
 </script>

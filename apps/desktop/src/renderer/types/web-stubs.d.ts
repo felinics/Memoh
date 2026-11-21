@@ -14,15 +14,49 @@ declare module '@memohai/web/router-guards/onboarding' {
   export function hasOnboardingInProgress(): boolean
 }
 
+declare module '@memohai/web/router-guards/return-to' {
+  import type { NavigationGuardReturn, RouteLocationNormalized, Router } from 'vue-router'
+  export interface AuthRouteGuardDeps {
+    readToken: () => string | null
+    readUserRole: () => string
+    hasOnboardingInProgress: () => boolean
+    ensureOnboarding: () => Promise<boolean>
+  }
+  export function normalizeRoutePath(pathname: string): string
+  export function sanitizeReturnTo(raw: unknown): string
+  export function buildLoginRedirect(target?: unknown): { path: '/login', query?: { return_to: string } }
+  export function shouldRedirectOnUnauthorized(currentPath: unknown): boolean
+  export function loginRedirectForCurrentRoute(
+    router?: Pick<Router, 'currentRoute'> | null,
+  ): { path: '/login', query?: { return_to: string } }
+  export function guardAuthenticatedRoute(
+    to: Pick<RouteLocationNormalized, 'path' | 'fullPath' | 'query' | 'meta'>,
+    deps: AuthRouteGuardDeps,
+  ): Promise<NavigationGuardReturn>
+}
+
 declare module '@memohai/web/routes' {
-  import type { RouteRecordRaw } from 'vue-router'
+  import type { DefineComponent } from 'vue'
+  import type { RouteLocationNormalized, RouteRecordRaw } from 'vue-router'
+  export const loadMainSection: () => Promise<{
+    default: DefineComponent<Record<string, never>, Record<string, never>, unknown>
+  }>
+  export function showsChatWorkspace(route: Pick<RouteLocationNormalized, 'name' | 'path'>): boolean
+  export function prefetchAppPages(): void
   export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[]
 }
 
-declare module '@memohai/web/router' {
-  import type { Router } from 'vue-router'
-  const router: Router
-  export default router
+declare module '@memohai/web/lib/chunk-load-error' {
+  export function isChunkLoadError(error: unknown): boolean
+  export function withStylesheetRecovery<T>(load: () => Promise<T>): () => Promise<T>
+  export function reloadForChunkLoadError(): boolean
+}
+
+declare module '@memohai/web/lib/idle-prefetch' {
+  export function holdPrefetchUntil(until: Promise<unknown>): void
+  export function prefetchInIdle(loaders: Array<() => Promise<unknown>>): void
+  export function prefetchLater(loaders: Array<() => Promise<unknown>>): void
+  export function whenNetworkQuiet(quietMs?: number, maxMs?: number): Promise<void>
 }
 
 declare module '@memohai/web/i18n' {
@@ -30,6 +64,7 @@ declare module '@memohai/web/i18n' {
   import type { ComputedRef } from 'vue'
   const i18n: I18n
   export default i18n
+  export const i18nReady: Promise<void>
   export function i18nRef(key: string): ComputedRef<string>
 }
 
@@ -39,6 +74,7 @@ declare module '@memohai/web/api-client' {
     fetch?: typeof fetch
     onUnauthorized?: () => void
   }
+  export function sdkRawFetch(): typeof fetch
   export interface SdkUrlOptions {
     url: string
     path?: Record<string, unknown>
@@ -160,16 +196,35 @@ declare module '@memohai/web/lib/browser-keyboard-shortcuts' {
 declare module '@memohai/web/store/keyboard-shortcuts' {
   import type { KeyboardBinding } from '@memohai/web/lib/keyboard-bindings'
   import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
-  export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'invalid'
+  export type ConflictKind =
+    | 'none'
+    | 'same-scope'
+    | 'cross-scope'
+    | 'reserved'
+    | 'editing'
+    | 'invalid'
+    | 'no-modifier'
+    | 'typing'
   export interface ConflictResult {
     kind: ConflictKind
     collidesWith?: AppKeyboardCommand
   }
+  export interface ParsedKeyCombo {
+    key: string
+    mod: boolean
+    alt: boolean
+    shift: boolean
+  }
   export function useKeyboardShortcutsStore(pinia?: unknown): {
     overrides: Record<string, string>
+    allBindings: KeyboardBinding[]
     effectiveBindings: KeyboardBinding[]
+    ignoredOverrides: Partial<Record<AppKeyboardCommand, ConflictResult>>
+    shadowedDefaults: Partial<Record<AppKeyboardCommand, AppKeyboardCommand>>
+    getEffectiveCombo(command: AppKeyboardCommand): ParsedKeyCombo | null
     isOverridden(command: AppKeyboardCommand): boolean
-    detectConflict(command: AppKeyboardCommand, combo: unknown): ConflictResult
+    detectConflict(command: AppKeyboardCommand, combo: ParsedKeyCombo): ConflictResult
+    detectConflictFromString(command: AppKeyboardCommand, combo: string): ConflictResult
     setBinding(command: AppKeyboardCommand, combo: string): ConflictResult
     resetBinding(command: AppKeyboardCommand): void
     resetAll(): void
@@ -218,17 +273,28 @@ declare module '@memohai/web/store/workspace-tabs' {
 }
 
 declare module '@memohai/web/store/user' {
-  export function useUserStore(): {
-    userInfo: {
-      role: string
-    }
+  export interface UserInfo {
+    id: string
+    username: string
+    role: string
+    displayName: string
+    avatarUrl: string
+    timezone: string
+  }
+  export function useUserStore(pinia?: unknown): {
+    userInfo: UserInfo
+    onboardingCompleted: boolean
+    chatExamplesSidebarEntryHidden: boolean
+    setChatExamplesSidebarEntryHidden: (hidden: boolean) => Promise<void>
+    fetchMe: () => Promise<boolean>
+    login: (userData: UserInfo, token: string) => void
+    patchUserInfo: (patch: Partial<UserInfo>) => void
+    exitLogin: () => void
   }
 }
 
 declare module '@memohai/web/store/chat-list' {
-  // Desktop needs the bot snapshot for two things: re-pulling it when a
-  // sibling window invalidates bot config (composer agent menu), and
-  // mirroring the list into the native tray's Bots submenu.
+  // Desktop mirrors the chat store's bot snapshot into the native tray's Bots submenu.
   export function useChatStore(pinia?: unknown): {
     bots: Array<{
       id?: string
@@ -237,40 +303,6 @@ declare module '@memohai/web/store/chat-list' {
     }>
     refreshBots: () => Promise<void>
   }
-}
-
-declare module '@memohai/web/store/capabilities' {
-  export function useCapabilitiesStore(): {
-    load: () => Promise<void>
-  }
-}
-
-declare module '@memohai/web/store/update' {
-  export function useUpdateStore(): {
-    checking: boolean
-    checked: boolean
-    hasUpdate: boolean
-    latestVersion: string
-    releaseBody: string
-    releaseUrl: string
-    check: () => Promise<boolean>
-    checkAtStartup: () => Promise<void>
-  }
-}
-
-declare module '@memohai/web/composables/useDialogMutation' {
-  export function useDialogMutation(): {
-    run: <T>(action: () => Promise<T>, options?: { fallbackMessage?: string, onSuccess?: () => void }) => Promise<T | undefined>
-  }
-}
-
-declare module '@memohai/web/constants/acl-presets' {
-  export const defaultAclPreset: string
-  export const aclPresetOptions: Array<{ value: string, titleKey: string, descriptionKey?: string }>
-}
-
-declare module '@memohai/web/utils/timezones' {
-  export const emptyTimezoneValue: string
 }
 
 declare module '@memohai/web/lib/desktop-shell' {
@@ -332,11 +364,6 @@ declare module '@memohai/web/lib/desktop-shell' {
   export const DesktopUpdatesKey: InjectionKey<DesktopUpdateBridge | undefined>
 }
 
-declare module '@memohai/web/lib/auth-session' {
-  export type AuthSessionClearReason = 'login' | 'logout' | 'token-cleared' | 'unauthorized'
-  export function notifyAuthSessionCleared(reason: AuthSessionClearReason): void
-}
-
 declare module '@memohai/web/lib/query-cache-persistence' {
   import type { PiniaColadaPlugin, QueryCache, UseQueryEntryFilter } from '@pinia/colada'
   export const QUERY_CACHE_STORAGE_KEY: string
@@ -350,6 +377,7 @@ declare module '@memohai/web/lib/query-cache-persistence' {
   export function saveQueryCacheToDiskNow(queryCache: QueryCache, storage?: Storage): void
   export function removeQueryCacheFromDisk(storage?: Storage): void
   export function cancelPendingQueryCacheSave(): void
+  export function clearQueryCacheAndPersistence(queryCache?: QueryCache, storage?: Storage): void
 }
 
 declare module '@memohai/web/pages/login/transition' {

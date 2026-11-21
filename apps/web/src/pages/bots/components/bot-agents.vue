@@ -3,7 +3,7 @@
     <PageShell
       v-if="view === 'list'"
       variant="tab"
-      :title="t('bots.tabs.agents')"
+      :title="t('bots.agent.title')"
     >
       <template #actions>
         <Button @click="addOpen = true">
@@ -31,7 +31,7 @@
       </SettingsSection>
 
       <SettingsSection v-else-if="agents.length === 0">
-        <div class="flex flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+        <div class="flex flex-col items-center justify-center gap-4 py-12 text-center">
           <div>
             <p class="text-control font-medium text-foreground">
               {{ t('bots.agent.emptyTitle') }}
@@ -137,7 +137,7 @@
     <DetailPane
       v-else
       width="narrow"
-      :back-label="t('bots.tabs.agents')"
+      :back-label="t('bots.agent.title')"
       @back="closeDetail"
     >
       <SettingsShell width="narrow">
@@ -173,6 +173,7 @@
             :bot-id="botId"
             :agent="selectedAgent"
             @authorized="refreshDirectRuntimeModels"
+            @missing-dependency="selectedAgent && void ensureAgentDependency(selectedAgent)"
           />
         </div>
       </SettingsShell>
@@ -222,7 +223,6 @@ import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import {
   deleteBotsByBotIdAgentsById,
   getAcpProfiles,
-  getBotsByBotIdAgents,
   patchBotsByBotIdAgentsById,
   type AcpprofilePublicProfile,
   type BotagentsBotAgent,
@@ -234,6 +234,7 @@ import AddBotAgentDialog from './add-bot-agent-dialog.vue'
 import DependencyEnableFlow from './dependency-enable-flow.vue'
 import { agentDependencyRequirement } from './dependency-enable-flow'
 import { externalAgentModelsQueryKey } from '@/composables/useAgentModelCatalog'
+import { botAgentsQueryKey, useBotAgentsQuery } from '@/composables/api/useBotAgents'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
@@ -297,17 +298,7 @@ const { data: profileData } = useQuery({
 })
 const profiles = computed<AcpprofilePublicProfile[]>(() => profileData.value?.items ?? [])
 
-const { data: agentData, isLoading: agentsLoading } = useQuery({
-  key: () => ['bot-agents', botIdRef.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdAgents({
-      path: { bot_id: botIdRef.value },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
+const { data: agentData, isLoading: agentsLoading } = useBotAgentsQuery(botIdRef)
 const agents = computed<BotagentsBotAgent[]>(() => agentData.value?.items ?? [])
 
 // `openAgent=<id>` lands on one Agent's detail, as the create flow does for
@@ -349,7 +340,7 @@ const { mutateAsync: updateAgent } = useMutation({
     return data
   },
   onSettled: () => {
-    void queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
+    void queryCache.invalidateQueries({ key: botAgentsQueryKey(props.botId) })
     void queryCache.invalidateQueries({ key: ['bot-settings', props.botId] })
   },
 })
@@ -465,7 +456,7 @@ async function confirmDelete() {
     toast.error(resolveApiErrorMessage(error, t('bots.agent.deleteFailed')))
   } finally {
     deleting.value = false
-    void queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
+    void queryCache.invalidateQueries({ key: botAgentsQueryKey(props.botId) })
     void queryCache.invalidateQueries({ key: ['bot-settings', props.botId] })
   }
 }

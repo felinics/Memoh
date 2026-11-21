@@ -4,15 +4,20 @@ package acpprofile
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
-	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/chat/thread"
 )
 
-// SetupResolver resolves the setup of the Agent instance an ACP thread runs
-// as. *botagents.Service satisfies it.
+// SetupResolver resolves the Agent instance an ACP thread runs as and its
+// setup. *botagents.Service satisfies it.
 type SetupResolver interface {
+	Get(ctx context.Context, botID, id string) (botagents.BotAgent, error)
+	FindActiveByProvider(ctx context.Context, botID, provider string) (botagents.BotAgent, error)
 	ResolveACPSetup(ctx context.Context, botID, botAgentID, provider string, botMetadata map[string]any) (runtimeprofile.AgentSetup, error)
 }
 
@@ -53,13 +58,49 @@ func (c *Catalog) ResolveACPSetupPreflight(ctx context.Context, botID, botAgentI
 		return turn.ACPSetupPreflight{}, err
 	}
 	result := turn.ACPSetupPreflight{Enabled: setup.Enabled}
-	if field, missing := runtimeprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+	if field, missing := runtimeprofile.MissingRequiredManagedField(profile, setup); missing {
 		result.MissingManagedField = &turn.ACPManagedField{
 			ID:    field.ID,
 			Label: field.Label,
 		}
 	}
 	return result, nil
+}
+
+// InstanceACPAgent is the ACP agent profile the Bot Agent instance runs.
+func (c *Catalog) InstanceACPAgent(ctx context.Context, botID, botAgentID string) (string, error) {
+	if c == nil || c.setups == nil {
+		return "", fmt.Errorf("%w: bot agents unavailable", thread.ErrACPAgentNotConfigured)
+	}
+	agent, err := c.setups.Get(ctx, botID, botAgentID)
+	if err != nil {
+		return "", err
+	}
+	descriptor, err := botagents.DescriptorFor(agent)
+	if err != nil {
+		return "", err
+	}
+	if descriptor.Runtime != botagents.RuntimeACP {
+		return "", fmt.Errorf("%w: bot agent %s runs %s", thread.ErrACPAgentNotConfigured, botAgentID, descriptor.Runtime)
+	}
+	return descriptor.Provider, nil
+}
+
+// ACPInstanceFor is the bot's oldest active instance of an ACP agent
+// profile, which a request naming only the profile runs as; empty when the
+// bot has none.
+func (c *Catalog) ACPInstanceFor(ctx context.Context, botID, agentID string) (string, error) {
+	if c == nil || c.setups == nil {
+		return "", nil
+	}
+	agent, err := c.setups.FindActiveByProvider(ctx, botID, agentID)
+	if errors.Is(err, botagents.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return agent.ID, nil
 }
 
 // KnownACPAgent reports whether agentID is a registered ACP profile. The
@@ -80,7 +121,7 @@ func (c *Catalog) ValidateACPSetup(ctx context.Context, botID, botAgentID, agent
 		return thread.ACPSetupValidation{}, err
 	}
 	result := thread.ACPSetupValidation{Enabled: setup.Enabled}
-	if field, missing := runtimeprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+	if field, missing := runtimeprofile.MissingRequiredManagedField(profile, setup); missing {
 		result.MissingManagedFieldID = field.ID
 	}
 	return result, nil

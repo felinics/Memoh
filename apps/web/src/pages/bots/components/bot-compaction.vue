@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch, onDeactivated, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { InlineLoadingRow, SectionGroup, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { InlineLoadingRow, SettingsBleed, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import {
   Button, Badge, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle,
   Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -11,6 +11,7 @@ import {
 } from '@felinic/ui'
 import { getBotsByBotIdCompactionLogs } from '@memohai/sdk'
 import type { CompactionLog } from '@memohai/sdk'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 
@@ -21,7 +22,7 @@ const props = defineProps<{
   botId: string
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // ---- Logs ----
 const isLoading = ref(false)
@@ -104,108 +105,94 @@ async function fetchLogs(silent = false) {
 }
 
 // Logs stream in on their own cadence, so the panel refreshes itself instead of
-// asking the user to hit a button: poll quietly, pause when the tab is hidden,
-// and catch up the moment it's visible again.
+// asking the user to hit a button: poll quietly while open and visible, pause
+// when hidden/deactivated, and catch up once visible again.
 const POLL_INTERVAL = 15_000
-let pollTimer: ReturnType<typeof setInterval> | undefined
-
-function tickPoll() {
-  if (document.hidden) return
-  void fetchLogs(true)
-}
-
-function onVisibilityChange() {
-  if (logsOpen.value && !document.hidden) void fetchLogs(true)
-}
-
-onMounted(() => {
-  pollTimer = setInterval(tickPoll, POLL_INTERVAL)
-  document.addEventListener('visibilitychange', onVisibilityChange)
-})
-
-onBeforeUnmount(() => {
-  if (pollTimer) clearInterval(pollTimer)
-  document.removeEventListener('visibilitychange', onVisibilityChange)
-})
+useVisiblePoll(
+  () => fetchLogs(true),
+  POLL_INTERVAL,
+  { enabled: () => logsOpen.value && !!props.botId },
+)
 </script>
 
 <template>
-  <SectionGroup
-    :title="$t('bots.tabs.compaction')"
-  >
-    <div class="space-y-8">
-      <SettingsSection>
-        <SettingsRow :label="$t('bots.compaction.title')">
-          <Button
-            variant="outline"
-            size="sm"
-            @click="logsOpen = true"
-          >
-            {{ $t('common.open') }}
-          </Button>
-        </SettingsRow>
-      </SettingsSection>
-      <Dialog v-model:open="logsOpen">
-        <DialogPanel width="3xl">
-          <DialogHeader>
-            <DialogTitle>{{ $t('bots.compaction.title') }}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <SettingsSection>
-              <SettingsRow
-                v-if="totalCount > 0"
-                :label="$t('common.status')"
-              >
-                <Select v-model="statusFilter">
-                  <SelectTrigger class="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">
-                      {{ $t('bots.compaction.filterAll') }}
-                    </SelectItem>
-                    <SelectItem value="ok">
-                      {{ $t('bots.compaction.statusOk') }}
-                    </SelectItem>
-                    <SelectItem value="pending">
-                      {{ $t('bots.compaction.statusPending') }}
-                    </SelectItem>
-                    <SelectItem value="error">
-                      {{ $t('bots.compaction.statusError') }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </SettingsRow>
+  <div class="space-y-8">
+    <SettingsSection :title="$t('bots.tabs.compaction')">
+      <SettingsRow :label="$t('bots.compaction.title')">
+        <Button
+          variant="outline"
+          size="sm"
+          @click="logsOpen = true"
+        >
+          {{ $t('common.open') }}
+        </Button>
+      </SettingsRow>
+    </SettingsSection>
+    <Dialog v-model:open="logsOpen">
+      <DialogPanel width="3xl">
+        <DialogHeader>
+          <DialogTitle>{{ $t('bots.compaction.title') }}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <SettingsSection>
+            <SettingsRow
+              v-if="totalCount > 0"
+              :label="$t('common.status')"
+            >
+              <Select v-model="statusFilter">
+                <SelectTrigger class="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    {{ $t('bots.compaction.filterAll') }}
+                  </SelectItem>
+                  <SelectItem value="ok">
+                    {{ $t('bots.compaction.statusOk') }}
+                  </SelectItem>
+                  <SelectItem value="pending">
+                    {{ $t('bots.compaction.statusPending') }}
+                  </SelectItem>
+                  <SelectItem value="error">
+                    {{ $t('bots.compaction.statusError') }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </SettingsRow>
 
-              <InlineLoadingRow
-                v-if="isLoading && logs.length === 0"
-                size="md"
-                surface="card-row"
-              >
-                {{ $t('common.loading') }}
-              </InlineLoadingRow>
+            <InlineLoadingRow
+              v-if="isLoading && logs.length === 0"
+              size="md"
+              surface="card-row"
+            >
+              {{ $t('common.loading') }}
+            </InlineLoadingRow>
 
-              <Empty
-                v-else-if="!isLoading && totalCount === 0"
-                class="py-12"
-              >
-                <EmptyHeader>
-                  <EmptyTitle>{{ $t('bots.compaction.empty') }}</EmptyTitle>
-                  <EmptyDescription>{{ $t('bots.compaction.emptyHint') }}</EmptyDescription>
-                </EmptyHeader>
-              </Empty>
+            <Empty
+              v-else-if="!isLoading && totalCount === 0"
+              class="py-12"
+            >
+              <EmptyHeader>
+                <EmptyTitle>{{ $t('bots.compaction.empty') }}</EmptyTitle>
+                <EmptyDescription>{{ $t('bots.compaction.emptyHint') }}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
 
-              <Empty
-                v-else-if="filteredLogs.length === 0"
-                class="py-12"
-              >
-                <EmptyHeader>
-                  <EmptyTitle>{{ $t('bots.compaction.empty') }}</EmptyTitle>
-                  <EmptyDescription>{{ $t('bots.compaction.filterEmpty') }}</EmptyDescription>
-                </EmptyHeader>
-              </Empty>
+            <Empty
+              v-else-if="filteredLogs.length === 0"
+              class="py-12"
+            >
+              <EmptyHeader>
+                <EmptyTitle>{{ $t('bots.compaction.empty') }}</EmptyTitle>
+                <EmptyDescription>{{ $t('bots.compaction.filterEmpty') }}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
 
-              <template v-else>
+            <template v-else>
+              <!-- The table and its pager span the card edge to edge: row hover
+                   fills and the rules between rows reach both sides, while the
+                   cells re-pad their text to line up with the rows above. -->
+              <SettingsBleed>
                 <div class="overflow-x-auto">
                   <table class="w-full text-xs">
                     <thead>
@@ -242,7 +229,7 @@ onBeforeUnmount(() => {
                             </Badge>
                           </td>
                           <td class="px-4 py-3 font-mono text-muted-foreground">
-                            {{ formatDateTime(log.started_at) }}
+                            {{ formatDateTime(log.started_at, { locale }) }}
                           </td>
                           <td class="px-4 py-3 font-mono text-muted-foreground">
                             {{ formatDuration(log.started_at, log.completed_at) }}
@@ -291,10 +278,11 @@ onBeforeUnmount(() => {
                     </tbody>
                   </table>
                 </div>
+              </SettingsBleed>
 
+              <SettingsBleed v-if="totalPages > 1">
                 <div
-                  v-if="totalPages > 1"
-                  class="flex items-center justify-between border-t border-border p-4"
+                  class="flex items-center justify-between border-t border-border px-(--settings-inset) py-4"
                 >
                   <span class="text-xs tabular-nums text-muted-foreground">
                     {{ paginationSummary }}
@@ -329,11 +317,11 @@ onBeforeUnmount(() => {
                     </PaginationContent>
                   </Pagination>
                 </div>
-              </template>
-            </SettingsSection>
-          </DialogBody>
-        </DialogPanel>
-      </Dialog>
-    </div>
-  </SectionGroup>
+              </SettingsBleed>
+            </template>
+          </SettingsSection>
+        </DialogBody>
+      </DialogPanel>
+    </Dialog>
+  </div>
 </template>

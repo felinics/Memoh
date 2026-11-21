@@ -14,14 +14,14 @@ func TestComposeBudgetedPreservesSourceBoundariesAndFitsReadmission(t *testing.T
 	for i := range rc {
 		rc[i] = textSegment(fmt.Sprintf("m%d", i), int64(i+1), strings.Repeat("x", 400))
 	}
-	artifacts := []CompactionArtifact{{ID: "summary", Summary: strings.Repeat("s", 400000-len("<summary>\n\n</summary>"))}}
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, artifacts, ComposeBudget{MaxTokens: 200000})
+	held := HistoryCheckpoint{Items: []CheckpointItem{{SummaryID: "summary", Summary: strings.Repeat("s", 400000-len(turn.SummaryText("")))}}}
+	composed, admission := ComposeContextWithCheckpointBudgeted(rc, nil, held, ComposeBudget{MaxTokens: 200000})
 	if composed == nil || admission.ProtectedOverflow {
 		t.Fatalf("source messages should fit: %+v", admission)
 	}
 	entries := make([]turn.AdmissionEntry, len(composed.Messages))
 	for i, message := range composed.Messages {
-		entries[i] = turn.AdmissionEntry{Cost: turn.EstimateTokensFromBytes(len(message.Content)), Pinned: message.CompactionArtifactID != ""}
+		entries[i] = turn.AdmissionEntry{Cost: turn.EstimateTokensFromBytes(len(message.Content)), Pinned: message.Pinned}
 	}
 	readmission := turn.AdmitContextEntries(entries, 200000)
 	if readmission.ProtectedOverflow || readmission.DroppedEntries != 0 {
@@ -37,7 +37,7 @@ func TestComposeBudgetedPreservesSourceBoundariesAndFitsReadmission(t *testing.T
 
 func TestComposeBudgetedIncludesSourceInternalSeparators(t *testing.T) {
 	rc := RenderedContext{{Content: []RenderedContentPiece{{Type: "text", Text: "xxxx"}, {Type: "text", Text: "yyy"}}}}
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 1})
+	composed, admission := ComposeContextWithCheckpointBudgeted(rc, nil, HistoryCheckpoint{}, ComposeBudget{MaxTokens: 1})
 	if composed != nil || !admission.ProtectedOverflow {
 		t.Fatalf("eight rendered bytes cannot fit one token: composed=%+v admission=%+v", composed, admission)
 	}
@@ -60,7 +60,7 @@ func FuzzComposeBudgetedMatchesRenderedCost(f *testing.F) {
 			}})
 		}
 		budget := int(limit) + 1
-		composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: budget})
+		composed, admission := ComposeContextWithCheckpointBudgeted(rc, nil, HistoryCheckpoint{}, ComposeBudget{MaxTokens: budget})
 		if composed == nil {
 			return
 		}
@@ -84,7 +84,7 @@ func BenchmarkComposeSourceMessages(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 200000})
+				ComposeContextWithCheckpointBudgeted(rc, nil, HistoryCheckpoint{}, ComposeBudget{MaxTokens: 200000})
 			}
 		})
 	}
@@ -106,7 +106,7 @@ func FuzzComposeBatchKeepsNewestSuffixAndReportsOmissions(f *testing.F) {
 		}
 		after := DiscussCursorPosition{SourceCursor: int64(int(consumed) % len(sizes))}
 		budget := int(limit) + 1
-		composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: budget, After: &after})
+		composed, admission := ComposeContextWithCheckpointBudgeted(rc, nil, HistoryCheckpoint{}, ComposeBudget{MaxTokens: budget, After: &after})
 		newest := strconv.Itoa(len(sizes) - 1)
 		if admission.ProtectedOverflow {
 			if cost := turn.EstimateTokensFromBytes(8 * (int(sizes[len(sizes)-1]) + 1)); cost <= budget {

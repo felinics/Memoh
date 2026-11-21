@@ -2,7 +2,7 @@
   <PageShell :title="$t('usage.title')">
     <div class="space-y-8">
       <SettingsSection :title="$t('usage.filters')">
-        <div class="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+        <div class="grid grid-cols-1 gap-4 py-4 sm:grid-cols-2">
           <div class="space-y-1.5">
             <p class="text-xs text-muted-foreground">
               {{ $t('usage.selectBot') }}
@@ -82,7 +82,29 @@
         </div>
       </SettingsSection>
 
-      <template v-if="!selectedBotId">
+      <template v-if="isLoading || (!selectedBotId && isBotsInitialLoading)">
+        <div class="flex items-center justify-center py-16">
+          <Spinner class="size-6" />
+        </div>
+      </template>
+
+      <template v-else-if="!selectedBotId && botsLoadFailed">
+        <CalloutBanner
+          tone="destructive"
+          :title="botsLoadFailedMessage"
+        >
+          <LoadingButton
+            variant="outline"
+            size="sm"
+            :loading="isBotsFetching"
+            @click="void refetchBots()"
+          >
+            {{ $t('common.retry') }}
+          </LoadingButton>
+        </CalloutBanner>
+      </template>
+
+      <template v-else-if="!selectedBotId">
         <Empty class="py-12">
           <EmptyHeader>
             <EmptyTitle>{{ $t('usage.selectBotPlaceholder') }}</EmptyTitle>
@@ -90,10 +112,20 @@
         </Empty>
       </template>
 
-      <template v-else-if="isLoading">
-        <div class="flex items-center justify-center py-16">
-          <Spinner class="size-6" />
-        </div>
+      <template v-else-if="usageLoadFailed">
+        <CalloutBanner
+          tone="destructive"
+          :title="usageLoadFailedMessage"
+        >
+          <LoadingButton
+            variant="outline"
+            size="sm"
+            :loading="isFetching"
+            @click="retryUsage"
+          >
+            {{ $t('common.retry') }}
+          </LoadingButton>
+        </CalloutBanner>
       </template>
 
       <template v-else>
@@ -144,39 +176,62 @@
                 </SelectContent>
               </Select>
             </template>
-            <VChart
-              :key="modelChartType"
-              class="p-4"
-              style="height: 300px; width: 100%"
-              :option="modelChartOption"
-              autoresize
+            <DataChart
+              v-if="modelChartType === 'bar'"
+              type="bar"
+              stacked
+              legend="top"
+              class="py-4"
+              :categories="modelNames"
+              :series="modelBarSeries"
+              :x-axis-label-rotate="30"
+              :value-formatter="formatNumber"
+            />
+            <DataChart
+              v-else
+              type="pie"
+              class="py-4"
+              :pie-items="modelPieItems"
+              :tooltip-value-label="$t('usage.tokens')"
+              :value-formatter="formatNumber"
             />
           </SettingsSection>
 
           <SettingsSection :title="$t('usage.dailyTokens')">
-            <VChart
-              class="p-4"
-              style="height: 300px; width: 100%"
-              :option="dailyTokensOption"
-              autoresize
+            <DataChart
+              type="bar"
+              stacked
+              class="py-4"
+              :categories="allDays"
+              :series="dailyTokensSeries"
+              :x-axis-label-formatter="formatShortDay"
+              :value-formatter="formatNumber"
             />
           </SettingsSection>
 
           <SettingsSection :title="$t('usage.cacheBreakdown')">
-            <VChart
-              class="p-4"
-              style="height: 300px; width: 100%"
-              :option="cacheBreakdownOption"
-              autoresize
+            <DataChart
+              type="bar"
+              stacked
+              class="py-4"
+              :categories="allDays"
+              :series="cacheBreakdownSeries"
+              :x-axis-label-formatter="formatShortDay"
+              :value-formatter="formatNumber"
             />
           </SettingsSection>
 
           <SettingsSection :title="$t('usage.cacheHitRate')">
-            <VChart
-              class="p-4"
-              style="height: 300px; width: 100%"
-              :option="cacheHitRateOption"
-              autoresize
+            <DataChart
+              type="line"
+              legend="none"
+              class="py-4"
+              :categories="allDays"
+              :series="cacheHitRateSeries"
+              :y-axis-max="100"
+              :x-axis-label-formatter="formatShortDay"
+              :y-axis-label-formatter="formatPercentAxis"
+              :value-formatter="formatPercentValue"
             />
           </SettingsSection>
         </template>
@@ -229,13 +284,29 @@
                   </div>
                 </TableCell>
               </TableRow>
-              <TableRow v-else-if="recordsList.length === 0">
+              <TableRow v-else-if="recordsLoadFailed || recordsList.length === 0">
                 <TableCell
                   :colspan="6"
                   class="p-0"
                 >
                   <div class="flex items-center justify-center h-[480px] text-muted-foreground">
-                    {{ $t('usage.noRecords') }}
+                    <div
+                      v-if="recordsLoadFailed"
+                      class="flex flex-col items-center gap-3"
+                    >
+                      {{ recordsLoadFailedMessage }}
+                      <LoadingButton
+                        variant="outline"
+                        size="sm"
+                        :loading="isRecordsFetching"
+                        @click="void refetchRecords()"
+                      >
+                        {{ $t('common.retry') }}
+                      </LoadingButton>
+                    </div>
+                    <template v-else>
+                      {{ $t('usage.noRecords') }}
+                    </template>
                   </div>
                 </TableCell>
               </TableRow>
@@ -312,18 +383,9 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { LineChart, BarChart, PieChart } from 'echarts/charts'
-import {
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
-} from 'echarts/components'
-import VChart from 'vue-echarts'
-import { useDark } from '@vueuse/core'
 import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date'
 import {
+  CalloutBanner,
   type DateRange,
   DateRangePicker,
   type DateRangePreset,
@@ -355,13 +417,14 @@ import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memohai/sdk'
 import { MetricReadout, PageShell, SectionGroup, SettingsSection } from '@felinic/ui'
 import BotSelect from '@/components/bot-select/index.vue'
+import { DataChart } from '@/components/chart'
+import LoadingButton from '@/components/loading-button/index.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { formatDateTimeShort } from '@/utils/date-time'
 import { externalAgentDisplayName } from '@/utils/external-agent'
-
-use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const { t, locale } = useI18n()
 
@@ -435,8 +498,14 @@ const datePresets = computed<DateRangePreset[]>(() => [
   { label: t('usage.last90Days'), range: presetRange(90) },
 ])
 
-const { data: botData } = useQuery(getBotsQuery())
+const { data: botData, error: botsError, asyncStatus: botsAsyncStatus, refetch: refetchBots } = useQuery(getBotsQuery())
 const botList = computed(() => botData.value?.items ?? [])
+const isBotsFetching = computed(() => botsAsyncStatus.value === 'loading')
+const botsLoadFailed = computed(() => !!botsError.value && !botData.value)
+const isBotsInitialLoading = computed(() => !botsLoadFailed.value && isBotsFetching.value && !botData.value)
+const botsLoadFailedMessage = computed(() =>
+  resolveApiErrorMessage(botsError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
+)
 
 // Default to the bot already active on the chat page (persisted in chat-selection),
 // so opening Usage continues looking at whatever the user was just chatting with.
@@ -467,7 +536,7 @@ const sessionTypeFilter = computed(() =>
   selectedSessionType.value === 'all' ? null : selectedSessionType.value as SessionTypeFilter,
 )
 
-const { data: usageData, asyncStatus, refetch } = useQuery({
+const { data: usageData, error: usageError, asyncStatus, refetch } = useQuery({
   key: () => ['token-usage', selectedBotId.value, dateFrom.value, dateTo.value, modelIdFilter.value ?? '', sessionTypeFilter.value ?? ''],
   query: async () => {
     const { data } = await getBotsByBotIdTokenUsage({
@@ -486,7 +555,14 @@ const { data: usageData, asyncStatus, refetch } = useQuery({
 })
 
 const isFetching = computed(() => asyncStatus.value === 'loading')
-const isLoading = computed(() => isFetching.value && !usageData.value)
+// A failed request with nothing cached must not fall through to the overview
+// (which would render every total as 0) or tear down the retry banner back into
+// a full-page spinner while a retry is in flight.
+const usageLoadFailed = computed(() => !!usageError.value && !usageData.value)
+const isLoading = computed(() => !usageLoadFailed.value && isFetching.value && !usageData.value)
+const usageLoadFailedMessage = computed(() =>
+  resolveApiErrorMessage(usageError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
+)
 
 onMounted(() => {
   if (selectedBotId.value) {
@@ -505,7 +581,7 @@ const recordsPageNumber = computed(() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
 })
 
-const { data: recordsData, asyncStatus: recordsAsyncStatus, refetch: refetchRecords } = useQuery({
+const { data: recordsData, error: recordsError, asyncStatus: recordsAsyncStatus, refetch: refetchRecords } = useQuery({
   key: () => [
     'token-usage-records',
     selectedBotId.value,
@@ -535,7 +611,18 @@ const { data: recordsData, asyncStatus: recordsAsyncStatus, refetch: refetchReco
 
 const recordsList = computed<HandlersTokenUsageRecord[]>(() => recordsData.value?.items ?? [])
 const isRecordsFetching = computed(() => recordsAsyncStatus.value === 'loading')
-const isRecordsInitialLoading = computed(() => isRecordsFetching.value && !recordsData.value)
+const recordsLoadFailed = computed(() => !!recordsError.value && !recordsData.value)
+const isRecordsInitialLoading = computed(() => !recordsLoadFailed.value && isRecordsFetching.value && !recordsData.value)
+const recordsLoadFailedMessage = computed(() =>
+  resolveApiErrorMessage(recordsError.value, t('usage.loadFailed'), { prefixFallback: true }) || t('usage.loadFailed'),
+)
+
+// The records table lives inside the overview branch, so one retry has to
+// bring both requests back.
+function retryUsage() {
+  void refetch()
+  void refetchRecords()
+}
 const recordsTotal = computed(() => recordsData.value?.total ?? 0)
 const recordsTotalPages = computed(() =>
   Math.max(1, Math.ceil(recordsTotal.value / RECORDS_PAGE_SIZE)),
@@ -684,342 +771,79 @@ function modelLabel(m: HandlersModelTokenUsage) {
   return `${m.model_name || m.model_slug} (${m.provider_name})`
 }
 
-// echarts paints on a <canvas> and can't read our CSS custom properties (the
-// tokens are oklch + nested vars), so resolve each design token to a concrete
-// color through a probe element, then rasterize it to a single pixel and read
-// the bytes back as rgb/rgba. The pixel round-trip matters: echarts' emphasis
-// (hover) state runs the color through a lift that only parses #hex/rgb/rgba/
-// hsl — never oklch/color() — so without it a hovered bar/slice paints
-// transparent. `void isDark.value` re-runs this when the theme flips.
-const isDark = useDark()
-
-const colorCanvas = typeof document !== 'undefined'
-  ? document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-  : null
-
-function readColor(token: string, fallback: string): string {
-  if (typeof document === 'undefined') return fallback
-  const probe = document.createElement('span')
-  probe.style.color = `var(${token})`
-  probe.style.display = 'none'
-  document.body.appendChild(probe)
-  const resolved = getComputedStyle(probe).color
-  probe.remove()
-  if (!resolved) return fallback
-  if (!colorCanvas) return resolved
-  try {
-    colorCanvas.clearRect(0, 0, 1, 1)
-    colorCanvas.fillStyle = '#000'
-    colorCanvas.fillStyle = resolved
-    colorCanvas.fillRect(0, 0, 1, 1)
-    const [r = 0, g = 0, b = 0, a = 255] = colorCanvas.getImageData(0, 0, 1, 1).data
-    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
+function sumDayField(
+  day: string,
+  field: 'input_tokens' | 'output_tokens' | 'cache_read_tokens',
+): number {
+  const maps = dayMaps.value
+  let total = 0
+  for (const tp of activeTypes.value) {
+    total += maps[tp].get(day)?.[field] ?? 0
   }
-  catch {
-    return fallback
-  }
+  return total
 }
 
-// Black / white / grey only. `--primary` is a violet here, so the charts use the
-// neutral foreground (primary series) + muted-foreground (secondary), with the
-// card color separating pie slices. No brand or accent color anywhere.
-const chartTheme = computed(() => {
-  void isDark.value
-  const fontFamily = typeof document !== 'undefined'
-    ? getComputedStyle(document.body).fontFamily
-    : 'inherit'
-  return {
-    bar: readColor('--foreground', '#18181b'),
-    barMuted: readColor('--muted-foreground', '#a1a1aa'),
-    text: readColor('--muted-foreground', '#a1a1aa'),
-    line: readColor('--border', '#e4e4e7'),
-    surface: readColor('--card', '#ffffff'),
-    pie: [
-      readColor('--foreground', '#18181b'),
-      readColor('--muted-foreground', '#a1a1aa'),
-      readColor('--border', '#e4e4e7'),
-    ],
-    fontFamily,
-  }
-})
+const modelNames = computed(() => byModelData.value.map(m => modelLabel(m)))
 
-// Tooltip surface mirrors Popover/HoverCard exactly: same shell radius, hairline
-// and dropdown shadow, with echarts' own background/border/padding zeroed so
-// they don't fight the token CSS.
-function tooltipSurface(fontFamily: string) {
-  return {
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    padding: 0,
-    extraCssText: [
-      'background: var(--popover)',
-      'color: var(--popover-foreground)',
-      'border: 1px solid var(--border-menu)',
-      'border-radius: var(--radius-menu-shell)',
-      'box-shadow: var(--shadow-dropdown)',
-      'padding: 10px 12px',
-      `font-family: ${fontFamily}`,
-    ].join('; '),
-  }
-}
-
-interface AxisTooltipParam {
-  seriesName?: string
-  value?: number
-  color?: string
-  axisValueLabel?: string
-}
-
-// Shared axis-tooltip body: a header row + one "dot · series · value" row per
-// series, colored with popover tokens so it matches the dropdown surface.
-function axisTooltipFormatter(format: (v: number) => string) {
-  return (params: AxisTooltipParam[] | AxisTooltipParam) => {
-    const list = Array.isArray(params) ? params : [params]
-    const head = list[0]?.axisValueLabel ?? ''
-    const rows = list.map((p) => {
-      const val = format(typeof p.value === 'number' ? p.value : 0)
-      const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:9999px;margin-right:7px;background:${p.color ?? 'var(--muted-foreground)'};"></span>`
-      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:24px;line-height:1.7;">'
-        + `<span style="color:var(--muted-foreground);">${dot}${p.seriesName ?? ''}</span>`
-        + `<span style="color:var(--popover-foreground);font-weight:500;font-variant-numeric:tabular-nums;">${val}</span></div>`
-    }).join('')
-    return '<div style="font-size:var(--text-body);min-width:140px;">'
-      + `<div style="color:var(--muted-foreground);margin-bottom:3px;">${head}</div>${rows}</div>`
-  }
-}
-
-const modelPieOption = computed(() => {
-  const c = chartTheme.value
-  const data = byModelData.value.map(m => ({
+const modelPieItems = computed(() =>
+  byModelData.value.map(m => ({
     name: modelLabel(m),
     value: (m.input_tokens ?? 0) + (m.output_tokens ?? 0),
-  }))
-  return {
-    color: c.pie,
-    textStyle: { fontFamily: c.fontFamily },
-    tooltip: {
-      trigger: 'item' as const,
-      ...tooltipSurface(c.fontFamily),
-      formatter: (params: { name: string, value: number, percent: number }) =>
-        '<div style="font-size:var(--text-body);min-width:140px;">'
-        + `<div style="color:var(--popover-foreground);font-weight:500;margin-bottom:3px;">${params.name}</div>`
-        + '<div style="display:flex;align-items:center;justify-content:space-between;gap:24px;line-height:1.7;">'
-        + `<span style="color:var(--muted-foreground);">${t('usage.tokens')}</span>`
-        + `<span style="color:var(--popover-foreground);font-weight:500;font-variant-numeric:tabular-nums;">${formatNumber(params.value)} (${params.percent}%)</span></div></div>`,
-    },
-    legend: {
-      orient: 'vertical' as const,
-      right: 8,
-      top: 'middle' as const,
-      icon: 'roundRect' as const,
-      itemWidth: 8,
-      itemHeight: 8,
-      textStyle: { color: c.text, fontFamily: c.fontFamily, fontSize: 11, overflow: 'truncate' as const, width: 130 },
-    },
-    series: [
-      {
-        type: 'pie' as const,
-        radius: ['52%', '72%'],
-        center: ['36%', '50%'],
-        avoidLabelOverlap: true,
-        itemStyle: {
-          borderRadius: 4,
-          borderColor: c.surface,
-          borderWidth: 2,
-        },
-        label: { show: false },
-        emphasis: { label: { show: false } },
-        data,
-      },
-    ],
-  }
-})
-
-const modelBarOption = computed(() => {
-  const c = chartTheme.value
-  const models = byModelData.value
-  const names = models.map(m => modelLabel(m))
-  const inputLabel = t('usage.inputTokens')
-  const outputLabel = t('usage.outputTokens')
-  return {
-    textStyle: { fontFamily: c.fontFamily },
-    tooltip: { trigger: 'axis' as const, ...tooltipSurface(c.fontFamily), formatter: axisTooltipFormatter(formatNumber) },
-    legend: {
-      data: [inputLabel, outputLabel],
-      top: 0,
-      icon: 'roundRect' as const,
-      itemWidth: 8,
-      itemHeight: 8,
-      textStyle: { color: c.text, fontFamily: c.fontFamily, fontSize: 11 },
-    },
-    grid: { left: 8, right: 8, top: 36, bottom: 64, containLabel: true },
-    xAxis: {
-      type: 'category' as const,
-      data: names,
-      axisTick: { show: false },
-      axisLine: { lineStyle: { color: c.line } },
-      axisLabel: { rotate: 30, fontSize: 10, color: c.text, fontFamily: c.fontFamily },
-    },
-    yAxis: {
-      type: 'value' as const,
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: (v: number) => formatNumber(v) },
-    },
-    series: [
-      { name: inputLabel, type: 'bar' as const, stack: 'tokens', itemStyle: { color: c.bar }, data: models.map(m => m.input_tokens ?? 0) },
-      { name: outputLabel, type: 'bar' as const, stack: 'tokens', itemStyle: { color: c.barMuted, borderRadius: [3, 3, 0, 0] as [number, number, number, number] }, data: models.map(m => m.output_tokens ?? 0) },
-    ],
-  }
-})
-
-const modelChartOption = computed(() =>
-  modelChartType.value === 'bar' ? modelBarOption.value : modelPieOption.value,
+  })),
 )
 
-const dailyTokensOption = computed(() => {
-  const c = chartTheme.value
-  const days = allDays.value
-  const types = activeTypes.value
-  const maps = dayMaps.value
-  const totalInputLabel = t('usage.totalInput')
-  const totalOutputLabel = t('usage.totalOutput')
-  const sumDay = (day: string, field: 'input_tokens' | 'output_tokens') => {
-    let sum = 0
-    for (const tp of types) sum += maps[tp].get(day)?.[field] ?? 0
-    return sum
-  }
-  return {
-    textStyle: { fontFamily: c.fontFamily },
-    tooltip: { trigger: 'axis' as const, ...tooltipSurface(c.fontFamily), formatter: axisTooltipFormatter(formatNumber) },
-    legend: {
-      data: [totalInputLabel, totalOutputLabel],
-      bottom: 0,
-      itemGap: 16,
-      icon: 'roundRect' as const,
-      itemWidth: 8,
-      itemHeight: 8,
-      textStyle: { color: c.text, fontFamily: c.fontFamily, fontSize: 11 },
-    },
-    grid: { left: 8, right: 8, top: 14, bottom: 40, containLabel: true },
-    xAxis: {
-      type: 'category' as const,
-      data: days,
-      axisTick: { show: false },
-      axisLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: (v: string) => v.slice(5) },
-    },
-    yAxis: {
-      type: 'value' as const,
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: (v: number) => formatNumber(v) },
-    },
-    series: [
-      { name: totalInputLabel, type: 'bar' as const, stack: 'tokens', itemStyle: { color: c.bar }, data: days.map(d => sumDay(d, 'input_tokens')) },
-      { name: totalOutputLabel, type: 'bar' as const, stack: 'tokens', itemStyle: { color: c.barMuted, borderRadius: [3, 3, 0, 0] as [number, number, number, number] }, data: days.map(d => sumDay(d, 'output_tokens')) },
-    ],
-  }
+const modelBarSeries = computed(() => {
+  const models = byModelData.value
+  return [
+    { name: t('usage.inputTokens'), data: models.map(m => m.input_tokens ?? 0) },
+    { name: t('usage.outputTokens'), data: models.map(m => m.output_tokens ?? 0) },
+  ]
 })
 
-const cacheBreakdownOption = computed(() => {
-  const c = chartTheme.value
+const dailyTokensSeries = computed(() => {
   const days = allDays.value
-  const types = activeTypes.value
-  const maps = dayMaps.value
-  function sumField(day: string, field: 'cache_read_tokens' | 'input_tokens') {
-    let total = 0
-    for (const tp of types) total += (maps[tp].get(day)?.[field] ?? 0) as number
-    return total
-  }
-  return {
-    textStyle: { fontFamily: c.fontFamily },
-    tooltip: { trigger: 'axis' as const, ...tooltipSurface(c.fontFamily), formatter: axisTooltipFormatter(formatNumber) },
-    legend: {
-      data: [t('usage.cacheRead'), t('usage.noCache')],
-      bottom: 0,
-      itemGap: 16,
-      icon: 'roundRect' as const,
-      itemWidth: 8,
-      itemHeight: 8,
-      textStyle: { color: c.text, fontFamily: c.fontFamily, fontSize: 11 },
-    },
-    grid: { left: 8, right: 8, top: 14, bottom: 40, containLabel: true },
-    xAxis: {
-      type: 'category' as const,
-      data: days,
-      axisTick: { show: false },
-      axisLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: (v: string) => v.slice(5) },
-    },
-    yAxis: {
-      type: 'value' as const,
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: (v: number) => formatNumber(v) },
-    },
-    series: [
-      { name: t('usage.cacheRead'), type: 'bar' as const, stack: 'cache', itemStyle: { color: c.bar }, data: days.map(d => sumField(d, 'cache_read_tokens')) },
-      {
-        name: t('usage.noCache'),
-        type: 'bar' as const,
-        stack: 'cache',
-        itemStyle: { color: c.barMuted, borderRadius: [3, 3, 0, 0] as [number, number, number, number] },
-        data: days.map(d => {
-          const totalInput = sumField(d, 'input_tokens')
-          const cacheRead = sumField(d, 'cache_read_tokens')
-          return Math.max(0, totalInput - cacheRead)
-        }),
-      },
-    ],
-  }
+  return [
+    { name: t('usage.totalInput'), data: days.map(d => sumDayField(d, 'input_tokens')) },
+    { name: t('usage.totalOutput'), data: days.map(d => sumDayField(d, 'output_tokens')) },
+  ]
 })
 
-const cacheHitRateOption = computed(() => {
-  const c = chartTheme.value
+const cacheBreakdownSeries = computed(() => {
   const days = allDays.value
-  const types = activeTypes.value
-  const maps = dayMaps.value
-  function sumField(day: string, field: 'cache_read_tokens' | 'input_tokens') {
-    let total = 0
-    for (const tp of types) total += (maps[tp].get(day)?.[field] ?? 0) as number
-    return total
-  }
-  return {
-    textStyle: { fontFamily: c.fontFamily },
-    tooltip: { trigger: 'axis' as const, ...tooltipSurface(c.fontFamily), formatter: axisTooltipFormatter((v: number) => `${v.toFixed(1)}%`) },
-    grid: { left: 8, right: 8, top: 14, bottom: 24, containLabel: true },
-    xAxis: {
-      type: 'category' as const,
-      data: days,
-      axisTick: { show: false },
-      axisLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: (v: string) => v.slice(5) },
+  return [
+    { name: t('usage.cacheRead'), data: days.map(d => sumDayField(d, 'cache_read_tokens')) },
+    {
+      name: t('usage.noCache'),
+      data: days.map(d => Math.max(0, sumDayField(d, 'input_tokens') - sumDayField(d, 'cache_read_tokens'))),
     },
-    yAxis: {
-      type: 'value' as const,
-      max: 100,
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: c.line } },
-      axisLabel: { color: c.text, fontFamily: c.fontFamily, fontSize: 10, formatter: '{value}%' },
-    },
-    series: [
-      {
-        name: t('usage.cacheHitRate'),
-        type: 'line' as const,
-        smooth: true,
-        symbol: 'none' as const,
-        lineStyle: { color: c.bar, width: 2 },
-        itemStyle: { color: c.bar },
-        data: days.map(d => {
-          const totalInput = sumField(d, 'input_tokens')
-          const cacheRead = sumField(d, 'cache_read_tokens')
-          return totalInput > 0 ? parseFloat(((cacheRead / totalInput) * 100).toFixed(1)) : 0
-        }),
-      },
-    ],
-  }
+  ]
 })
+
+const cacheHitRateSeries = computed(() => {
+  const days = allDays.value
+  return [
+    {
+      name: t('usage.cacheHitRate'),
+      data: days.map((d) => {
+        const totalInput = sumDayField(d, 'input_tokens')
+        const cacheRead = sumDayField(d, 'cache_read_tokens')
+        return totalInput > 0 ? parseFloat(((cacheRead / totalInput) * 100).toFixed(1)) : 0
+      }),
+    },
+  ]
+})
+
+function formatShortDay(day: string): string {
+  return day.slice(5)
+}
+
+function formatPercentAxis(value: number): string {
+  return `${value}%`
+}
+
+function formatPercentValue(value: number): string {
+  return `${value.toFixed(1)}%`
+}
 
 function formatDate(d: Date): string {
   const y = d.getFullYear()

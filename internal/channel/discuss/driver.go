@@ -15,12 +15,6 @@ type DiscussCursorStore interface {
 	UpsertDiscussCursor(ctx context.Context, sessionID, scopeKey, routeID, source string, position timeline.DiscussCursorPosition) error
 }
 
-// DiscussArtifactProvider projects the session's active compaction artifacts
-// for timeline composition. Implemented agent-side and injected at assembly.
-type DiscussArtifactProvider interface {
-	ActiveCompactionArtifacts(ctx context.Context, botID, sessionID string) ([]timeline.CompactionArtifact, error)
-}
-
 // DiscussStreamBroadcaster publishes stream events to local UI subscribers.
 // Implemented by local.RouteHub.
 type DiscussStreamBroadcaster interface {
@@ -32,7 +26,7 @@ type DiscussDriverDeps struct {
 	Turn           turn.Service
 	MessageService HistoryReader
 	CursorStore    DiscussCursorStore
-	Artifacts      DiscussArtifactProvider
+	Checkpoints    DiscussCheckpointSource
 	Broadcaster    DiscussStreamBroadcaster
 	Logger         *slog.Logger
 	// AdmissionMaxTokens is the server-wide context admission cap applied
@@ -52,9 +46,10 @@ type DiscussSessionConfig struct {
 	CurrentPlatform   string
 	ConversationType  string
 	ConversationName  string
-	SessionToken      string //nolint:gosec // session credential material
-	ChatToken         string //nolint:gosec // scoped chat routing token
-	ToolHTTPURL       string
+	// ActorAccountID is the account the session's turns act for (the bot
+	// owner, or the runtime owner of an external-runtime session).
+	ActorAccountID string
+	ToolHTTPURL    string
 	// StartProcessing shows the platform processing indicator ("typing")
 	// for one addressed run; nil when the channel has none. It is bound to
 	// the inbound message that last woke the session.
@@ -78,18 +73,15 @@ type DiscussDriver struct {
 	cursor             discussCursorTracker
 	trigger            discussTriggerBuilder
 	runner             discussTurnRunner
-	artifacts          DiscussArtifactProvider
+	checkpoints        DiscussCheckpointSource
 	admissionCapTokens int
 	logger             *slog.Logger
 }
 
-// admissionMaxTokens resolves the effective admission cap; construction
-// without an explicit cap still gets the shared default, never unbounded.
+// admissionMaxTokens is the admission cap; NewDiscussDriver defaults it, so
+// it is never unbounded.
 func (d *DiscussDriver) admissionMaxTokens() int {
-	if d.admissionCapTokens > 0 {
-		return d.admissionCapTokens
-	}
-	return turn.DefaultContextCapTokens
+	return d.admissionCapTokens
 }
 
 type discussSession struct {
@@ -122,7 +114,7 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 		},
 		cursor:             discussCursorTracker{store: deps.CursorStore},
 		runner:             discussTurnRunner{projector: projector},
-		artifacts:          deps.Artifacts,
+		checkpoints:        deps.Checkpoints,
 		admissionCapTokens: capTokens,
 		logger:             logger,
 	}

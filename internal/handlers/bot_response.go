@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/bots"
 )
 

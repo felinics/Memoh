@@ -1,5 +1,8 @@
 <template>
-  <PageShell :title="t('people.title')">
+  <PageShell
+    :title="t('people.title')"
+    width="lg"
+  >
     <template #actions>
       <Button
         type="button"
@@ -63,7 +66,7 @@
               :key="user.id"
             >
               <TableCell>
-                <div class="flex items-center gap-3">
+                <div class="flex min-w-0 max-w-64 items-center gap-3">
                   <Avatar class="size-9 shrink-0">
                     <AvatarImage
                       v-if="user.avatar_url"
@@ -322,7 +325,7 @@ import type {
   AccountsUpdateAccountRequest,
 } from '@memohai/sdk'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const userStore = useUserStore()
 
 type MemberRole = 'admin' | 'member'
@@ -407,7 +410,7 @@ function setUserPending(userID: string, pending: boolean) {
 }
 
 function formatMemberDate(value: string | undefined, fallback: string): string {
-  return formatDateTime(value, { fallback })
+  return formatDateTime(value, { fallback, locale: locale.value })
 }
 
 function resetCreateForm() {

@@ -55,8 +55,8 @@ type pendingUserInputSuperseder interface {
 	SupersedePendingUserInputsBySession(ctx context.Context, arg sqlc.SupersedePendingUserInputsBySessionParams) ([]sqlc.UserInputRequest, error)
 }
 
-type pendingCompactionClaimReleaser interface {
-	ReleasePendingCompactionClaimsBySession(ctx context.Context, arg sqlc.ReleasePendingCompactionClaimsBySessionParams) error
+type pendingCompactionLogReleaser interface {
+	ReleasePendingCompactionLogsBySession(ctx context.Context, arg sqlc.ReleasePendingCompactionLogsBySessionParams) error
 }
 
 type waitingDecisionRunReclaimer interface {
@@ -244,15 +244,15 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 		}); err != nil {
 			return fmt.Errorf("cancel superseded user inputs: %w", err)
 		}
-		claims, ok := txQueries.(pendingCompactionClaimReleaser)
+		compactionLogs, ok := txQueries.(pendingCompactionLogReleaser)
 		if !ok {
-			return errors.New("persistence store does not support releasing compaction claims")
+			return errors.New("persistence store does not support releasing compaction logs")
 		}
-		if err := claims.ReleasePendingCompactionClaimsBySession(ctx, sqlc.ReleasePendingCompactionClaimsBySessionParams{
+		if err := compactionLogs.ReleasePendingCompactionLogsBySession(ctx, sqlc.ReleasePendingCompactionLogsBySessionParams{
 			BotID:     pgBotID,
 			SessionID: pgSessionID,
 		}); err != nil {
-			return fmt.Errorf("release superseded compaction claims: %w", err)
+			return fmt.Errorf("release superseded compaction logs: %w", err)
 		}
 		return nil
 	})

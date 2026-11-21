@@ -55,21 +55,22 @@ type Manager struct {
 	newEpoch       func() string
 	newGeneration  func() string
 
-	mu                     sync.Mutex
-	controls               map[runControlKey]*runControl
-	commandHandler         func(context.Context, Command) error
-	decisionStore          DecisionStore
-	terminalObserver       func(context.Context, TerminalRun)
-	admissionObserver      func(botID, sessionID string)
-	decisionFinalizer      func(context.Context, RunHandle) error
-	terminalReconciler     func(context.Context) error
-	cancelLostRunDecisions func(context.Context, string, string, string, int64, string) error
-	historyResetHandler    HistoryResetHandler
-	pendingCommands        map[string]map[*commandWaiter]struct{}
-	inflightCommandTargets map[string]struct{}
-	commandExecutions      map[string]chan struct{}
-	admittedCommands       map[string]struct{}
-	localCommandResults    map[string]localCommandResult
+	mu                      sync.Mutex
+	controls                map[runControlKey]*runControl
+	commandHandler          func(context.Context, Command) error
+	decisionStore           DecisionStore
+	terminalObserver        func(context.Context, TerminalRun)
+	admissionObserver       func(botID, sessionID string)
+	waitingDecisionObserver func(ctx context.Context, botID, sessionID string)
+	decisionFinalizer       func(context.Context, RunHandle) error
+	terminalReconciler      func(context.Context) error
+	cancelLostRunDecisions  func(context.Context, string, string, string, int64, string) error
+	historyResetHandler     HistoryResetHandler
+	pendingCommands         map[string]map[*commandWaiter]struct{}
+	inflightCommandTargets  map[string]struct{}
+	commandExecutions       map[string]chan struct{}
+	admittedCommands        map[string]struct{}
+	localCommandResults     map[string]localCommandResult
 	// localFinishHandoffs are memory-backend runs whose owner retry budget was
 	// exhausted. Memory has no lease index, so the shared reaper loop retries
 	// these durable conclusions without retaining one goroutine per run.
@@ -115,6 +116,7 @@ type runControl struct {
 	injectStopped     bool
 	steerWake         chan struct{} // guarded by Manager.mu; never closed
 	converter         *chatview.UIMessageStreamConverter
+	output            runOutput
 	leaseStop         func()
 	leaseDone         chan struct{}
 	leaseLifecycleMu  sync.Mutex
@@ -557,8 +559,8 @@ func (m *Manager) SetTerminalReconciler(reconciler func(context.Context) error) 
 	m.mu.Unlock()
 }
 
-// SetLostRunDecisionCanceller installs run-scoped cleanup for decisions parked
-// by a run that the reaper has durably marked lost.
+// SetLostRunDecisionCanceller installs run-scoped cleanup for decisions a run
+// left pending when it became terminal without its owner's finish path.
 func (m *Manager) SetLostRunDecisionCanceller(canceller func(context.Context, string, string, string, int64, string) error) {
 	if m == nil {
 		return
@@ -566,6 +568,34 @@ func (m *Manager) SetLostRunDecisionCanceller(canceller func(context.Context, st
 	m.mu.Lock()
 	m.cancelLostRunDecisions = canceller
 	m.mu.Unlock()
+}
+
+// cancelUnfinalizedDecisions closes the decisions of a run that became
+// terminal outside its owner's finish path. That path closes them through the
+// decision finalizer before its terminal write; the reaper, graceful shutdown
+// and the memory finish handoff end a run without it, and a pending request on
+// a terminal run would stay answerable with nothing left to apply the answer.
+// The terminal row is authoritative and is never rolled back: a failure here
+// is logged, and answering one of those requests repeats the cleanup.
+func (m *Manager) cancelUnfinalizedDecisions(ctx context.Context, terminal TerminalRun) {
+	if m == nil || terminal.RunID == "" || terminal.BotID == "" || terminal.SessionID == "" {
+		return
+	}
+	m.mu.Lock()
+	canceller := m.cancelLostRunDecisions
+	m.mu.Unlock()
+	if canceller == nil {
+		return
+	}
+	reason := terminal.ErrorCode
+	if reason == "" {
+		reason = terminal.State
+	}
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := canceller(cancelCtx, terminal.BotID, terminal.SessionID, terminal.RunID, terminal.FencingToken, reason); err != nil {
+		m.logger.WarnContext(ctx, "cancel unfinalized run decisions failed", slog.String("run_id", terminal.RunID), slog.Any("error", err))
+	}
 }
 
 func (m *Manager) observeTerminalRun(ctx context.Context, run TerminalRun) {
@@ -747,6 +777,7 @@ func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
 			continue
 		}
 		m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
+		m.cancelUnfinalizedDecisions(ctx, terminal)
 		m.observeTerminalRun(ctx, terminal)
 		key := scopedRunControlKey(handle.BotID, handle.SessionID, handle.RunID)
 		m.mu.Lock()
@@ -895,15 +926,20 @@ func (m *Manager) startReaper(ctx context.Context) error {
 	if m.runs == nil || m.liveness == nil {
 		return nil
 	}
-	reaper := NewReaper(m.runs, m.liveness, m.tuning, m.ownerID, m.logger)
+	tune := m.tuning
+	if m.distributed == nil {
+		// A memory generation ends with its process, and a memory backend is
+		// single-instance by configuration, so a stale generation is never an
+		// owner reconnecting through a blip. Waiting out the grace would only
+		// keep parked decisions unanswerable after a restart.
+		tune.backendLossGrace = 0
+	}
+	reaper := NewReaper(m.runs, m.liveness, tune, m.ownerID, m.logger)
 	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
 	reaper.SetTerminalLiveReconciler(m.reconcileTerminalLive)
 	reaper.SetTerminalObserver(m.observeTerminalRun)
 	reaper.SetTerminalReconciler(m.reconcileTerminalRuns)
-	m.mu.Lock()
-	cancelLostRunDecisions := m.cancelLostRunDecisions
-	m.mu.Unlock()
-	reaper.SetLostRunDecisionCanceller(cancelLostRunDecisions)
+	reaper.SetUnfinalizedDecisionCanceller(m.cancelUnfinalizedDecisions)
 	if err := reaper.Start(ctx); err != nil {
 		return err
 	}
@@ -1186,17 +1222,9 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		}
 		return snapshot, true, nil
 	}
-	var claimedSnapshot Snapshot
-	var changed bool
-	if m.distributed != nil {
-		claimedSnapshot, changed, err = m.distributed.StartRun(ctx, key, RunRef{
-			BotID: botID, SessionID: sessionID, RunID: runID, OwnerID: m.ownerID, Generation: runGeneration, FencingToken: start.fencingToken,
-		}, claim)
-	} else if gated, ok := m.backend.(historyResetStartBackend); ok {
-		claimedSnapshot, changed, err = gated.StartRunIfNoHistoryReset(ctx, key, claim)
-	} else {
-		claimedSnapshot, changed, err = m.backend.Update(ctx, key, claim)
-	}
+	claimedSnapshot, changed, err := m.reserveLiveRun(ctx, key, RunRef{
+		BotID: botID, SessionID: sessionID, RunID: runID, OwnerID: m.ownerID, Generation: runGeneration, FencingToken: start.fencingToken,
+	}, claim)
 	if err != nil {
 		if ctrl.abortWasRequested() {
 			reconcileErr := m.reconcileCanceledRunClaim(context.WithoutCancel(ctx), ctrl)
@@ -1299,6 +1327,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		snapshot.UpdatedAt = now
 		run.Status = RunStatusRunning
 		run.Operation = admission.Operation
+		run.ResumeTurn = admission.ResumeTurn
 		switch {
 		case admission.RequestUserTurn != nil:
 			run.UserTurns = []chatview.UITurn{*admission.RequestUserTurn}
@@ -1908,6 +1937,15 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	if !visibleChange {
 		return messages, nil
 	}
+	if isRunOutputAppend(delta) {
+		if err := m.appendRunOutput(ctx, ctrl, delta, messages); err != nil {
+			if errors.Is(err, ErrRunOwnershipLost) {
+				return nil, err
+			}
+			return messages, err
+		}
+		return messages, nil
+	}
 	terminalProposal, err := m.prepareAgentTerminalEvent(ctx, handle, event)
 	if err != nil {
 		if errors.Is(err, ErrRunOwnershipLost) {
@@ -2053,6 +2091,7 @@ func (m *Manager) setWaitingDecision(ctx context.Context, handle RunHandle) erro
 	if !applied {
 		return ErrRunOwnershipLost
 	}
+	m.observeWaitingDecision(ctx, handle.BotID, handle.SessionID)
 	return nil
 }
 
@@ -2097,20 +2136,34 @@ func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapsh
 // the live cursor stands still, as a history reset does to it. A client
 // discards a snapshot that does not move its cursor, so a snapshot with a run
 // from the ledger carries an epoch of its own that changes with that run.
-func (m *Manager) subscriberSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
+//
+// live reports that the snapshot is the live projection itself, so its cursor
+// names it: while the stored cursor stays there, so does the snapshot.
+func (m *Manager) subscriberSnapshot(ctx context.Context, botID, sessionID string) (snapshot Snapshot, live bool, err error) {
 	if m == nil || m.backend == nil {
-		return EmptySnapshot(botID, sessionID), nil
+		return EmptySnapshot(botID, sessionID), false, nil
 	}
-	snapshot, err := m.liveSnapshot(ctx, botID, sessionID)
-	if err != nil || snapshot.CurrentRunView != nil {
-		return snapshot, err
+	snapshot, err = m.liveSnapshot(ctx, botID, sessionID)
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	if snapshot.CurrentRunView != nil {
+		return snapshot, true, nil
 	}
 	snapshot = m.hydrateSnapshotFromLedger(ctx, snapshot)
 	if run := snapshot.CurrentRunView; run != nil && strings.TrimSpace(snapshot.Epoch) != "" {
 		sum := sha256.Sum256([]byte(strings.Join([]string{run.RunID, run.Status, run.ErrorCode, run.ProposedTerminalStatus}, "\x00")))
 		snapshot.Epoch = strings.TrimSpace(snapshot.Epoch) + ":ledger-" + hex.EncodeToString(sum[:8])
 	}
-	return snapshot, nil
+	return snapshot, false, nil
+}
+
+// liveCursorAt reports that the stored live snapshot is still at cursor, read
+// without loading the snapshot. A failed read answers no, which sends the
+// caller to the full read that reports the failure.
+func (m *Manager) liveCursorAt(ctx context.Context, key Key, cursor Cursor) bool {
+	stored, ok, err := m.backend.LoadCursor(ctx, key)
+	return err == nil && ok && stored == cursor
 }
 
 func (m *Manager) liveSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
@@ -2272,7 +2325,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		cancel()
 		return Subscription{}, err
 	}
-	baseline, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
+	baseline, baselineLive, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 	if err != nil {
 		backendSub.Close()
 		cancel()
@@ -2321,6 +2374,12 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		defer ticker.Stop()
 		lastEpoch := baseline.Epoch
 		lastSeq := baseline.Seq
+		// lastLive reports that lastEpoch and lastSeq name a live snapshot,
+		// which lets the periodic reconcile ask only whether the stored cursor
+		// moved instead of loading the whole run view, finished runs included.
+		// Read-side lease expiry (a distributed backend without a ledger)
+		// happens on the full read, so it keeps that read.
+		lastLive := baselineLive && (m.distributed == nil || m.runs != nil)
 		terminalDrop := func(message string) {
 			_ = send(Event{
 				Type:      EventRuntimeDropped,
@@ -2333,7 +2392,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		}
 		unreadable := false
 		reconcile := func(observedEpoch string, observedSeq int64, reason string) bool {
-			snapshot, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
+			snapshot, live, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 			if err != nil {
 				if subCtx.Err() != nil {
 					return false
@@ -2350,6 +2409,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				return true
 			}
 			unreadable = false
+			lastLive = live && (m.distributed == nil || m.runs != nil)
 			snapshotEpoch := strings.TrimSpace(snapshot.Epoch)
 			observedEpoch = strings.TrimSpace(observedEpoch)
 			if snapshotEpoch == "" {
@@ -2428,6 +2488,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				}
 				if eventEpoch != "" {
 					lastEpoch = eventEpoch
+					lastLive = m.distributed == nil || m.runs != nil
 				}
 				if event.Seq > 0 {
 					lastSeq = event.Seq
@@ -2436,6 +2497,9 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 					return
 				}
 			case <-ticker.C:
+				if lastLive && m.liveCursorAt(subCtx, key, Cursor{Epoch: lastEpoch, Seq: lastSeq}) {
+					continue
+				}
 				if !reconcile("", 0, "periodic runtime reconciliation") {
 					return
 				}
@@ -2469,7 +2533,21 @@ func (m *Manager) updateAndPublish(ctx context.Context, key Key, runID string, u
 	return snapshot, true, nil
 }
 
+// updateActiveAndPublish commits one transition of an active run. On the
+// run's owner it first commits the output the run is holding, so a transition
+// never overtakes output that preceded it.
 func (m *Manager) updateActiveAndPublish(ctx context.Context, handle RunHandle, update ActiveRunUpdate, buildDelta func(Snapshot) RuntimeDelta) (Snapshot, bool, error) {
+	if ctrl := m.localControlForHandle(handle); ctrl != nil {
+		ctrl.output.mu.Lock()
+		defer ctrl.output.mu.Unlock()
+		if err := m.flushRunOutputLocked(ctx, ctrl); err != nil {
+			return Snapshot{}, false, err
+		}
+	}
+	return m.commitActiveUpdate(ctx, handle, update, buildDelta)
+}
+
+func (m *Manager) commitActiveUpdate(ctx context.Context, handle RunHandle, update ActiveRunUpdate, buildDelta func(Snapshot) RuntimeDelta) (Snapshot, bool, error) {
 	handle = handle.normalized()
 	if !handle.valid() {
 		return Snapshot{}, false, ErrRunOwnershipLost
@@ -2514,6 +2592,13 @@ func (m *Manager) releaseActiveAndPublish(ctx context.Context, handle RunHandle,
 	if !handle.valid() {
 		return Snapshot{}, false, ErrRunOwnershipLost
 	}
+	if ctrl := m.localControlForHandle(handle); ctrl != nil {
+		ctrl.output.mu.Lock()
+		defer ctrl.output.mu.Unlock()
+		if err := m.flushRunOutputLocked(ctx, ctrl); err != nil {
+			return Snapshot{}, false, err
+		}
+	}
 	ref := RunRef{
 		BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID,
 		OwnerID: m.ownerID, Generation: handle.Generation,
@@ -2530,6 +2615,20 @@ func (m *Manager) releaseActiveAndPublish(ctx context.Context, handle RunHandle,
 		m.logger.WarnContext(ctx, "publish runtime release delta failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", handle.RunID))
 	}
 	return snapshot, true, nil
+}
+
+// reserveLiveRun claims the session's live slot for a run this manager owns.
+// Admission and parked-decision recovery share it, so a recovered run is
+// reserved exactly as an admitted one: a lease reference on a distributed
+// backend, and behind the history-reset gate on a memory backend.
+func (m *Manager) reserveLiveRun(ctx context.Context, key Key, ref RunRef, claim SnapshotUpdate) (Snapshot, bool, error) {
+	if m.distributed != nil {
+		return m.distributed.StartRun(ctx, key, ref, claim)
+	}
+	if gated, ok := m.backend.(historyResetStartBackend); ok {
+		return gated.StartRunIfNoHistoryReset(ctx, key, claim)
+	}
+	return m.backend.Update(ctx, key, claim)
 }
 
 func (m *Manager) runOwnerMatches(run *CurrentRunView) bool {

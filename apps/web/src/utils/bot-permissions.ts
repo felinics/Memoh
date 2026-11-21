@@ -32,3 +32,14 @@ export function expandBotPermissions(permissions: readonly string[] | null | und
 export function hasBotPermission(permissions: readonly string[] | null | undefined, permission: BotPermission): boolean {
   return expandBotPermissions(permissions).includes(permission)
 }
+
+/**
+ * Only restrict management when the backend explicitly reports a scoped
+ * permission set without "manage" (e.g. chat-only members). When permissions are
+ * absent or empty (older backend/cache), keep management enabled and let the
+ * backend enforce access.
+ */
+export function canManageBotPermissions(permissions: readonly string[] | null | undefined): boolean {
+  if (!permissions || permissions.length === 0) return true
+  return hasBotPermission(permissions, 'manage')
+}

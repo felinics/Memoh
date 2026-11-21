@@ -122,7 +122,7 @@ type SpawnIdentity struct {
 	CurrentPlatform     string
 	ReplyTarget         string
 	ConversationType    string
-	SessionToken        string //nolint:gosec // #nosec G117 -- session identifier, not a secret
+	ActorAccountID      string
 	WorkspaceTargetID   string
 	WorkspaceTargetKind string
 	WorkspaceTargetName string
@@ -999,7 +999,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			CurrentPlatform:     req.parentSession.CurrentPlatform,
 			ReplyTarget:         req.parentSession.ReplyTarget,
 			ConversationType:    req.parentSession.ConversationType,
-			SessionToken:        req.parentSession.SessionToken,
+			ActorAccountID:      req.parentSession.ActorAccountID,
 			WorkspaceTargetID:   req.parentSession.WorkspaceTargetID,
 			WorkspaceTargetKind: req.parentSession.WorkspaceTargetKind,
 			WorkspaceTargetName: req.parentSession.WorkspaceTargetName,

@@ -6,7 +6,7 @@
          Rendered ONLY for a saved server: before creation there is no entity to
          badge, toggle, or delete, so the whole card (and its Switch) stays out. -->
     <SettingsSection v-if="serverId">
-      <div class="group/header flex items-center gap-3 px-4 py-3">
+      <div class="group/header flex items-center gap-3 py-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <component
             :is="connectionType === 'stdio' ? Terminal : Globe"
@@ -98,7 +98,7 @@
          server the header card above already names the entity, so a heading
          would echo it; on create the Name field below leads the card. -->
     <SettingsSection>
-      <div class="space-y-5 p-4">
+      <div class="space-y-5 py-4">
         <Field v-if="!serverId">
           <FieldLabel>{{ $t('common.name') }}</FieldLabel>
           <FieldControl>
@@ -272,7 +272,7 @@
              the status lands. -->
         <div
           v-if="oauthStatusLoading && !oauthStatus"
-          class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+          class="flex min-h-[3.75rem] items-center justify-center py-3"
         >
           <Spinner class="size-5 text-muted-foreground" />
         </div>
@@ -337,7 +337,7 @@
                discovery attempt found no registration endpoint. -->
           <div
             v-if="oauthNeedsClientId"
-            class="mx-4 space-y-4 border-b border-border pb-4 last:border-b-0"
+            class="space-y-4 border-b border-border pb-4 last:border-b-0"
           >
             <Field>
               <FieldLabel>{{ $t('mcp.oauth.clientId') }}</FieldLabel>
@@ -406,7 +406,7 @@
       v-if="serverId && status === 'connected'"
       :title="$t('mcp.discoveredTools')"
     >
-      <div class="p-4">
+      <div class="py-4">
         <p
           v-if="tools.length === 0"
           class="text-sm text-muted-foreground"
@@ -457,6 +457,7 @@ import { ConfirmPopover, SettingsRow, SettingsSection } from '@felinic/ui'
 import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import KeyValueEditor from '@/components/key-value-editor/index.vue'
 import type { KeyValuePair } from '@/components/key-value-editor/index.vue'
+import { canOpenDesktopExternalUrl, openDesktopExternalUrl, parseSafeHttpUrl } from '@/lib/external-url'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { joinShellWords, splitShellWords } from '@/utils/shell-words'
 import type { McpItem } from './mcp-types'
@@ -1030,7 +1031,7 @@ async function handleOAuthFlow() {
     if (!data?.authorization_url) throw new Error(t('mcp.oauth.flowInitFailed'))
 
     const popup = await openOAuthURL(data.authorization_url)
-    if (!popup && !window.api?.desktop?.openExternalUrl) {
+    if (!popup && !canOpenDesktopExternalUrl()) {
       // window.open returned null: the browser blocked the popup. Fail fast
       // with a signpost — with no window handle, the poll below has no close
       // signal and would spin silently for 120s before a generic failure.
@@ -1063,6 +1064,7 @@ async function handleOAuthFlow() {
       }
     }
     const onMessage = async (event: MessageEvent) => {
+      if (!popup || event.origin !== window.location.origin || event.source !== popup) return
       if (event.data?.type === 'mcp-oauth-callback') {
         await finishOAuth(event.data.status === 'success' ? 'success' : 'error', event.data.error)
       }
@@ -1103,12 +1105,13 @@ async function handleOAuthFlow() {
 }
 
 async function openOAuthURL(url: string): Promise<Window | null> {
-  const desktopOpenExternal = window.api?.desktop?.openExternalUrl
-  if (desktopOpenExternal) {
-    await desktopOpenExternal(url)
+  const safeUrl = parseSafeHttpUrl(url, 'invalid_oauth_url')
+  const desktopOpenResult = openDesktopExternalUrl(safeUrl)
+  if (desktopOpenResult) {
+    await desktopOpenResult
     return null
   }
-  return window.open(url, 'mcp-oauth', 'width=600,height=700')
+  return window.open(safeUrl, 'mcp-oauth', 'width=600,height=700')
 }
 
 async function handleOAuthRevoke() {

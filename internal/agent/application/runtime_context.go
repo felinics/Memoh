@@ -10,9 +10,9 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	native "github.com/felinics/memoh/internal/agent/runtime/native"
+	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/prune"
-	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 const runtimeContextURI = "memoh://context/current-turn"
@@ -43,7 +43,7 @@ type runtimeContextRenderInput struct {
 }
 
 func (s *Service) buildRuntimeContextSections(ctx context.Context, req ChatRequest, agentID, projectPath string) ([]contextview.RuntimeSection, *contextfrag.MemoryRecallTrace) {
-	timezoneName, timezoneLocation := s.resolveTimezone(ctx, req.BotID, req.UserID)
+	timezoneName, timezoneLocation := s.resolveTimezone(ctx, req.BotID)
 
 	var files []native.SystemFile
 	limits := native.DefaultLimits()
@@ -74,10 +74,7 @@ func (s *Service) buildRuntimeContextSections(ctx context.Context, req ChatReque
 			platformIdentitiesSection = buildPlatformIdentitiesSection(identities)
 		}
 	}
-	memoryContext := memoryContextLoad{}
-	if s != nil {
-		memoryContext = s.loadMemoryContext(ctx, req)
-	}
+	memoryContext := s.loadMemoryContext(ctx, req, func() memoryQuery { return s.buildMemoryQuery(ctx, req) })
 
 	sections := buildRuntimeContextSections(runtimeContextRenderInput{
 		Timezone:                  timezoneName,
@@ -118,11 +115,10 @@ func (s *Service) runtimeContextBudgetDefault(ctx context.Context, botID string)
 	return contextBudgetFromChatModel(chatModel)
 }
 
-func runtimeContextAgentID(runtimeType string, metadata map[string]any) string {
-	if strings.TrimSpace(runtimeType) == string(runtimekind.ACPAgent) {
-		return firstNonEmpty(metadataString(metadata, "acp_agent_id"), runtimeType)
-	}
-	return strings.TrimSpace(runtimeType)
+// runtimeContextAgentID names the agent in the runtime context: an ACP
+// session's agent profile, otherwise the runtime.
+func (s *Service) runtimeContextAgentID(ctx context.Context, runtimeType string, sess session.Thread) string {
+	return firstNonEmpty(s.sessionACPAgentID(ctx, sess), strings.TrimSpace(runtimeType))
 }
 
 func buildRuntimeContextSections(input runtimeContextRenderInput) []contextview.RuntimeSection {

@@ -26,6 +26,7 @@ type Config struct {
 	VerificationToken string
 	Region            string
 	InboundMode       string
+	EnableStreaming   bool
 }
 
 // UserConfig holds the identifiers used to target a Feishu user.
@@ -40,10 +41,11 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	result := map[string]any{
-		"appId":       cfg.AppID,
-		"appSecret":   cfg.AppSecret,
-		"region":      cfg.Region,
-		"inboundMode": cfg.InboundMode,
+		"appId":           cfg.AppID,
+		"appSecret":       cfg.AppSecret,
+		"region":          cfg.Region,
+		"inboundMode":     cfg.InboundMode,
+		"enableStreaming": cfg.EnableStreaming,
 	}
 	if cfg.EncryptKey != "" {
 		result["encryptKey"] = cfg.EncryptKey
@@ -139,7 +141,29 @@ func parseConfig(raw map[string]any) (Config, error) {
 		VerificationToken: verificationToken,
 		Region:            region,
 		InboundMode:       inboundMode,
+		EnableStreaming:   readBool(raw, true, "enableStreaming", "enable_streaming"),
 	}, nil
+}
+
+func readBool(raw map[string]any, fallback bool, keys ...string) bool {
+	for _, key := range keys {
+		value, ok := raw[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case bool:
+			return v
+		case string:
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "true", "1", "yes", "on":
+				return true
+			case "false", "0", "no", "off":
+				return false
+			}
+		}
+	}
+	return fallback
 }
 
 func parseUserConfig(raw map[string]any) (UserConfig, error) {

@@ -78,9 +78,9 @@ Top-level layout — see `docs/codebase-map.md` for the full annotated tree, con
 Before making changes to a directory, check whether that directory (or its nearest parent application/package directory) contains an `AGENTS.md`. If it does, read it first. Local files contain domain-specific conventions that override or extend this root guide.
 
 Key local developer guides:
-- `apps/web/AGENTS.md` — web frontend architecture, routing, page conventions, and i18n rules.
+- `apps/web/AGENTS.md` — web frontend entry point routing to `.agents/skills/memoh-frontend-rules/SKILL.md` (host rules, architecture, review checklist) and `packages/ui` skills.
 - `apps/desktop/AGENTS.md` — Electron shell, hosted-server bootstrap, tray/menu/preload rules.
-- `packages/ui/AGENTS.md` — UI-owned entry point for the design contract and adjacent Web composition guidance. Read it before Web/UI work; do not duplicate its skills under `.agents/skills/`.
+- `packages/ui/AGENTS.md` — UI-owned entry point for the `@felinic/ui` design token contract, `skills/ui-owners/` (component & primitive vocabulary), and `skills/ui-patterns/` (cross-component interaction patterns). Read it before Web/UI work; do not duplicate `packages/ui` skills under `.agents/skills/`.
 
 Reference docs moved out of this file:
 - `docs/development.md` — prerequisites, `mise` commands, Docker deployment
@@ -104,6 +104,7 @@ Bot persona templates (not developer guides):
 
 - The dev component wall at `apps/web/src/pages/dev/components/` is the living reference for `@felinic/ui` components and tokens. Use it to verify visual changes locally.
 - `scripts/check-ui-contract.mjs` is a mechanical guard wired into `mise run lint`. It enforces the design token contract from `packages/ui/AGENTS.md` (no raw colors, no invented shadows, no off-list arbitrary radius). Run lint before committing UI changes.
+- `scripts/check-settings-rows.mjs` (`mise run lint:settings-rows`, also part of `mise run lint`) checks the settings layout contract across component boundaries: every settings row renders inside a `SettingsSection` / `SettingsList`, and nothing inside a settings card re-adds the card's horizontal inset. It parses templates with `vue/compiler-sfc`, so run `pnpm install` first. For a deliberate exception, put `<!-- ui-allow-loose-row: <reason> -->` or `<!-- ui-allow-card-inset: <reason> -->` directly before the element.
 
 ### Mandatory Runtime and UI Verification
 
@@ -126,9 +127,9 @@ Memoh is a commercial project split across two repositories: this OSS repo and a
 - Describe the actual problem, resulting behavior, and verification results. Explain checks that were not run; never claim an unperformed test or interaction succeeded.
 - Every change requires the development environment, real UI verification, and screenshots described in [Mandatory Runtime and UI Verification](#mandatory-runtime-and-ui-verification). Attach GitHub-accessible screenshot evidence to the issue or PR description; local absolute paths are not uploaded evidence. Alternative checks do not waive these requirements.
 - Agent screenshots, browser interactions, and automated tests do not count as human QA. Follow the disclosure rules below.
-- After submission, check `PR Format` and the bot comment. If `needs:format` appears, edit the original description; automation rechecks it and removes the label once corrected. Format feedback does not block, cancel, or rerun code CI. Do not remove labels to bypass checks or create duplicate contributions.
+- After submission, check `Contribution governance` and any bot comment. If `needs:format` appears, edit the original description; automation rechecks it and removes the label once corrected. Format feedback does not block, cancel, or rerun code CI. Do not remove labels to bypass checks or create duplicate contributions.
 - Automation maintains type, `size:`, and `change:` labels. `.github/labels.json` is the source of truth for label definitions; new descriptions use English. Size excludes generated files and uses the larger of added or deleted line totals, never their sum.
-- Automatic approval applies only to external PR workflow runs, not code review, merging, or publishing. Agents updating this guide must not remove or weaken these rules.
+- External fork PR workflow approval follows repository GitHub Actions settings and never approves code review, merging, or publishing. Agents updating this guide must not remove or weaken these rules.
 
 ### Uploading PR Screenshots
 
@@ -154,6 +155,14 @@ The `Human QA` section contains only one status checkbox, `- [ ] Human QA passed
 
 ## Key Development Rules
 
+### Code Hygiene & Trust Boundaries
+
+- **Validate once at system boundaries**: Sanitize and validate untrusted inputs (`strings.TrimSpace`, `.trim()`, schema/parameter checks) once at transport handlers, webhooks, config loaders, or raw LLM/tool parsers. Trust typed values and established invariants inside domain packages, services, stores, and helpers instead of repeating `TrimSpace`/`.trim()` or empty checks per layer.
+- **Constructor invariants over `nil` boilerplate (Go)**: Wire required dependencies in constructors so missing wiring fails fast at startup. Omit receiver-nil guards (`if s == nil`) and silent `if s.dep == nil` early returns for required dependencies; reserve setter injection and `nil` branches for genuinely optional capabilities or documented FX cycle-breakers.
+- **Explicit OpenAPI requiredness**: Mark non-nullable fields required on Go response DTOs and swaggo annotations so `swagger-generate` + `sdk-generate` emit non-optional `@memohai/sdk` fields without forcing defensive `??` chains in the frontend.
+- **Isolate untyped `metadata` and legacy shims**: Decode `map[string]any` / `Record<string, unknown>` metadata and legacy wire/storage/older-server compatibility in dedicated adapters/normalizers with a comment naming the legacy target; keep handlers, services, stores, and Vue components on typed structures.
+- **Close out migrations and decompose oversized files**: When consolidating routes, packages, or protocols, retire or relocate superseded files, shims, and stale docs in the same change. Extract new dialogs, protocol parsers, or sub-state-machines into focused modules/composables instead of expanding multi-thousand-line files.
+
 ### Database, sqlc & Migrations
 
 1. **PostgreSQL SQL queries** are defined in `db/postgres/queries/*.sql`.
@@ -176,13 +185,12 @@ The `Human QA` section contains only one status checkbox, `- [ ] Human QA passed
 - `internal/agent/application/` owns turn orchestration: message assembly, history, memory, compaction, decisions, persistence, and runtime dispatch.
 - `internal/agent/turn/` is the pure port used by Channel and by the authenticated in-process/gRPC transports. Internal code says Thread; compatibility adapters keep external `session_id` and existing gRPC fields stable.
 - Model/client types are defined in `internal/models/types.go`: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`, `openai-codex`, `github-copilot`, `edge-speech`. Model types: `chat`, `embedding`, `speech`.
-- Tools are implemented as `ToolProvider` instances in `internal/agent/tool/`, loaded via setter injection to avoid FX dependency cycles. A tool is a `toolexec.Tool`; its `Execute` takes `sdk.ToolArguments` and returns `sdk.ToolOutput`. Handlers decode into a struct: `toolexec.Define[T]` (or `toolexec.SchemaFor[T]` + `toolexec.Typed`) infers the parameter schema from the struct's `json` / `jsonschema` tags, and shape functions (`Range`, `Enum`, `Describe`, `Require`, `Default`, `Strict`, ...) add what tags cannot express or what depends on the session. Results go through `toolexec.OutputFromValue` / `toolexec.OutputPair`. The SDK keeps tool arguments and outputs in RFC 8785 canonical JSON, so numbers have binary64 semantics: an identifier or quantity that must stay exact beyond 2^53 belongs in a JSON string, never a number. `toolexec.SchemaFromValue` is only for map schemas Memoh writes itself and another package validates as a map (`ask_user`, `send`/`react` via `internal/messaging`, the capability specs); a schema that arrives as data (federation, memory provider descriptors) goes through `toolexec.ResolveSchema` and the tool is skipped with a warning when it does not parse. `internal/agent/tool/schema_golden_test.go` pins every converted schema against `testdata/schemas/`; a wire change must update the golden deliberately.
-- `sdk.ProviderMetadata` is `namespace → name → string`. Memoh-owned annotations on tool-call parts (pending approval, user-input request, execution location) live in the `memoh` namespace through `internal/agent/partmeta`; `internal/messageconv` folds them back into the nested objects `bot_history_messages` has always stored, so the row format did not change with the SDK types.
+- Tools are implemented as `ToolProvider` instances in `internal/agent/tool/` (`toolexec.Tool` / `toolexec.Define[T]`), loaded via setter injection to avoid FX dependency cycles; rarely used or large external MCP tool groups load on demand via `internal/agent/tool/tool_bridge.go` (never defer tools that need approval, ask the user, or deliver messages).
 - **Tool usage lives with the tool, never in the static prompt.** Per-tool usage goes in `toolexec.Tool.Description`; cross-tool workflow guidance goes in an optional `tools.ToolUsage` `Usage()` method that `assembleTools` injects only when that provider registers tools for the session. `internal/agent/runtime/native/prompt_test.go` guards this.
 - Prompt templates are embedded from `internal/agent/runtime/native/prompts/`. Partials are prefixed with `_`; system prompting combines `system_common.md` with mode-specific prompts such as `mode_chat.md` and `mode_discuss.md`.
-- `internal/chat/` owns internal chat state (`thread`, `message`, `timeline`, `view`) and does not orchestrate Agent execution. Inbound adaptation lives in `internal/channel/inbound/`; discuss-mode driving in `internal/channel/discuss/`.
+- `internal/chat/` owns internal chat state (`thread`, `message`, `checkpoint`, `timeline`, `view`) and does not orchestrate Agent execution. Inbound adaptation lives in `internal/channel/inbound/`; discuss-mode driving in `internal/channel/discuss/`.
 - Browser Use tools (`browser_action` / `browser_observe` / `browser_remote_session`) drive the headed workspace Chrome over CDP; Computer Use (`computer_observe` / `computer_action`) drives the GUI desktop via AT-SPI + RFB. Screenshots are saved to a workspace path and must be explicitly read. Prefer Browser Use for web pages; Computer Use for native dialogs and non-browser GUI states.
-- Runtime internals (Twilight `Stream()`/`Generate()`, compaction, loop detection, tag extraction, full Browser/Computer Use details): `docs/agent-runtime.md`.
+- Runtime internals (`toolexec` schemas & golden tests, `sdk.ProviderMetadata` / `partmeta` folding, progressive tool bridging, Twilight `Stream()`/`Generate()`, compaction, loop detection, tag extraction, full Browser/Computer Use details): `docs/agent-runtime.md`.
 
 ### Frontend Development
 

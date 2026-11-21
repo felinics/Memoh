@@ -1,7 +1,6 @@
 import type { Locale } from '@/i18n'
 
 export function detectLocale(): Locale {
-  if (typeof navigator === 'undefined') return 'en'
   const lang = navigator.language || ''
   const normalized = lang.toLowerCase()
   if (normalized.startsWith('zh')) return 'zh'

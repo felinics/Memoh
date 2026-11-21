@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -232,8 +233,9 @@ func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessio
 	var nativeID pgtype.UUID
 	var externalID pgtype.Text
 	var reconciledEffort string
+	_, agentCatalog := external.As[external.ModelCatalogProvider](s.runtimes, sess.RuntimeType)
 	switch {
-	case sessionpkg.IsDirectRuntimeType(sess.RuntimeType):
+	case agentCatalog:
 		if modelRef == nil || strings.TrimSpace(*modelRef) == "" {
 			modelID = db.TextToString(sess.PreferredExternalModelID)
 		}

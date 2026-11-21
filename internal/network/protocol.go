@@ -19,16 +19,7 @@ const (
 
 type ActionType string
 
-type StatusState string
-
-const (
-	ActionTypeTestConnection ActionType = "test_connection"
-
-	StatusStateUnknown      StatusState = "unknown"
-	StatusStateReady        StatusState = "ready"
-	StatusStateNeedsConfig  StatusState = "needs_config"
-	StatusStateUnauthorized StatusState = "unauthorized"
-)
+const ActionTypeTestConnection ActionType = "test_connection"
 
 type ConfigConstraint struct {
 	Min  *float64 `json:"min,omitempty"`
@@ -37,8 +28,8 @@ type ConfigConstraint struct {
 }
 
 type ConfigField struct {
-	Key         string            `json:"key"`
-	Type        FieldType         `json:"type"`
+	Key         string            `json:"key" validate:"required"`
+	Type        FieldType         `json:"type" validate:"required"`
 	Required    bool              `json:"required,omitempty"`
 	Title       string            `json:"title,omitempty"`
 	Description string            `json:"description,omitempty"`
@@ -67,9 +58,9 @@ func (f ConfigField) Validate() error {
 }
 
 type ConfigSchema struct {
-	Version int           `json:"version"`
+	Version int           `json:"version" validate:"required"`
 	Title   string        `json:"title,omitempty"`
-	Fields  []ConfigField `json:"fields"`
+	Fields  []ConfigField `json:"fields" validate:"required"`
 }
 
 func (s ConfigSchema) Validate() error {
@@ -90,29 +81,29 @@ func (s ConfigSchema) Validate() error {
 }
 
 type ProviderActionStatus struct {
-	Enabled bool   `json:"enabled"`
+	Enabled bool   `json:"enabled" validate:"required"`
 	Reason  string `json:"reason,omitempty"`
 }
 
 type ProviderAction struct {
-	ID          string                `json:"id"`
-	Type        ActionType            `json:"type"`
-	Label       string                `json:"label"`
+	ID          string                `json:"id" validate:"required"`
+	Type        ActionType            `json:"type" validate:"required"`
+	Label       string                `json:"label" validate:"required"`
 	Description string                `json:"description,omitempty"`
 	Primary     bool                  `json:"primary,omitempty"`
 	Status      *ProviderActionStatus `json:"status,omitempty"`
 }
 
 type ProviderStatus struct {
-	State       StatusState    `json:"state"`
+	State       OverlayState   `json:"state" validate:"required"`
 	Title       string         `json:"title,omitempty"`
 	Description string         `json:"description,omitempty"`
 	Details     map[string]any `json:"details,omitempty"`
 }
 
 type ProviderActionExecution struct {
-	ActionID string         `json:"action_id"`
-	Status   ProviderStatus `json:"status"`
+	ActionID string         `json:"action_id" validate:"required"`
+	Status   ProviderStatus `json:"status" validate:"required"`
 	Output   map[string]any `json:"output,omitempty"`
 }
 

@@ -117,6 +117,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // handover collapses). An id, not an element pointer — element pointers
   // die on remount, which was the imperative design's disease.
   let pinnedTurnId: string | null = null
+  // Set while an edit's or retry's pin is armed: the height the turn had
+  // when it was restarted. See pinRestartedTurn.
+  let restartHoldPx: number | null = null
 
   // Retire only the previous send's unused reply room. Compensate the portion
   // above the viewport so the handover does not move the reader before placing
@@ -174,7 +177,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
       atBottomRefreshRaf = 0
       const el = scrollEl.value
       if (!el || pinScrollActive) return
-      isAtBottom.value = isNearBottom(el)
+      isAtBottom.value = isJumpAtBottom(el)
     })
   }
 
@@ -193,6 +196,23 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // the jump button, follow arming, and the jump target alike.
   function isNearBottom(el: HTMLElement): boolean {
     return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD_PX
+  }
+
+  // Empty trailing min-height from sendPin can leave scrollHeight taller than
+  // the viewport even when every real message already fits on screen. Exclude
+  // only that unused reserve when deciding whether to show the jump button.
+  function unusedTurnReservePx(): number {
+    if (turnReserves.value.size === 0) return 0
+    const container = lastTurnEl.value
+    if (!container?.isConnected || !container.style.minHeight) return 0
+    const motion = container.querySelector<HTMLElement>('[data-turn-motion]')
+    if (!motion) return 0
+    return Math.max(0, container.offsetHeight - motion.offsetHeight)
+  }
+
+  function isJumpAtBottom(el: HTMLElement): boolean {
+    const effectiveScrollHeight = el.scrollHeight - unusedTurnReservePx()
+    return effectiveScrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD_PX
   }
 
   // Scroll target for "go to the bottom": the physical bottom.
@@ -290,7 +310,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
         requestAnimationFrame(() => {
           isProgrammaticScroll = false
           const current = scrollEl.value
-          if (current) isAtBottom.value = isNearBottom(current)
+          if (current) isAtBottom.value = isJumpAtBottom(current)
         })
       })
     }
@@ -329,7 +349,58 @@ export function useChatScroll(options: UseChatScrollOptions) {
     return rollback
   }
 
-  function startSmoothScroll(root: HTMLElement, getTarget: () => number) {
+  // Saving an edit or retrying a reply restarts the conversation from the
+  // latest turn, so it lands like a send. Unlike a send, the turn SHRINKS
+  // first: the store has just swapped the old reply for a short placeholder.
+  // Left alone, that shrink lands in the same frame as the swap and a
+  // bottom-parked view is clamped upward in one jump. The restarted turn
+  // therefore keeps its old height until tryApplyPin has eased the prompt to
+  // the pin. Call these after the store's synchronous swap and before Vue
+  // renders it, while the DOM still shows the old turn.
+  function pinAfterEdit(editedId: string, replacementId: string): () => void {
+    return pinRestartedTurn(editedId, replacementId, editedId)
+  }
+
+  // A retry keeps its prompt and replaces only the reply, so the pin must not
+  // wait for a newer prompt (anchor null).
+  function pinAfterRetry(promptId: string): () => void {
+    return pinRestartedTurn(promptId, promptId, null)
+  }
+
+  function pinRestartedTurn(oldTurnId: string, newTurnId: string, anchorId: string | null): () => void {
+    const container = turnContainerOf(oldTurnId)
+    const holdPx = container?.offsetHeight ?? 0
+    const rollback = armPin(anchorId)
+    const attemptId = pinAttemptId
+    // armPin reads a null anchor as "the current prompt"; a retry has no
+    // newer prompt to wait for.
+    pinAnchorId = anchorId
+    restartHoldPx = holdPx
+    const next = new Map(turnReserves.value)
+    // The old turn's own reserve is folded into the hold (its height already
+    // includes it); an earlier turn's reserve stays for tryApplyPin's
+    // ordinary handover.
+    if (pinnedTurnId === oldTurnId) {
+      next.delete(oldTurnId)
+      pinnedTurnId = newTurnId
+    }
+    if (holdPx > 0) {
+      next.set(newTurnId, holdPx)
+      // Mirror on the live element too: Vue patches a container's children
+      // before its style, so the reply's removal must not see a frame
+      // without the hold.
+      if (container) container.style.minHeight = `${holdPx}px`
+    }
+    turnReserves.value = next
+    return () => {
+      // A stale rollback (superseded pin, switched session) is a no-op in
+      // armPin; it must not drop a newer restart's hold either.
+      if (attemptId === pinAttemptId) restartHoldPx = null
+      rollback()
+    }
+  }
+
+  function startSmoothScroll(root: HTMLElement, getTarget: () => number, onRelease?: () => void) {
     cancelSmoothScroll?.()
     let cancelled = false
     smoothScrollActive = true
@@ -349,6 +420,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
         && scrollEl.value === root && !isNearBottom(root)) {
         stickToBottomNow()
       }
+      onRelease?.()
       scheduleAtBottomRefresh()
     }
     const cancel = () => {
@@ -434,14 +506,23 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const ideal = el.clientHeight - below - PIN_TOP_OFFSET_PX + promptOffsetInTurn
     const floor = promptOffsetInTurn + promptEl.offsetHeight + Math.round(el.clientHeight / 3)
     const reservePx = Math.max(0, Math.round(Math.max(ideal, floor)))
-    turnReserves.value = new Map(turnReserves.value).set(prompt.id, reservePx)
+    // A restarted turn keeps its old height through the flight
+    // (pinRestartedTurn); settleRestartHold lowers it to the reply room after
+    // landing.
+    const restarted = restartHoldPx !== null
+    const heldPx = Math.max(reservePx, restartHoldPx ?? 0)
+    restartHoldPx = null
+    turnReserves.value = new Map(turnReserves.value).set(prompt.id, heldPx)
     appliedPinAttemptId = pinAttemptId
     // Immediate projection of the same value: the reactive binding lands on
     // Vue's next flush, but the scroll below needs this frame's geometry.
     // The binding renders the identical value and owns it from the next
     // patch on — including across every future remount.
-    container.style.minHeight = `${reservePx}px`
+    container.style.minHeight = `${heldPx}px`
     lastScrollTop = el.scrollTop
+    const settle = heldPx > reservePx
+      ? () => settleRestartHold(el, heldPx, reservePx)
+      : undefined
 
     // Resolve the live prompt, including its offset inside a replacement turn.
     // pinnedTurnId follows optimistic → persisted identity migration.
@@ -449,7 +530,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const target = Math.min(Math.max(pinTarget(), 0), Math.max(0, bottomTarget(el)))
     const promptTop = containerTop + promptOffsetInTurn - target
     // The viewport already covers the travel distance; keep the turn entrance local.
-    const fromY = Math.max(0, Math.min(
+    // A restarted turn's prompt is already on screen, so it only travels with
+    // the view.
+    const fromY = restarted ? 0 : Math.max(0, Math.min(
       TURN_ENTRANCE_MAX_DISTANCE_PX,
       el.clientHeight - below - promptEl.offsetHeight - promptTop,
       container.offsetHeight - promptEl.offsetHeight,
@@ -458,13 +541,31 @@ export function useChatScroll(options: UseChatScrollOptions) {
       cancelSmoothScroll?.()
       el.scrollTop = target
       isProgrammaticScroll = false
+      settle?.()
       scheduleAtBottomRefresh()
     } else {
-      startSmoothScroll(el, pinTarget)
+      startSmoothScroll(el, pinTarget, settle)
       pinScrollActive = true
       startTurnEntrance(el, container, fromY)
     }
     return true
+  }
+
+  // Lower a restarted turn's hold to the pin's reply room once the flight is
+  // over — only when the dropped band lies wholly below the viewport. Dropping
+  // content the reader can see, or content a bottom-parked view rests on,
+  // clamps scrollTop: the jump the hold exists to prevent. Otherwise the hold
+  // stays; like any reserve it is legal layout until the next send's handover.
+  function settleRestartHold(el: HTMLElement, heldPx: number, reservePx: number) {
+    const turnId = pinnedTurnId
+    if (!turnId || turnReserves.value.get(turnId) !== heldPx) return
+    const container = turnContainerOf(turnId)
+    const content = container?.querySelector<HTMLElement>('[data-turn-motion]')
+    if (!container?.isConnected || !content) return
+    const delta = container.offsetHeight - Math.max(content.offsetHeight, reservePx)
+    if (delta > 0 && el.scrollTop > el.scrollHeight - el.clientHeight - delta) return
+    turnReserves.value = new Map(turnReserves.value).set(turnId, reservePx)
+    container.style.minHeight = `${reservePx}px`
   }
 
   function startTurnEntrance(root: HTMLElement, container: HTMLElement, fromY: number) {
@@ -513,7 +614,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
       isProgrammaticScroll = false
       const cur = scrollEl.value
       if (!cur) return
-      isAtBottom.value = isNearBottom(cur)
+      isAtBottom.value = isJumpAtBottom(cur)
       lastScrollTop = cur.scrollTop
     })
   }
@@ -602,6 +703,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // session's rows.
     pinPending = false
     pinAnchorId = null
+    restartHoldPx = null
+    // A send, edit or retry still in flight in the previous session keeps its
+    // rollback; bumping the attempt voids it, so a late failure there cannot
+    // restore the old session's scroll state onto this one.
+    pinAttemptId++
     // The old session's reserves are meaningless against the new session's
     // turns — clear the map so nothing re-projects onto foreign ids.
     pinnedTurnId = null
@@ -655,7 +761,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
             // bottom.
             const root = scrollEl.value
             followEnabled = root ? isNearBottom(root) : true
-            if (root) isAtBottom.value = isNearBottom(root)
+            if (root) isAtBottom.value = isJumpAtBottom(root)
           })
         } else {
           if (!newValue) {
@@ -760,7 +866,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     lastScrollTop = top
     // Frozen while the pin's entrance tween animates, or the jump button would
     // flash for its whole flight; the settle timer refreshes it on landing.
-    if (!pinScrollActive) isAtBottom.value = isNearBottom(el)
+    if (!pinScrollActive) isAtBottom.value = isJumpAtBottom(el)
     // A scroll we triggered ourselves only updates the at-bottom mirror; it
     // must never move the follow latch.
     if (isProgrammaticScroll) return
@@ -862,7 +968,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (pinPending && tryApplyPin(el)) return
     if (followEnabled) stickToBottomNow()
     else if (!pinScrollActive) {
-      isAtBottom.value = isNearBottom(el)
+      isAtBottom.value = isJumpAtBottom(el)
       scheduleAtBottomRefresh()
     }
   }
@@ -966,6 +1072,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
     markEscaped,
     followBottom,
     pinAfterSend,
+    pinAfterEdit,
+    pinAfterRetry,
     pinAfterSteer,
     pinAfterFollowUp,
 

@@ -82,21 +82,6 @@ export function detectSaveConflict(a: SaveConflictArgs): boolean {
   return a.lastFsChangeAt > a.lastLoadedAt
 }
 
-export interface ExternalReloadGuardArgs {
-  contentAtRequestStart: string
-  originalContentAtRequestStart: string
-  currentContent: string
-  currentOriginalContent: string
-  force?: boolean
-}
-
-export function canApplyExternalReload(a: ExternalReloadGuardArgs): boolean {
-  if (a.force) return true
-  return a.currentContent === a.contentAtRequestStart
-    && a.currentOriginalContent === a.originalContentAtRequestStart
-    && a.currentContent === a.currentOriginalContent
-}
-
 export type ConflictState = 'none' | 'chip' | 'compare'
 
 export type PolledTextChangeAction =

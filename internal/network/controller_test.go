@@ -81,7 +81,7 @@ func (*fakeProvider) NormalizeConfig(raw map[string]any) (map[string]any, error)
 }
 
 func (*fakeProvider) Status(context.Context, BotOverlayConfig) (ProviderStatus, error) {
-	return ProviderStatus{State: StatusStateReady}, nil
+	return ProviderStatus{State: OverlayStateReady}, nil
 }
 
 func (*fakeProvider) ExecuteAction(context.Context, BotOverlayConfig, string, map[string]any) (ProviderActionExecution, error) {

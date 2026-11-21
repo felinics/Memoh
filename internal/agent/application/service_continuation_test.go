@@ -15,9 +15,9 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
-	"github.com/felinics/memoh/internal/contextview"
 )
 
 type continuationTurnRequestResolverService struct {
@@ -117,11 +117,54 @@ func TestPrepareContinuationRunConfigReplacesStaleContextAndSetsCapabilities(t *
 	}
 }
 
-func TestPrepareContinuationRunConfigPropagatesArtifactProjectionFailure(t *testing.T) {
+// A continuation resumes on the history as a request renders it: what the
+// checkpoint holds, and the rows after it.
+func TestPrepareContinuationRunConfigRendersTheCheckpoint(t *testing.T) {
 	t.Parallel()
 
-	sentinel := errors.New("artifact projection unavailable")
-	resolver := &Service{queries: &recordingCompactionLogQueries{listErr: sentinel}}
+	queries := &historyCheckpointQueries{}
+	queries.activate(historyCheckpointRow(t, checkpointTestID, historyTestPosition(1),
+		checkpoint.Item{SummaryID: queries.summary(t, checkpointTestSummaryID, "earlier work")}))
+	resolver := checkpointTestService(&memoryQueryMessageService{messages: []messagepkg.Message{
+		persistedHistoryMessage(t, "earlier", "user", "earlier"),
+		persistedHistoryMessage(t, "folded", "assistant", "folded"),
+		persistedHistoryMessage(t, "request-row", "user", "resumed request"),
+	}}, queries)
+
+	got, err := resolver.prepareContinuationRunConfig(
+		context.Background(),
+		native.RunConfig{},
+		historyfrag.ScopeFallback{},
+		contextfrag.Scope{SessionID: lifecycleTestSessionID},
+		nil,
+		ChatRequest{ThreadID: lifecycleTestSessionID},
+	)
+	if err != nil {
+		t.Fatalf("prepareContinuationRunConfig() error = %v", err)
+	}
+	var texts []string
+	for _, message := range got.Messages {
+		texts = append(texts, messageContentTextForTest(message))
+	}
+	if want := []string{turn.SummaryText("earlier work"), "resumed request"}; !slices.Equal(texts, want) {
+		t.Fatalf("continuation messages = %q, want %q", texts, want)
+	}
+	var summaries []int
+	for _, frag := range got.ContextFrags {
+		if frag.Kind == contextfrag.KindConversationSummary {
+			summaries = append(summaries, frag.Provenance.Index)
+		}
+	}
+	if !slices.Equal(summaries, []int{0}) {
+		t.Fatalf("summary frags at messages %v, want the summary at message 0", summaries)
+	}
+}
+
+func TestPrepareContinuationRunConfigPropagatesCheckpointFailure(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("history checkpoint unavailable")
+	resolver := checkpointTestService(&memoryQueryMessageService{}, &historyCheckpointQueries{activeErr: sentinel})
 	got, err := resolver.prepareContinuationRunConfig(
 		context.Background(),
 		native.RunConfig{Query: "must not survive"},
@@ -147,8 +190,11 @@ func TestPendingRuntimeDecisionsFailsClosedOnRuntimeLookupFailure(t *testing.T) 
 	}
 }
 
-func TestContinuationRecoversBudgetKeepingTheResumedTurn(t *testing.T) {
+// A continuation whose load the byte budget truncated folds the rows it left
+// out before it runs, keeping the input it resumes as an anchor.
+func TestContinuationFoldsATruncatedLoadKeepingTheResumedInput(t *testing.T) {
 	s, history, runner, _ := chatRecoveryFixture(t)
+	history.truncated = true
 	history.messages = []messagepkg.Message{
 		{ID: "old-answer", BotID: syncCompactBotID, SessionID: syncCompactThreadID, Role: "assistant", Content: newTextContent(strings.Repeat("h", 40000))},
 		{ID: "request-row", BotID: syncCompactBotID, SessionID: syncCompactThreadID, Role: "user", Content: newTextContent("resumed request")},
@@ -164,14 +210,13 @@ func TestContinuationRecoversBudgetKeepingTheResumedTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg)
-	if err != nil || len(runner.configs) == 0 {
-		t.Fatalf("over-budget continuation did not compact: error=%v compactions=%d", err, len(runner.configs))
+	if len(runner.configs) != 1 || history.loads != 2 {
+		t.Fatalf("truncated continuation compactions=%d loads=%d, want one compaction and a second load", len(runner.configs), history.loads)
 	}
-	if want := (turn.ContextMessageSource{Kind: "history", ID: "request-row"}); !slices.Contains(runner.configs[0].ProtectedSources, want) {
-		t.Fatalf("resumed turn must stay verbatim and count as kept history: %+v", runner.configs[0].ProtectedSources)
+	if want := (turn.ContextMessageSource{Kind: "history", ID: "request-row"}); !slices.Contains(runner.configs[0].Anchors, want) {
+		t.Fatalf("the resumed input must be an anchor: %+v", runner.configs[0].Anchors)
 	}
-	if countRecoveryText(got.Messages, "compacted history") != 1 {
-		t.Fatalf("continuation did not run on the recovered history: %d messages", len(got.Messages))
+	if countRecoveryText(cfg.Messages, "compacted history") != 1 {
+		t.Fatalf("continuation did not run on the compacted history: %d messages", len(cfg.Messages))
 	}
 }

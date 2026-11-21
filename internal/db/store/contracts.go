@@ -308,17 +308,6 @@ type PipelineSessionEventRepository interface {
 	CountBySession(ctx context.Context, sessionID ID) (int64, error)
 }
 
-type CompactionRepository interface {
-	CreateLog(ctx context.Context, input Input) (Record, error)
-	GetLogByID(ctx context.Context, logID ID) (Record, error)
-	ListLogsBySession(ctx context.Context, sessionID ID) ([]Record, error)
-	ListLogsByBot(ctx context.Context, botID ID, page Page) ([]Record, error)
-	CountLogsByBot(ctx context.Context, botID ID) (int64, error)
-	ListUncompactedMessagesBySession(ctx context.Context, sessionID ID) ([]Record, error)
-	MarkMessagesCompacted(ctx context.Context, messageIDs []ID, logID ID) error
-	CompleteLog(ctx context.Context, logID ID, input Patch) (Record, error)
-}
-
 type ChannelConfigRepository interface {
 	UpsertBotChannelConfig(ctx context.Context, input Input) (Record, error)
 	DeleteBotChannelConfig(ctx context.Context, id ID) error

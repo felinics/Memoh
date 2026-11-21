@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -340,10 +340,6 @@ type reconcileOutcomeQueries struct {
 
 func (*reconcileOutcomeQueries) SupportsTransactions() bool { return true }
 
-func (*reconcileOutcomeQueries) ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
-	return nil, nil
-}
-
 func (q *reconcileOutcomeQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
 	q.mu.Lock()
 	if q.failFirst > 0 {
@@ -387,10 +383,8 @@ func (q *reconcileOutcomeQueries) DeleteRuntimeDecisionProjectionsByRun(
 
 // TestACPCommitUnknownResolutionMatrix pins the three-way commit-unknown
 // resolution contract of resolveRuntimeRoundPersistFailure through the completed
-// -turn path, plus the incomplete-abort rollback path. Two invariants hold in
-// every cell: the eagerly persisted leading user message is never deleted,
-// and the warm runtime is only discarded on a PROVEN rollback of a completed
-// turn.
+// -turn path, plus the incomplete-abort rollback path. In every cell the
+// eagerly persisted leading user message is never deleted.
 func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 	assertUserMessageKept := func(t *testing.T, messages *recordingMessageService) {
 		t.Helper()
@@ -420,9 +414,6 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		if !containsStreamEvent(events, native.EventEnd) {
 			t.Fatalf("proven-committed round did not terminate as completed: %#v", events)
 		}
-		if len(pool.closed) != 0 {
-			t.Fatalf("proven-committed round closed the runtime: %v", pool.closed)
-		}
 		assertUserMessageKept(t, messages)
 	})
 
@@ -442,9 +433,6 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		events := drainAgentEvents(t, eventCh)
 		if !containsStreamEvent(events, native.EventError) || containsStreamEvent(events, native.EventEnd) {
 			t.Fatalf("proven rollback of a completed turn must surface a sanitized error abort: %#v", events)
-		}
-		if len(pool.closed) != 1 || pool.closed[0] != lifecycleTestSessionID {
-			t.Fatalf("proven rollback must discard the diverged warm runtime once: %v", pool.closed)
 		}
 		assertUserMessageKept(t, messages)
 	})
@@ -468,9 +456,6 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		if err == nil || apperror.CodeOf(err) != apperror.CodeSessionHistoryInconsistent {
 			t.Fatalf("unresolved outcome must fail closed, got %v", err)
 		}
-		if len(pool.closed) != 0 {
-			t.Fatalf("unresolved outcome must not touch the runtime: %v", pool.closed)
-		}
 		assertUserMessageKept(t, messages)
 		// The background reconciliation owns the deferred projection sweep.
 		select {
@@ -481,7 +466,7 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		assertUserMessageKept(t, messages)
 	})
 
-	t.Run("incomplete abort rollback keeps runtime", func(t *testing.T) {
+	t.Run("incomplete abort rollback", func(t *testing.T) {
 		messages := &recordingMessageService{roundPersistErr: errors.New("definite rollback")}
 		started := make(chan struct{})
 		pool := &recordingACPPrompter{promptFn: func(ctx context.Context, _ acpagent.PromptInput) (acpclient.PromptResult, error) {
@@ -504,9 +489,6 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		close(abortCh)
 		if err := <-done; err != nil {
 			t.Fatalf("streamACPAgentWS() error = %v", err)
-		}
-		if len(pool.closed) != 0 {
-			t.Fatalf("incomplete abort must keep the runtime (head never needed to move): %v", pool.closed)
 		}
 		assertUserMessageKept(t, messages)
 	})

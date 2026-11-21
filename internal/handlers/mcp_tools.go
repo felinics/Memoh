@@ -20,7 +20,6 @@ const (
 	headerSessionType       = mcpgw.ToolHeaderSessionType
 	headerRouteID           = mcpgw.ToolHeaderRouteID
 	headerChannelIdentityID = mcpgw.ToolHeaderChannelIdentityID
-	headerSessionToken      = mcpgw.ToolHeaderSessionToken
 	headerCurrentPlatform   = mcpgw.ToolHeaderCurrentPlatform
 	headerReplyTarget       = mcpgw.ToolHeaderReplyTarget
 	headerConversationType  = mcpgw.ToolHeaderConversationType
@@ -99,7 +98,6 @@ func (*ContainerdHandler) buildToolSessionContext(c echo.Context, botID string) 
 	session.PublicRequest = true
 	session.RuntimeToken = ""
 	session.ChannelIdentityID = ""
-	session.SessionToken = ""
 	// Public MCP clients cannot prove model-native image transport support.
 	// Keep this capability limited to server-resolved runtime contexts until
 	// the native MCP image path is wired end-to-end.

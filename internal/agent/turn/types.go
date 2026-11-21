@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -183,12 +184,14 @@ type ModelMessage struct {
 
 // TextContent extracts plain text from string or multipart content.
 func (m ModelMessage) TextContent() string {
-	if len(m.Content) == 0 {
-		return ""
-	}
-	var text string
-	if err := json.Unmarshal(m.Content, &text); err == nil {
+	switch contentKind(m.Content) {
+	case '"':
+		var text string
+		_ = json.Unmarshal(m.Content, &text)
 		return text
+	case '[':
+	default:
+		return ""
 	}
 	var parts []ContentPart
 	if err := json.Unmarshal(m.Content, &parts); err == nil {
@@ -209,7 +212,7 @@ func (m ModelMessage) TextContent() string {
 // ContentParts parses multipart content, returning nil for strings or invalid
 // JSON.
 func (m ModelMessage) ContentParts() []ContentPart {
-	if len(m.Content) == 0 {
+	if contentKind(m.Content) != '[' {
 		return nil
 	}
 	var parts []ContentPart
@@ -222,13 +225,24 @@ func (m ModelMessage) ContentParts() []ContentPart {
 // HasContent reports whether the message carries non-empty content or tool
 // calls.
 func (m ModelMessage) HasContent() bool {
-	if strings.TrimSpace(m.TextContent()) != "" {
+	if len(m.ToolCalls) > 0 {
 		return true
 	}
-	if len(m.ContentParts()) > 0 {
-		return true
+	if contentKind(m.Content) == '"' {
+		return strings.TrimSpace(m.TextContent()) != ""
 	}
-	return len(m.ToolCalls) > 0
+	return len(m.ContentParts()) > 0
+}
+
+// contentKind is the first byte of the JSON value content holds: '"' for
+// plain text, '[' for parts. Decoding a whole message only to learn it is
+// not a string costs as much as decoding it, so callers branch on this.
+func contentKind(content json.RawMessage) byte {
+	trimmed := bytes.TrimLeft(content, " \t\r\n")
+	if len(trimmed) == 0 {
+		return 0
+	}
+	return trimmed[0]
 }
 
 // NewTextContent creates a JSON string value from plain text.

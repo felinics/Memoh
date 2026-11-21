@@ -2,6 +2,7 @@ package toolname
 
 import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/toolbridge"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
@@ -66,6 +67,7 @@ func ToolGetSchedule() Name    { return newName("get_schedule") }
 func ToolCreateSchedule() Name { return newName("create_schedule") }
 func ToolUpdateSchedule() Name { return newName("update_schedule") }
 func ToolDeleteSchedule() Name { return newName("delete_schedule") }
+func ToolNotifyUser() Name     { return newName("notify_user") }
 
 func ToolBrowserAction() Name        { return newName("browser_action") }
 func ToolBrowserObserve() Name       { return newName("browser_observe") }
@@ -80,17 +82,21 @@ func ToolGenerateVideo() Name   { return newName("generate_video") }
 func ToolTranscribeAudio() Name { return newName("transcribe_audio") }
 func ToolAskUser() Name         { return newName(userinput.ToolNameAskUser) }
 
+func ToolDescribe() Name { return newName(toolbridge.DescribeToolName) }
+func ToolCall() Name     { return newName(toolbridge.CallToolName) }
+
 func ToolMCPManage() Name { return newName("mcp_manage") }
 func ToolAppSearch() Name { return newName("app_search") }
 func ToolAppManage() Name { return newName("app_manage") }
 
 var all = []Name{
+	ToolDescribe(), ToolCall(),
 	ToolMCPManage(), ToolAppSearch(), ToolAppManage(),
 	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListExecutionLocations(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
 	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolCreateMemory(), ToolUpdateMemory(), ToolDeleteMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
 	ToolListWorkdirs(), ToolListACPAgents(),
-	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
+	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(), ToolNotifyUser(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),
 	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolGenerateVideo(), ToolTranscribeAudio(), ToolAskUser(),
 }

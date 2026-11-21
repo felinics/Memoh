@@ -22,14 +22,8 @@ import { useMediaQuery } from '@vueuse/core'
  * guard is needed anywhere this composable is consumed.
  */
 export function useIsMobile() {
-  // Pass the global window explicitly: vueuse's default `defaultWindow` is
-  // captured at ITS module load as `isClient ? window : undefined`, so in a
-  // non-browser test runtime that polyfills window later (the store tests do,
-  // via vi.hoisted) the default stays undefined and the query would be
-  // permanently false. Resolving window at CALL time keeps the composable
-  // honest wherever a window exists by the time a store/component runs; in
-  // the browser this is the same object vueuse would have defaulted to.
-  return useMediaQuery('(width < 768px)', {
-    window: typeof window === 'undefined' ? undefined : window,
-  })
+  // Pass the global window explicitly at call time so tests that stub
+  // globals via vi.stubGlobal see the current window rather than the
+  // module-load snapshot inside @vueuse/core.
+  return useMediaQuery('(width < 768px)', { window })
 }

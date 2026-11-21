@@ -16,7 +16,7 @@ func TestAssembleToolsReturnsStructuredUsageFragments(t *testing.T) {
 		&usageTestProvider{emitTool: true, toolName: "alpha_tool", usage: "Alpha 用法"},
 	)
 
-	_, flat, frags, _, err := a.assembleTools(
+	assembled, err := a.assembleTools(
 		context.Background(),
 		RunConfig{},
 		tools.StreamEmitter(func(tools.ToolStreamEvent) {}),
@@ -25,6 +25,7 @@ func TestAssembleToolsReturnsStructuredUsageFragments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
+	flat, frags := assembled.usage, assembled.usageFrags
 
 	wantFlat := "## Tool usage\n\nZeta usage\n\nAlpha 用法"
 	if flat != wantFlat {

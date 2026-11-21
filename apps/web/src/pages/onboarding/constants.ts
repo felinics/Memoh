@@ -3,5 +3,6 @@ export const ONBOARDING_KEYS = {
   botResult: 'memoh:onboarding:bot-result',
   forceOnboarding: 'memoh:dev:force-onboarding',
   introSeen: 'memoh:onboarding:intro-seen',
+  completedUsers: 'memoh:onboarding:completed-users',
   entryAnimation: 'memoh:onboarding:entry-animation',
 } as const

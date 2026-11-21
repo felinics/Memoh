@@ -3,7 +3,7 @@ import { computed, nextTick, onDeactivated, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Button, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle,
-  PageShell, SectionGroup, SettingsRow, SettingsSection,
+  PageShell, SettingsRow, SettingsSection,
 } from '@felinic/ui'
 import type { BotWorkspaceBackend } from '@/utils/bot-detail-tabs'
 import BotToolApproval from './bot-tool-approval.vue'
@@ -47,26 +47,24 @@ watch(() => [route.query.tab, route.query.section, props.botId, hasContainer.val
         data-advanced-section="tool-approval"
         :bot-id="botId"
       />
-      <SectionGroup
+      <SettingsSection
         v-if="hasContainer"
         data-advanced-section="hooks"
         :title="$t('bots.tabs.hooks')"
       >
-        <SettingsSection>
-          <SettingsRow
-            :label="$t('bots.hooks.title')"
-            :description="$t('bots.hooks.subtitle')"
+        <SettingsRow
+          :label="$t('bots.hooks.entryTitle')"
+          :description="$t('bots.hooks.subtitle')"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            @click="hooksOpen = true"
           >
-            <Button
-              variant="outline"
-              size="sm"
-              @click="hooksOpen = true"
-            >
-              {{ $t('common.edit') }}
-            </Button>
-          </SettingsRow>
-        </SettingsSection>
-      </SectionGroup>
+            {{ $t('common.edit') }}
+          </Button>
+        </SettingsRow>
+      </SettingsSection>
       <BotDesktop
         v-if="hasContainer"
         data-advanced-section="desktop"

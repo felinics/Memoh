@@ -1,11 +1,9 @@
 import { ref } from 'vue'
-import { externalAgentDraftMetadata, sameExternalAgentSessionInput, type DetachedExternalAgentSession, type createExternalAgentStaging } from './external-agent-staging'
-import type { createACPRuntimeRegistry } from './acp-runtime-registry'
+import { draftRuntimeStatus, externalAgentDraftMetadata, sameExternalAgentSessionInput, type DetachedExternalAgentSession, type createExternalAgentStaging } from './external-agent-staging'
 import type { ExternalAgentSessionInput, ChatViewTarget } from './types'
 import type { ChatViewEntry } from './view-registry'
 
 type ExternalAgentStaging = ReturnType<typeof createExternalAgentStaging>
-type ACPRuntimeRegistry = ReturnType<typeof createACPRuntimeRegistry>
 
 interface DraftExternalAgentStage extends DetachedExternalAgentSession {
   viewId: string
@@ -13,10 +11,8 @@ interface DraftExternalAgentStage extends DetachedExternalAgentSession {
 
 export interface ExternalAgentOrchestrationDeps {
   staging: ExternalAgentStaging
-  runtimeRegistry: ACPRuntimeRegistry
   normalizeTarget: (target?: Partial<ChatViewTarget>) => ChatViewTarget
   invalidateDraftCommand: (target: ChatViewTarget) => void
-  forgetDraftCommand: (target: ChatViewTarget) => void
   resetWorkspaceTargetSelection: (target: ChatViewTarget) => void
 }
 
@@ -27,8 +23,8 @@ function draftStageKey(botId: string, viewId: string) {
 export function createExternalAgentOrchestration(deps: ExternalAgentOrchestrationDeps) {
   const {
     pendingExternalAgentSessionInput,
-    pendingACPRuntimeId,
     pendingExternalAgentSessionMetadata,
+    effectiveDraftInput,
     pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring,
     stageExternalAgentSession: stageFocusedExternalAgentSession,
@@ -41,14 +37,9 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
     setPendingACPReasoning: setFocusedPendingACPReasoning,
     detachPendingExternalAgentSession,
     restorePendingExternalAgentSession,
-    releasePendingExternalAgentSession,
-    discardDetachedExternalAgentSession,
+    clearPendingExternalAgentSession,
     pendingExternalAgentMatchesInput: focusedPendingExternalAgentMatchesInput,
   } = deps.staging
-  const {
-    acpRuntimeStatuses,
-    acpRuntimeKey,
-  } = deps.runtimeRegistry
 
   const draftStages = ref<Record<string, DraftExternalAgentStage>>({})
   let liveDraft: { botId: string; viewId: string } | null = null
@@ -74,7 +65,7 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
         botId: detached.botId.trim() || target.botId.trim(),
         viewId: target.viewId.trim(),
         input: { ...detached.input },
-        runtimeId: detached.runtimeId.trim(),
+        options: detached.options,
       },
     }
   }
@@ -84,7 +75,6 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
     rememberDraftStage(liveDraft, {
       botId: liveDraft.botId,
       input: pendingExternalAgentSessionInput.value,
-      runtimeId: pendingACPRuntimeId.value,
     })
   }
 
@@ -103,31 +93,16 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
     saveLiveDraftStage()
     liveDraft = { botId: resolved.botId, viewId: resolved.viewId }
     const saved = draftStages.value[draftStageKey(resolved.botId, resolved.viewId)]
-    if (saved) restorePendingExternalAgentSession(saved.input, saved.runtimeId, saved.botId)
-    else releasePendingExternalAgentSession()
+    if (saved) restorePendingExternalAgentSession(saved.input, saved.botId, saved.options)
+    else clearPendingExternalAgentSession()
   }
 
   function forgetDraftStage(target: ChatViewTarget) {
     const resolved = deps.normalizeTarget(target)
     const key = draftStageKey(resolved.botId, resolved.viewId)
     if (isLiveDraft(liveDraft, resolved)) {
-      releasePendingExternalAgentSession()
+      clearPendingExternalAgentSession()
       liveDraft = null
-    }
-    if (!(key in draftStages.value)) return
-    const { [key]: _removed, ...rest } = draftStages.value
-    draftStages.value = rest
-  }
-
-  function discardDraftStage(target: ChatViewTarget) {
-    const resolved = deps.normalizeTarget(target)
-    const key = draftStageKey(resolved.botId, resolved.viewId)
-    if (isLiveDraft(liveDraft, resolved)) {
-      deps.staging.clearPendingExternalAgentSession()
-      liveDraft = null
-    } else {
-      const saved = draftStages.value[key]
-      if (saved) discardDetachedExternalAgentSession(saved)
     }
     if (!(key in draftStages.value)) return
     const { [key]: _removed, ...rest } = draftStages.value
@@ -136,8 +111,8 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
 
   function discardEvictedDraft(view: ChatViewEntry) {
     const target = { botId: view.botId, sessionId: null, viewId: view.viewId }
-    deps.forgetDraftCommand(target)
-    discardDraftStage(target)
+    deps.invalidateDraftCommand(target)
+    forgetDraftStage(target)
   }
 
   function pendingExternalAgentStateFor(target: ChatViewTarget) {
@@ -149,16 +124,13 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
           botId: liveDraft!.botId,
           viewId: liveDraft!.viewId,
           input: pendingExternalAgentSessionInput.value,
-          runtimeId: pendingACPRuntimeId.value,
         }
       : draftStages.value[draftStageKey(resolved.botId, resolved.viewId)]
     if (!saved) return null
-    const runtimeKey = acpRuntimeKey(saved.botId, saved.runtimeId)
     return {
       input: { ...saved.input },
-      metadata: externalAgentDraftMetadata(saved.input),
-      runtimeId: saved.runtimeId,
-      runtimeStatus: runtimeKey ? acpRuntimeStatuses.value[runtimeKey] : undefined,
+      metadata: externalAgentDraftMetadata(effectiveDraftInput(saved.botId, saved.input)),
+      runtimeStatus: live ? pendingACPRuntimeStatus.value : draftRuntimeStatus(saved.options, saved.input),
       ensuring: live ? pendingACPRuntimeEnsuring.value : false,
     }
   }
@@ -269,7 +241,7 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
       ? { ...state.input, planMode: modeId === 'plan' }
       : { ...state.input, permissionMode: modeId }
     if (isLiveDraft(liveDraft, draft)) pendingExternalAgentSessionInput.value = input
-    rememberDraftStage(draft, { botId: draft.botId, input, runtimeId: state.runtimeId })
+    rememberDraftStage(draft, { botId: draft.botId, input, options: draftStages.value[draftStageKey(draft.botId, draft.viewId)]?.options })
   }
 
   function pendingExternalAgentMatchesInput(input: ExternalAgentSessionInput, target?: ChatViewTarget) {
@@ -286,7 +258,6 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
 
   return {
     pendingExternalAgentSessionInput,
-    pendingACPRuntimeId,
     pendingExternalAgentSessionMetadata,
     pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring,
@@ -302,14 +273,11 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
     setPendingRuntimeMode,
     setPendingACPReasoning,
     pendingExternalAgentMatchesInput,
-    sameDraftExternalAgentStage: isLiveDraft,
     rememberDraftExternalAgentStage: rememberDraftStage,
     saveLiveDraftExternalAgentStage: saveLiveDraftStage,
     activateDraftExternalAgentStage: activateDraftStage,
     forgetDraftExternalAgentStage: forgetDraftStage,
-    discardDraftExternalAgentStage: discardDraftStage,
     discardEvictedDraft,
-    releasePendingExternalAgentSession,
     reset,
   }
 }

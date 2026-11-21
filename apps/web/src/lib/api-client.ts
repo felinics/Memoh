@@ -64,7 +64,12 @@ export function sdkWebSocketUrl(options: SdkUrlOptions): string {
 }
 
 let onUnauthorizedHook: (() => void) | undefined
+let configuredBaseFetch: typeof fetch | undefined
 let unauthorizedNotified = false
+
+export function sdkRawFetch(): typeof fetch {
+  return configuredBaseFetch ?? globalThis.fetch
+}
 
 interface ApiFetchContext {
   input: Parameters<typeof fetch>[0]
@@ -146,9 +151,33 @@ function addAuthorizationHeader(request: Request): Request {
   return request
 }
 
+function attachErrorResponseStatus(error: unknown, response?: Response): unknown {
+  const status = response?.status
+  if (typeof status !== 'number') return error
+  if (error instanceof Error) {
+    if (typeof (error as { status?: unknown }).status !== 'number') {
+      ;(error as Error & { status?: number }).status = status
+    }
+    return error
+  }
+  if (error && typeof error === 'object' && !Array.isArray(error)) {
+    if (typeof (error as { status?: unknown }).status === 'number') return error
+    return { ...(error as Record<string, unknown>), status }
+  }
+  if (typeof error === 'string') {
+    return error ? { status, message: error } : { status }
+  }
+  return { status }
+}
+
 function installAuthRequestInterceptor() {
   if (client.interceptors.request.exists(addAuthorizationHeader)) return
   client.interceptors.request.use(addAuthorizationHeader)
+}
+
+function installErrorStatusInterceptor() {
+  if (client.interceptors.error.exists(attachErrorResponseStatus)) return
+  client.interceptors.error.use(attachErrorResponseStatus)
 }
 
 /**
@@ -157,10 +186,9 @@ function installAuthRequestInterceptor() {
  */
 export function setupApiClient(options: SetupApiClientOptions = {}) {
   const apiBaseUrl = options.baseUrl?.trim() || import.meta.env.VITE_API_URL?.trim() || '/api'
-  const agentBaseUrl = import.meta.env.VITE_AGENT_URL?.trim() || '/agent'
-  void agentBaseUrl
 
   onUnauthorizedHook = options.onUnauthorized
+  configuredBaseFetch = options.fetch
 
   client.setConfig({
     baseUrl: apiBaseUrl,
@@ -168,4 +196,5 @@ export function setupApiClient(options: SetupApiClientOptions = {}) {
   })
 
   installAuthRequestInterceptor()
+  installErrorStatusInterceptor()
 }

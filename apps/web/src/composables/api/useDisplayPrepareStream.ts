@@ -1,12 +1,7 @@
 import { client } from '@memohai/sdk/client'
 import type { Options } from '@memohai/sdk'
-import {
-  fetchSSEProblem,
-  isSSEErrorEvent,
-  localizeSSEErrorEvent,
-  normalizeSSEFailure,
-  type SSEErrorEvent,
-} from './sse-error'
+import { isSSEErrorEvent, type SSEErrorEvent } from './sse-error'
+import { openJsonSseStream } from './stream-json-sse'
 
 // codesync(display-prepare-stream): keep these manual SSE payload types in sync
 // with internal/handlers/display.go.
@@ -42,40 +37,21 @@ function isDisplayPrepareStreamEvent(value: unknown): value is DisplayPrepareStr
 export async function postBotsByBotIdContainerDisplayPrepareStream(
   options: Options<DisplayPrepareStreamData>,
 ): Promise<{ stream: AsyncGenerator<DisplayPrepareStreamEvent, void, unknown> }> {
-  let streamError: unknown
   const { throwOnError: _throwOnError, ...rest } = options
-  const result = await client.sse.post<DisplayPrepareStreamEvent>({
-    url: '/bots/{bot_id}/container/display/prepare',
-    ...rest,
-    headers: {
-      ...options.headers as Record<string, string>,
-      Accept: 'text/event-stream',
-    },
-    fetch: fetchSSEProblem,
-    onSseError: (error) => {
-      streamError = error
-    },
-    responseValidator: async (data) => {
-      if (!isDisplayPrepareStreamEvent(data)) {
-        throw new Error('Invalid display preparation stream event')
-      }
-    },
-    sseMaxRetryAttempts: 1,
+  return openJsonSseStream<DisplayPrepareStreamEvent>({
+    signal: options.signal,
+    invalidEventMessage: 'Invalid display preparation stream event',
+    failureMessage: 'Display preparation stream failed',
+    isEvent: isDisplayPrepareStreamEvent,
+    open: request =>
+      client.sse.post<DisplayPrepareStreamEvent>({
+        url: '/bots/{bot_id}/container/display/prepare',
+        ...rest,
+        ...request,
+        headers: {
+          ...options.headers as Record<string, string>,
+          ...request.headers,
+        },
+      }),
   })
-
-  return {
-    stream: (async function* () {
-      for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
-        if (!isDisplayPrepareStreamEvent(event)) {
-          throw new Error('Invalid display preparation stream event')
-        }
-        yield event.type === 'error'
-          ? localizeSSEErrorEvent(event)
-          : event
-      }
-      if (streamError) {
-        throw normalizeSSEFailure(streamError, 'Display preparation stream failed')
-      }
-    })(),
-  }
 }

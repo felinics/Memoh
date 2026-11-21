@@ -10,7 +10,7 @@ import (
 
 func (d *nativeDriver) listNodes(ctx context.Context, botID string) ([]netctl.NodeOption, error) {
 	req := netctl.AttachmentRequest{BotID: botID}
-	localStatus, err := readLocalStatusWithPeers(ctx, d.socketPath(req), true)
+	localStatus, err := d.client(req).status(ctx, true)
 	if err != nil {
 		return nil, err
 	}

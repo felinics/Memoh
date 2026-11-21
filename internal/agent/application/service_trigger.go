@@ -30,7 +30,7 @@ func attachCurrentTurnPrompt(req ChatRequest, cfg native.RunConfig, prompt strin
 }
 
 // TriggerSchedule executes a scheduled command via the internal agent.
-func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (triggerResult schedule.TriggerResult, err error) {
+func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload) (triggerResult schedule.TriggerResult, err error) {
 	endActiveTurn, beginErr := s.activeTurns.begin()
 	if beginErr != nil {
 		return schedule.TriggerResult{}, beginErr
@@ -95,7 +95,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		return schedule.TriggerResult{}, err
 	}
 	if dispatch.kind == dispatchExternal {
-		return s.triggerScheduleRuntime(ctx, botID, payload, token, admission.RunID, dispatch.driver)
+		return s.triggerScheduleRuntime(ctx, botID, payload, admission.RunID, dispatch.driver)
 	}
 
 	req := ChatRequest{
@@ -106,7 +106,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		RunHandle:       admission.Handle,
 		Query:           payload.Command,
 		UserID:          payload.OwnerUserID,
-		Token:           token,
+		ActorAccountID:  payload.OwnerUserID,
 		Model:           payload.ModelID,
 		ReasoningEffort: payload.ReasoningEffort,
 		SessionType:     sessionmode.Schedule,
@@ -130,12 +130,14 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	schedulePrompt := native.GenerateSchedulePrompt(native.Schedule{
-		ID:          payload.ID,
-		Name:        payload.Name,
-		Description: payload.Description,
-		Pattern:     payload.Pattern,
-		MaxCalls:    payload.MaxCalls,
-		Command:     payload.Command,
+		ID:               payload.ID,
+		Name:             payload.Name,
+		Description:      payload.Description,
+		Pattern:          payload.Pattern,
+		MaxCalls:         payload.MaxCalls,
+		Command:          payload.Command,
+		NoChannelContact: payload.NoChannelContact,
+		NotifiesEveryRun: payload.NotifiesEveryRun,
 	})
 	req, cfg = attachCurrentTurnPrompt(req, cfg, schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
@@ -373,7 +375,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		return schedule.TriggerResult{}, streamErr
 	case streamErr != nil && !hasSnapshot:
 		if idle != nil && idle.DidFire() {
-			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(true, streamErr)); storeErr != nil {
+			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(true, streamErr), snapshotFailureArgs(true, streamErr)); storeErr != nil {
 				s.logger.ErrorContext(ctx, "triggered run timeout persist failed", slog.Any("error", storeErr))
 			}
 		}

@@ -41,6 +41,14 @@ func (h *NetworkHandler) Register(e *echo.Echo) {
 	group.POST("/actions/:action_id", h.ExecuteAction)
 }
 
+// ListMeta godoc
+// @Summary List network providers
+// @Description List the network providers a bot can use, with their config schema, capabilities and actions
+// @Tags network
+// @Success 200 {array} network.ProviderDescriptor
+// @Failure 401 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /network/meta [get].
 func (h *NetworkHandler) ListMeta(c echo.Context) error {
 	if _, err := RequireChannelIdentityID(c); err != nil {
 		return err
@@ -48,6 +56,16 @@ func (h *NetworkHandler) ListMeta(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.service.ListMeta(c.Request().Context()))
 }
 
+// Status godoc
+// @Summary Get bot network status
+// @Description Get the state of the bot's network overlay and of the workspace it attaches to
+// @Tags network
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} network.BotStatus
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/network/status [get].
 func (h *NetworkHandler) Status(c echo.Context) error {
 	botID, err := h.authorize(c)
 	if err != nil {
@@ -60,6 +78,17 @@ func (h *NetworkHandler) Status(c echo.Context) error {
 	return c.JSON(http.StatusOK, status)
 }
 
+// ListNodes godoc
+// @Summary List bot network nodes
+// @Description List the peers the bot can use as exit nodes
+// @Tags network
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} network.NodeListResponse
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/network/nodes [get].
 func (h *NetworkHandler) ListNodes(c echo.Context) error {
 	botID, err := h.authorize(c)
 	if err != nil {
@@ -72,6 +101,20 @@ func (h *NetworkHandler) ListNodes(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+// ExecuteAction godoc
+// @Summary Run a bot network action
+// @Description Run a provider action such as test_connection or logout
+// @Tags network
+// @Param bot_id path string true "Bot ID"
+// @Param action_id path string true "Action ID"
+// @Param payload body network.BotActionRequest true "Action input"
+// @Success 200 {object} network.ProviderActionExecution
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/network/actions/{action_id} [post].
 func (h *NetworkHandler) ExecuteAction(c echo.Context) error {
 	botID, err := h.authorize(c)
 	if err != nil {

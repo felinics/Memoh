@@ -34,7 +34,6 @@ import (
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
 	attachmentpkg "github.com/felinics/memoh/internal/attachment"
-	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/local"
@@ -83,8 +82,6 @@ type LocalChannelHandler struct {
 	wsSkillTurnsMu      sync.Mutex
 	wsSkillTurns        *wsRequestedSkillTurnRegistry
 	logger              *slog.Logger
-	jwtSecret           string
-	tokenTTL            time.Duration
 	// wsHeartbeat is the chat socket's ping, read and write timing. The
 	// zero value means defaultWSHeartbeat; tests set shorter intervals.
 	wsHeartbeat wsHeartbeat
@@ -148,12 +145,6 @@ func (h *LocalChannelHandler) SetCommandHandler(handler *command.Handler) {
 
 func (h *LocalChannelHandler) SetRuntimeSkillResolver(resolver runtimeSkillResolver) {
 	h.skillResolver = resolver
-}
-
-// SetAuthTokenConfig configures runtime token minting for external-agent local WS streams.
-func (h *LocalChannelHandler) SetAuthTokenConfig(jwtSecret string, ttl time.Duration) {
-	h.jwtSecret = strings.TrimSpace(jwtSecret)
-	h.tokenTTL = ttl
 }
 
 // SetMediaService sets the media service for WebSocket attachment ingestion.
@@ -593,7 +584,7 @@ func sendWSCommandResult(writer *wsWriter, msg wsClientMessage, actionID string,
 
 // Queue commands share REST admission and invocation identity. They never start
 // a parallel chat turn or pass the command selector to the model.
-func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer *wsWriter, msg wsClientMessage, channelIdentityID, botID, actionID, text string) {
+func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, c echo.Context, writer *wsWriter, msg wsClientMessage, channelIdentityID, botID, actionID, text string) {
 	var err error
 	switch {
 	case strings.TrimSpace(msg.SessionID) == "" || strings.TrimSpace(text) == "":
@@ -601,28 +592,26 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 	case h.sessionService == nil:
 		err = apperror.New(apperror.CodeQueueAdmissionUnavailable, nil)
 	default:
-		// The queued item records the session's team and the acting user,
-		// because the run it eventually starts is admitted long after this
-		// connection's context is gone.
 		var sess sessionpkg.Thread
 		sess, err = h.sessionService.Get(ctx, msg.SessionID)
 		if err != nil || sess.BotID != botID {
 			err = apperror.New(apperror.CodeSessionNotFound, nil)
 			break
 		}
-		input := application.QueueInput{
-			TeamID:                  sess.TeamID,
-			BotID:                   botID,
-			SessionID:               msg.SessionID,
-			InvocationID:            msg.InvocationID,
-			UserID:                  channelIdentityID,
-			SourceChannelIdentityID: channelIdentityID,
-			Text:                    text,
+		// The queued text is the turn this message would have started, with
+		// the options it was sent with; the session's team admits it later.
+		var cmd turn.StartTurnCommand
+		if cmd, _, err = h.turns().text(ctx, c, channelIdentityID, botID, msg.SessionID, text); err != nil {
+			break
 		}
+		cmd.TeamID = sess.TeamID
+		cmd.Model = strings.TrimSpace(msg.ModelID)
+		cmd.ReasoningEffort = strings.TrimSpace(msg.ReasoningEffort)
+		cmd.WorkspaceTargetID = strings.TrimSpace(msg.WorkspaceTargetID)
 		if actionID == "steer" {
-			_, err = h.agentService.EnqueueSteer(ctx, input)
+			_, err = h.agentService.EnqueueSteer(ctx, msg.InvocationID, cmd)
 		} else {
-			_, err = h.agentService.EnqueueFollowUp(ctx, input)
+			_, err = h.agentService.EnqueueFollowUp(ctx, msg.InvocationID, cmd)
 		}
 		err = queueAdmissionError(err)
 		if err != nil && apperror.CodeOf(err) == "" {
@@ -1167,21 +1156,6 @@ func (w *wsWriter) Close() {
 	<-w.done
 }
 
-func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID, fallbackBearerToken string) string {
-	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
-	if h == nil || strings.TrimSpace(h.jwtSecret) == "" || runtimeOwnerAccountID == "" || h.tokenTTL <= 0 {
-		return fallbackBearerToken
-	}
-	signed, _, err := auth.GenerateToken(runtimeOwnerAccountID, h.jwtSecret, h.tokenTTL)
-	if err != nil {
-		if h.logger != nil {
-			h.logger.Warn("issue external-agent runtime token failed", slog.Any("error", err))
-		}
-		return fallbackBearerToken
-	}
-	return "Bearer " + signed
-}
-
 // resolveWSTargetTurnID settles which round a replacement names. A turn id is
 // the contract; a message id is the pre-turn spelling and is resolved to its
 // round here, at the transport boundary, so nothing downstream has to know two
@@ -1309,6 +1283,18 @@ func sendWSControlAck(writer *wsWriter, ref wsTurnRef, control, controlID string
 	})
 }
 
+// wsUnappliedDecisionCode names a decision response the runtime handled but did
+// not apply: the decision was answered under another control, was closed, or
+// its run ended. The other transports report that as the decision's expired
+// error; the acknowledgement carries the same code, so the client restores the
+// request instead of keeping its optimistic answer.
+func wsUnappliedDecisionCode(result sessionruntime.DecisionResponseResult, expired apperror.Code) string {
+	if result.Applied || !result.Handled {
+		return ""
+	}
+	return string(expired)
+}
+
 // failWSControl answers a control that failed with a control_ack carrying
 // ackCode and writes the control's result record. The ack is what the client
 // branches on and the record carries err, so the two are separate: the ack is
@@ -1391,7 +1377,11 @@ func sendWSRunFailure(ctx context.Context, writer *wsWriter, ref wsTurnRef, err 
 	if outcome.Cause == err { //nolint:errorlint // Identity: whether this error is the run's outcome.
 		// The run's record already names the failure, whatever has become of
 		// the stream since, so the frame is rendered without its caller.
-		frame, _ := server.NewStreamError(context.WithoutCancel(ctx), apperror.Wrap(runCode, err, nil), "")
+		var args map[string]string
+		if apperror.CodeOf(err) == runCode {
+			args = apperror.ArgsOf(err)
+		}
+		frame, _ := server.NewStreamError(context.WithoutCancel(ctx), apperror.Wrap(runCode, err, args), "")
 		writer.SendJSON(wsErrorEvent(ref, frame))
 		return
 	}
@@ -1869,8 +1859,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	keepalive := heartbeat.start(conn)
 	defer keepalive.Stop()
 
-	bearerToken := "Bearer " + auth.RawTokenFromContext(c)
-
 	writer := newWSWriter(conn, heartbeat.writeTimeout)
 	defer writer.Close()
 
@@ -1997,7 +1985,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(apperror.CodeOf(err)), err)
 				continue
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, "")
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, wsUnappliedDecisionCode(result, apperror.CodeToolApprovalExpired))
 
 		case "user_input_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
@@ -2057,7 +2045,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(apperror.CodeOf(err)), err)
 				continue
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, "")
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, wsUnappliedDecisionCode(result, apperror.CodeUserInputExpired))
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
@@ -2156,7 +2144,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					}
 				}
 				if actionID == "steer" || actionID == "queue" {
-					h.executeWSQueueCommand(streamBaseCtx, writer, msg, channelIdentityID, botID, actionID, decision.Invocation.Rest)
+					h.executeWSQueueCommand(streamBaseCtx, c, writer, msg, channelIdentityID, botID, actionID, decision.Invocation.Rest)
 					continue
 				}
 				skillActivationAllowed := true
@@ -2321,7 +2309,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					continue
 				}
 			}
-			runtimeInfo, err := h.authorizeWSRuntimeExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
+			cmd, runtimeInfo, err := h.turns().text(c.Request().Context(), c, channelIdentityID, botID, sessionID, streamText)
 			if err != nil {
 				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", err)
 				releaseActiveWSTurnNow()
@@ -2332,41 +2320,29 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				releaseActiveWSTurnNow()
 				continue
 			}
-			streamToken := bearerToken
-			if runtimeInfo.RequiresWorkspaceExec {
-				streamToken = h.issueRuntimeOwnerBearerToken(runtimeInfo.RuntimeOwnerAccountID, bearerToken)
-			}
+			cmd.ModelQuery = streamModelText
+			cmd.UserMessageKind = userMessageKind
+			cmd.UserVisibleText = userVisibleText
+			cmd.SkillActivation = skillActivation
+			cmd.RequestedSkills = requestedSkillContexts
+			cmd.SkipMemoryExtraction = hasSkillActivation && userVisibleText == ""
+			cmd.SkipTitleGeneration = cmd.SkipMemoryExtraction
+			cmd.Model = strings.TrimSpace(msg.ModelID)
+			cmd.ReasoningEffort = strings.TrimSpace(msg.ReasoningEffort)
+			cmd.WorkspaceTargetID = workspaceTargetID
+			cmd.AgentCommand = decision.AgentCommand
 			var ingestedActivationAttachments []turn.Attachment
-			userMessagePersisted := false
 			persistedUserMessageID := ""
-			externalMessageID := ""
 			var preparedActivationReq *application.ChatRequest
 			if hasSkillActivation {
 				// The persisted user turn is deduplicated by the client's
 				// invocation id: it exists before any run does, and the
 				// invocation is precisely the key a redelivery would repeat.
-				externalMessageID = ref.InvocationID
+				cmd.ExternalMessageID = ref.InvocationID
 				ingestedActivationAttachments = h.ingestWSInboundAttachments(streamBaseCtx, botID, chatAttachments)
-				userReq := application.ChatRequest{
-					BotID:                   botID,
-					ChatID:                  botID,
-					ThreadID:                sessionID,
-					UserID:                  channelIdentityID,
-					SourceChannelIdentityID: channelIdentityID,
-					ExternalMessageID:       externalMessageID,
-					ConversationType:        channel.ConversationTypePrivate,
-					Query:                   streamText,
-					ModelQuery:              streamModelText,
-					RawQuery:                userVisibleText,
-					UserMessageKind:         userMessageKind,
-					UserVisibleText:         userVisibleText,
-					SkillActivation:         skillActivation,
-					CurrentChannel:          h.channelType.String(),
-					ReplyTarget:             botID,
-					Attachments:             ingestedActivationAttachments,
-					RequestedSkills:         requestedSkillContexts,
-					WorkspaceTargetID:       workspaceTargetID,
-				}
+				userReq := application.ChatRequestFromCommand(cmd)
+				userReq.RawQuery = userVisibleText
+				userReq.Attachments = ingestedActivationAttachments
 				preparedReq, persisted, persistErr := h.agentService.ApplyUserMessageHookAndPersistUserTurn(streamBaseCtx, userReq)
 				if persistErr != nil {
 					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", persistErr)
@@ -2375,7 +2351,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				preparedActivationReq = &preparedReq
 				persistedUserMessageID = persisted.ID
-				userMessagePersisted = true
+				cmd.UserMessagePersisted = true
 			}
 			submission := wsSubmission{
 				Kind:        "message",
@@ -2404,51 +2380,24 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws.message", submission, messageAdmission.build, releaseActiveWSTurn,
 				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
-					req := application.ChatRequest{
-						OnModelPreferenceSettled: func() {
-							writer.SendJSON(wsOutboundEvent{
-								Type:         "model_preference_settled",
-								RunID:        runRef.RunID,
-								InvocationID: runRef.InvocationID,
-								SessionID:    runRef.SessionID,
-							})
-						},
-						BotID:                   botID,
-						ChatID:                  botID,
-						ThreadID:                sessionID,
-						RunID:                   runRef.RunID,
-						TurnID:                  admittedTurn.TurnID,
-						TurnPosition:            admittedTurn.Position,
-						UserID:                  channelIdentityID,
-						SourceChannelIdentityID: channelIdentityID,
-						ExternalMessageID:       externalMessageID,
-						ConversationType:        channel.ConversationTypePrivate,
-						Query:                   streamText,
-						ModelQuery:              streamModelText,
-						RawQuery:                userVisibleText,
-						UserMessageKind:         userMessageKind,
-						UserVisibleText:         userVisibleText,
-						SkillActivation:         skillActivation,
-						UserMessagePersisted:    userMessagePersisted,
-						PersistedUserMessageID:  persistedUserMessageID,
-						Token:                   streamToken,
-						ChatToken:               bearerToken,
-						CurrentChannel:          h.channelType.String(),
-						ReplyTarget:             botID,
-						Channels:                []string{h.channelType.String()},
-						Attachments:             messageAdmission.preparedAttachments(),
-						RequestedSkills:         requestedSkillContexts,
-						SkipMemoryExtraction:    hasSkillActivation && userVisibleText == "",
-						SkipTitleGeneration:     hasSkillActivation && userVisibleText == "",
-						Model:                   strings.TrimSpace(msg.ModelID),
-						ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
-						WorkspaceTargetID:       workspaceTargetID,
-						ToolHTTPURL:             buildExternalAgentToolsURL(c, botID),
-						AgentCommand:            decision.AgentCommand,
-						RunHandle:               admittedTurn.Handle,
-						InjectCh:                admittedTurn.InjectCh,
-						QueueSteerEnabled:       admittedTurn.InjectCh != nil,
+					req := application.ChatRequestFromCommand(cmd)
+					req.OnModelPreferenceSettled = func() {
+						writer.SendJSON(wsOutboundEvent{
+							Type:         "model_preference_settled",
+							RunID:        runRef.RunID,
+							InvocationID: runRef.InvocationID,
+							SessionID:    runRef.SessionID,
+						})
 					}
+					req.RunID = runRef.RunID
+					req.TurnID = admittedTurn.TurnID
+					req.TurnPosition = admittedTurn.Position
+					req.RawQuery = userVisibleText
+					req.PersistedUserMessageID = persistedUserMessageID
+					req.Attachments = messageAdmission.preparedAttachments()
+					req.RunHandle = admittedTurn.Handle
+					req.InjectCh = admittedTurn.InjectCh
+					req.QueueSteerEnabled = admittedTurn.InjectCh != nil
 					if preparedActivationReq != nil {
 						req.Messages = preparedActivationReq.Messages
 						req.Query = preparedActivationReq.Query
@@ -2509,7 +2458,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				TargetTurnID:           targetTurnID,
 				ActorChannelIdentityID: channelIdentityID,
 				ActorUserID:            channelIdentityID,
-				ChatToken:              bearerToken,
 				Model:                  strings.TrimSpace(msg.ModelID),
 				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
 				WorkspaceTargetID:      workspaceTargetID,
@@ -2601,7 +2549,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				Text:                   text,
 				ActorChannelIdentityID: channelIdentityID,
 				ActorUserID:            channelIdentityID,
-				ChatToken:              bearerToken,
 				Model:                  strings.TrimSpace(msg.ModelID),
 				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
 				WorkspaceTargetID:      workspaceTargetID,
@@ -2724,35 +2671,9 @@ func (h *LocalChannelHandler) wsSessionSupportsRequestedSkills(ctx context.Conte
 	return sessionpkg.SupportsSkillActivation(sess.SessionMode, sess.Type, sess.RuntimeType), nil
 }
 
-func (h *LocalChannelHandler) authorizeWSRuntimeExecution(ctx context.Context, channelIdentityID, botID, sessionID string) (application.RuntimeSessionExecutionInfo, error) {
-	if h == nil || h.agentService == nil {
-		return application.RuntimeSessionExecutionInfo{}, nil
-	}
-	info, err := h.agentService.RuntimeSessionExecutionInfo(ctx, sessionID)
-	if err != nil || !info.RequiresWorkspaceExec {
-		return info, err
-	}
-	if strings.TrimSpace(info.RuntimeOwnerAccountID) == "" {
-		return info, apperror.New(apperror.CodeACPRuntimeOwnerMissing, nil)
-	}
-	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
-	if err != nil {
-		if isHTTPStatus(err, http.StatusForbidden) {
-			return info, apperror.New(apperror.CodeNoWorkspaceExec, nil)
-		}
-		return info, err
-	}
-	if strings.TrimSpace(info.BotID) != "" && info.BotID != bot.ID {
-		return info, apperror.New(apperror.CodeSessionNotFound, nil)
-	}
-	perms, err := h.resolveCurrentUserPermissions(ctx, channelIdentityID, bot.ID)
-	if err != nil {
-		return info, err
-	}
-	if err := authorizeExternalAgentSessionAccess(channelIdentityID, perms, info.RuntimeOwnerAccountID); err != nil {
-		return info, err
-	}
-	return info, nil
+// turns builds this handler's chat turns; see localTurns.
+func (h *LocalChannelHandler) turns() localTurns {
+	return localTurns{channel: h.channelType, agentService: h.agentService, botService: h.botService, accountService: h.accountService}
 }
 
 func canOpenLocalWebSocket(perms []string) bool {
@@ -2816,14 +2737,18 @@ func (h *LocalChannelHandler) authorizeBotSessionAccess(ctx context.Context, cha
 }
 
 func (h *LocalChannelHandler) resolveCurrentUserPermissions(ctx context.Context, channelIdentityID, botID string) ([]string, error) {
-	if h.botService == nil || h.accountService == nil {
+	return resolveUserPermissions(ctx, h.botService, h.accountService, channelIdentityID, botID)
+}
+
+func resolveUserPermissions(ctx context.Context, botService *bots.Service, accountService *accounts.Service, channelIdentityID, botID string) ([]string, error) {
+	if botService == nil || accountService == nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
-	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+	isAdmin, err := accountService.IsAdmin(ctx, channelIdentityID)
 	if err != nil {
 		return nil, errs.Wrap(err, "check admin")
 	}
-	perms, err := h.botService.ResolveUserPermissions(ctx, botID, channelIdentityID, isAdmin)
+	perms, err := botService.ResolveUserPermissions(ctx, botID, channelIdentityID, isAdmin)
 	if err != nil {
 		return nil, errs.Wrap(err, "resolve bot permissions")
 	}

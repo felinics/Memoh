@@ -15,11 +15,13 @@ func RegisterBuiltinProviders(registry *netctl.Registry, deps ProviderDeps) erro
 			SidecarRuntime: deps.SidecarRuntime,
 			Runtime:        deps.Runtime,
 			StateRoot:      deps.StateRoot,
+			Logger:         deps.Logger,
 		}),
 		netbird.NewProvider(netbird.Deps{
 			SidecarRuntime: deps.SidecarRuntime,
 			Runtime:        deps.Runtime,
 			StateRoot:      deps.StateRoot,
+			Logger:         deps.Logger,
 		}),
 	}
 	for _, provider := range providers {

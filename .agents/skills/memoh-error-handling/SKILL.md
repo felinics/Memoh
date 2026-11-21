@@ -80,8 +80,7 @@ metadata:
   **错误文案是 UX，不是英文 detail 的翻译**：要回答用户"接下来能做什么"——
   可重试的说"请稍后重试"（如 `workspace.unreachable` 的 zh 文案），需要用户改输入的
   指向那个输入（如 `bot.name_taken`）；无法行动的错误才允许只陈述事实。
-- **HTTP status**：`apiErrorStatus(error)`。Problem body 自带 `status` 字段——这是刻意设计，
-  因为 hey-api client `throw jsonError` 只抛 body、会丢 HTTP status，不要"优化"掉 body 里的 status。
+- **HTTP status**：`apiErrorStatus(error)`。Problem body 自带 `status` 字段，`setupApiClient` 注册的 SDK error 拦截器也会把 HTTP `response.status` 补充挂载到非 Problem 错误对象与纯文本响应上，不要“优化”掉 `response.status` 保留或 Problem `status`。
 - **SSE 流**：新流复制现有三件套模式（`useBotCreateStream.ts` 为范例）：
   event 类型并入 `SSEErrorEvent`、`fetch: fetchSSEProblem`（把流前 HTTP 拒绝解码为结构化错误）、
   yield 时 `localizeSSEErrorEvent`、收尾 `normalizeSSEFailure`。
@@ -90,9 +89,7 @@ metadata:
 
 ## Legacy 兼容边界（读懂再动）
 
-- 旧服务器（桌面端可能连接）返回 `{"message":"..."}`、无 code 无 status。
-  对这类响应的英文匹配兜底**允许存在但必须带注释**（范例：files-pane 的
-  `isTransientWorkspaceError`）。删除兜底 = 明确决定放弃对应旧版本，需报备。
+- `resolveApiErrorMessage` 不会透传未携带已注册 `code` 的服务端原始 `detail`/`message` 英文文本（见第 79 行）；前端业务分支禁止对其返回值做英文子串匹配。需要兼容尚未接入 `apperror` 的旧服务端时，依赖 `setupApiClient` 保留的 HTTP status 做明确的 `apiErrorStatus(error)` 判断（例如 `bot-settings` 在响应未带 `code` 时回退检查 `apiErrorStatus(error) === 409`）。
 - 服务端不再发 legacy SSE error：流错误帧由 `server.NewStreamError` 生成，
   HTTP 错误一律是 Problem（含 `echo.HTTPError`，见不变量 5）。前端渲染链不读 `i18n_key`。
 - `bot-create-progress` 里 409→`bot.name_taken` 的启发式是旧服务器兜底，

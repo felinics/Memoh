@@ -209,7 +209,6 @@ func TestToolGatewayServiceCacheSeparatesDiscoveryContext(t *testing.T) {
 		RuntimeID:    "runtime-1",
 		RuntimeToken: "runtime-token-1",
 		RouteID:      "route-1",
-		SessionToken: "token-1",
 	}
 
 	if _, err := service.ListTools(context.Background(), session); err != nil {
@@ -231,18 +230,11 @@ func TestToolGatewayServiceCacheSeparatesDiscoveryContext(t *testing.T) {
 	if _, err := service.ListTools(context.Background(), session); err != nil {
 		t.Fatalf("list tools after route change failed: %v", err)
 	}
-	session.SessionToken = "token-2"
-	if _, err := service.ListTools(context.Background(), session); err != nil {
-		t.Fatalf("list tools after session token change failed: %v", err)
-	}
-	if provider.calls != 6 {
+	if provider.calls != 5 {
 		t.Fatalf("ListTools calls = %d, want separate cache entries for discovery context fields", provider.calls)
 	}
 	if strings.Contains(toolRegistryCacheKey(session), session.RuntimeToken) {
 		t.Fatal("cache key must not contain the raw runtime token")
-	}
-	if strings.Contains(toolRegistryCacheKey(session), session.SessionToken) {
-		t.Fatal("cache key must not contain the raw session token")
 	}
 }
 

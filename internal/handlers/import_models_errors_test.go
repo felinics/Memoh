@@ -58,7 +58,10 @@ func TestImportModelsTranslatesUpstreamRejection(t *testing.T) {
 	if status != http.StatusBadGateway || problem.Code != string(apperror.CodeAgentProviderRequestRejected) || problem.Fault != "dependency" {
 		t.Fatalf("answer = %d %+v body=%s, want provider request rejected dependency", status, problem, body)
 	}
-	if strings.Contains(body, "provider secret failure") {
-		t.Fatalf("body leaks upstream error: %s", body)
+	if strings.Contains(problem.Detail, "provider secret failure") {
+		t.Fatalf("detail leaks upstream error: %s", problem.Detail)
+	}
+	if got := problem.Args[apperror.ProviderErrorArgUpstream]; got != `HTTP 401: {"error":"provider secret failure"}` {
+		t.Fatalf("args.upstream = %q, want verbatim upstream summary", got)
 	}
 }

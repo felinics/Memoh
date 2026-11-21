@@ -15,7 +15,7 @@ func TestExternalSteerClaimsOnlyCurrentRunAndAppliesAfterConfirmation(t *testing
 	if err := source.Enable(ctx); err != nil {
 		t.Fatal(err)
 	}
-	first, err := service.EnqueueSteer(ctx, testQueueInput(handle.BotID, handle.SessionID, "one", "adjust"))
+	first, err := service.EnqueueSteer(ctx, "one", testQueuedText(handle.BotID, handle.SessionID, "adjust"))
 	if err != nil {
 		t.Fatal(err)
 	}

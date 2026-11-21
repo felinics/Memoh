@@ -523,7 +523,7 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
 
       <Specimen
         label="<BadgeCount :count>"
-        note="a small solid count — destructive = the red alert dot (unread / needs attention), pinned to an icon corner. default = a neutral dot for plain informational counts that ride a tab / filter / segment label. In a flat list row a count is calmer as a plain muted numeral, no bubble (Inbox). Overflow caps at max (default 99)."
+        note="a small solid count, toned by meaning, loudest first — destructive = red (something failed), warning = yellow (waiting on the user), brand = new for you without alarm; a count over mixed items takes its most urgent tone. default = a neutral dot for plain informational counts that ride a tab / filter / segment label. In a flat list row a count is calmer as a plain muted numeral, no bubble (Inbox). Overflow caps at max (default 99)."
       >
         <div class="flex flex-wrap items-center gap-8">
           <!-- Canonical ALERT: red dot pinned to the corner of an icon button -->
@@ -587,6 +587,22 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
             <BadgeCount
               :count="120"
               variant="destructive"
+            />
+          </div>
+
+          <!-- Tone ladder, loudest first: failed > waiting on you > new for you -->
+          <div class="flex items-center gap-2">
+            <BadgeCount
+              :count="2"
+              variant="destructive"
+            />
+            <BadgeCount
+              :count="3"
+              variant="warning"
+            />
+            <BadgeCount
+              :count="12"
+              variant="brand"
             />
           </div>
         </div>

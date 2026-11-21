@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
-	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
-	"github.com/felinics/memoh/internal/agent/runtime/codex/codexcfg"
-	"github.com/felinics/memoh/internal/agent/runtime/grok/grokcfg"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/external/claudecode/claudecfg"
+	"github.com/felinics/memoh/internal/agent/runtime/external/codex/codexcfg"
+	"github.com/felinics/memoh/internal/agent/runtime/external/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -72,7 +72,8 @@ var directRuntimes = map[string]directRuntime{
 			if cfg.Auth == codexcfg.AuthAPIKey {
 				return agentcredential.AuthKindOpenAIAPIKey, nil
 			}
-			return agentcredential.AuthKindOpenAICodexOAuth, nil
+			// Codex keeps its ChatGPT login in the Agent's workspace.
+			return "", nil
 		},
 	},
 	RuntimeClaudeCode: {
@@ -82,14 +83,11 @@ var directRuntimes = map[string]directRuntime{
 			if err != nil {
 				return "", err
 			}
-			switch cfg.Auth {
-			case claudecfg.AuthAPIKey:
+			if cfg.Auth == claudecfg.AuthAPIKey {
 				return agentcredential.AuthKindAnthropicAPIKey, nil
-			case claudecfg.AuthOAuthToken:
-				return agentcredential.AuthKindClaudeCodeOAuth, nil
-			default:
-				return "", nil
 			}
+			// Claude Code keeps its Claude account login in the Agent's workspace.
+			return "", nil
 		},
 	},
 	RuntimeGrokBuild: {
@@ -100,11 +98,23 @@ var directRuntimes = map[string]directRuntime{
 				return "", err
 			}
 			if cfg.Auth == grokcfg.AuthGrokAccount {
-				return agentcredential.AuthKindXAIGrokOAuth, nil
+				// Grok keeps its account login in the Agent's workspace.
+				return "", nil
 			}
 			return agentcredential.AuthKindXAIAPIKey, nil
 		},
 	},
+}
+
+// SignsInOnAgent reports whether a direct Agent's auth mode is an account
+// the Agent's own runtime signs in to, rather than a credential Memoh stores.
+func SignsInOnAgent(agent BotAgent) bool {
+	direct, ok := directRuntimes[agent.Runtime]
+	if !ok {
+		return false
+	}
+	kind, err := direct.credentialAuthKind(agent.Metadata)
+	return err == nil && kind == ""
 }
 
 type ConfigurationError struct {
@@ -539,7 +549,7 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 			return ErrInvalidMetadata
 		}
 		setup := acpprofile.ParseInstanceSetup(botMetadata, agent.Metadata, descriptor.Provider)
-		if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+		if field, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 			return &ConfigurationError{Field: field.ID}
 		}
 		return nil
@@ -552,7 +562,9 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 	if err != nil {
 		return &ConfigurationError{Field: "auth"}
 	}
-	if credentialAuthKind != expected {
+	// A mode that stores no credential has none to check, whatever an earlier
+	// mode left attached.
+	if expected != "" && credentialAuthKind != expected {
 		return &ConfigurationError{Field: "agent_credential_id"}
 	}
 	return nil
@@ -647,6 +659,12 @@ func fromRow(row sqlc.BotAgent) (BotAgent, error) {
 		if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
 			return BotAgent{}, fmt.Errorf("decode bot agent metadata: %w", err)
 		}
+	}
+	// A Claude account used to be stored as a token Memoh obtained
+	// (oauth_token) or as a login found in the workspace (workspace); either
+	// now signs in on the Agent itself.
+	if auth := metadata["auth"]; row.Runtime == RuntimeClaudeCode && (auth == "oauth_token" || auth == "workspace") {
+		metadata["auth"] = string(claudecfg.AuthClaudeAccount)
 	}
 	item := BotAgent{
 		ID:        uuidString(row.ID),

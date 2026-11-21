@@ -52,7 +52,6 @@ type UserInputResponseInput struct {
 	TextAnswer                 string
 	Canceled                   bool
 	Reason                     string
-	ChatToken                  string
 	SuppressActivePromptAttach bool
 }
 
@@ -373,6 +372,7 @@ func (s *Service) storeUserInputResultAndContinue(
 		ChatID:                  input.BotID,
 		ThreadID:                req.SessionID,
 		UserID:                  requesterUserID,
+		ActorAccountID:          requesterUserID,
 		SourceChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          req.SourcePlatform,
 		ReplyTarget:             req.ReplyTarget,
@@ -408,11 +408,11 @@ func (s *Service) continueUserInputSession(
 		BotID:             input.BotID,
 		SessionID:         req.SessionID,
 		UserID:            requesterUserID,
+		ActorAccountID:    requesterUserID,
 		ChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentPlatform:   req.SourcePlatform,
 		ReplyTarget:       req.ReplyTarget,
 		ConversationType:  req.ConversationType,
-		ChatToken:         input.ChatToken,
 	})
 	if err != nil {
 		return err
@@ -431,6 +431,7 @@ func (s *Service) continueUserInputSession(
 		ChatID:                  input.BotID,
 		ThreadID:                req.SessionID,
 		UserID:                  requesterUserID,
+		ActorAccountID:          requesterUserID,
 		SourceChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          req.SourcePlatform,
 		ReplyTarget:             req.ReplyTarget,

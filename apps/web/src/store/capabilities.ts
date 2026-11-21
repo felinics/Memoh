@@ -1,34 +1,54 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getPing } from '@memohai/sdk'
+import { onAuthSessionCleared } from '@/lib/auth-session'
 
 export const useCapabilitiesStore = defineStore('capabilities', () => {
-  const containerBackend = ref('containerd')
   const snapshotSupported = ref(true)
   const connectors = ref(false)
   const serverVersion = ref('')
   const commitHash = ref('')
   const loaded = ref(false)
+  let inflight: Promise<void> | null = null
+  let sessionGeneration = 0
 
-  async function load() {
-    if (loaded.value) return
+  onAuthSessionCleared(() => {
+    sessionGeneration++
+    inflight = null
+    snapshotSupported.value = true
+    connectors.value = false
+    serverVersion.value = ''
+    commitHash.value = ''
+    loaded.value = false
+  })
+
+  async function fetchCapabilities(generation: number) {
     try {
       const { data } = await getPing()
-      if (data) {
-        containerBackend.value = data.container_backend ?? 'containerd'
-        snapshotSupported.value = data.snapshot_supported !== false
-        connectors.value = data.connectors === true
-        serverVersion.value = data.version ?? ''
-        commitHash.value = data.commit_hash ?? ''
-      }
+      if (!data || generation !== sessionGeneration) return
+      snapshotSupported.value = data.snapshot_supported !== false
+      connectors.value = data.connectors === true
+      serverVersion.value = data.version ?? ''
+      commitHash.value = data.commit_hash ?? ''
+      loaded.value = true
     } catch {
-      // fallback: assume containerd
+      // Keep loaded=false so subsequent callers can retry /ping after transient failures.
+    } finally {
+      if (generation === sessionGeneration) {
+        inflight = null
+      }
     }
-    loaded.value = true
+  }
+
+  function load() {
+    if (loaded.value) return Promise.resolve()
+    if (!inflight) {
+      inflight = fetchCapabilities(sessionGeneration)
+    }
+    return inflight
   }
 
   return {
-    containerBackend,
     snapshotSupported,
     connectors,
     serverVersion,

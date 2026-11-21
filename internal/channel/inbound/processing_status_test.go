@@ -123,7 +123,8 @@ func TestHandleInboundKeepsProcessingIndicatorAliveUntilFinalReply(t *testing.T)
 		},
 	}
 	processor := NewChannelInboundProcessor(slog.Default(), registry, chatSvc, chatSvc, gateway,
-		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "ci-1"}}, &fakePolicyService{}, "", 0)
+		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "ci-1"}}, &fakePolicyService{},
+	)
 	sender := &finalObservingSender{adapter: adapter}
 	cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("feishu")}
 	msg := channel.InboundMessage{
@@ -162,7 +163,7 @@ func TestDiscussProcessingStarterBindsInboundMessage(t *testing.T) {
 	adapter := &refreshingStatusAdapter{}
 	registry := channel.NewRegistry()
 	registry.MustRegister(adapter)
-	processor := NewChannelInboundProcessor(slog.Default(), registry, nil, nil, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(slog.Default(), registry, nil, nil, nil, nil, nil)
 	msg := channel.InboundMessage{Channel: channel.ChannelType("feishu")}
 	info := channel.ProcessingStatusInfo{BotID: "bot-1", ReplyTarget: "chat-1", SourceMessageID: "om_2"}
 

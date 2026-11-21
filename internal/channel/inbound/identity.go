@@ -173,18 +173,8 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 	state.Identity.DisplayName = displayName
 	state.Identity.AvatarURL = avatarURL
 
-	// Owner bypass — owner messages always pass identity resolution.
-	if r.policy != nil && strings.TrimSpace(state.Identity.UserID) != "" {
-		ownerUserID, err := r.policy.BotOwnerUserID(ctx, botID)
-		if err != nil {
-			return state, err
-		}
-		if strings.TrimSpace(ownerUserID) == strings.TrimSpace(state.Identity.UserID) {
-			return state, nil
-		}
-	}
-
-	// Non-owner messages pass identity resolution; downstream ACL decides allow/deny.
+	// Owner and non-owner messages alike pass identity resolution; downstream
+	// ACL decides allow/deny.
 	return state, nil
 }
 

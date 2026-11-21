@@ -178,9 +178,9 @@ export function appUpdateAvailable(item: Pick<AppItem, 'available_revision' | 'r
   return !!available && available !== (item.revision ?? '')
 }
 
-/** Drives the tab count badge: Apps the user should act on. */
+/** Drives the tab count badge: Apps whose installation failed or is incomplete. */
 export function appNeedsAttention(item: AppItem): boolean {
-  return item.status === 'partial' || item.status === 'failed' || appHasUpdates(item)
+  return item.status === 'partial' || item.status === 'failed'
 }
 
 /** Dependencies of the App with a newer version known. */

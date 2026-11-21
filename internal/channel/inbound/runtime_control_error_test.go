@@ -16,7 +16,7 @@ import (
 // message's result record.
 func TestRuntimeControlErrorIsAnsweredAndReturned(t *testing.T) {
 	t.Parallel()
-	processor := NewChannelInboundProcessor(nil, nil, nil, nil, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(nil, nil, nil, nil, nil, nil, nil)
 	msg := channel.InboundMessage{Channel: channel.ChannelType("telegram"), ReplyTarget: "chat"}
 	en := i18n.New("en")
 	for _, tc := range []struct {

@@ -28,7 +28,7 @@ func TestProviderStatusRejectsExitNodeWithUserspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if status.State != netctl.StatusStateNeedsConfig {
+	if status.State != netctl.OverlayStateNeedsConfig {
 		t.Fatalf("expected needs config, got %s", status.State)
 	}
 	if !strings.Contains(status.Description, "userspace=false") {
@@ -50,38 +50,33 @@ func TestProviderStatusAllowsExitNodeWithKernelTUN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if status.State != netctl.StatusStateReady {
+	if status.State != netctl.OverlayStateReady {
 		t.Fatalf("expected ready, got %s: %s", status.State, status.Description)
 	}
 }
 
-func TestNativeDriverBuildSpecExitNodeArgs(t *testing.T) {
+func TestNativeDriverBuildSpecRunsTailscaledDirectly(t *testing.T) {
 	driver := newNativeDriver(netctl.BotOverlayConfig{
 		Enabled:  true,
 		Provider: "tailscale",
-		Config: map[string]any{
-			"auth_key":  "tskey-test",
-			"userspace": false,
-		},
-	}, nil, t.TempDir())
-	spec, err := driver.buildSpec(netctl.AttachmentRequest{
-		BotID: "bot-1",
-		Overlay: netctl.BotOverlayConfig{
-			Enabled:  true,
-			Provider: "tailscale",
-			Config: map[string]any{
-				"exit_node": "100.64.0.10",
-			},
-		},
-	})
+		Config:   map[string]any{"auth_key": "tskey-test", "exit_node": "100.64.0.10"},
+	}, nil, t.TempDir(), nil)
+	spec, err := driver.buildSpec(netctl.AttachmentRequest{BotID: "bot-1"})
 	if err != nil {
 		t.Fatalf("buildSpec returned error: %v", err)
 	}
-	if spec.ProxyAddress != "" {
-		t.Fatalf("expected no explicit proxy address in transparent mode, got %q", spec.ProxyAddress)
+	if len(spec.Cmd) == 0 || spec.Cmd[0] != "tailscaled" {
+		t.Fatalf("sidecar must run tailscaled, got %q", spec.Cmd)
 	}
-	if env := strings.Join(spec.Env, " "); !strings.Contains(env, "--exit-node=100.64.0.10") {
-		t.Fatalf("expected exit node arg in env, got %q", env)
+	// Login and preferences go through the LocalAPI, so neither the auth key
+	// nor the exit node may leak into the process spec.
+	for _, part := range append(append([]string{}, spec.Cmd...), spec.Env...) {
+		if strings.Contains(part, "tskey-test") || strings.Contains(part, "100.64.0.10") {
+			t.Fatalf("config value leaked into sidecar spec: %q", part)
+		}
+	}
+	if spec.ProxyAddress != "" {
+		t.Fatalf("expected no proxy address in transparent mode, got %q", spec.ProxyAddress)
 	}
 }
 
@@ -95,7 +90,7 @@ func TestNativeDriverBuildSpecSocks5Enabled(t *testing.T) {
 			"socks5_enabled": true,
 			"socks5_port":    float64(1055),
 		},
-	}, nil, t.TempDir())
+	}, nil, t.TempDir(), nil)
 	spec, err := driver.buildSpec(netctl.AttachmentRequest{BotID: "bot-1", Overlay: netctl.BotOverlayConfig{Enabled: true, Provider: "tailscale", Config: map[string]any{}}})
 	if err != nil {
 		t.Fatalf("buildSpec returned error: %v", err)
@@ -103,8 +98,8 @@ func TestNativeDriverBuildSpecSocks5Enabled(t *testing.T) {
 	if !strings.Contains(spec.ProxyAddress, "socks5://") {
 		t.Fatalf("expected socks5 proxy address, got %q", spec.ProxyAddress)
 	}
-	if env := strings.Join(spec.Env, " "); !strings.Contains(env, "TS_SOCKS5_SERVER=:1055") {
-		t.Fatalf("expected socks5 server env, got %q", env)
+	if cmd := strings.Join(spec.Cmd, " "); !strings.Contains(cmd, "--socks5-server=:1055") || !strings.Contains(cmd, "--tun=userspace-networking") {
+		t.Fatalf("expected userspace socks5 flags, got %q", cmd)
 	}
 }
 
@@ -123,7 +118,7 @@ func TestNativeDriverListNodesFiltersExitNodes(t *testing.T) {
 		Config: map[string]any{
 			"exit_node": "100.64.0.10",
 		},
-	}, nil, tempDir)
+	}, nil, tempDir, nil)
 	socketPath := filepath.Join(tempDir, "bot-1", "tailscale", "run", "tailscaled.sock")
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o750); err != nil {
 		t.Fatalf("mkdir socket dir: %v", err)
@@ -187,5 +182,22 @@ func startUnixJSONServer(t *testing.T, socketPath string, payload map[string]any
 	return func() {
 		_ = server.Close()
 		_ = listener.Close()
+	}
+}
+
+func TestNativeDriverBuildSpecGivesEachBotItsOwnResolvConf(t *testing.T) {
+	root := t.TempDir()
+	driver := newNativeDriver(netctl.BotOverlayConfig{Enabled: true, Provider: "tailscale", Config: map[string]any{}}, nil, root, nil)
+	spec, err := driver.buildSpec(netctl.AttachmentRequest{BotID: "bot-1", Overlay: netctl.BotOverlayConfig{Enabled: true, Provider: "tailscale", Config: map[string]any{}}})
+	if err != nil {
+		t.Fatalf("buildSpec returned error: %v", err)
+	}
+	if want := filepath.Join(root, "bot-1", "tailscale-resolv.conf"); spec.ResolvConfPath != want {
+		t.Fatalf("ResolvConfPath = %q, want %q", spec.ResolvConfPath, want)
+	}
+	for _, m := range spec.Mounts {
+		if rel, err := filepath.Rel(m.Source, spec.ResolvConfPath); err == nil && !strings.HasPrefix(rel, "..") {
+			t.Fatalf("ResolvConfPath %q is reachable through mount %q", spec.ResolvConfPath, m.Destination)
+		}
 	}
 }

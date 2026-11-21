@@ -418,7 +418,7 @@ func TestCommandFieldTranslation(t *testing.T) {
 	cmd := turn.StartTurnCommand{
 		TeamID: "t", Mode: turn.ModeChat,
 		BotID: "bot", ChatID: "chat", ThreadID: "sess", RouteID: "route",
-		Token: "tok", ChatToken: "ctok", UserID: "u", SourceChannelIdentityID: "ci",
+		ActorAccountID: "owner", UserID: "u", SourceChannelIdentityID: "ci",
 		DisplayName: "dn", ExternalMessageID: "ext", EventID: "ev",
 		Query: "q", ModelQuery: "mq", UserMessageKind: "kind", UserVisibleText: "uvt",
 		Attachments: []turn.Attachment{{Type: "image", ContentHash: "ch1", Name: "a.png"}},
@@ -448,8 +448,7 @@ func TestCommandFieldTranslation(t *testing.T) {
 		"RunID":                     {got.RunID, "run-1"},
 		"TurnID":                    {got.TurnID, "turn-1"},
 		"RouteID":                   {got.RouteID, "route"},
-		"Token":                     {got.Token, "tok"},
-		"ChatToken":                 {got.ChatToken, "ctok"},
+		"ActorAccountID":            {got.ActorAccountID, "owner"},
 		"UserID":                    {got.UserID, "u"},
 		"SourceChannelIdentityID":   {got.SourceChannelIdentityID, "ci"},
 		"DisplayName":               {got.DisplayName, "dn"},
@@ -523,7 +522,7 @@ func TestBoundaryValuesPassThrough(t *testing.T) {
 		Name: "skill", Description: "desc", Content: "body", SourceKind: "registry",
 		OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
 	}}
-	request := chatRequestFromCommand(turn.StartTurnCommand{
+	request := ChatRequestFromCommand(turn.StartTurnCommand{
 		ReplyAttachments: []turn.Attachment{attachment},
 		Attachments:      []turn.Attachment{attachment},
 		SkillActivation:  activation,

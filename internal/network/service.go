@@ -96,14 +96,14 @@ func (s *Service) StatusBot(ctx context.Context, botID string) (BotStatus, error
 	if !cfg.Enabled {
 		return withWorkspace(BotStatus{
 			Provider:    cfg.Provider,
-			State:       "disabled",
+			State:       OverlayStateDisabled,
 			Title:       "Disabled",
 			Description: "Bot network is disabled.",
 		}, ws), nil
 	}
 	if strings.TrimSpace(cfg.Provider) == "" {
 		return withWorkspace(BotStatus{
-			State:       string(StatusStateNeedsConfig),
+			State:       OverlayStateNeedsConfig,
 			Title:       "Config Required",
 			Description: "Select a network provider for this bot.",
 		}, ws), nil
@@ -116,7 +116,7 @@ func (s *Service) StatusBot(ctx context.Context, botID string) (BotStatus, error
 	if err != nil {
 		return BotStatus{}, err
 	}
-	if providerStatus.State != StatusStateReady {
+	if providerStatus.State != OverlayStateReady {
 		return withWorkspace(botStatusFromProviderStatus(cfg.Provider, providerStatus), ws), nil
 	}
 	if s.overlayRuntimeUnsupported() {
@@ -127,7 +127,7 @@ func (s *Service) StatusBot(ctx context.Context, botID string) (BotStatus, error
 		if errors.Is(err, ErrWorkspaceContainerMissing) {
 			return withWorkspace(BotStatus{
 				Provider:    cfg.Provider,
-				State:       "workspace_missing",
+				State:       OverlayStateWorkspaceMissing,
 				Title:       "Workspace Missing",
 				Description: "The bot workspace has not been created yet. Start the bot once before checking overlay status.",
 			}, ws), nil
@@ -174,7 +174,7 @@ func (s *Service) ExecuteActionBot(ctx context.Context, botID, actionID string, 
 	if err != nil {
 		return providerExec, err
 	}
-	if providerExec.Status.State != StatusStateReady {
+	if providerExec.Status.State != OverlayStateReady {
 		return providerExec, nil
 	}
 	if _, ensureErr := s.ensureOverlayBot(ctx, botID, cfg); ensureErr != nil && !errors.Is(ensureErr, ErrWorkspaceContainerMissing) {
@@ -185,7 +185,7 @@ func (s *Service) ExecuteActionBot(ctx context.Context, botID, actionID string, 
 		return providerExec, statusErr
 	}
 	providerExec.Status = ProviderStatus{
-		State:       StatusState(botStatus.State),
+		State:       botStatus.State,
 		Title:       botStatus.Title,
 		Description: firstNonEmptyString(botStatus.Description, botStatus.Message),
 		Details:     cloneMap(botStatus.Details),
@@ -201,26 +201,37 @@ func (s *Service) executeLogout(ctx context.Context, botID string, cfg BotOverla
 		return ProviderActionExecution{}, err
 	}
 	if s.networkStateRoot != "" && strings.TrimSpace(cfg.Provider) != "" {
-		stateDir := filepath.Join(s.networkStateRoot, "network", botID, cfg.Provider)
-		if err := os.RemoveAll(stateDir); err != nil {
-			s.logger.WarnContext(ctx, "failed to wipe network state directory on logout",
-				slog.String("bot_id", botID),
-				slog.String("provider", cfg.Provider),
-				slog.Any("error", err))
+		botDir := filepath.Join(s.networkStateRoot, "network", botID)
+		// The client's state directory, plus the files Memoh keeps for the
+		// provider next to it (named "<provider>-*"), such as a pending login.
+		paths, _ := filepath.Glob(filepath.Join(botDir, cfg.Provider+"-*"))
+		for _, path := range append(paths, filepath.Join(botDir, cfg.Provider)) {
+			if err := os.RemoveAll(path); err != nil {
+				s.logger.WarnContext(ctx, "failed to wipe network state on logout",
+					slog.String("bot_id", botID),
+					slog.String("provider", cfg.Provider),
+					slog.String("path", path),
+					slog.Any("error", err))
+			}
 		}
 	}
 	return ProviderActionExecution{
 		ActionID: "logout",
 		Status: ProviderStatus{
-			State:       StatusStateNeedsConfig,
+			State:       OverlayStateNeedsConfig,
 			Title:       "Logged Out",
 			Description: "SD-WAN overlay has been stopped and state cleared.",
 		},
 	}, nil
 }
 
+// ReconcileBot moves a bot from its previous network config to the next one.
+// The sidecar is only torn down when the provider changes or networking is
+// turned off; within the same provider the driver recreates the sidecar if
+// its process settings changed and applies the rest through the client API.
 func (s *Service) ReconcileBot(ctx context.Context, botID string, previous, next BotOverlayConfig) error {
-	if previous.Enabled && strings.TrimSpace(previous.Provider) != "" {
+	sameProvider := next.Enabled && strings.TrimSpace(next.Provider) == strings.TrimSpace(previous.Provider)
+	if previous.Enabled && strings.TrimSpace(previous.Provider) != "" && !sameProvider {
 		s.logger.InfoContext(ctx, "detach previous overlay", slog.String("bot_id", botID), slog.String("provider", previous.Provider))
 		if err := s.detachOverlayBot(ctx, botID, previous); err != nil && !errors.Is(err, ErrWorkspaceContainerMissing) {
 			return err
@@ -306,32 +317,42 @@ func composeBotStatus(cfg BotOverlayConfig, overlay OverlayStatus) BotStatus {
 		Details:      cloneMap(overlay.Details),
 	}
 	switch overlay.State {
-	case "ready":
+	case OverlayStateReady:
 		status.Title = "Connected"
 		status.Description = "SD-WAN overlay is running and attached."
-	case "needs_login":
+	case OverlayStateNeedsLogin:
 		status.Title = "Login Required"
-		status.Description = "Open the authentication URL to complete login."
-	case "starting":
+		status.Description = firstNonEmptyString(overlay.Message, "Open the authentication URL to complete login.")
+	case OverlayStateStarting:
 		status.Title = "Starting"
 		status.Description = firstNonEmptyString(overlay.Message, "SD-WAN overlay is starting.")
-	case "degraded":
+	case OverlayStateDegraded:
 		status.Title = "Degraded"
 		status.Description = firstNonEmptyString(overlay.Message, "SD-WAN overlay is running but reported health issues.")
-	case "stopped":
+	case OverlayStateStopped:
 		status.Title = "Stopped"
 		status.Description = "SD-WAN overlay exists but is not running."
-	case "missing":
+	case OverlayStateMissing:
 		status.Title = "Not Attached"
 		status.Description = "SD-WAN overlay is not attached yet. Start the bot workspace first."
-	case "unsupported":
+	case OverlayStateUnsupported:
 		status.Title = "Unsupported"
 		status.Description = firstNonEmptyString(overlay.Message, "Provider-backed network is not supported by the current runtime backend.")
-	case "disabled":
+	case OverlayStateDisabled:
 		status.Title = "Disabled"
 		status.Description = "Bot network is disabled."
+	case OverlayStateUnauthorized:
+		status.Title = "Credentials Rejected"
+		status.Description = firstNonEmptyString(overlay.Message, "The network provider rejected the credentials.")
+	case OverlayStateNeedsConfig:
+		status.Title = "Config Required"
+		status.Description = firstNonEmptyString(overlay.Message, "The network provider configuration is incomplete.")
+	case OverlayStateWorkspaceMissing:
+		status.Title = "Workspace Missing"
+		status.Description = "The bot workspace has not been created yet."
 	default:
-		status.Title = strings.ToUpper(firstNonEmptyString(overlay.State, "unknown"))
+		status.State = OverlayStateUnknown
+		status.Title = "Unknown"
 		status.Description = firstNonEmptyString(overlay.Message, "Overlay status is unavailable.")
 	}
 	return status
@@ -378,7 +399,7 @@ func (s *Service) overlayRuntimeUnsupported() bool {
 func unsupportedOverlayStatus(cfg BotOverlayConfig) OverlayStatus {
 	return OverlayStatus{
 		Provider: cfg.Provider,
-		State:    "unsupported",
+		State:    OverlayStateUnsupported,
 		Message:  "Provider-backed network sidecars are not supported on the current runtime backend.",
 	}
 }
@@ -386,7 +407,7 @@ func unsupportedOverlayStatus(cfg BotOverlayConfig) OverlayStatus {
 func botStatusFromProviderStatus(provider string, status ProviderStatus) BotStatus {
 	return BotStatus{
 		Provider:    provider,
-		State:       string(status.State),
+		State:       status.State,
 		Title:       status.Title,
 		Description: status.Description,
 		Details:     cloneMap(status.Details),

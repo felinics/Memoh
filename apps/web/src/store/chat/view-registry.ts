@@ -25,6 +25,10 @@ export interface ChatViewEntry {
   attachedPanelIds: Set<string>
   visiblePanelIds: Set<string>
   initialized: boolean
+  // True when the first history load failed and the view has nothing to show.
+  // Without it that state is indistinguishable from an empty session once the
+  // loading mask clears. Any applied history clears it.
+  initialLoadFailed: Ref<boolean>
   workspaceTargetId: Ref<string>
   workspaceTargetSnapshot: Ref<ChatWorkspaceTargetSnapshot | null>
   workspaceTargetSelectionSource: Ref<ChatWorkspaceTargetSelectionSource>
@@ -156,6 +160,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       attachedPanelIds: new Set<string>(),
       visiblePanelIds: new Set<string>(),
       initialized: false,
+      initialLoadFailed: ref(false),
       workspaceTargetId: ref(''),
       workspaceTargetSnapshot: ref(null),
       workspaceTargetSelectionSource: ref('unset'),
@@ -170,6 +175,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     }
     transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp, refreshToken) => {
       view.initialized = true
+      view.initialLoadFailed.value = false
       // A mark that landed mid-refresh is not covered by the history this
       // refresh fetched — keep the flag so the next revisit still masks.
       if (refreshToken === undefined || refreshToken === view.staleMarkVersion) {

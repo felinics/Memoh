@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { CalloutBanner, ConfirmPopover, InlineLoadingRow, MetricReadout, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { until } from '@vueuse/core'
+import { useVisiblePoll } from '@/composables/useVisiblePoll'
 import { Play, AlertCircle, ChevronRight } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
@@ -24,6 +25,7 @@ import {
   type HandlersListSnapshotsResponse,
 } from '@memohai/sdk'
 import { useBotQuery } from '@/composables/api/useBot'
+import { containerLayerProgressPercent } from '@/composables/api/container-stream-events'
 import {
   postBotsByBotIdContainerStream,
   type ContainerCreateLayerStatus,
@@ -106,17 +108,9 @@ interface CreateProgress {
 }
 const createProgress = ref<CreateProgress | null>(null)
 
-const createProgressPercent = computed(() => {
-  const layers = createProgress.value?.layers
-  if (!layers || layers.length === 0) return 0
-  let totalOffset = 0
-  let totalSize = 0
-  for (const l of layers) {
-    totalOffset += l.offset
-    totalSize += l.total
-  }
-  return totalSize > 0 ? Math.round((totalOffset / totalSize) * 100) : 0
-})
+const createProgressPercent = computed(() =>
+  containerLayerProgressPercent(createProgress.value?.layers),
+)
 
 const capabilitiesStore = useCapabilitiesStore()
 const routeIdentifier = computed(() => route.params.botName as string)
@@ -760,7 +754,7 @@ const containerTaskText = computed(() => {
 })
 
 function formatDate(value: string | undefined): string {
-  return formatDateTime(value, { fallback: '-' })
+  return formatDateTime(value, { fallback: '-', locale: locale.value })
 }
 
 function snapshotCreatedAt(value: BotContainerSnapshot) {
@@ -886,50 +880,21 @@ watch([containerMissing, rememberedCreateGPU], ([missing, remembered]) => {
   createGPUPrefilled.value = true
 }, { immediate: true })
 
-// Keep usage fresh on its own. We poll the metrics endpoint on a steady cadence,
-// but only when the user can actually see it (Workspace tab + page visible) and
-// when nothing else is mid-flight, so the poll never fights an in-progress action.
+// Keep usage fresh on its own. Poll metrics while the Workspace tab is active,
+// the page is visible, and no container operation is mid-flight.
 const METRICS_POLL_INTERVAL_MS = 10_000
-let metricsPollTimer: ReturnType<typeof setInterval> | null = null
-
-function pageVisible() {
-  return typeof document === 'undefined' || document.visibilityState === 'visible'
-}
-
-function canPollMetrics() {
-  return (
-    activeTab.value === 'container'
-    && !!botId.value
-    && !!containerInfo.value
-    && !containerBusy.value
-    && pageVisible()
-  )
-}
-
-function stopMetricsPoll() {
-  if (metricsPollTimer !== null) {
-    clearInterval(metricsPollTimer)
-    metricsPollTimer = null
-  }
-}
-
-function startMetricsPoll() {
-  stopMetricsPoll()
-  metricsPollTimer = setInterval(() => {
-    if (canPollMetrics()) void refreshContainerMetricsSilently()
-  }, METRICS_POLL_INTERVAL_MS)
-}
-
-// Returning to the tab/window shouldn't wait a full interval for fresh numbers.
-function handleVisibilityChange() {
-  if (pageVisible() && canPollMetrics()) void refreshContainerMetricsSilently()
-}
-
-onMounted(() => document.addEventListener('visibilitychange', handleVisibilityChange))
-onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  stopMetricsPoll()
-})
+useVisiblePoll(
+  () => refreshContainerMetricsSilently(),
+  METRICS_POLL_INTERVAL_MS,
+  {
+    enabled: () => (
+      activeTab.value === 'container'
+      && !!botId.value
+      && !!containerInfo.value
+      && !containerBusy.value
+    ),
+  },
+)
 
 // This page instance is kept alive across bots: without the reset, a removal
 // still shown from the previous bot would be followed and finished on this one.
@@ -942,15 +907,8 @@ watch(botId, () => {
 }, { flush: 'sync' })
 
 watch([activeTab, botId], ([tab]) => {
-  if (!botId.value) {
-    stopMetricsPoll()
-    return
-  }
-  if (tab === 'container') {
+  if (botId.value && tab === 'container') {
     void loadContainerData(true)
-    startMetricsPoll()
-  } else {
-    stopMetricsPoll()
   }
 }, { immediate: true })
 </script>
@@ -980,7 +938,7 @@ watch([activeTab, botId], ([tab]) => {
         v-if="botLifecyclePending"
         class="mb-8"
       >
-        <div class="flex items-center gap-3 px-4 py-3">
+        <div class="flex items-center gap-3 py-3">
           <AlertCircle class="size-4 shrink-0 text-muted-foreground" />
           <p class="text-sm text-muted-foreground">
             {{ $t('bots.container.botNotReady') }}
@@ -996,7 +954,7 @@ watch([activeTab, botId], ([tab]) => {
              (flex-col, py-12) title + description + single CTA that fills the card
              frame. A SettingsRow is a horizontal label↔control pair; this is a
              different relationship (a vertical empty state), so it stays hand-written. -->
-        <div class="flex min-h-[3.75rem] flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+        <div class="flex min-h-[3.75rem] flex-col items-center justify-center gap-4 py-12 text-center">
           <div>
             <p class="text-sm font-medium text-foreground">
               {{ $t('bots.container.refactored.emptyTitle') }}
@@ -1164,7 +1122,7 @@ watch([activeTab, botId], ([tab]) => {
           <SettingsSection v-else>
             <!-- ui-allow-shape: single empty-state message, not a label/control row;
                  SettingsSection owns the surface in both themes. -->
-            <div class="flex min-h-[3.75rem] items-center px-4 py-3 text-sm text-muted-foreground">
+            <div class="flex min-h-[3.75rem] items-center py-3 text-sm text-muted-foreground">
               {{ runtimeMetricsNote || $t('bots.container.refactored.runtimeUnavailable') }}
             </div>
           </SettingsSection>
@@ -1531,7 +1489,7 @@ watch([activeTab, botId], ([tab]) => {
               class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border"
             >
               <!-- ui-allow-shape: a row INSIDE a self-contained bordered card
-                   (px-4 within the card, not the section's mx-4). SettingsRow is a
+                   (px-4 within the card, not the section's inset). SettingsRow is a
                    direct child of a section surface; these snapshot rows live one
                    level in, inside their own rounded frame — a different container
                    relationship, so they stay hand-written. -->

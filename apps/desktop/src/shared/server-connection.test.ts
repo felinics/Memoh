@@ -8,10 +8,10 @@ import {
 
 describe('desktop server connection', () => {
   it('normalizes local and remote server addresses', () => {
-    expect(normalizeBaseUrl('localhost:18080/')).toBe('http://localhost:18080')
-    expect(normalizeBaseUrl('memoh.example.com')).toBe('https://memoh.example.com')
+    expect(normalizeBaseUrl('localhost:18080/')).toBe('http://localhost:18080/api')
+    expect(normalizeBaseUrl('memoh.example.com')).toBe('https://memoh.example.com/api')
     expect(normalizeBaseUrl('https://memoh.example.com/path?query=1#hash'))
-      .toBe('https://memoh.example.com/path')
+      .toBe('https://memoh.example.com/path/api')
   })
 
   it('lets explicit launch configuration override a persisted profile', () => {
@@ -19,14 +19,14 @@ describe('desktop server connection', () => {
       proxy: 'http://localhost:18080',
       profile: 'http://141.98.75.24:28083',
       fallback: 'http://localhost:8080',
-    })).toBe('http://localhost:18080')
+    })).toBe('http://localhost:18080/api')
   })
 
   it('uses the persisted profile when no launch override is present', () => {
     expect(resolveDesktopBaseUrl({
       profile: 'https://memoh.example.com',
       fallback: 'http://localhost:8080',
-    })).toBe('https://memoh.example.com')
+    })).toBe('https://memoh.example.com/api')
   })
 
   it('keeps a verified in-app server switch for the rest of the process', () => {
@@ -35,7 +35,7 @@ describe('desktop server connection', () => {
       proxy: 'http://localhost:18081',
       profile: 'http://localhost:18080',
       fallback: 'http://localhost:8080',
-    })).toBe('http://localhost:18080')
+    })).toBe('http://localhost:18080/api')
   })
 
   it('rejects empty, malformed, and unsupported addresses', () => {
@@ -51,8 +51,8 @@ describe('desktop server connection', () => {
     const success = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ status: 'ok', version: '0.15.0' }), { status: 200 }),
     )
-    await expect(probeServerBaseUrl('https://memoh.example.com', success))
-      .resolves.toEqual({ ok: true, baseUrl: 'https://memoh.example.com' })
+    await expect(probeServerBaseUrl('https://memoh.example.com/api', success))
+      .resolves.toEqual({ ok: true, baseUrl: 'https://memoh.example.com/api' })
     expect(success).toHaveBeenCalledWith('https://memoh.example.com/api/ping', expect.objectContaining({
       headers: { Accept: 'application/json' },
     }))

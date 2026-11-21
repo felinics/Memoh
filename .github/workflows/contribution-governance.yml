@@ -2,46 +2,40 @@ name: Contribution governance
 
 on:
   issues:
-    types: [opened, edited, reopened, labeled, unlabeled]
+    types: [opened, edited, reopened]
   pull_request_target:
-    types: [opened, edited, reopened, synchronize, ready_for_review, labeled, unlabeled]
-  workflow_run:
-    workflows: [ESLint, Go CI, Rust CI, Remote Runtime CI, Migrations, Installer CI, Electron CI, Docker PR, Contribution policy CI]
-    types: [requested, completed]
-  schedule:
-    - cron: '*/5 * * * *'
+    types: [opened, edited, reopened, synchronize, ready_for_review]
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to reconcile; leave empty for new open PRs'
-        required: false
+        description: 'Pull request number to inspect'
+        required: true
         type: string
 
 permissions:
   contents: read
   issues: write
   pull-requests: write
-  statuses: write
-  actions: write
 
-# Coalesce events for the same item, without dropping unrelated issue/PR events.
+# Coalesce rapid edits or pushes for the same issue/PR and cancel superseded runs.
 concurrency:
-  group: contribution-governance-${{ github.event.issue.number || github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event_name }}
-  cancel-in-progress: false
+  group: contribution-governance-${{ github.event.issue.number || github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   govern:
-    if: github.repository == 'felinics/Memoh'
+    if: github.repository == 'felinics/Memoh' && (github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+          sparse-checkout: .github
       - uses: actions/github-script@v7
         with:
-          retries: 3
+          retries: 2
           script: |
             const { run } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/contribution-governance.mjs`);
             await run({ github, context, core });

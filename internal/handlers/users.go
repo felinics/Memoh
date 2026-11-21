@@ -15,11 +15,9 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/acl"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
-	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/channel"
@@ -113,13 +111,13 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup.PUT("/:id", h.UpdateBot)
 	botGroup.PUT("/:id/owner", h.TransferBotOwner)
 	botGroup.DELETE("/:id", h.DeleteBot)
+	botGroup.GET("/:id/channels", h.ListBotChannelConfigs)
 	botGroup.GET("/:id/channel/:platform", h.GetBotChannelConfig)
 	botGroup.PUT("/:id/channel/:platform", h.UpsertBotChannelConfig)
 	botGroup.PATCH("/:id/channel/:platform/status", h.UpdateBotChannelStatus)
 	botGroup.POST("/:id/channel/:platform/webhook-endpoint", h.SetBotChannelWebhookEndpoint)
 	botGroup.DELETE("/:id/channel/:platform", h.DeleteBotChannelConfig)
 	botGroup.POST("/:id/channel/:platform/send", h.SendBotMessage)
-	botGroup.POST("/:id/channel/:platform/send_chat", h.SendBotMessageSession)
 }
 
 // GetMe godoc
@@ -834,39 +832,11 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 }
 
 func validateACPManagedConfig(metadata map[string]any) error {
-	for _, item := range acpprofile.List() {
-		profile, ok := acpprofile.Lookup(item.ID)
-		if !ok {
-			continue
-		}
-		setup := acpprofile.ParseAgentSetup(metadata, profile.ID)
-		if !setup.Enabled {
-			continue
-		}
-		mode := acpclient.SetupMode(setup.Mode)
-		if !acpProfileSupportsSetupMode(profile, mode) {
-			return fmt.Errorf("%s does not support setup mode %q", profile.DisplayName, mode)
-		}
-		if mode == acpclient.SetupModeSelf {
-			continue
-		}
-		if err := acpclient.ValidateManagedACPConfig(profile, setup, mode); err != nil {
-			return err
-		}
+	setup := acpprofile.ParseAgentSetup(metadata, acpprofile.AgentACPID)
+	if !setup.Enabled {
+		return nil
 	}
-	return nil
-}
-
-func acpProfileSupportsSetupMode(profile acpprofile.Profile, mode acpclient.SetupMode) bool {
-	if len(profile.SetupModes) == 0 {
-		return true
-	}
-	for _, supported := range profile.SetupModes {
-		if strings.EqualFold(strings.TrimSpace(supported), string(mode)) {
-			return true
-		}
-	}
-	return false
+	return acpprofile.CheckSetup(setup)
 }
 
 func acpRuntimeMetadataChanged(existing, pending map[string]any) bool {
@@ -985,6 +955,47 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 		"id":     botID,
 		"status": bots.BotStatusDeleting,
 	})
+}
+
+type ListBotChannelsResponse struct {
+	Items []channel.ChannelConfig `json:"items" validate:"required"`
+}
+
+// ListBotChannelConfigs godoc
+// @Summary List bot channel configs
+// @Description List all configured channel integrations for a bot
+// @Tags bots
+// @Param id path string true "Bot ID"
+// @Success 200 {object} ListBotChannelsResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{id}/channels [get].
+func (h *UsersHandler) ListBotChannelConfigs(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
+	if err != nil {
+		return err
+	}
+	if h.channelStore == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "channel store not configured")
+	}
+	items, err := h.channelStore.ListConfigs(c.Request().Context(), bot.ID)
+	if err != nil {
+		return errs.Wrap(err, "list bot channel configs")
+	}
+	if items == nil {
+		items = []channel.ChannelConfig{}
+	}
+	return c.JSON(http.StatusOK, ListBotChannelsResponse{Items: items})
 }
 
 // GetBotChannelConfig godoc
@@ -1283,66 +1294,6 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	req.Message = channel.WithoutMarkdownMedia(req.Message)
 	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, req); err != nil {
 		return sendChannelMessageHTTPError(err, true)
-	}
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// SendBotMessageSession godoc
-// @Summary Send message via bot channel session token
-// @Description Send a message using a session-scoped token (reply only)
-// @Tags bots
-// @Param id path string true "Bot ID"
-// @Param platform path string true "Channel platform"
-// @Param payload body channel.SendRequest true "Send payload"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} server.Problem
-// @Failure 401 {object} server.Problem
-// @Failure 403 {object} server.Problem
-// @Failure 500 {object} server.Problem
-// @Failure 503 {object} server.Problem
-// @Router /bots/{id}/channel/{platform}/send_chat [post].
-func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
-	chatToken, err := auth.ChatTokenFromContext(c)
-	if err != nil {
-		return err
-	}
-	botID, err := httpx.RequiredParam(c, "id")
-	if err != nil {
-		return err
-	}
-	if chatToken.BotID != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "token bot mismatch")
-	}
-	if h.channelRuntime == nil || h.routeService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "services not configured")
-	}
-	route, err := h.routeService.GetByID(c.Request().Context(), chatToken.RouteID)
-	if err != nil {
-		if accountNotFound(err) {
-			return apperror.Wrap(apperror.CodeChannelRouteNotFound, err, nil)
-		}
-		return errs.Wrap(err, "get chat route")
-	}
-	if strings.TrimSpace(route.ReplyTarget) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("reply target missing in route"))
-	}
-	channelType, err := h.registry.ParseChannelType(route.Platform)
-	if err != nil {
-		return errs.Wrap(err, "route platform")
-	}
-
-	var req channel.SendRequest
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	if req.Message.IsEmpty() {
-		return apperror.FieldRequired("message")
-	}
-	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, channel.SendRequest{
-		Target:  route.ReplyTarget,
-		Message: channel.WithoutMarkdownMedia(req.Message),
-	}); err != nil {
-		return sendChannelMessageHTTPError(err, false)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }

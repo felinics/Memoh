@@ -10,6 +10,12 @@ vi.mock('@memohai/sdk', () => ({
   putBotsByBotIdScheduleById: vi.fn().mockResolvedValue({}),
 }))
 vi.mock('@/utils/api-error', () => ({ resolveApiErrorMessage: () => 'Save failed' }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('@/composables/api/useBotChannels', async () => {
+  const { ref } = await import('vue')
+  return { useBotChannels: () => ({ data: ref([]) }) }
+})
+vi.mock('@/components/channel-icon/index.vue', () => ({ default: defineComponent({ setup: () => () => null }) }))
 vi.mock('./schedule-execution-fields.vue', () => ({
   default: defineComponent({ setup(_, { expose }) { expose({ modelSatisfied: true }); return () => null } }),
 }))
@@ -29,12 +35,14 @@ vi.mock('@felinic/ui', () => {
       setup(props, { emit, attrs }) { return () => h('input', { ...attrs, value: props.modelValue, onInput: (event: Event) => emit('update:modelValue', Number((event.target as HTMLInputElement).value)) }) },
     }),
     DialogFooter: slot, SectionGroup: slot, Select: slot, SelectContent: slot, SelectItem: slot,
-    SelectTrigger: slot, SelectValue: slot, SettingsRow: slot, SettingsSection: slot, Switch: slot, TimeInput: slot,
+    SelectTrigger: slot, SelectValue: slot, SettingsRow: slot, SettingsSection: slot, Switch: slot, TimeInput: slot, TextButton: slot,
   }
 })
 
+import { createPinia } from 'pinia'
+import { PiniaColada } from '@pinia/colada'
 import ScheduleEditor from './schedule-editor.vue'
-import { postBotsByBotIdSchedule, putBotsByBotIdScheduleById } from '@memohai/sdk'
+import { getBotsByBotIdSettings, postBotsByBotIdSchedule, putBotsByBotIdScheduleById } from '@memohai/sdk'
 let app: App
 let root: HTMLDivElement
 afterEach(() => { app?.unmount(); root?.remove(); vi.clearAllMocks() })
@@ -42,6 +50,7 @@ async function mount(schedule?: Record<string, unknown>) {
   root = document.createElement('div')
   document.body.append(root)
   app = createApp(ScheduleEditor, { botId: 'bot', mode: schedule ? 'edit' : 'create', schedule })
+  app.use(createPinia()).use(PiniaColada)
   app.mount(root)
   await nextTick()
 }
@@ -91,4 +100,29 @@ it('rejects an out-of-range execution budget', async () => {
   await submit()
   await vi.waitFor(() => expect(root.textContent).toContain('bots.schedule.form.invalidMaxRunMinutes'))
   expect(putBotsByBotIdScheduleById).not.toHaveBeenCalled()
+})
+
+it('creates a schedule that tells its owner only when needed and may reach them on platforms', async () => {
+  await mount()
+  await fill('#sched-name', 'Daily news')
+  await fill('#sched-command', 'Summarize AI news')
+  await submit()
+  await vi.waitFor(() => expect(postBotsByBotIdSchedule).toHaveBeenCalledWith(expect.objectContaining({
+    body: expect.objectContaining({ notify_policy: 'important', contact_via_channels: true }),
+  })))
+})
+
+it('keeps a schedule\'s notification settings through an edit', async () => {
+  await mount({ id: 'schedule', name: 'Backup', command: 'Check', pattern: '0 23 * * *', notify_policy: 'every_run', contact_via_channels: false })
+  await submit()
+  await vi.waitFor(() => expect(putBotsByBotIdScheduleById).toHaveBeenCalledWith(expect.objectContaining({
+    body: expect.objectContaining({ notify_policy: 'every_run', contact_via_channels: false }),
+  })))
+})
+
+it('labels the preview with the timezone the server resolved for the bot', async () => {
+  vi.mocked(getBotsByBotIdSettings).mockResolvedValueOnce({ data: { timezone: '', effective_timezone: 'Asia/Shanghai' } } as never)
+  await mount({ id: 'schedule', name: 'Report', command: 'Summarize', pattern: '0 9 * * 1' })
+  await vi.waitFor(() => expect(root.textContent).toContain('· Asia/Shanghai'))
+  expect(getBotsByBotIdSettings).toHaveBeenCalledWith(expect.objectContaining({ path: { bot_id: 'bot' } }))
 })

@@ -41,4 +41,26 @@ jobs:
         - [ ] Human QA passed
 
     secrets:
-      CLAUDE_CODE_OAUTH_TOKEN	: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  govern:
+    if: github.repository == 'felinics/Memoh'
+    needs: update
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github
+      - uses: actions/github-script@v7
+        with:
+          retries: 2
+          script: |
+            const { governBotPRs } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/contribution-governance.mjs`);
+            await governBotPRs({ github, context, core });

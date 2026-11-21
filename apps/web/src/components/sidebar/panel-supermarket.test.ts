@@ -51,7 +51,7 @@ vi.mock('@pinia/colada', async importOriginal => {
 })
 let app: ReturnType<typeof createApp>
 let root: HTMLDivElement
-let panelProps: { botId: string, canManage: boolean }
+let panelProps: { botId: string, botName?: string, canManage: boolean }
 beforeEach(async () => {
   vi.clearAllMocks()
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
@@ -77,6 +77,15 @@ it('opens the installed app management page from the whole card without a separa
   expect(root.textContent).not.toContain('View details')
   card('Bun').click()
   expect(mocks.push).toHaveBeenCalledWith({ name: 'bot-detail', params: { botName: 'qa-bot' }, query: { tab: 'apps', app: 'memoh/bun' } })
+})
+it('prefers botName slug over botId when navigating from an installed app card', async () => {
+  panelProps.botId = 'bot-uuid-1'
+  panelProps.botName = 'neko'
+  await nextTick()
+  card('Bun').click()
+  expect(mocks.push).toHaveBeenCalledWith({ name: 'bot-detail', params: { botName: 'neko' }, query: { tab: 'apps', app: 'memoh/bun' } })
+  card('Go').click()
+  expect(mocks.push).toHaveBeenCalledWith({ name: 'supermarket-app-detail', params: { registryId: 'memoh', appId: 'go' }, query: { botId: 'bot-uuid-1' } })
 })
 it('opens the market detail from the catalog card and preserves the selected bot', () => {
   card('Go').click()

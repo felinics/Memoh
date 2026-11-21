@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import { inject, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { defineAsyncComponent, defineComponent, h, inject, onBeforeUnmount, onMounted, provide, ref, type AsyncComponentLoader } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -42,14 +42,12 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
 import { normalizeFileManagerPath } from './file-manager-path'
 import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
+import { prefetchLater, whenNetworkQuiet } from '@/lib/idle-prefetch'
+import { withStylesheetRecovery } from '@/lib/chunk-load-error'
 import PanelChat from './dockview/panel-chat.vue'
-import PanelFile from './dockview/panel-file.vue'
-import PanelPreview from './dockview/panel-preview.vue'
-import PanelAsset from './dockview/panel-asset.vue'
-import PanelTerminal from './dockview/panel-terminal.vue'
-import PanelBrowser from './dockview/panel-browser.vue'
-import PanelDisplay from './dockview/panel-display.vue'
-import PanelSchedule from './dockview/panel-schedule.vue'
+import PanelLoading from './dockview/panel-loading.vue'
+import { retryPanelLoadKey } from './dockview/panel-load-state.vue'
+import { PanelLoadFailed } from './dockview/lazy-panel-content'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTab from './dockview/workspace-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
@@ -116,19 +114,89 @@ function handleResize(entry?: ResizeObserverEntry) {
   applyLayoutSize(size)
 }
 
+// The first-entry shell scales in from 1.15 to 1 (pages/main-section).
+// dockview places panels rendered 'always' from page bounding boxes, which
+// include that scale, and re-measures them only when a size changes; a
+// transform changes none. A dock mounted mid-animation (the chat opens at once
+// after sign-in) would keep those panels 1.15x wide and offset until the next
+// resize, so re-measure once an ancestor's transform transition ends.
+const TRANSFORM_PROPERTIES = new Set(['scale', 'transform', 'translate'])
+
+function relayoutAfterAncestorTransform(event: TransitionEvent) {
+  if (!TRANSFORM_PROPERTIES.has(event.propertyName)) return
+  const el = rootEl.value
+  const target = event.target
+  if (!el || !(target instanceof Element) || target === el || !target.contains(el)) return
+  const size = readLayoutSize()
+  if (!size || !api.value) return
+  lastLayoutSize = size
+  api.value.layout(size.width, size.height, true)
+}
+
 // Panel components are looked up by name when panels are added or restored
 // from a serialized layout. dockview-vue types frameworks components as
 // DefineComponent<T> (single generic), which script-setup SFC types do not
 // structurally match, hence the casts.
+//
+// Only the chat panel ships with the workspace, so the chat can render without
+// waiting on the others: the file and asset panels carry the Monaco editor and
+// the terminal carries xterm. The other panel types download in the background
+// once the workspace is up (below), or when a panel of that type is created
+// (opened, or restored from a saved layout) before that. Until its chunk
+// arrives a panel shows PanelLoading (the editor's chunks are about 700KB
+// gzip, several seconds on a slow network), or its failed state if the chunk
+// can't be fetched. dockview passes later params updates as new props, which
+// both wrappers forward once the panel has loaded.
+//
+// After a failed load, mounting the async component again runs its loader
+// again (Vue drops the failed request), and Chrome fetches a dynamic import
+// again after a failed fetch (other browsers not tested). The failed state's
+// Retry button remounts by changing the key, so recovering one panel leaves
+// the others, and any unsaved edits in them, untouched. A chunk removed by a
+// deployment since the page loaded fails on every retry; the failed state
+// also offers a page reload for that (see panel-load-state.vue).
+const lazyPanel = (loader: AsyncComponentLoader) => {
+  const Panel = defineAsyncComponent({
+    loader,
+    loadingComponent: PanelLoading,
+    errorComponent: PanelLoadFailed,
+  })
+  return defineComponent({
+    inheritAttrs: false,
+    setup(_, { attrs }) {
+      const attempt = ref(0)
+      provide(retryPanelLoadKey, () => { attempt.value += 1 })
+      return () => h(Panel, { ...attrs, key: attempt.value })
+    },
+  }) as unknown as VueComponent
+}
+
+// Every panel type is also downloaded in the background, after the small
+// chunks a click is more likely to need (on the web, the settings pages) and
+// only once the workspace's own first requests have finished; see
+// lib/idle-prefetch.ts. Waiting here covers the workspace opening after
+// sign-in, when the rest of the queue may have finished long before. Only the
+// panel shells are downloaded this way: the editor and the terminal sit behind
+// a second boundary inside their panels (see lazy-panel-content.ts) and are
+// fetched when such a panel is first shown.
+// Wrapped with withStylesheetRecovery so a stylesheet that failed during the
+// background download is loaded again when the panel opens or retries.
+const panelLoaders = {
+  file: withStylesheetRecovery(() => import('./dockview/panel-file.vue')),
+  preview: withStylesheetRecovery(() => import('./dockview/panel-preview.vue')),
+  asset: withStylesheetRecovery(() => import('./dockview/panel-asset.vue')),
+  terminal: withStylesheetRecovery(() => import('./dockview/panel-terminal.vue')),
+  browser: withStylesheetRecovery(() => import('./dockview/panel-browser.vue')),
+  display: withStylesheetRecovery(() => import('./dockview/panel-display.vue')),
+  schedule: withStylesheetRecovery(() => import('./dockview/panel-schedule.vue')),
+}
+onMounted(() => {
+  void whenNetworkQuiet().then(() => prefetchLater(Object.values(panelLoaders)))
+})
+
 const panelComponents: Record<string, VueComponent> = {
   chat: PanelChat as unknown as VueComponent,
-  file: PanelFile as unknown as VueComponent,
-  preview: PanelPreview as unknown as VueComponent,
-  asset: PanelAsset as unknown as VueComponent,
-  terminal: PanelTerminal as unknown as VueComponent,
-  browser: PanelBrowser as unknown as VueComponent,
-  display: PanelDisplay as unknown as VueComponent,
-  schedule: PanelSchedule as unknown as VueComponent,
+  ...Object.fromEntries(Object.entries(panelLoaders).map(([type, load]) => [type, lazyPanel(load)])),
 }
 
 const watermarkComponent = WorkspaceWatermark as unknown as VueComponent
@@ -211,9 +279,11 @@ onMounted(() => {
     handleResize(entry)
   })
   if (rootEl.value) resizeObserver.observe(rootEl.value)
+  document.addEventListener('transitionend', relayoutAfterAncestorTransform)
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('transitionend', relayoutAfterAncestorTransform)
   resizeObserver?.disconnect()
   resizeObserver = null
   store.releaseApi()

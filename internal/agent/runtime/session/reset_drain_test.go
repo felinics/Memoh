@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -301,5 +302,41 @@ func TestBeginHistoryResetReleasesDurableLeaseWhenLiveReleaseHangs(t *testing.T)
 	runs.resetMu.Unlock()
 	if releaseErr != nil {
 		t.Fatalf("durable release ran with a spent context: %v", releaseErr)
+	}
+}
+
+// A reset reaching a live run stops it, then closes its processes under the
+// command's own context: the stop ends the run, and closing the processes
+// outlasts it.
+func TestHistoryResetCommandClosesProcessesAfterStoppingTheRun(t *testing.T) {
+	t.Parallel()
+	manager := NewManager(NewMemoryBackend(), Options{
+		OwnerID: "owner-reset-command", StateTTL: time.Minute, OwnerLeaseTTL: time.Second,
+		Ledger: newFakeResetLedger(), Fence: &fakeFence{},
+	})
+	t.Cleanup(func() { _ = manager.Close() })
+	admission := admitResetRaceRun(t, manager)
+	var closeErr error
+	var once sync.Once
+	manager.SetHistoryResetHandler(func(ctx context.Context, _ ResetScope) (func(), error) {
+		once.Do(func() {
+			// The run's own processes take a while to close.
+			select {
+			case <-ctx.Done():
+				closeErr = ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+			_, _ = manager.FinishRun(context.WithoutCancel(ctx), admission.Handle, RunStatusAborted)
+		})
+		return func() {}, nil
+	})
+
+	_, release, err := manager.BeginSessionHistoryReset(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("reset of a live run = %v", err)
+	}
+	release()
+	if closeErr != nil {
+		t.Fatalf("processes closed under a context done with the run: %v", closeErr)
 	}
 }

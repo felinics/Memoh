@@ -168,14 +168,15 @@ func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCal
 // alongside the model-facing result, so callers can persist them on
 // harness-side channels (row metadata) instead of leaking them to the model.
 func (a *Agent) ExecuteToolWithUIMetadata(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, map[string]any, error) {
-	sdkTools, _, _, _, err := a.assembleTools(ctx, cfg, nil, false)
+	assembled, err := a.assembleTools(ctx, cfg, nil, false)
 	if err != nil {
 		return sdk.ToolResultPart{}, nil, fmt.Errorf("assemble tools: %w", err)
 	}
-	sdkTools, _ = decorateReadMediaTools(cfg.Model, sdkTools)
+	sdkTools, _ := decorateReadMediaTools(cfg.Model, assembled.tools)
 	uiMetadata := newToolExecutionMetadataRegistry(nil)
 	sdkTools = uiMetadata.wrapToolUIOutput(sdkTools)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
+	sdkTools = assembled.bridge.Bind(sdkTools)
 	for i := range sdkTools {
 		tool := sdkTools[i]
 		if tool.Name != call.ToolName {
@@ -302,7 +303,10 @@ func prepareProviderAttempt(
 	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
 	dynamicRefs = verifyDynamicRefs(cfg.dynamicInputs, dynamicRefs, params.Messages)
 	snapshot := contextfrag.StepSnapshot{StepIndex: stepIndex}
-	allowance := providerInputAllowance(cfg)
+	// The allowance is what the provider counts; an armed run measures the
+	// request by its estimate, calibrated by what the provider counted for
+	// the run's or the session's latest step.
+	allowance := cfg.contextSwitch.calibrated(providerInputAllowance(cfg))
 	// A step request only grows between compaction events. A request that
 	// still does not fit after compaction ends the run without pruning.
 	if cfg.contextSwitch != nil {
@@ -325,6 +329,7 @@ func prepareProviderAttempt(
 			allowance,
 		))
 	}
+	cfg.contextSwitch.staged(params)
 	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, dynamicRefs)
 	return params
 }
@@ -367,16 +372,25 @@ func failPreparedProviderAttempt(
 	return params
 }
 
+// providerWindow is the context window every provider dispatch of the run
+// is sized for and the output it reserves, whether the plan recorded them or
+// the run assembled its context without a plan.
+func providerWindow(cfg RunConfig) (window, reserve int) {
+	window = cfg.ContextBudgetMaxTokens
+	if plan := cfg.ContextManifest.BudgetPlan; plan != nil {
+		return plan.Window, plan.OutputReserve
+	}
+	if window > 0 {
+		reserve = cfg.GenerationLimits().MaxOutputTokens
+	}
+	return window, reserve
+}
+
 // providerInputAllowance is the input allowance every provider dispatch is
 // checked against: the window minus the output reserve, whether the plan
 // recorded it or the run assembled its context without a plan.
 func providerInputAllowance(cfg RunConfig) int {
-	window, reserve := cfg.ContextBudgetMaxTokens, 0
-	if plan := cfg.ContextManifest.BudgetPlan; plan != nil {
-		window, reserve = plan.Window, plan.OutputReserve
-	} else if window > 0 {
-		reserve = cfg.GenerationLimits().MaxOutputTokens
-	}
+	window, reserve := providerWindow(cfg)
 	if window <= 0 {
 		return 0
 	}
@@ -429,6 +443,20 @@ func aggregateStepUsage(steps []step.Record) sdk.Usage {
 	return total
 }
 
+// assembledTools is one session's tool set. tools holds every executable
+// tool, on-demand ones included, so the execution chain wraps them alike;
+// bridge (nil when nothing loads on demand) keeps the on-demand ones out of
+// the request once that chain is built. usage is the guidance the system
+// prompt carries, usageFrags its fragments, and defs the definitions the
+// request carries.
+type assembledTools struct {
+	tools      []toolexec.Tool
+	usage      string
+	usageFrags []contextfrag.ContextFrag
+	defs       []contextfrag.ToolDefAccounting
+	bridge     *tools.ToolBridge
+}
+
 // assembleTools collects tools from all registered ToolProviders, along with
 // the group-level usage guidance contributed by providers that also implement
 // tools.ToolUsage. Usage guidance is gathered only from providers that actually
@@ -436,14 +464,18 @@ func aggregateStepUsage(steps []step.Record) sdk.Usage {
 // (see tools.ToolUsage). emitter is injected into the session context so that
 // tools targeting the current conversation can push side-effect events
 // (attachments, reactions, speech) directly into the agent stream.
+//
+// Rarely used tool groups load on demand (see tools.ToolBridge): their
+// definitions leave the request, and the guidance of a provider whose tools
+// all load on demand moves with them into tool_describe's result.
 func (a *Agent) assembleTools(
 	ctx context.Context,
 	cfg RunConfig,
 	emitter tools.StreamEmitter,
 	liveStream bool,
-) ([]toolexec.Tool, string, []contextfrag.ContextFrag, []contextfrag.ToolDefAccounting, error) {
+) (assembledTools, error) {
 	if len(a.toolProviders) == 0 {
-		return nil, "", nil, nil, nil
+		return assembledTools{}, nil
 	}
 	skillsMap := make(map[string]tools.SkillDetail, len(cfg.Skills))
 	for _, s := range cfg.Skills {
@@ -465,7 +497,7 @@ func (a *Agent) assembleTools(
 		SessionType:              cfg.SessionType,
 		UserID:                   cfg.Identity.UserID,
 		ChannelIdentityID:        cfg.Identity.ChannelIdentityID,
-		SessionToken:             cfg.Identity.SessionToken,
+		ActorAccountID:           cfg.Identity.ActorAccountID,
 		WorkspaceTargetID:        cfg.Identity.WorkspaceTargetID,
 		WorkspaceTargetKind:      cfg.Identity.WorkspaceTargetKind,
 		WorkspaceTargetName:      cfg.Identity.WorkspaceTargetName,
@@ -496,6 +528,7 @@ func (a *Agent) assembleTools(
 	type usageRegistration struct {
 		provider   tools.ToolUsage
 		capability string
+		toolNames  []string
 	}
 	var usageRegistrations []usageRegistration
 	seenToolNames := make(map[string]struct{})
@@ -540,19 +573,43 @@ func (a *Agent) assembleTools(
 		// contributed tools this session, so guidance and registration share
 		// one gating decision and cannot drift apart.
 		if usageProvider, ok := provider.(tools.ToolUsage); ok {
+			names := make([]string, 0, len(providerTools))
+			for _, tool := range providerTools {
+				names = append(names, tool.Name)
+			}
 			usageRegistrations = append(usageRegistrations, usageRegistration{
 				provider:   usageProvider,
 				capability: firstToolName(providerTools),
+				toolNames:  names,
 			})
 		}
 	}
 	if cfg.ToolApprovalHandler != nil || a.hookService != nil {
 		allTools = markApprovalTools(allTools)
 	}
+	bridge := tools.PlanToolBridge(allTools)
+	if bridge != nil {
+		bridgeTools := bridge.Tools()
+		allTools = append(allTools, bridgeTools...)
+		wireDefs := make([]contextfrag.ToolDefAccounting, 0, len(toolDefs)+len(bridgeTools))
+		for _, def := range toolDefs {
+			if !bridge.Defers(def.Name) {
+				wireDefs = append(wireDefs, def)
+			}
+		}
+		for _, tool := range bridgeTools {
+			wireDefs = append(wireDefs, contextfrag.ToolDefAccountingFor("native", tool))
+		}
+		toolDefs = wireDefs
+	}
 	availableTools := tools.NewAvailableTools(allTools)
 	var usageSections []toolUsageSection
 	for _, registration := range usageRegistrations {
 		if text := strings.TrimSpace(registration.provider.Usage(ctx, session, availableTools)); text != "" {
+			if bridge.DefersAll(registration.toolNames) {
+				bridge.AddUsage(registration.toolNames[0], text)
+				continue
+			}
 			usageSections = append(usageSections, toolUsageSection{
 				capability: registration.capability,
 				text:       text,
@@ -581,8 +638,14 @@ func (a *Agent) assembleTools(
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
-	//nolint:contextcheck // Each tool call reads its own context from its ToolExecContext, not from this assembly.
-	return wrapToolTracing(allTools), usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
+	return assembledTools{
+		//nolint:contextcheck // Each tool call reads its own context from its ToolExecContext, not from this assembly.
+		tools:      wrapToolTracing(allTools),
+		usage:      usage,
+		usageFrags: structuredToolUsage(usageSections, cfg.ContextScope),
+		defs:       toolDefs,
+		bridge:     bridge,
+	}, nil
 }
 
 func appendToolUsageToSystem(system, toolUsage string) string {

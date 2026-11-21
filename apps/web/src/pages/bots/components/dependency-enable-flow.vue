@@ -7,7 +7,7 @@
 // afterwards like anything else installed from the Supermarket. Cancellation,
 // an unavailable workspace or platform, and failed or backgrounded
 // installation all leave the agent disabled.
-import { computed, onBeforeUnmount, onDeactivated, ref, shallowRef } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -60,6 +60,7 @@ const name = computed(() => (item.value ? dependencyDisplayName(item.value) : ''
 
 /** True while the preflight request is in flight (the row shows "Checking…"). */
 const checking = ref(false)
+const active = ref(true)
 
 const workspaceOpen = ref(false)
 const workspaceState = ref<'not_running' | 'missing'>('not_running')
@@ -79,7 +80,7 @@ const workspaceRows = computed<DependencyKvRow[]>(() => [
 async function run(agent: BotagentsBotAgent): Promise<boolean> {
   const declared = agentDependencyRequirement(agent)
   if (!declared) return true
-  if (settle) return false
+  if (!active.value || settle) return false
   return new Promise<boolean>((resolve) => {
     settle = resolve
     requirement.value = declared
@@ -107,7 +108,7 @@ async function preflight() {
   let step
   try {
     const response = await preflightDependencies(props.botId, [declared.dependencyId])
-    if (!settle || currentGeneration !== generation) return
+    if (!active.value || !settle || currentGeneration !== generation) return
     step = resolveEnableFlowStep(declared, response)
   } catch (error) {
     if (currentGeneration !== generation) return
@@ -239,8 +240,15 @@ function onProgressOpenChange(value: boolean) {
   finish(displayed.value?.status === 'done' && displayed.value.result === 'installed')
 }
 
-onDeactivated(() => finish(false))
-onBeforeUnmount(() => finish(false))
+onActivated(() => { active.value = true })
+onDeactivated(() => {
+  active.value = false
+  finish(false)
+})
+onBeforeUnmount(() => {
+  active.value = false
+  finish(false)
+})
 
 defineExpose({ run, checking })
 </script>

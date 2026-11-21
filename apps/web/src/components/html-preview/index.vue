@@ -19,7 +19,6 @@ const themeStyle = ref('')
 // User-authored CSS inside the HTML still wins because it appears later in
 // the document source order (equal specificity → later rule applies).
 function refreshThemeStyle() {
-  if (typeof document === 'undefined') return
   const cs = getComputedStyle(document.documentElement)
   const fg = cs.getPropertyValue('--color-foreground').trim()
   // Match the editor plane so the preview canvas is continuous with its tab.
@@ -85,7 +84,7 @@ const srcdoc = computed(() => themeStyle.value + (props.content ?? ''))
   <div :class="['flex h-full w-full min-h-0 bg-surface-editor', props.class]">
     <iframe
       :srcdoc="srcdoc"
-      sandbox="allow-same-origin"
+      sandbox=""
       class="h-full w-full border-0"
       title="HTML preview"
       referrerpolicy="no-referrer"

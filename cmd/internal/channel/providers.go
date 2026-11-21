@@ -22,7 +22,6 @@ import (
 	acpprofileadapter "github.com/felinics/memoh/internal/agent/adapter/acpprofile"
 	"github.com/felinics/memoh/internal/agent/adapter/channelqueue"
 	"github.com/felinics/memoh/internal/agent/application"
-	"github.com/felinics/memoh/internal/agent/context/compaction"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	audiopkg "github.com/felinics/memoh/internal/audio"
@@ -75,16 +74,14 @@ func providePipeline(log *slog.Logger) *timeline.Pipeline {
 }
 
 func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.EventStore {
-	store := timeline.NewEventStore(log, queries)
-	store.SetReplayArtifactProvider(compaction.NewTimelineArtifactSource(queries))
-	return store
+	return timeline.NewEventStore(log, queries)
 }
 
 func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries, cfg config.Config) *discuss.DiscussDriver {
 	return discuss.NewDiscussDriver(discuss.DiscussDriverDeps{
 		MessageService:     msgService,
 		CursorStore:        eventStore,
-		Artifacts:          compaction.NewTimelineArtifactSource(queries),
+		Checkpoints:        timeline.NewCheckpointSource(log, queries, msgService),
 		Logger:             log,
 		AdmissionMaxTokens: cfg.Agent.EffectiveContextAbsoluteMaxTokens(),
 	})
@@ -206,7 +203,6 @@ func provideChannelRouter(
 	pipeline *timeline.Pipeline,
 	eventStore *timeline.EventStore,
 	discussDriver *discuss.DiscussDriver,
-	cfg config.Config,
 	cmdHandler inbound.CommandHandler,
 	queueHandler inbound.QueueCommandHandler,
 	skillResolver inbound.RequestedSkillResolver,
@@ -224,7 +220,7 @@ func provideChannelRouter(
 	qqAdapter.SetRouteResolver(routeService)
 
 	threadCoordinator := route.NewThreadCoordinator(log, routeService, sessionService)
-	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService, cfg.Auth.JWTSecret, 5*time.Minute)
+	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService)
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{coordinator: threadCoordinator})
 	processor.SetPipeline(pipeline, eventStore, discussDriver)
 	discussDriver.SetTurnService(turnService)
@@ -492,7 +488,6 @@ func (r *settingsDefaultChatRuntime) DefaultChatRuntime(ctx context.Context, bot
 		Runtime:     s.ChatRuntime,
 		ACPAgentID:  s.ChatACPAgentID,
 		ProjectPath: s.ChatACPProjectPath,
-		ProjectMode: s.ChatACPProjectMode,
 	}, nil
 }
 

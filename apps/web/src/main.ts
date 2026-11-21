@@ -13,20 +13,24 @@ import { connectBrowserKeyboardShortcutsLive } from './lib/browser-keyboard-shor
 import { selectWebBindings } from './lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from './composables/useKeyboardCommand'
 import { setupApiClient } from './lib/api-client'
+import { loginRedirectForCurrentRoute, shouldRedirectOnUnauthorized } from './router-guards/return-to'
 import { installFileDropGuard } from './lib/file-drop-guard'
 import { DesktopShellKey } from './lib/desktop-shell'
 import { registerWorkspaceTabCommands } from './pages/home/commands/workspace-tab-commands'
 import { useWorkspaceTabsStore } from './store/workspace-tabs'
 import { useKeyboardShortcutsStore } from './store/keyboard-shortcuts'
 import { createPinia } from 'pinia'
-import i18n from './i18n'
+import i18n, { i18nReady } from './i18n'
 import { PiniaColada } from '@pinia/colada'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import { createQueryCachePersistencePlugin, whenQueryCacheRestored } from './lib/query-cache-persistence'
 import 'katex/dist/katex.min.css'
 
 setupApiClient({
-  onUnauthorized: () => router.replace({ name: 'Login' }),
+  onUnauthorized: () => {
+    if (!shouldRedirectOnUnauthorized(router.currentRoute.value.path)) return
+    void router.replace(loginRedirectForCurrentRoute(router))
+  },
 })
 
 // Before anything can render: an OS file drop that no zone claims would navigate
@@ -68,8 +72,8 @@ const app = createApp(App)
   .use(pinia)
   .use(PiniaColada, {
     plugins: [
-      // Persist whitelisted catalog/config queries across reloads; hydrated
-      // entries revalidate on mount (see lib/query-cache-persistence.ts).
+      // Persist query results across reloads for the first paint; restored
+      // entries refetch on mount (see lib/query-cache-persistence.ts).
       createQueryCachePersistencePlugin(),
     ],
   })
@@ -82,5 +86,6 @@ if (forceDesktopShell) {
 }
 
 // Mount only after the snapshot is hydrated so the first render already has
-// the last-known values (storage is sync, so this resolves in a microtask).
-void whenQueryCacheRestored().then(() => app.mount('#app'))
+// the last-known values (storage is sync, so this resolves in a microtask), and
+// after the active language has loaded so the first render has its copy.
+void Promise.all([whenQueryCacheRestored(), i18nReady]).then(() => app.mount('#app'))

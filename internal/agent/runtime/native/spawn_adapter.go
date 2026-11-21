@@ -164,7 +164,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		CurrentPlatform:     cfg.Identity.CurrentPlatform,
 		ReplyTarget:         cfg.Identity.ReplyTarget,
 		ConversationType:    cfg.Identity.ConversationType,
-		SessionToken:        cfg.Identity.SessionToken,
+		ActorAccountID:      cfg.Identity.ActorAccountID,
 		WorkspaceTargetID:   cfg.Identity.WorkspaceTargetID,
 		WorkspaceTargetKind: cfg.Identity.WorkspaceTargetKind,
 		WorkspaceTargetName: cfg.Identity.WorkspaceTargetName,

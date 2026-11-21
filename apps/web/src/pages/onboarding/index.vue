@@ -2,6 +2,7 @@
 import { onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useOnboarding, STEP_COUNT, LAST_STEP_INDEX } from '@/composables/useOnboarding'
+import { toReturnToParam } from '@/router-guards/return-to'
 
 import Step1Intro from './steps/Step1Intro.vue'
 import Step2Appearance from './steps/Step2Appearance.vue'
@@ -47,7 +48,13 @@ onMounted(() => {
 
 watch(currentStep, (step) => {
   if (route.query.step !== String(step)) {
-    router.replace({ query: { step: String(step) } })
+    const returnTo = toReturnToParam(route.query.return_to)
+    router.replace({
+      query: {
+        step: String(step),
+        ...(returnTo ? { return_to: returnTo } : {}),
+      },
+    })
   }
 })
 

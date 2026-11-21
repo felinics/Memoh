@@ -17,6 +17,16 @@ const (
 	RunTargetExistingSession = "existing_session"
 )
 
+// Notify policies: when a run of a schedule raises its owner's unread
+// attention in Memoh.
+const (
+	// NotifyImportant raises it only when the run calls notify_user, fails or
+	// waits for a decision. It is the default.
+	NotifyImportant = "important"
+	// NotifyEveryRun also raises it on every completed run.
+	NotifyEveryRun = "every_run"
+)
+
 // Runtime types are the bot_sessions vocabulary, pinned to the shared
 // runtimekind table (the schedule domain cannot import the chat packages).
 const (
@@ -68,6 +78,12 @@ type Schedule struct {
 	Enabled      bool      `json:"enabled"`
 	Command      string    `json:"command"`
 	BotID        string    `json:"bot_id"`
+	// NotifyPolicy is when a run tells the owner in Memoh: important (only
+	// when the run asks to, fails or waits for a decision) or every_run.
+	NotifyPolicy string `json:"notify_policy" enums:"important,every_run"`
+	// ContactViaChannels leaves the bot free to reach the owner on its social
+	// platforms when a run has something for them.
+	ContactViaChannels bool `json:"contact_via_channels"`
 	ExecutionConfig
 }
 
@@ -108,6 +124,10 @@ type CreateRequest struct {
 	MaxCalls    NullableInt `json:"max_calls,omitempty"`
 	Command     string      `json:"command"`
 	Enabled     *bool       `json:"enabled,omitempty"`
+	// NotifyPolicy defaults to important.
+	NotifyPolicy string `json:"notify_policy,omitempty" enums:"important,every_run"`
+	// ContactViaChannels defaults to true.
+	ContactViaChannels *bool `json:"contact_via_channels,omitempty"`
 	ExecutionConfig
 }
 
@@ -118,6 +138,9 @@ type UpdateRequest struct {
 	MaxCalls    NullableInt `json:"max_calls,omitempty"`
 	Command     *string     `json:"command,omitempty"`
 	Enabled     *bool       `json:"enabled,omitempty"`
+	// NotifyPolicy and ContactViaChannels keep their stored value when absent.
+	NotifyPolicy       *string `json:"notify_policy,omitempty" enums:"important,every_run"`
+	ContactViaChannels *bool   `json:"contact_via_channels,omitempty"`
 	// Execution replaces the whole execution parameter block when present.
 	// Field-level patching is deliberately not offered: the block carries
 	// cross-field constraints (run target vs runtime vs workdir), so

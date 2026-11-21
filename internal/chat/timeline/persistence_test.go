@@ -5,18 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"reflect"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/chat/checkpoint"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type fakeEventQueries struct {
-	dbstore.Queries
+	fakeCheckpointQueries
 	nextCursor   int64
 	created      sqlc.CreateSessionEventParams
 	replayRows   []sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow
@@ -135,17 +137,17 @@ func TestPersistEventReturnsOriginalEventOnDedup(t *testing.T) {
 	}
 }
 
-type staticReplayArtifacts []CompactionArtifact
-
-func (a staticReplayArtifacts) ActiveCompactionArtifacts(context.Context, string, string) ([]CompactionArtifact, error) {
-	return a, nil
-}
-
-func TestLoadEventsForReplayPassesFrontierAndRestoresChronologicalOrder(t *testing.T) {
+// Replay leaves out in SQL what the session's checkpoint stands for: it
+// passes the checkpoint's position and the rows it keeps, and restores the
+// newest-first pages to chronological order.
+func TestLoadEventsForReplayLeavesOutWhatTheCheckpointStandsFor(t *testing.T) {
 	t.Parallel()
-	sessionID := "66666666-6666-6666-6666-666666666666"
+	const (
+		summaryID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+		keptID    = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1"
+	)
 	makeRow := func(id string, receivedAt int64, messageID string) sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow {
-		event := MessageEvent{SessionID: sessionID, MessageID: messageID, ReceivedAtMs: receivedAt, Content: []ContentNode{{Type: "text", Text: messageID}}}
+		event := MessageEvent{SessionID: checkpointTestSessionID, MessageID: messageID, ReceivedAtMs: receivedAt, Content: []ContentNode{{Type: "text", Text: messageID}}}
 		data, err := json.Marshal(event)
 		if err != nil {
 			t.Fatal(err)
@@ -159,37 +161,53 @@ func TestLoadEventsForReplayPassesFrontierAndRestoresChronologicalOrder(t *testi
 			ReceivedAtMs: receivedAt, PayloadBytes: int64(len(data)), CumulativeBytes: int64(len(data) * 2),
 		}
 	}
-	queries := &fakeEventQueries{
-		eventCount: 3,
-		replayRows: []sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow{
-			makeRow("55555555-5555-5555-5555-555555555552", 20, "new"),
-			makeRow("55555555-5555-5555-5555-555555555551", 10, "old"),
+	for _, tc := range []struct {
+		name      string
+		active    sqlc.BotHistoryCheckpoint
+		wantAfter messagepkg.HistoryPosition
+		wantKept  []string
+	}{
+		{
+			name: "checkpoint",
+			active: checkpointRow(t, messagepkg.HistoryPosition{Turn: 7, Seq: 2},
+				checkpoint.Item{SummaryID: summaryID}, checkpoint.Item{RowID: keptID}),
+			wantAfter: messagepkg.HistoryPosition{Turn: 7, Seq: 2},
+			wantKept:  []string{keptID},
 		},
-	}
-	store := NewEventStore(slog.New(slog.DiscardHandler), queries)
-	store.SetReplayArtifactProvider(staticReplayArtifacts{{
-		ID: "artifact", Summary: "covered", CoverageAsOfMs: 15,
-		Sources: []CompactionSource{{ExternalMessageID: "covered-message", CreatedAtMs: 5, EventCursor: 7}},
-	}})
-	events, err := store.LoadEventsForReplay(context.Background(), "77777777-7777-7777-7777-777777777777", sessionID)
-	if err != nil {
-		t.Fatalf("LoadEventsForReplay() error = %v", err)
-	}
-	if len(events) != 2 || events[0].(MessageEvent).MessageID != "old" || events[1].(MessageEvent).MessageID != "new" {
-		t.Fatalf("events not chronological: %#v", events)
-	}
-	if len(queries.replayParams) != 1 {
-		t.Fatalf("query calls = %d, want 1", len(queries.replayParams))
-	}
-	var coverage map[string]int64
-	var cursors map[string]int64
-	if err := json.Unmarshal(queries.replayParams[0].CoveredEventCursors, &cursors); err != nil || cursors["covered-message"] != 7 {
-		t.Fatalf("replay lost covered event version: cursors=%v err=%v", cursors, err)
-	}
-	if err := json.Unmarshal(queries.replayParams[0].CoveredExternalMessages, &coverage); err != nil {
-		t.Fatalf("decode coverage: %v", err)
-	}
-	if coverage["covered-message"] != 15 {
-		t.Fatalf("coverage = %#v", coverage)
+		{name: "no checkpoint", wantKept: []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			queries := &fakeEventQueries{
+				fakeCheckpointQueries: fakeCheckpointQueries{active: tc.active, summaries: map[string]string{summaryID: "covered"}},
+				eventCount:            3,
+				replayRows: []sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow{
+					makeRow("55555555-5555-5555-5555-555555555552", 20, "new"),
+					makeRow("55555555-5555-5555-5555-555555555551", 10, "old"),
+				},
+			}
+			store := NewEventStore(slog.New(slog.DiscardHandler), queries)
+			events, err := store.LoadEventsForReplay(context.Background(), "77777777-7777-7777-7777-777777777777", checkpointTestSessionID)
+			if err != nil {
+				t.Fatalf("LoadEventsForReplay() error = %v", err)
+			}
+			if len(events) != 2 || events[0].(MessageEvent).MessageID != "old" || events[1].(MessageEvent).MessageID != "new" {
+				t.Fatalf("events not chronological: %#v", events)
+			}
+			if len(queries.replayParams) != 1 {
+				t.Fatalf("query calls = %d, want 1", len(queries.replayParams))
+			}
+			params := queries.replayParams[0]
+			if got := (messagepkg.HistoryPosition{Turn: params.AfterTurnPosition, Seq: params.AfterTurnMessageSeq}); got != tc.wantAfter {
+				t.Fatalf("replay after %+v, want %+v", got, tc.wantAfter)
+			}
+			kept := make([]string, 0, len(params.KeptIds))
+			for _, id := range params.KeptIds {
+				kept = append(kept, id.String())
+			}
+			if !reflect.DeepEqual(kept, tc.wantKept) {
+				t.Fatalf("replay kept ids = %v, want %v", kept, tc.wantKept)
+			}
+		})
 	}
 }

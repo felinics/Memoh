@@ -700,7 +700,7 @@ func TestTriggerScheduleBusyIsTheScheduleSentinel(t *testing.T) {
 	t.Parallel()
 	svc := &Service{logger: slog.New(slog.DiscardHandler), sessionRuntime: &fakeTriggeredAdmitter{admitErr: sessionruntime.ErrSessionBusy}}
 
-	_, err := svc.TriggerSchedule(context.Background(), "bot-1", schedule.TriggerPayload{FireID: "fire-1", ID: "schedule-1", SessionID: "session-1", Command: "run"}, "token")
+	_, err := svc.TriggerSchedule(context.Background(), "bot-1", schedule.TriggerPayload{FireID: "fire-1", ID: "schedule-1", SessionID: "session-1", Command: "run"})
 
 	if !errors.Is(err, schedule.ErrSessionBusy) || !errors.Is(err, sessionruntime.ErrSessionBusy) {
 		t.Fatalf("err = %v, want the schedule busy sentinel over the runtime's", err)
@@ -716,7 +716,7 @@ func TestTriggerScheduleFailureAfterAdmissionIsRecorded(t *testing.T) {
 	t.Parallel()
 	svc := &Service{logger: slog.New(slog.DiscardHandler), sessionRuntime: &fakeTriggeredAdmitter{}}
 
-	_, err := svc.TriggerSchedule(context.Background(), "bot-1", schedule.TriggerPayload{FireID: "fire-1", ID: "schedule-1", SessionID: "session-1", Command: "run"}, "token")
+	_, err := svc.TriggerSchedule(context.Background(), "bot-1", schedule.TriggerPayload{FireID: "fire-1", ID: "schedule-1", SessionID: "session-1", Command: "run"})
 
 	if err == nil {
 		t.Fatal("TriggerSchedule() error = nil, want the run's failure")

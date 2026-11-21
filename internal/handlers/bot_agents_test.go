@@ -96,7 +96,9 @@ func (dependencyDriver) Prompt(context.Context, external.PromptInput) (external.
 	return external.PromptResult{}, nil
 }
 
-func (d dependencyDriver) RequiredDependency() string { return d.depID }
+func (d dependencyDriver) Caps() external.Caps {
+	return external.Caps{Dependency: d.depID, Command: d.depID}
+}
 
 // plainDriver is a runtime without a dependency declaration (the generic ACP
 // runtime, or a direct runtime whose CLI is not yet managed).
@@ -105,6 +107,8 @@ type plainDriver struct {
 }
 
 func (d plainDriver) RuntimeType() string { return d.runtimeType }
+
+func (plainDriver) Caps() external.Caps { return external.Caps{} }
 
 func (plainDriver) Prompt(context.Context, external.PromptInput) (external.PromptResult, error) {
 	return external.PromptResult{}, nil
@@ -130,7 +134,7 @@ func newBotAgentsTestHandler(queries *botAgentsQueries, drivers ...external.Driv
 		botagents.NewService(nil, queries),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
-		external.Drivers(drivers),
+		testRuntimeRegistry(drivers...),
 	)
 }
 
@@ -317,6 +321,10 @@ type catalogDriver struct {
 	err error
 }
 
+func (catalogDriver) Caps() external.Caps {
+	return external.Caps{}
+}
+
 func (d catalogDriver) ModelCatalog(context.Context, external.ModelCatalogRequest) (external.ModelCatalog, error) {
 	return external.ModelCatalog{}, d.err
 }
@@ -379,9 +387,9 @@ func TestBotAgentsHandlerListModelsAnswersRuntimeFailuresWithTheirCode(t *testin
 		code   apperror.Code
 		status int
 	}{
-		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired, http.StatusConflict},
+		{"auth required", external.Fail(external.FailureAuthRequired, nil), apperror.CodeExternalRuntimeAuthRequired, http.StatusConflict},
 		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked, http.StatusConflict},
-		{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
+		{"agent failed", external.Upstream(errors.New("bridge refused")), apperror.CodeExternalRuntimeReported, http.StatusBadGateway},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			queries := &botAgentsQueries{rows: []sqlc.BotAgent{
@@ -406,6 +414,10 @@ type purgeDriver struct {
 	err error
 }
 
+func (purgeDriver) Caps() external.Caps {
+	return external.Caps{}
+}
+
 func (d purgeDriver) PurgeBotAgentAuth(context.Context, string, string) error { return d.err }
 
 func (q *botAgentsQueries) SoftDeleteBotAgent(_ context.Context, params sqlc.SoftDeleteBotAgentParams) (sqlc.BotAgent, error) {
@@ -426,7 +438,7 @@ var purgeFailures = []struct {
 	status int
 }{
 	{"credential in use", external.Fail(external.FailureCredentialBusy, nil), apperror.CodeAgentCredentialRuntimeBusy, http.StatusConflict},
-	{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
+	{"agent failed", external.Upstream(errors.New("bridge refused")), apperror.CodeExternalRuntimeReported, http.StatusBadGateway},
 	{"missing dependency", &external.DependencyMissingError{DependencyID: "codex"}, apperror.CodeAgentCredentialMaterializationFailed, http.StatusInternalServerError},
 	{"plain error", errors.New("delete auth.json: permission denied"), apperror.CodeAgentCredentialMaterializationFailed, http.StatusInternalServerError},
 }
@@ -468,4 +480,14 @@ func TestBotAgentHTTPErrorKeepsTheCauseAndNamesTheDirectRuntime(t *testing.T) {
 	if !errors.Is(apperror.CauseOf(plain), botagents.ErrNameTaken) {
 		t.Fatalf("cause of name_taken = %v, want the sentinel kept", apperror.CauseOf(plain))
 	}
+}
+
+// testRuntimeRegistry registers test drivers, panicking on a stub whose
+// declaration disagrees with what it implements.
+func testRuntimeRegistry(drivers ...external.Driver) *external.Registry {
+	registry, err := external.NewRegistry(drivers...)
+	if err != nil {
+		panic(err)
+	}
+	return registry
 }

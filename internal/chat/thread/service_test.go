@@ -12,9 +12,27 @@ import (
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
-type testACPSetupValidator struct{}
+// testACPSetupValidator gives every test bot one instance of the custom ACP
+// agent, or none for a bot configured before instances.
+type testACPSetupValidator struct{ instanceless bool }
+
+// InstanceACPAgent gives every Agent instance the test's custom ACP agent.
+func (testACPSetupValidator) InstanceACPAgent(context.Context, string, string) (string, error) {
+	return "custom-agent", nil
+}
+
+// testACPInstanceID is the custom ACP agent's instance on every test bot.
+const testACPInstanceID = "00000000-0000-0000-0000-0000000000aa"
+
+func (v testACPSetupValidator) ACPInstanceFor(context.Context, string, string) (string, error) {
+	if v.instanceless {
+		return "", nil
+	}
+	return testACPInstanceID, nil
+}
 
 func (testACPSetupValidator) KnownACPAgent(agentID string) bool {
 	return strings.ToLower(strings.TrimSpace(agentID)) == "custom-agent"
@@ -97,44 +115,82 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 	}
 }
 
-func TestValidateACPMetadata(t *testing.T) {
+func TestShapeExternalMetadata(t *testing.T) {
+	botID := mustPGUUID("00000000-0000-0000-0000-000000000001")
+	queries := acpPolicyQueries{bot: sqlc.GetBotByIDRow{
+		ID: botID,
+		Metadata: mustSessionJSON(map[string]any{
+			"acp": map[string]any{
+				"agents": map[string]any{
+					"custom-agent": map[string]any{"enabled": true, "setup_mode": "self"},
+				},
+			},
+		}),
+	}}
 	tests := []struct {
-		name    string
-		meta    map[string]any
-		wantErr string
+		name        string
+		runtimeType string
+		meta        map[string]any
+		owner       string
+		wantErr     error
+		wantPath    string
 	}{
 		{
-			name: "valid acp_agent_id",
-			meta: map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data", "runtime_owner_account_id": "owner-1"},
+			name:        "acp",
+			runtimeType: RuntimeACPAgent,
+			meta:        map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data/app"},
+			owner:       "owner-1",
+			wantPath:    "/data/app",
 		},
 		{
-			name:    "missing agent",
-			meta:    map[string]any{"project_path": "/data"},
-			wantErr: "acp_agent_id is required",
+			name:        "acp missing agent",
+			runtimeType: RuntimeACPAgent,
+			meta:        map[string]any{"project_path": "/data"},
+			owner:       "owner-1",
+			wantErr:     ErrACPAgentIDRequired,
 		},
 		{
-			name:    "missing project path",
-			meta:    map[string]any{"acp_agent_id": "custom-agent", "runtime_owner_account_id": "owner-1"},
-			wantErr: "project_path is required",
+			name:        "missing runtime owner",
+			runtimeType: RuntimeACPAgent,
+			meta:        map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
+			wantErr:     ErrRuntimeOwnerMissing,
 		},
 		{
-			name:    "missing runtime owner",
-			meta:    map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
-			wantErr: "runtime_owner_account_id is required",
+			name:        "direct runtime defaults project path",
+			runtimeType: string(runtimekind.Codex),
+			meta:        map[string]any{},
+			owner:       "owner-1",
+			wantPath:    DefaultACPProjectPath,
+		},
+		{
+			name:        "direct runtime missing owner",
+			runtimeType: string(runtimekind.Codex),
+			meta:        map[string]any{},
+			wantErr:     ErrRuntimeOwnerMissing,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateACPMetadata(tc.meta)
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("validateACPMetadata() error = %v", err)
+			svc := newACPTestService(queries)
+			meta, runtimeMeta, botAgentID, err := svc.shapeExternalMetadata(context.Background(), queries, tc.runtimeType, botID, "", tc.meta, nil, tc.owner, "")
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("shapeExternalMetadata() error = %v, want %v", err, tc.wantErr)
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("validateACPMetadata() error = %v, want %q", err, tc.wantErr)
+			if err != nil {
+				t.Fatalf("shapeExternalMetadata() error = %v", err)
+			}
+			for _, m := range []map[string]any{meta, runtimeMeta} {
+				if m["project_path"] != tc.wantPath || m["runtime_owner_account_id"] != tc.owner || m["acp_agent_id"] != nil {
+					t.Fatalf("metadata = %#v, want project_path %q and owner %q in both maps, and no profile", m, tc.wantPath, tc.owner)
+				}
+			}
+			// A request naming only an ACP profile runs as the bot's instance.
+			if wantAgent := map[bool]string{true: testACPInstanceID}[tc.runtimeType == RuntimeACPAgent]; botAgentID != wantAgent {
+				t.Fatalf("bot agent = %q, want %q", botAgentID, wantAgent)
 			}
 		})
 	}
@@ -152,26 +208,18 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 			},
 		}),
 	}
-	disabledBot := enabledBot
-	disabledBot.Metadata = mustSessionJSON(map[string]any{
-		"acp": map[string]any{
-			"agents": map[string]any{
-				"custom-agent": map[string]any{"enabled": false},
-			},
-		},
-	})
 
 	tests := []struct {
 		name     string
 		bot      sqlc.GetBotByIDRow
 		sessions []sqlc.ListSessionsByBotRow
-		meta     map[string]any
+		agentID  string
 		wantErr  string
 	}{
 		{
-			name: "enabled",
-			bot:  enabledBot,
-			meta: map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
+			name:    "enabled",
+			bot:     enabledBot,
+			agentID: "custom-agent",
 		},
 		{
 			name: "enabled but missing managed configuration",
@@ -185,20 +233,14 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 					},
 				}),
 			},
-			meta:    map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
+			agentID: "custom-agent",
 			wantErr: "is not configured",
 		},
 		{
 			name:    "unknown agent",
 			bot:     enabledBot,
-			meta:    map[string]any{"acp_agent_id": "unknown", "project_path": "/data"},
+			agentID: "unknown",
 			wantErr: "unknown ACP agent",
-		},
-		{
-			name:    "bot disabled",
-			bot:     disabledBot,
-			meta:    map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
-			wantErr: "is not enabled",
 		},
 	}
 
@@ -208,7 +250,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 				bot:      tt.bot,
 				sessions: tt.sessions,
 			})
-			err := svc.validateACPCreatePolicy(context.Background(), botID, "", tt.meta)
+			err := svc.validateACPCreatePolicyWithQueries(context.Background(), svc.queries, botID, testACPInstanceID, tt.agentID)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateACPCreatePolicy() error = %v", err)
@@ -265,11 +307,12 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 	if created.SessionMode != TypeChat || created.RuntimeType != RuntimeACPAgent {
 		t.Fatalf("created descriptor = %q/%q, want chat/acp_agent", created.SessionMode, created.RuntimeType)
 	}
-	if got := created.Metadata["acp_agent_id"]; got != "custom-agent" {
-		t.Fatalf("created metadata acp_agent_id = %#v", got)
+	// The instance carries the profile; the session stores neither key.
+	if created.Metadata["acp_agent_id"] != nil || created.RuntimeMetadata["acp_agent_id"] != nil {
+		t.Fatalf("created metadata = %#v / %#v, want no acp_agent_id", created.Metadata, created.RuntimeMetadata)
 	}
-	if got := created.RuntimeMetadata["acp_agent_id"]; got != "custom-agent" {
-		t.Fatalf("created runtime metadata acp_agent_id = %#v", got)
+	if created.BotAgentID != testACPInstanceID {
+		t.Fatalf("created bot agent = %q, want the bot's custom-agent instance", created.BotAgentID)
 	}
 	if got := created.RuntimeMetadata["runtime_owner_account_id"]; got != "00000000-0000-0000-0000-000000000003" {
 		t.Fatalf("created runtime owner = %#v, want server owner", got)
@@ -308,8 +351,8 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 	if created.Metadata["project_path"] != DefaultACPProjectPath {
 		t.Fatalf("created metadata project_path = %#v, want %q", created.Metadata["project_path"], DefaultACPProjectPath)
 	}
-	if created.Metadata["acp_project_mode"] != DefaultACPProjectMode {
-		t.Fatalf("created metadata acp_project_mode = %#v, want %q", created.Metadata["acp_project_mode"], DefaultACPProjectMode)
+	if created.Metadata["acp_project_mode"] != nil {
+		t.Fatalf("created metadata acp_project_mode = %#v, want none", created.Metadata["acp_project_mode"])
 	}
 }
 
@@ -458,6 +501,7 @@ func (q *createACPQueries) CreateSession(_ context.Context, params sqlc.CreateSe
 		Type:            params.Type,
 		SessionMode:     params.SessionMode,
 		RuntimeType:     params.RuntimeType,
+		BotAgentID:      params.BotAgentID,
 		RuntimeMetadata: params.RuntimeMetadata,
 		Title:           params.Title,
 		Metadata:        params.Metadata,
@@ -725,5 +769,94 @@ func TestThreadJSONKeepsLegacySessionFieldNames(t *testing.T) {
 	}
 	if strings.Contains(got, "parent_thread_id") || strings.Contains(got, "visibility") {
 		t.Fatalf("JSON exposed internal thread fields: %s", got)
+	}
+}
+
+func TestExternalIdentityReadsACPProfileFromInstance(t *testing.T) {
+	svc := newACPTestService(nil)
+	bound, err := svc.ExternalIdentity(context.Background(), Thread{
+		BotID: "bot-1", BotAgentID: testACPInstanceID, RuntimeType: RuntimeACPAgent,
+		Metadata: map[string]any{"project_path": "/data/app", "runtime_owner_account_id": "owner-1"},
+	})
+	if err != nil || bound.ACPAgentID != "custom-agent" || bound.ProjectPath != "/data/app" || bound.RuntimeOwnerAccountID != "owner-1" {
+		t.Fatalf("instance-bound identity = %+v, err = %v", bound, err)
+	}
+	// A session from before instances keeps the profile it named.
+	legacy, err := svc.ExternalIdentity(context.Background(), Thread{
+		Type:            TypeACPAgent,
+		Metadata:        map[string]any{"acp_agent_id": "old-agent", "acp_project_mode": "project"},
+		RuntimeMetadata: map[string]any{"project_path": "/data/old"},
+	})
+	if err != nil || legacy.ACPAgentID != "old-agent" || legacy.ProjectPath != "/data/old" {
+		t.Fatalf("legacy identity = %+v, err = %v", legacy, err)
+	}
+}
+
+// Schedules and channel defaults from before Bot Agent instances name only an
+// ACP profile. On a bot with no instance of it the session is created the way
+// it always was, naming the profile itself, and runs through the bot's own
+// profile slot; on a bot with one it runs as that instance.
+func TestCreateFromProfileOnlySourceKeepsLegacyShapeWithoutInstance(t *testing.T) {
+	const botID = "00000000-0000-0000-0000-000000000001"
+	enabled := map[string]any{"acp": map[string]any{"agents": map[string]any{
+		"custom-agent": map[string]any{"enabled": true, "setup_mode": "self"},
+	}}}
+	sources := map[string]CreateInput{
+		"schedule": {
+			BotID: botID, Type: TypeSchedule, RuntimeType: RuntimeACPAgent,
+			CreatedByUserID: "00000000-0000-0000-0000-000000000003",
+			Metadata:        map[string]any{"acp_agent_id": "custom-agent"},
+		},
+		"channel default": {
+			BotID: botID, Type: TypeACPAgent, SessionMode: TypeChat, RuntimeType: RuntimeACPAgent,
+			CreatedByUserID: "00000000-0000-0000-0000-000000000003",
+			Metadata:        map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data/app"},
+			RuntimeMetadata: map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data/app"},
+		},
+	}
+	for name, input := range sources {
+		t.Run(name+" without instance", func(t *testing.T) {
+			queries := &createACPQueries{bot: sqlc.GetBotByIDRow{ID: mustPGUUID(botID), Metadata: mustSessionJSON(enabled)}}
+			svc := NewService(nil, queries, nil)
+			svc.SetACPSetupValidator(testACPSetupValidator{instanceless: true})
+			created, err := svc.Create(context.Background(), input)
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+			if created.BotAgentID != "" || created.Metadata["acp_agent_id"] != "custom-agent" || created.RuntimeMetadata["acp_agent_id"] != "custom-agent" {
+				t.Fatalf("created = bot agent %q, metadata %#v / %#v, want the legacy shape", created.BotAgentID, created.Metadata, created.RuntimeMetadata)
+			}
+			identity, err := svc.ExternalIdentity(context.Background(), created)
+			if err != nil || identity.ACPAgentID != "custom-agent" {
+				t.Fatalf("identity = %+v, err = %v", identity, err)
+			}
+		})
+		t.Run(name+" with instance", func(t *testing.T) {
+			queries := &createACPQueries{bot: sqlc.GetBotByIDRow{ID: mustPGUUID(botID), Metadata: mustSessionJSON(enabled)}}
+			created, err := newACPTestService(queries).Create(context.Background(), input)
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+			if created.BotAgentID != testACPInstanceID || created.Metadata["acp_agent_id"] != nil || created.RuntimeMetadata["acp_agent_id"] != nil {
+				t.Fatalf("created = bot agent %q, metadata %#v / %#v, want bound to the instance", created.BotAgentID, created.Metadata, created.RuntimeMetadata)
+			}
+		})
+	}
+}
+
+func TestCreateWithoutInstanceRequiresTheBotProfileEnabled(t *testing.T) {
+	const botID = "00000000-0000-0000-0000-000000000001"
+	disabled := map[string]any{"acp": map[string]any{"agents": map[string]any{
+		"custom-agent": map[string]any{"enabled": false, "setup_mode": "self"},
+	}}}
+	queries := &createACPQueries{bot: sqlc.GetBotByIDRow{ID: mustPGUUID(botID), Metadata: mustSessionJSON(disabled)}}
+	svc := NewService(nil, queries, nil)
+	svc.SetACPSetupValidator(testACPSetupValidator{instanceless: true})
+	_, err := svc.Create(context.Background(), CreateInput{
+		BotID: botID, Type: TypeACPAgent, CreatedByUserID: "00000000-0000-0000-0000-000000000003",
+		Metadata: map[string]any{"acp_agent_id": "custom-agent"},
+	})
+	if !errors.Is(err, ErrACPAgentNotEnabled) {
+		t.Fatalf("Create() error = %v, want %v", err, ErrACPAgentNotEnabled)
 	}
 }

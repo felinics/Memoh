@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { getAgentAuthorizationsById, getBotsById, getBotsByIdChecks, getBotsByBotIdAgents, getBotsByBotIdAgentsById, patchBotsByBotIdAgentsById, postBotsByBotIdAgents, postBotsByBotIdAgentsByIdCredentialClaim, postBotsByBotIdUserAccess, putBotsByBotIdSettings } from '@memohai/sdk'
+import { getBotsById, getBotsByIdChecks, getBotsByBotIdAgents, getBotsByBotIdAgentsById, patchBotsByBotIdAgentsById, postBotsByBotIdAgents, postBotsByBotIdAgentsByIdCredentialClaim, postBotsByBotIdUserAccess, putBotsByBotIdSettings } from '@memohai/sdk'
 import type { BotagentsBotAgent, BotsBot, BotsCreateBotRequest } from '@memohai/sdk'
 import {
   botCreateProgressPercent,
@@ -19,7 +19,7 @@ import {
 import { markOnboardingCompleted } from '@/composables/useOnboarding'
 import { apiErrorStatus, parseMemohError, renderI18nMessage, resolveApiErrorMessage } from '@/utils/api-error'
 import { botCheckDetail } from '@/utils/bot-check'
-import { agentAuthForCredentialKind, botAgentRuntimeForProvider, directBotAgentMetadata, isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
+import { botAgentRuntimeForProvider, directBotAgentMetadata, isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
 import { writeCreatedBotSession, type CreatedBotSession } from '@/pages/bots/created-bot-session'
 import { randomUUID } from '@/utils/uuid'
@@ -290,9 +290,9 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
             const { data } = await getBotsByBotIdAgents({ path: { bot_id: botId }, throwOnError: true })
             createdAgent.value = data.items?.find(agent => agent.runtime === runtime) ?? null
           }
+          // Only an API key is staged before the Bot exists.
           if (authorizationId.value && !createdAgent.value?.agent_credential_id) {
-            const { data } = await getAgentAuthorizationsById({ path: { id: authorizationId.value }, throwOnError: true })
-            metadata = { ...metadata, auth: agentAuthForCredentialKind(data.auth_kind) }
+            metadata = { ...metadata, auth: 'api_key' }
           }
         }
         if (!createdAgent.value?.id) {

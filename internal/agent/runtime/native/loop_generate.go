@@ -64,23 +64,21 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	}
 
 	var sdkTools []toolexec.Tool
+	var toolBridge *tools.ToolBridge
 	cfg.ContextToolDefsResolved = true
 	if cfg.SupportsToolCall {
-		var toolUsage string
-		var toolUsageFrags []contextfrag.ContextFrag
-		var toolDefs []contextfrag.ToolDefAccounting
-		var err error
-		sdkTools, toolUsage, toolUsageFrags, toolDefs, err = a.assembleTools(genCtx, cfg, collectEmitter, false)
+		assembled, err := a.assembleTools(genCtx, cfg, collectEmitter, false)
 		if err != nil {
 			return nil, fmt.Errorf("assemble tools: %w", err)
 		}
-		cfg.ContextToolDefs = toolDefs
-		if toolUsage != "" {
+		sdkTools, toolBridge = assembled.tools, assembled.bridge
+		cfg.ContextToolDefs = assembled.defs
+		if assembled.usage != "" {
 			// Must run before dispatch assembly so prompt caching and
 			// background task summaries see the usage-augmented text.
-			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
-			cfg.ContextToolUsage = toolUsage
-			cfg.ContextToolUsageFrags = toolUsageFrags
+			cfg.System = appendToolUsageToSystem(cfg.System, assembled.usage)
+			cfg.ContextToolUsage = assembled.usage
+			cfg.ContextToolUsageFrags = assembled.usageFrags
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
@@ -105,13 +103,13 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 
 	// The execution chain over the assembled tools; a capability refresh
 	// rebuilds the same chain over the re-assembled set.
-	sdkTools, approvalTools := a.wrapExecutableTools(ctx, cfg, sdkTools, toolExecutionMetadata, toolLoopGuard, toolLoopAbortCallIDs)
+	sdkTools, approvalTools := a.wrapExecutableTools(ctx, cfg, sdkTools, toolBridge, toolExecutionMetadata, toolLoopGuard, toolLoopAbortCallIDs)
 
 	// The loop owns the dynamic input messages it appends at step boundaries
 	// (read-media carriers here; the stream loop adds live injections).
 	dynamic := newLoopDynamicInputs(cfg.StepIndexOffset)
 	cfg.dynamicInputs = dynamic
-	prepareStep := a.wrapPrepareStepWithModelHook(genCtx, cfg, nil)
+	prepareStep := a.wrapPrepareStepWithModelHook(genCtx, cfg)
 	cfg, err := a.applyBeforeModelCallHook(genCtx, cfg, 0)
 	if err != nil {
 		return nil, err
@@ -138,6 +136,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	var thread stepThread
 	thread.reset(dispatch)
 	commitStep := func(sdkStep int, sr *step.Record) (StepDirective, error) {
+		if sr != nil {
+			sr.InputEstimateTokens = cfg.contextSwitch.observe(sr.Result.Usage)
+		}
 		var dir StepDirective
 		if cfg.OnStepCommitted != nil {
 			stepIndex := sdkStep + cfg.StepIndexOffset
@@ -199,31 +200,38 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	// same budget the streaming loop keeps.
 	retries := 0
 	for sdkStep := 0; ; sdkStep++ {
-		stepParams := thread.advance(cfg, dynamic, stepBoundary{
+		stepParams, prepareErr := thread.advance(cfg, dynamic, stepBoundary{
 			first:     sdkStep == 0,
 			committed: len(allSteps),
 			readMedia: readMediaState,
 		})
-		if next, ok := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams); ok {
-			cfg.ContextCachePlan = next.ContextCachePlan
-			dispatch, err := a.buildGenerateDispatch(genCtx, next, sdkTools, approvalTools, prepareStep)
-			if err != nil {
-				return nil, fmt.Errorf("generate: %w", err)
+		if prepareErr == nil {
+			if next, ok := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams); ok {
+				cfg.ContextCachePlan = next.ContextCachePlan
+				dispatch, err := a.buildGenerateDispatch(genCtx, next, sdkTools, approvalTools, prepareStep)
+				if err != nil {
+					return nil, fmt.Errorf("generate: %w", err)
+				}
+				thread.reset(dispatch)
+				stepParams, prepareErr = thread.advance(cfg, dynamic, stepBoundary{first: true})
 			}
-			thread.reset(dispatch)
-			stepParams = thread.advance(cfg, dynamic, stepBoundary{first: true})
 		}
 		if stepErr := failure.err(); stepErr != nil {
 			return nil, stepErr
 		}
-		// Dispatch boundary: never invoke the provider on a dead context, and
-		// publish the staged provider-attempt state exactly once per call.
+		// Dispatch boundary: never invoke the provider on a dead context or
+		// for a call the prepare chain refused, and publish the staged
+		// provider-attempt state exactly once per call.
 		if ctxErr := genCtx.Err(); ctxErr != nil {
 			thread.dispatch.handoff.reject()
 			if loopErr := detectGenerateLoopAbort(genCtx, ctxErr); loopErr != nil {
 				return nil, loopErr
 			}
 			return nil, fmt.Errorf("generate: %w", ctxErr)
+		}
+		if prepareErr != nil {
+			thread.dispatch.handoff.reject()
+			return nil, prepareErr
 		}
 		if err := thread.dispatch.handoff.publish(stepParams); err != nil {
 			return nil, fmt.Errorf("generate: %w", err)
@@ -354,7 +362,7 @@ func (a *Agent) generateStep(ctx context.Context, cfg RunConfig, params sdk.Requ
 type generateDispatch struct {
 	params      sdk.Request
 	execTools   []toolexec.Tool
-	prepareStep func(*sdk.Request) *sdk.Request
+	prepareStep prepareStepFunc
 	handoff     *providerAttemptHandoff
 	approve     func(context.Context, sdk.ToolCall) (toolexec.ToolApprovalResult, error)
 	// initialMessageCount is the compiled provider prefix length (including a
@@ -371,7 +379,7 @@ type generateDispatch struct {
 // prepare-step composition, yielding the concrete sdk.Request and the composed
 // step-prepare function. The executable tool set stays local to the loop; the
 // request carries only the provider-bound definitions.
-func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkTools []toolexec.Tool, approvalTools []toolexec.Tool, prepareStep func(*sdk.Request) *sdk.Request) (generateDispatch, error) {
+func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkTools []toolexec.Tool, approvalTools []toolexec.Tool, prepareStep prepareStepFunc) (generateDispatch, error) {
 	handoff := newProviderAttemptHandoff(cfg)
 	sdkTools = canonicalizeProviderToolSchemas(sdkTools)
 	cfg.ContextMutations.SetModelInfo(modelID(cfg.Model), models.ResolveClientType(cfg.Model))
@@ -405,35 +413,11 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 	if toolDefErr != nil {
 		return generateDispatch{}, toolDefErr
 	}
-	initialParams := prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, 0, providerRefs, &sdk.Request{
-		System: system, Messages: messages, Tools: toolDefs,
-	})
-	system = initialParams.System
-	messages = initialParams.Messages
-	toolDefs = initialParams.Tools
-	if cfg.BackgroundManager != nil {
-		basePrepare := prepareStep
-		prepareStep = func(p *sdk.Request) *sdk.Request {
-			if p == nil {
-				return nil
-			}
-			p.Messages = removeBackgroundSummaryMessages(p.Messages, initialProviderMessageCount)
-			if basePrepare != nil {
-				if override := basePrepare(p); override != nil {
-					p = override
-				}
-			}
-			if summary := strings.TrimSpace(cfg.BackgroundManager.RunningTasksSummary(cfg.Identity.BotID, cfg.Identity.SessionID)); summary != "" {
-				cfg.ContextMutations.Record(contextfrag.MutationBackgroundSummary, fmt.Sprintf("bytes=%d", len(summary)))
-				p.Messages = append(p.Messages, backgroundSummaryMessage(summary))
-			}
-			return p
-		}
-	}
-
 	// The provider-scoped model ID is bound here so every dispatch through the
 	// single-call seam carries a complete request; sdk.Model.Generate/Stream
-	// re-verifies it against the bound model.
+	// re-verifies it against the bound model. The first attempt is prepared
+	// on the complete request: a compaction event before the run's first step
+	// forks it as it would be sent.
 	modelIdentifier := ""
 	if cfg.Model != nil {
 		modelIdentifier = cfg.Model.ID
@@ -448,26 +432,6 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 		maxTokens := limits.MaxOutputTokens
 		params.MaxTokens = &maxTokens
 	}
-	approvalHandler := cfg.ToolApprovalHandler
-	if a != nil && a.hookService != nil {
-		approvalHandler = a.wrapApprovalHandlerWithHooks(cfg, approvalTools, approvalHandler)
-	}
-
-	prepareIndex := 0
-	basePrepare := prepareStep
-	stepPrepare := func(p *sdk.Request) *sdk.Request {
-		if basePrepare != nil {
-			if override := basePrepare(p); override != nil {
-				p = override
-			}
-		}
-		if p == nil {
-			return nil
-		}
-		defer func() { prepareIndex++ }()
-		return prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, prepareIndex+1, cfg.dynamicInputs.pendingRefs(), p)
-	}
-
 	if key := models.PromptCacheKey(cfg.Model, cfg.PromptCacheTTL, cfg.Identity.SessionID); key != "" {
 		params.PromptCacheKey = &key
 	}
@@ -476,6 +440,55 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 		ChatCompletionsCompat: cfg.ChatCompletionsCompat,
 		ReasoningConfig:       cfg.ReasoningConfig,
 	})
+	params = *prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, 0, providerRefs, &params)
+	if cfg.BackgroundManager != nil {
+		basePrepare := prepareStep
+		prepareStep = func(p *sdk.Request) (*sdk.Request, error) {
+			if p == nil {
+				return nil, nil
+			}
+			p.Messages = removeBackgroundSummaryMessages(p.Messages, initialProviderMessageCount)
+			if basePrepare != nil {
+				override, err := basePrepare(p)
+				if err != nil {
+					return nil, err
+				}
+				if override != nil {
+					p = override
+				}
+			}
+			if summary := strings.TrimSpace(cfg.BackgroundManager.RunningTasksSummary(cfg.Identity.BotID, cfg.Identity.SessionID)); summary != "" {
+				cfg.ContextMutations.Record(contextfrag.MutationBackgroundSummary, fmt.Sprintf("bytes=%d", len(summary)))
+				p.Messages = append(p.Messages, backgroundSummaryMessage(summary))
+			}
+			return p, nil
+		}
+	}
+
+	approvalHandler := cfg.ToolApprovalHandler
+	if a != nil && a.hookService != nil {
+		approvalHandler = a.wrapApprovalHandlerWithHooks(cfg, approvalTools, approvalHandler)
+	}
+
+	prepareIndex := 0
+	basePrepare := prepareStep
+	stepPrepare := func(p *sdk.Request) (*sdk.Request, error) {
+		if basePrepare != nil {
+			override, err := basePrepare(p)
+			if err != nil {
+				return nil, err
+			}
+			if override != nil {
+				p = override
+			}
+		}
+		if p == nil {
+			return nil, nil
+		}
+		defer func() { prepareIndex++ }()
+		return prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, prepareIndex+1, cfg.dynamicInputs.pendingRefs(), p), nil
+	}
+
 	return generateDispatch{
 		params:              params,
 		execTools:           executableTools,

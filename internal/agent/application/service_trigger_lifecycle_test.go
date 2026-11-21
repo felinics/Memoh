@@ -13,9 +13,9 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
@@ -170,7 +170,7 @@ func triggerDirectSchedule(t *testing.T, service *Service) (schedule.TriggerResu
 		SessionID:   lifecycleTestSessionID,
 		Command:     directLifecyclePrompt,
 		OwnerUserID: "user-1",
-	}, "")
+	})
 }
 
 func TestTriggerScheduleResolveFailurePersistsAdmittedMinimalLifecycle(t *testing.T) {
@@ -350,7 +350,6 @@ func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {
 			RuntimeModelID:  "test-model",
 			ReasoningEffort: "medium",
 		},
-		"",
 		lifecycleTestRunID,
 		acpagent.NewDriver(pool),
 	)
@@ -378,6 +377,8 @@ type incompleteScheduleDriver struct {
 
 func (*incompleteScheduleDriver) RuntimeType() string { return "codex" }
 
+func (*incompleteScheduleDriver) Caps() external.Caps { return stubCaps }
+
 func (d *incompleteScheduleDriver) Prompt(_ context.Context, input external.PromptInput) (external.PromptResult, error) {
 	d.input = input
 	return external.PromptResult{Text: "partial", Output: []sdk.Message{sdk.AssistantMessage("partial")}}, nil
@@ -395,7 +396,6 @@ func TestTriggerScheduleRuntimeRejectsIncompleteTurn(t *testing.T) {
 		ctx,
 		lifecycleTestBotID,
 		schedule.TriggerPayload{FireID: "test-fire", SessionID: lifecycleTestSessionID, Command: "run scheduled task", OwnerUserID: "user-1"},
-		"",
 		lifecycleTestRunID,
 		driver,
 	)

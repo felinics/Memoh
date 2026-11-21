@@ -419,9 +419,9 @@ func TestPostgresHistoryResetDuringActiveRun(t *testing.T) {
 	for _, scope := range []historyResetScope{historyResetSession, historyResetBot} {
 		t.Run(string(scope), func(t *testing.T) {
 			h := newWSStepHistoryHarness(t, wsStepHistoryBlock)
-			// The ACP pool installs the owner-local closer in production; this
-			// session has no ACP runtime to close.
-			h.manager.SetHistoryResetHandler(func(context.Context, sessionruntime.ResetScope) error { return nil })
+			// The process supervisor installs the closer in production; this
+			// session has no agent process to close.
+			h.manager.SetHistoryResetHandler(func(context.Context, sessionruntime.ResetScope) (func(), error) { return func() {}, nil })
 			resetDone := make(chan error, 1)
 			got := h.run(t, func(ctx context.Context, _ string) {
 				resetDone <- h.clearHistoryErr(ctx, scope, nil)
@@ -459,7 +459,7 @@ func TestPostgresHistoryResetDrainBackendFailure(t *testing.T) {
 		t.Run(string(scope), func(t *testing.T) {
 			backend := &failingUpdateBackend{MemoryBackend: sessionruntime.NewMemoryBackend()}
 			h := newWSStepHistoryHarnessOn(t, wsStepHistoryBlock, backend)
-			h.manager.SetHistoryResetHandler(func(context.Context, sessionruntime.ResetScope) error { return nil })
+			h.manager.SetHistoryResetHandler(func(context.Context, sessionruntime.ResetScope) (func(), error) { return func() {}, nil })
 			var failed error
 			var during *sessionruntime.CurrentRunView
 			retried := make(chan error, 1)

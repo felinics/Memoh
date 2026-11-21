@@ -56,7 +56,7 @@ func tgsSticker(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	w := gzip.NewWriter(&buf)
-	if _, err := w.Write([]byte(`{"v":"5.5.2","w":512,"h":512,"ip":0,"op":60,"fr":30,"layers":[]}`)); err != nil {
+	if _, err := w.Write([]byte(`{"v":"5.5.2","w":32,"h":32,"ip":0,"op":60,"fr":30,"layers":[]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	agentevent "github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/toolbridge"
 )
 
 type uiTextStreamState struct {
@@ -48,8 +49,33 @@ func NewUIMessageStreamConverter() *UIMessageStreamConverter {
 	}
 }
 
+// Resume continues a run whose live blocks another converter rendered: a run
+// a new owner reclaimed after the previous process went away. Later blocks take
+// IDs after the resumed ones, tool events update their blocks in place, and the
+// terminal snapshot lines up with them as with blocks this converter emitted.
+func (c *UIMessageStreamConverter) Resume(messages []UIMessage) {
+	for _, message := range messages {
+		if message.ID >= c.nextID {
+			c.nextID = message.ID + 1
+		}
+		if message.Type == UIMessageStatus {
+			continue
+		}
+		toolCallID := strings.TrimSpace(message.ToolCallID)
+		c.emitted = append(c.emitted, uiEmittedBlock{Kind: message.Type, ToolCallID: toolCallID, ID: message.ID})
+		if message.Type == UIMessageTool && toolCallID != "" {
+			c.tools[toolCallID] = &uiToolStreamState{Message: message}
+		}
+	}
+}
+
 // HandleEvent updates converter state and returns zero or one complete UI messages.
 func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIMessage {
+	// A tool_call runs an on-demand tool; the block shows that tool, the
+	// same way the persisted history renders it.
+	if name, input, ok := toolbridge.Unwrap(event.ToolName, event.Input); ok {
+		event.ToolName, event.Input = name, input
+	}
 	switch strings.ToLower(strings.TrimSpace(event.Type)) {
 	case "retry":
 		// A retried attempt regenerates its output from scratch, so the terminal

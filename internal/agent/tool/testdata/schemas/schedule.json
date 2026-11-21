@@ -12,6 +12,10 @@
       "command": {
         "type": "string"
       },
+      "contact_via_channels": {
+        "description": "Whether runs that have something for the user may also reach them on the bot's configured social platforms. Default true (recommended).",
+        "type": "boolean"
+      },
       "description": {
         "type": "string"
       },
@@ -40,6 +44,14 @@
         "type": "string"
       },
       "name": {
+        "type": "string"
+      },
+      "notify_policy": {
+        "description": "When Memoh tells the user about a run: important (default, recommended) only when the run calls notify_user, fails or waits for a decision; every_run after every run.",
+        "enum": [
+          "important",
+          "every_run"
+        ],
         "type": "string"
       },
       "pattern": {
@@ -107,6 +119,10 @@
       "command": {
         "type": "string"
       },
+      "contact_via_channels": {
+        "description": "Whether runs that have something for the user may also reach them on the bot's configured social platforms.",
+        "type": "boolean"
+      },
       "description": {
         "type": "string"
       },
@@ -137,6 +153,14 @@
         "type": "string"
       },
       "name": {
+        "type": "string"
+      },
+      "notify_policy": {
+        "description": "When Memoh tells the user about a run: important only when the run calls notify_user, fails or waits for a decision; every_run after every run.",
+        "enum": [
+          "important",
+          "every_run"
+        ],
         "type": "string"
       },
       "pattern": {

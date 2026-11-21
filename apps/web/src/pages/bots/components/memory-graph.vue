@@ -10,38 +10,41 @@
       </div>
     </template>
 
-    <div
-      class="relative h-[30rem]"
-      @wheel.capture.prevent="handleGraphWheel"
-      @pointerdown="handleGraphPointerDown"
-    >
-      <PanePlaceholder
-        v-if="loading"
-        loading
+    <!-- The graph canvas fills the whole card, edge to edge. -->
+    <SettingsBleed>
+      <div
+        class="relative h-[30rem]"
+        @wheel.capture.prevent="handleGraphWheel"
+        @pointerdown="handleGraphPointerDown"
       >
-        {{ $t('common.loading') }}
-      </PanePlaceholder>
-      <template v-else-if="graphData && graphData.nodes.length > 0">
-        <VChart
-          ref="chartRef"
-          :option="chartOption"
-          :autoresize="chartAutoresize"
-          :update-options="chartUpdateOptions"
-          class="size-full"
-          :class="{ invisible: !layoutReady }"
-        />
         <PanePlaceholder
-          v-if="!layoutReady"
+          v-if="loading"
           loading
-          class="absolute inset-0 z-(--z-raised)"
         >
           {{ $t('common.loading') }}
         </PanePlaceholder>
-      </template>
-      <PanePlaceholder v-else>
-        {{ $t('memory.graphEmpty') }}
-      </PanePlaceholder>
-    </div>
+        <template v-else-if="graphData && graphData.nodes.length > 0">
+          <VChart
+            ref="chartRef"
+            :option="chartOption"
+            :autoresize="chartAutoresize"
+            :update-options="chartUpdateOptions"
+            class="size-full"
+            :class="{ invisible: !layoutReady }"
+          />
+          <PanePlaceholder
+            v-if="!layoutReady"
+            loading
+            class="absolute inset-0 z-(--z-raised)"
+          >
+            {{ $t('common.loading') }}
+          </PanePlaceholder>
+        </template>
+        <PanePlaceholder v-else>
+          {{ $t('memory.graphEmpty') }}
+        </PanePlaceholder>
+      </div>
+    </SettingsBleed>
   </SettingsSection>
 </template>
 
@@ -51,7 +54,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { PanePlaceholder, SettingsSection } from '@felinic/ui'
+import { PanePlaceholder, SettingsBleed, SettingsSection } from '@felinic/ui'
 import { useMemoryGraphFromProps } from './memory-graph/useMemoryGraph'
 
 use([CanvasRenderer, GraphChart, TooltipComponent])

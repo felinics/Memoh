@@ -19,18 +19,18 @@ const (
 	QueueCommandCodeInvalid     = string(apperror.CodeQueueRequestInvalid)
 	QueueCommandCodeUnsupported = string(apperror.CodeQueueUnsupportedSession)
 	QueueCommandCodeCapacity    = string(apperror.CodeQueueCapacityExceeded)
-	// QueueCommandCodeFollowUpUnsupportedChannel means the channel cannot
-	// receive the reply of a run that the server starts from the follow-up
-	// queue: platform channels deliver replies from the inbound call's run
-	// handle, which a queued run does not have.
+	// QueueCommandCodeFollowUpUnsupportedChannel answers /queue on a channel.
+	// A follow-up is a run the server starts later, without the inbound
+	// call's run handle a platform channel streams its reply from; only the
+	// Web client, which watches the session, queues one, through its own API.
 	QueueCommandCodeFollowUpUnsupportedChannel = string(apperror.CodeQueueFollowUpUnsupportedChannel)
 )
 
-// QueueCommandInput contains only facts derived by the channel boundary. The
-// session is resolved from the current route; callers cannot select a run or
-// supply queue provenance. Team and sender identity are recorded with the
-// item because a queued follow-up starts after this request is gone, and the
-// admission that starts it needs the same identity an ordinary turn carries.
+// QueueCommandInput is a /steer a channel admits, with only facts derived by
+// the channel boundary: the session is resolved from the current route, so
+// callers cannot select a run. The steer joins the run the channel is
+// already streaming, which has its own route; it records the team and the
+// sender, who alone may edit it.
 type QueueCommandInput struct {
 	TeamID            string `json:"team_id"`
 	BotID             string `json:"bot_id"`
@@ -41,12 +41,11 @@ type QueueCommandInput struct {
 	Text              string `json:"text"`
 }
 
-// QueueCommandHandler is the narrow live-queue port used by channel slash
-// controls. The embedded Server uses a local adapter; split Channel uses the
-// authenticated server-runtime RPC client.
+// QueueCommandHandler is the narrow live-queue port used by the channel
+// /steer control. The embedded Server uses a local adapter; split Channel
+// uses the authenticated server-runtime RPC client.
 type QueueCommandHandler interface {
 	EnqueueSteer(context.Context, QueueCommandInput) error
-	EnqueueFollowUp(context.Context, QueueCommandInput) error
 }
 
 // NewQueueCommandError is the public error a queue command is refused with.

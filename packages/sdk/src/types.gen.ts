@@ -343,14 +343,10 @@ export type AdaptersUsageResponse = {
 
 export type AgentcredentialAuthorization = {
     auth_kind: string;
-    authorization_url?: string;
     expires_at: string;
     id: string;
-    interval_seconds?: number;
     runtime: string;
-    status: 'pending' | 'ready' | 'claimed';
-    user_code?: string;
-    verification_url?: string;
+    status: 'ready' | 'claimed';
 };
 
 export type AgentcredentialAuthorizationRequest = {
@@ -378,6 +374,41 @@ export type AgentcredentialPublicCredential = {
 };
 
 export type ApperrorFault = 'client' | 'server' | 'dependency' | 'canceled';
+
+export type AttentionAttention = {
+    /**
+     * At is when the session last needed attention, or when it was marked
+     * unread if it never did; it orders the inbox.
+     */
+    attention_at?: string;
+    attention_kind?: AttentionKind;
+    bot_id?: string;
+    /**
+     * Marked is true when the user marked the session unread themselves; such
+     * a session is not read just because it is already on screen.
+     */
+    marked?: boolean;
+    /**
+     * ReadThrough is the through a client sends to read it: it covers both the
+     * attention and a manual unread mark.
+     */
+    read_through?: string;
+    /**
+     * ScheduleID names the schedule whose run created the session, so a
+     * client can show one schedule's unread runs as one entry.
+     */
+    schedule_id?: string;
+    session_id?: string;
+    title?: string;
+};
+
+export type AttentionKind = 'reply' | 'failed' | 'needs_input' | 'update' | 'marked';
+
+export type AttentionReadStateChange = {
+    session_id?: string;
+    through?: string;
+    unread?: boolean;
+};
 
 export type AudioConfigSchema = {
     fields?: Array<AudioFieldSchema>;
@@ -539,6 +570,11 @@ export type BotagentsBotAgent = {
         [key: string]: unknown;
     };
     name?: string;
+    /**
+     * ReportsQuota is decided at read time: the Agent's own account login
+     * reports its plan usage (GET .../quota).
+     */
+    reports_quota?: boolean;
     runtime?: string;
     updated_at?: string;
 };
@@ -1576,24 +1612,39 @@ export type ExternalReasoningEffortOption = {
     name?: string;
 };
 
-export type ExternalagentCodexUsageResponse = {
-    limit_reached: boolean;
-    windows: Array<ExternalagentCodexUsageWindow>;
+export type ExternalagentAgentAccountResponse = {
+    email?: string;
+    signed_in: boolean;
 };
 
-export type ExternalagentCodexUsageWindow = {
+export type ExternalagentAgentQuotaResponse = {
+    limit_reached: boolean;
+    windows: Array<ExternalagentAgentQuotaWindow>;
+};
+
+export type ExternalagentAgentQuotaWindow = {
+    /**
+     * Model names the models the window counts alone; absent when it counts all.
+     */
+    model?: string;
     resets_at?: string;
     used_percent: number;
     /**
-     * WindowMinutes is 0 when the backend does not report the window length.
+     * WindowMinutes is 0 when the runtime does not report the window length.
      */
     window_minutes: number;
 };
 
 export type ExternalagentDeviceLoginAuthorizeResponse = {
+    code_required?: boolean;
     login_id: string;
-    user_code: string;
+    user_code?: string;
     verification_url: string;
+};
+
+export type ExternalagentDeviceLoginCodeRequest = {
+    code: string;
+    login_id: string;
 };
 
 export type ExternalagentDeviceLoginPollRequest = {
@@ -1676,10 +1727,6 @@ export type GithubComFelinicsMemohInternalMcpConnection = {
 
 export type HandlersAgentAuthorizationClaimRequest = {
     authorization_id: string;
-};
-
-export type HandlersAgentAuthorizationExchangeRequest = {
-    code: string;
 };
 
 export type HandlersAppConnectorCredentialRequest = {
@@ -2243,6 +2290,10 @@ export type HandlersHooksEventsResponse = {
     events?: Array<HandlersHookEventInfo>;
 };
 
+export type HandlersListBotChannelsResponse = {
+    items: Array<ChannelChannelConfig>;
+};
+
 export type HandlersListSnapshotsResponse = {
     snapshots?: Array<HandlersSnapshotInfo>;
     snapshotter?: string;
@@ -2367,6 +2418,14 @@ export type HandlersSessionInfoResponse = {
     context_usage?: HandlersContextUsage;
     message_count?: number;
     skills?: Array<string>;
+};
+
+export type HandlersSetReadStateRequest = {
+    items?: Array<AttentionReadStateChange>;
+};
+
+export type HandlersSetReadStateResponse = {
+    items?: Array<AttentionAttention>;
 };
 
 export type HandlersSiteIconResponse = {
@@ -2705,6 +2764,10 @@ export type HandlersUiMessageListResponse = {
     items: Array<ConversationUiTurn>;
 };
 
+export type HandlersUnreadSessionsResponse = {
+    items?: Array<AttentionAttention>;
+};
+
 export type HandlersUpdateContainerMetricsRequest = {
     resource_limits?: HandlersUpdateContainerResourceLimitsRequest;
 };
@@ -2961,16 +3024,6 @@ export type HandlersWorkspaceRemovalResponse = {
     updated_at?: string;
 };
 
-export type HandlersAcpRuntimeCreateRequest = {
-    acp_agent_id?: string;
-    /**
-     * BotAgentID names the Agent instance whose setup launches the runtime;
-     * only a session bound to the same instance can later adopt it.
-     */
-    bot_agent_id?: string;
-    project_path?: string;
-};
-
 export type HandlersAcpRuntimeModeRequest = {
     mode_id: string;
 };
@@ -3007,12 +3060,6 @@ export type HandlersBrowserSessionKeepAliveResponse = {
 };
 
 export type HandlersCreateSessionRequest = {
-    /**
-     * ACPRuntimeID optionally binds a warm pre-session runtime (created via
-     * POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
-     * transient in-memory handle reference, never persisted in metadata.
-     */
-    acp_runtime_id?: string;
     bot_agent_id?: string;
     channel_type?: string;
     metadata?: {
@@ -3590,6 +3637,13 @@ export type ModelsReasoningReplay = {
 
 export type ModelsTestResponse = {
     /**
+     * Args are the catalog args attached to Code (such as upstream for
+     * non-authentication upstream rejections).
+     */
+    args?: {
+        [key: string]: string;
+    };
+    /**
      * Code is the error catalog code for why the test did not pass. It is
      * empty on success and when no catalog code describes the failure.
      */
@@ -3608,6 +3662,150 @@ export type ModelsUpdateRequest = {
     name?: string;
     provider_id?: string;
     type?: ModelsModelType;
+};
+
+export type NetworkActionType = 'test_connection';
+
+export type NetworkBotActionRequest = {
+    input?: {
+        [key: string]: unknown;
+    };
+};
+
+export type NetworkBotStatus = {
+    attached: boolean;
+    description?: string;
+    details?: {
+        [key: string]: unknown;
+    };
+    message?: string;
+    network_ip?: string;
+    provider?: string;
+    proxy_address?: string;
+    state: NetworkOverlayState;
+    title?: string;
+    workspace?: NetworkWorkspaceRuntimeStatus;
+};
+
+export type NetworkConfigConstraint = {
+    max?: number;
+    min?: number;
+    step?: number;
+};
+
+export type NetworkConfigField = {
+    collapsed?: boolean;
+    constraint?: NetworkConfigConstraint;
+    default?: unknown;
+    description?: string;
+    enum?: Array<string>;
+    example?: unknown;
+    key: string;
+    multiline?: boolean;
+    order?: number;
+    placeholder?: string;
+    readonly?: boolean;
+    required?: boolean;
+    secret?: boolean;
+    title?: string;
+    type: NetworkFieldType;
+};
+
+export type NetworkConfigSchema = {
+    fields: Array<NetworkConfigField>;
+    title?: string;
+    version: number;
+};
+
+export type NetworkFieldType = 'string' | 'secret' | 'number' | 'bool' | 'enum' | 'textarea';
+
+export type NetworkNodeListResponse = {
+    items?: Array<NetworkNodeOption>;
+    message?: string;
+    provider?: string;
+};
+
+export type NetworkNodeOption = {
+    addresses?: Array<string>;
+    can_exit_node: boolean;
+    description?: string;
+    details?: {
+        [key: string]: unknown;
+    };
+    display_name: string;
+    id: string;
+    online: boolean;
+    selected: boolean;
+    value: string;
+};
+
+export type NetworkOverlayState = 'ready' | 'starting' | 'needs_login' | 'degraded' | 'stopped' | 'missing' | 'unsupported' | 'disabled' | 'workspace_missing' | 'needs_config' | 'unauthorized' | 'unknown';
+
+export type NetworkProviderAction = {
+    description?: string;
+    id: string;
+    label: string;
+    primary?: boolean;
+    status?: NetworkProviderActionStatus;
+    type: NetworkActionType;
+};
+
+export type NetworkProviderActionExecution = {
+    action_id: string;
+    output?: {
+        [key: string]: unknown;
+    };
+    status: NetworkProviderStatus;
+};
+
+export type NetworkProviderActionStatus = {
+    enabled: boolean;
+    reason?: string;
+};
+
+export type NetworkProviderCapabilities = {
+    egress_proxy: boolean;
+    exit_node: boolean;
+    kernel_tun: boolean;
+    mesh: boolean;
+    native_client: boolean;
+    private_dns: boolean;
+    service_proxy: boolean;
+    sidecar_worker: boolean;
+    transparent_proxy: boolean;
+    userspace: boolean;
+};
+
+export type NetworkProviderDescriptor = {
+    actions?: Array<NetworkProviderAction>;
+    capabilities: NetworkProviderCapabilities;
+    config_schema: NetworkConfigSchema;
+    description?: string;
+    display_name: string;
+    kind: string;
+};
+
+export type NetworkProviderStatus = {
+    description?: string;
+    details?: {
+        [key: string]: unknown;
+    };
+    state: NetworkOverlayState;
+    title?: string;
+};
+
+export type NetworkWorkspaceRuntimeStatus = {
+    container_id?: string;
+    message?: string;
+    network_attached?: boolean;
+    network_target?: string;
+    network_target_kind?: string;
+    pid?: number;
+    /**
+     * workspace_missing | runtime_unavailable | task_stopped | network_target_ready | unknown
+     */
+    state: string;
+    task_status?: string;
 };
 
 export type ProvidersCountResponse = {
@@ -3706,6 +3904,13 @@ export type ProvidersOAuthStatus = {
 };
 
 export type ProvidersTestResponse = {
+    /**
+     * Args are the catalog args attached to Code (such as upstream for
+     * non-authentication upstream rejections).
+     */
+    args?: {
+        [key: string]: string;
+    };
     /**
      * Code is the error catalog code for why the test did not pass. It is
      * empty on success and when no catalog code describes the failure.
@@ -3819,6 +4024,10 @@ export type ScheduleCreateRequest = {
      */
     bot_agent_id?: string;
     command?: string;
+    /**
+     * ContactViaChannels defaults to true.
+     */
+    contact_via_channels?: boolean;
     description?: string;
     enabled?: boolean;
     max_calls?: ScheduleNullableInt;
@@ -3831,6 +4040,10 @@ export type ScheduleCreateRequest = {
      */
     model_id?: string;
     name?: string;
+    /**
+     * NotifyPolicy defaults to important.
+     */
+    notify_policy?: 'important' | 'every_run';
     pattern?: string;
     /**
      * ReasoningEffort overrides the reasoning effort for this schedule.
@@ -3984,6 +4197,11 @@ export type ScheduleSchedule = {
     bot_agent_id?: string;
     bot_id?: string;
     command?: string;
+    /**
+     * ContactViaChannels leaves the bot free to reach the owner on its social
+     * platforms when a run has something for them.
+     */
+    contact_via_channels?: boolean;
     created_at?: string;
     current_calls?: number;
     description?: string;
@@ -3999,6 +4217,11 @@ export type ScheduleSchedule = {
      */
     model_id?: string;
     name?: string;
+    /**
+     * NotifyPolicy is when a run tells the owner in Memoh: important (only
+     * when the run asks to, fails or waits for a decision) or every_run.
+     */
+    notify_policy?: 'important' | 'every_run';
     pattern?: string;
     /**
      * ReasoningEffort overrides the reasoning effort for this schedule.
@@ -4028,6 +4251,7 @@ export type ScheduleSchedule = {
 
 export type ScheduleUpdateRequest = {
     command?: string;
+    contact_via_channels?: boolean;
     description?: string;
     enabled?: boolean;
     /**
@@ -4040,6 +4264,10 @@ export type ScheduleUpdateRequest = {
     execution?: ScheduleExecutionConfig;
     max_calls?: ScheduleNullableInt;
     name?: string;
+    /**
+     * NotifyPolicy and ContactViaChannels keep their stored value when absent.
+     */
+    notify_policy?: 'important' | 'every_run';
     pattern?: string;
 };
 
@@ -4084,7 +4312,7 @@ export type SearchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex';
+export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex' | 'deepseek';
 
 export type SearchprovidersUpdateRequest = {
     config?: {
@@ -4109,6 +4337,12 @@ export type ServerProblem = {
 };
 
 export type SessionSession = {
+    attention_at?: string;
+    /**
+     * AttentionKind and Unread describe the requesting user's unread state.
+     * They are filled by the attention service for list responses only.
+     */
+    attention_kind?: string;
     bot_agent_id?: string;
     bot_id?: string;
     channel_type?: string;
@@ -4139,6 +4373,7 @@ export type SessionSession = {
     session_mode?: string;
     title?: string;
     type?: string;
+    unread?: boolean;
     updated_at?: string;
     workdir_id?: string;
 };
@@ -4164,8 +4399,23 @@ export type SettingsSettings = {
     default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
+    /**
+     * EffectiveTimezone is the timezone the bot runs in: Timezone when set,
+     * otherwise InheritedTimezone. Agent turns and the scheduler use the same
+     * value, so clients read it instead of deriving one from the browser.
+     * Only the settings API fills EffectiveTimezone, InheritedTimezone and
+     * InheritedTimezoneSource; they are empty on settings the server reads for
+     * its own use.
+     */
+    effective_timezone?: string;
     fetch_provider_id?: string;
     image_model_id?: string;
+    /**
+     * InheritedTimezone is what the bot uses without a Timezone of its own.
+     * InheritedTimezoneSource says whose timezone that is.
+     */
+    inherited_timezone?: string;
+    inherited_timezone_source?: 'owner' | 'system';
     /**
      * MemoryEnabled reports whether the bot uses Built-in Memory. It is derived
      * from MemoryProviderID, which stays internal to the server.
@@ -4681,89 +4931,6 @@ export type GetAgentAuthorizationsByIdResponses = {
 };
 
 export type GetAgentAuthorizationsByIdResponse = GetAgentAuthorizationsByIdResponses[keyof GetAgentAuthorizationsByIdResponses];
-
-export type PostAgentAuthorizationsByIdExchangeData = {
-    /**
-     * Authorization code
-     */
-    body: HandlersAgentAuthorizationExchangeRequest;
-    path: {
-        /**
-         * Authorization ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/agent-authorizations/{id}/exchange';
-};
-
-export type PostAgentAuthorizationsByIdExchangeErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Gone
-     */
-    410: ServerProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ServerProblem;
-};
-
-export type PostAgentAuthorizationsByIdExchangeError = PostAgentAuthorizationsByIdExchangeErrors[keyof PostAgentAuthorizationsByIdExchangeErrors];
-
-export type PostAgentAuthorizationsByIdExchangeResponses = {
-    /**
-     * OK
-     */
-    200: AgentcredentialAuthorization;
-};
-
-export type PostAgentAuthorizationsByIdExchangeResponse = PostAgentAuthorizationsByIdExchangeResponses[keyof PostAgentAuthorizationsByIdExchangeResponses];
-
-export type PostAgentAuthorizationsByIdPollData = {
-    body?: never;
-    path: {
-        /**
-         * Authorization ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/agent-authorizations/{id}/poll';
-};
-
-export type PostAgentAuthorizationsByIdPollErrors = {
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Gone
-     */
-    410: ServerProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ServerProblem;
-};
-
-export type PostAgentAuthorizationsByIdPollError = PostAgentAuthorizationsByIdPollErrors[keyof PostAgentAuthorizationsByIdPollErrors];
-
-export type PostAgentAuthorizationsByIdPollResponses = {
-    /**
-     * OK
-     */
-    200: AgentcredentialAuthorization;
-};
-
-export type PostAgentAuthorizationsByIdPollResponse = PostAgentAuthorizationsByIdPollResponses[keyof PostAgentAuthorizationsByIdPollResponses];
 
 export type PostAuthLoginData = {
     /**
@@ -5466,177 +5633,36 @@ export type PutBotsByBotIdAclRulesByRuleIdResponses = {
 
 export type PutBotsByBotIdAclRulesByRuleIdResponse = PutBotsByBotIdAclRulesByRuleIdResponses[keyof PutBotsByBotIdAclRulesByRuleIdResponses];
 
-export type PostBotsByBotIdAcpRuntimesData = {
-    /**
-     * Runtime spec
-     */
-    body: HandlersAcpRuntimeCreateRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes';
-};
-
-export type PostBotsByBotIdAcpRuntimesErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Too Many Requests
-     */
-    429: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type PostBotsByBotIdAcpRuntimesError = PostBotsByBotIdAcpRuntimesErrors[keyof PostBotsByBotIdAcpRuntimesErrors];
-
-export type PostBotsByBotIdAcpRuntimesResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PostBotsByBotIdAcpRuntimesResponse = PostBotsByBotIdAcpRuntimesResponses[keyof PostBotsByBotIdAcpRuntimesResponses];
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdData = {
+export type GetBotsByBotIdAcpOptionsData = {
     body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
     };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}';
-};
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdError = DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors];
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdData = {
-    body?: never;
-    path: {
+    query: {
         /**
-         * Bot ID
+         * ACP agent ID
          */
-        bot_id: string;
+        acp_agent_id: string;
         /**
-         * Runtime ID
+         * Agent instance ID
          */
-        runtime_id: string;
+        bot_agent_id?: string;
+        /**
+         * Project the conversation will run in; /data when omitted
+         */
+        project_path?: string;
+        /**
+         * Model whose reasoning efforts to report; the agent's current model when omitted
+         */
+        model_id?: string;
     };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}';
+    url: '/bots/{bot_id}/acp-options';
 };
 
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdError = GetBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdErrors];
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponse = GetBotsByBotIdAcpRuntimesByRuntimeIdResponses[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeData = {
-    /**
-     * Mode selection
-     */
-    body: HandlersAcpRuntimeModeRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/mode';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors = {
+export type GetBotsByBotIdAcpOptionsErrors = {
     /**
      * Bad Request
      */
@@ -5663,130 +5689,16 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors = {
     502: ServerProblem;
 };
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors];
+export type GetBotsByBotIdAcpOptionsError = GetBotsByBotIdAcpOptionsErrors[keyof GetBotsByBotIdAcpOptionsErrors];
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses = {
+export type GetBotsByBotIdAcpOptionsResponses = {
     /**
      * OK
      */
     200: AcpagentRuntimeStatus;
 };
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelData = {
-    /**
-     * Model selection
-     */
-    body: HandlersAcpRuntimeModelRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/model';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ServerProblem;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningData = {
-    /**
-     * Reasoning effort selection
-     */
-    body: HandlersAcpRuntimeReasoningRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ServerProblem;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningError = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses];
+export type GetBotsByBotIdAcpOptionsResponse = GetBotsByBotIdAcpOptionsResponses[keyof GetBotsByBotIdAcpOptionsResponses];
 
 export type GetBotsByBotIdAgentsData = {
     body?: never;
@@ -5986,7 +5898,7 @@ export type PatchBotsByBotIdAgentsByIdResponses = {
 
 export type PatchBotsByBotIdAgentsByIdResponse = PatchBotsByBotIdAgentsByIdResponses[keyof PatchBotsByBotIdAgentsByIdResponses];
 
-export type GetBotsByBotIdAgentsByIdCodexUsageData = {
+export type GetBotsByBotIdAgentsByIdAccountData = {
     body?: never;
     path: {
         /**
@@ -5999,10 +5911,10 @@ export type GetBotsByBotIdAgentsByIdCodexUsageData = {
         id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/agents/{id}/codex/usage';
+    url: '/bots/{bot_id}/agents/{id}/account';
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
+export type GetBotsByBotIdAgentsByIdAccountErrors = {
     /**
      * Forbidden
      */
@@ -6012,29 +5924,25 @@ export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
      */
     404: ServerProblem;
     /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
      * Unprocessable Entity
      */
     422: ServerProblem;
     /**
-     * Bad Gateway
+     * Service Unavailable
      */
-    502: ServerProblem;
+    503: ServerProblem;
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageError = GetBotsByBotIdAgentsByIdCodexUsageErrors[keyof GetBotsByBotIdAgentsByIdCodexUsageErrors];
+export type GetBotsByBotIdAgentsByIdAccountError = GetBotsByBotIdAgentsByIdAccountErrors[keyof GetBotsByBotIdAgentsByIdAccountErrors];
 
-export type GetBotsByBotIdAgentsByIdCodexUsageResponses = {
+export type GetBotsByBotIdAgentsByIdAccountResponses = {
     /**
      * OK
      */
-    200: ExternalagentCodexUsageResponse;
+    200: ExternalagentAgentAccountResponse;
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageResponse = GetBotsByBotIdAgentsByIdCodexUsageResponses[keyof GetBotsByBotIdAgentsByIdCodexUsageResponses];
+export type GetBotsByBotIdAgentsByIdAccountResponse = GetBotsByBotIdAgentsByIdAccountResponses[keyof GetBotsByBotIdAgentsByIdAccountResponses];
 
 export type DeleteBotsByBotIdAgentsByIdCredentialData = {
     body?: never;
@@ -6297,6 +6205,53 @@ export type PostBotsByBotIdAgentsByIdLoginDeviceCancelResponses = {
     204: unknown;
 };
 
+export type PostBotsByBotIdAgentsByIdLoginDeviceCodeData = {
+    /**
+     * Sign-in reference and code
+     */
+    body: ExternalagentDeviceLoginCodeRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/login/device/code';
+};
+
+export type PostBotsByBotIdAgentsByIdLoginDeviceCodeErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type PostBotsByBotIdAgentsByIdLoginDeviceCodeError = PostBotsByBotIdAgentsByIdLoginDeviceCodeErrors[keyof PostBotsByBotIdAgentsByIdLoginDeviceCodeErrors];
+
+export type PostBotsByBotIdAgentsByIdLoginDeviceCodeResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type PostBotsByBotIdAgentsByIdLoginDevicePollData = {
     /**
      * Sign-in reference
@@ -6392,6 +6347,52 @@ export type GetBotsByBotIdAgentsByIdModelsResponses = {
 };
 
 export type GetBotsByBotIdAgentsByIdModelsResponse = GetBotsByBotIdAgentsByIdModelsResponses[keyof GetBotsByBotIdAgentsByIdModelsResponses];
+
+export type GetBotsByBotIdAgentsByIdQuotaData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/quota';
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaError = GetBotsByBotIdAgentsByIdQuotaErrors[keyof GetBotsByBotIdAgentsByIdQuotaErrors];
+
+export type GetBotsByBotIdAgentsByIdQuotaResponses = {
+    /**
+     * OK
+     */
+    200: ExternalagentAgentQuotaResponse;
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaResponse = GetBotsByBotIdAgentsByIdQuotaResponses[keyof GetBotsByBotIdAgentsByIdQuotaResponses];
 
 export type GetBotsByBotIdAgentsByIdRuntimeControlsData = {
     body?: never;
@@ -10777,6 +10778,139 @@ export type GetBotsByBotIdMessagesLocateResponses = {
 
 export type GetBotsByBotIdMessagesLocateResponse = GetBotsByBotIdMessagesLocateResponses[keyof GetBotsByBotIdMessagesLocateResponses];
 
+export type PostBotsByBotIdNetworkActionsByActionIdData = {
+    /**
+     * Action input
+     */
+    body: NetworkBotActionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Action ID
+         */
+        action_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/network/actions/{action_id}';
+};
+
+export type PostBotsByBotIdNetworkActionsByActionIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type PostBotsByBotIdNetworkActionsByActionIdError = PostBotsByBotIdNetworkActionsByActionIdErrors[keyof PostBotsByBotIdNetworkActionsByActionIdErrors];
+
+export type PostBotsByBotIdNetworkActionsByActionIdResponses = {
+    /**
+     * OK
+     */
+    200: NetworkProviderActionExecution;
+};
+
+export type PostBotsByBotIdNetworkActionsByActionIdResponse = PostBotsByBotIdNetworkActionsByActionIdResponses[keyof PostBotsByBotIdNetworkActionsByActionIdResponses];
+
+export type GetBotsByBotIdNetworkNodesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/network/nodes';
+};
+
+export type GetBotsByBotIdNetworkNodesErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetBotsByBotIdNetworkNodesError = GetBotsByBotIdNetworkNodesErrors[keyof GetBotsByBotIdNetworkNodesErrors];
+
+export type GetBotsByBotIdNetworkNodesResponses = {
+    /**
+     * OK
+     */
+    200: NetworkNodeListResponse;
+};
+
+export type GetBotsByBotIdNetworkNodesResponse = GetBotsByBotIdNetworkNodesResponses[keyof GetBotsByBotIdNetworkNodesResponses];
+
+export type GetBotsByBotIdNetworkStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/network/status';
+};
+
+export type GetBotsByBotIdNetworkStatusErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetBotsByBotIdNetworkStatusError = GetBotsByBotIdNetworkStatusErrors[keyof GetBotsByBotIdNetworkStatusErrors];
+
+export type GetBotsByBotIdNetworkStatusResponses = {
+    /**
+     * OK
+     */
+    200: NetworkBotStatus;
+};
+
+export type GetBotsByBotIdNetworkStatusResponse = GetBotsByBotIdNetworkStatusResponses[keyof GetBotsByBotIdNetworkStatusResponses];
+
 export type PostBotsByBotIdQuickActionsExecuteData = {
     /**
      * Quick action payload
@@ -11697,6 +11831,54 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses = {
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses];
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session';
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionError = DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors[keyof DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors];
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningData = {
     /**
@@ -14462,61 +14644,6 @@ export type PostBotsByIdChannelByPlatformSendResponses = {
 
 export type PostBotsByIdChannelByPlatformSendResponse = PostBotsByIdChannelByPlatformSendResponses[keyof PostBotsByIdChannelByPlatformSendResponses];
 
-export type PostBotsByIdChannelByPlatformSendChatData = {
-    /**
-     * Send payload
-     */
-    body: ChannelSendRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-        /**
-         * Channel platform
-         */
-        platform: string;
-    };
-    query?: never;
-    url: '/bots/{id}/channel/{platform}/send_chat';
-};
-
-export type PostBotsByIdChannelByPlatformSendChatErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Unauthorized
-     */
-    401: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ServerProblem;
-};
-
-export type PostBotsByIdChannelByPlatformSendChatError = PostBotsByIdChannelByPlatformSendChatErrors[keyof PostBotsByIdChannelByPlatformSendChatErrors];
-
-export type PostBotsByIdChannelByPlatformSendChatResponses = {
-    /**
-     * OK
-     */
-    200: {
-        [key: string]: string;
-    };
-};
-
-export type PostBotsByIdChannelByPlatformSendChatResponse = PostBotsByIdChannelByPlatformSendChatResponses[keyof PostBotsByIdChannelByPlatformSendChatResponses];
-
 export type PatchBotsByIdChannelByPlatformStatusData = {
     /**
      * Channel status payload
@@ -14626,6 +14753,48 @@ export type PostBotsByIdChannelByPlatformWebhookEndpointResponses = {
 };
 
 export type PostBotsByIdChannelByPlatformWebhookEndpointResponse = PostBotsByIdChannelByPlatformWebhookEndpointResponses[keyof PostBotsByIdChannelByPlatformWebhookEndpointResponses];
+
+export type GetBotsByIdChannelsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channels';
+};
+
+export type GetBotsByIdChannelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetBotsByIdChannelsError = GetBotsByIdChannelsErrors[keyof GetBotsByIdChannelsErrors];
+
+export type GetBotsByIdChannelsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersListBotChannelsResponse;
+};
+
+export type GetBotsByIdChannelsResponse = GetBotsByIdChannelsResponses[keyof GetBotsByIdChannelsResponses];
 
 export type GetBotsByIdChecksData = {
     body?: never;
@@ -15415,6 +15584,35 @@ export type PostModelsByIdTestResponses = {
 };
 
 export type PostModelsByIdTestResponse = PostModelsByIdTestResponses[keyof PostModelsByIdTestResponses];
+
+export type GetNetworkMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/network/meta';
+};
+
+export type GetNetworkMetaErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetNetworkMetaError = GetNetworkMetaErrors[keyof GetNetworkMetaErrors];
+
+export type GetNetworkMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<NetworkProviderDescriptor>;
+};
+
+export type GetNetworkMetaResponse = GetNetworkMetaResponses[keyof GetNetworkMetaResponses];
 
 export type GetOauthMcpCallbackData = {
     body?: never;
@@ -17566,6 +17764,31 @@ export type PutUsersMeResponses = {
 
 export type PutUsersMeResponse = PutUsersMeResponses[keyof PutUsersMeResponses];
 
+export type GetUsersMeAttentionEventsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/attention/events';
+};
+
+export type GetUsersMeAttentionEventsErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetUsersMeAttentionEventsError = GetUsersMeAttentionEventsErrors[keyof GetUsersMeAttentionEventsErrors];
+
+export type GetUsersMeAttentionEventsResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetUsersMeAttentionEventsResponse = GetUsersMeAttentionEventsResponses[keyof GetUsersMeAttentionEventsResponses];
+
 export type GetUsersMeChannelIdentitiesData = {
     body?: never;
     path?: never;
@@ -17789,6 +18012,34 @@ export type PutUsersMePasswordResponses = {
     204: unknown;
 };
 
+export type PutUsersMeReadStateData = {
+    /**
+     * Read state changes
+     */
+    body: HandlersSetReadStateRequest;
+    path?: never;
+    query?: never;
+    url: '/users/me/read-state';
+};
+
+export type PutUsersMeReadStateErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+};
+
+export type PutUsersMeReadStateError = PutUsersMeReadStateErrors[keyof PutUsersMeReadStateErrors];
+
+export type PutUsersMeReadStateResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSetReadStateResponse;
+};
+
+export type PutUsersMeReadStateResponse = PutUsersMeReadStateResponses[keyof PutUsersMeReadStateResponses];
+
 export type GetUsersMeRuntimesData = {
     body?: never;
     path?: never;
@@ -17885,6 +18136,31 @@ export type DeleteUsersMeRuntimesByIdResponses = {
      */
     204: unknown;
 };
+
+export type GetUsersMeUnreadData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/unread';
+};
+
+export type GetUsersMeUnreadErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetUsersMeUnreadError = GetUsersMeUnreadErrors[keyof GetUsersMeUnreadErrors];
+
+export type GetUsersMeUnreadResponses = {
+    /**
+     * OK
+     */
+    200: HandlersUnreadSessionsResponse;
+};
+
+export type GetUsersMeUnreadResponse = GetUsersMeUnreadResponses[keyof GetUsersMeUnreadResponses];
 
 export type DeleteUsersByIdData = {
     body?: never;

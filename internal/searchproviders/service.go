@@ -403,6 +403,34 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderDeepSeek),
+			DisplayName: "DeepSeek",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "DeepSeek API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "DeepSeek Search API URL",
+						Required:    false,
+						Example:     "https://api.deepseek.com/v1/tools/search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -569,6 +597,7 @@ var defaultProviders = []struct {
 	{ProviderBocha, "Bocha"},
 	{ProviderDuckDuckGo, "DuckDuckGo"},
 	{ProviderYandex, "Yandex"},
+	{ProviderDeepSeek, "DeepSeek"},
 }
 
 func (s *Service) EnsureDefaults(ctx context.Context) error {
@@ -615,7 +644,8 @@ func isValidProviderName(name ProviderName) bool {
 		ProviderExa,
 		ProviderBocha,
 		ProviderDuckDuckGo,
-		ProviderYandex:
+		ProviderYandex,
+		ProviderDeepSeek:
 		return true
 	default:
 		return false

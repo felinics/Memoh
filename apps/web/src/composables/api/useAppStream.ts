@@ -5,12 +5,10 @@ import {
   postBotsByBotIdAppsUpdate,
 } from '@memohai/sdk'
 import {
-  fetchSSEProblem,
   isSSEErrorEvent,
-  localizeSSEErrorEvent,
-  normalizeSSEFailure,
   type SSEErrorEvent,
 } from './sse-error'
+import { streamJsonSse } from './stream-json-sse'
 
 // codesync(app-stream): keep these manual SSE payload types in sync with
 // internal/handlers/apps.go (AppStreamEvent). The generated
@@ -101,74 +99,55 @@ const INVALID_EVENT = 'Invalid app stream event'
 export async function* streamAppOperation(
   options: AppStreamOptions,
 ): AsyncGenerator<AppStreamEvent, void, unknown> {
-  let streamError: unknown
-  const common = {
-    headers: { Accept: 'text/event-stream' },
+  yield* streamJsonSse<AppStreamEvent>({
     signal: options.signal,
-    fetch: fetchSSEProblem,
-    onSseError: (error: unknown) => {
-      streamError = error
+    invalidEventMessage: INVALID_EVENT,
+    failureMessage: 'App stream failed',
+    isEvent: isAppStreamEvent,
+    normalizeEvent: event => (event.type === 'log' ? { ...event, data: event.data ?? '' } : event),
+    open: async (common) => {
+      switch (options.action) {
+        case 'install': {
+          const install = options.install
+          if (!install) throw new Error('install target is required')
+          return postBotsByBotIdApps({
+            ...common,
+            path: { bot_id: options.botId },
+            body: {
+              registry_id: install.registryId,
+              app_id: install.appId,
+              revision: install.revision,
+            },
+          })
+        }
+        case 'update': {
+          const update = options.update
+          if (!update || !options.registryId || !options.appId) throw new Error('update selection is required')
+          return postBotsByBotIdAppsUpdate({
+            ...common,
+            path: { bot_id: options.botId },
+            body: {
+              registry_id: options.registryId,
+              app_id: options.appId,
+              release: update.release,
+              dependencies: update.dependencies,
+            },
+          })
+        }
+        case 'resume':
+          return postBotsByBotIdAppsByInstallationIdResume({
+            ...common,
+            path: { bot_id: options.botId, installation_id: requireInstallation(options) },
+          })
+        default:
+          return deleteBotsByBotIdAppsByInstallationId({
+            ...common,
+            path: { bot_id: options.botId, installation_id: requireInstallation(options) },
+            query: options.removeUnreferencedRequired ? { remove_unreferenced_required: true } : undefined,
+          })
+      }
     },
-    responseValidator: async (data: unknown) => {
-      if (!isAppStreamEvent(data)) throw new Error(INVALID_EVENT)
-    },
-    sseMaxRetryAttempts: 1,
-  }
-
-  let result: { stream: unknown }
-  switch (options.action) {
-    case 'install': {
-      const install = options.install
-      if (!install) throw new Error('install target is required')
-      result = await postBotsByBotIdApps({
-        ...common,
-        path: { bot_id: options.botId },
-        body: {
-          registry_id: install.registryId,
-          app_id: install.appId,
-          revision: install.revision,
-        },
-      })
-      break
-    }
-    case 'update': {
-      const update = options.update
-      if (!update || !options.registryId || !options.appId) throw new Error('update selection is required')
-      result = await postBotsByBotIdAppsUpdate({
-        ...common,
-        path: { bot_id: options.botId },
-        body: {
-          registry_id: options.registryId,
-          app_id: options.appId,
-          release: update.release,
-          dependencies: update.dependencies,
-        },
-      })
-      break
-    }
-    case 'resume':
-      result = await postBotsByBotIdAppsByInstallationIdResume({
-        ...common,
-        path: { bot_id: options.botId, installation_id: requireInstallation(options) },
-      })
-      break
-    default:
-      result = await deleteBotsByBotIdAppsByInstallationId({
-        ...common,
-        path: { bot_id: options.botId, installation_id: requireInstallation(options) },
-        query: options.removeUnreferencedRequired ? { remove_unreferenced_required: true } : undefined,
-      })
-  }
-
-  for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
-    if (!isAppStreamEvent(event)) throw new Error(INVALID_EVENT)
-    if (event.type === 'log') yield { ...event, data: event.data ?? '' }
-    else yield event.type === 'error' ? localizeSSEErrorEvent(event) : event
-  }
-
-  if (streamError) {
-    throw normalizeSSEFailure(streamError, 'App stream failed')
-  }
+  })
 }
 
 function requireInstallation(options: AppStreamOptions): string {
