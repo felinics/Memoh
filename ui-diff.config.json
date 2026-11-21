@@ -1,0 +1,178 @@
+{
+  "startCommand": "pnpm --filter @memohai/web exec vite --port {port} --host 127.0.0.1",
+  "baseUrl": "http://127.0.0.1:{port}",
+  "readyPath": "/login",
+  "install": "auto",
+  "routes": [
+    {
+      "path": "/dev/components",
+      "name": "dev-components",
+      "files": [
+        "apps/web/src/pages/dev/components/**",
+        "packages/ui/src/**"
+      ]
+    },
+    {
+      "path": "/login",
+      "name": "login",
+      "files": [
+        "apps/web/src/pages/login/**"
+      ]
+    },
+    {
+      "path": "/onboarding",
+      "name": "onboarding",
+      "files": [
+        "apps/web/src/pages/onboarding/**"
+      ]
+    },
+    {
+      "path": "/",
+      "name": "home",
+      "files": [
+        "apps/web/src/pages/home/**",
+        "apps/web/src/pages/main-section/**",
+        "apps/web/src/components/**"
+      ]
+    },
+    {
+      "path": "/settings/bots",
+      "name": "settings-bots",
+      "files": [
+        "apps/web/src/pages/bots/**",
+        "apps/web/src/pages/settings-section/**"
+      ]
+    },
+    {
+      "path": "/settings/providers",
+      "name": "settings-providers",
+      "files": [
+        "apps/web/src/pages/providers/**"
+      ]
+    },
+    {
+      "path": "/settings/runtimes",
+      "name": "settings-runtimes",
+      "files": [
+        "apps/web/src/pages/runtimes/**"
+      ]
+    },
+    {
+      "path": "/settings/usage",
+      "name": "settings-usage",
+      "files": [
+        "apps/web/src/pages/usage/**"
+      ]
+    },
+    {
+      "path": "/settings/people",
+      "name": "settings-people",
+      "files": [
+        "apps/web/src/pages/people/**"
+      ]
+    },
+    {
+      "path": "/settings/appearance",
+      "name": "settings-appearance",
+      "files": [
+        "apps/web/src/pages/appearance/**"
+      ]
+    },
+    {
+      "path": "/settings/keyboard",
+      "name": "settings-keyboard",
+      "files": [
+        "apps/web/src/pages/keyboard-shortcuts/**"
+      ]
+    },
+    {
+      "path": "/settings/profile",
+      "name": "settings-profile",
+      "files": [
+        "apps/web/src/pages/profile/**"
+      ]
+    },
+    {
+      "path": "/settings/supermarket",
+      "name": "settings-supermarket",
+      "files": [
+        "apps/web/src/pages/supermarket/**"
+      ]
+    },
+    {
+      "path": "/settings/about",
+      "name": "settings-about",
+      "files": [
+        "apps/web/src/pages/about/**"
+      ]
+    }
+  ],
+  "globalFiles": [
+    "apps/web/src/style.css",
+    "apps/web/src/App.vue",
+    "apps/web/src/main.ts",
+    "apps/web/src/router.ts",
+    "apps/web/src/routes.ts",
+    "apps/web/src/i18n/**",
+    "apps/web/index.html",
+    "packages/ui/src/styles/**"
+  ],
+  "detect": {
+    "conventions": false,
+    "maxRoutes": 14,
+    "aliases": {
+      "@/": "apps/web/src/"
+    },
+    "exclude": [
+      "**/*.test.*",
+      "**/*.spec.*",
+      "**/package.json",
+      "internal/**",
+      "spec/**",
+      "scripts/**",
+      "apps/desktop/**",
+      "packages/sdk/src/**/*.gen.ts"
+    ]
+  },
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844,
+      "deviceScaleFactor": 2,
+      "isMobile": true,
+      "hasTouch": true
+    }
+  ],
+  "themes": [
+    {
+      "name": "light",
+      "colorScheme": "light",
+      "localStorage": {
+        "theme": "light",
+        "memoh:dev-tools": "1"
+      }
+    },
+    {
+      "name": "dark",
+      "colorScheme": "dark",
+      "localStorage": {
+        "theme": "dark",
+        "memoh:dev-tools": "1"
+      }
+    }
+  ],
+  "capture": {
+    "fixedTime": "run-start",
+    "hideDevOverlays": true
+  },
+  "publish": {
+    "mode": "none",
+    "allowPublicRepo": false
+  }
+}

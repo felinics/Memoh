@@ -10,5 +10,6 @@
 2. **`packages/ui/AGENTS.md`（组件库基础 Token 与视觉契约）**：`@felinic/ui` 的颜色、叠色梯、三态选中、圆角、细线边框、浮层阴影、5 级 z 梯、字号缩放与动效档位。
 3. **`packages/ui/skills/ui-owners/SKILL.md`（原子与布局原语字典）**：页面外壳、分组卡片、行、表单字段、统计磁贴、四级加载与弹窗原语的选型字典与手写边界。
 4. **`packages/ui/skills/ui-patterns/SKILL.md`（跨组件交互与场景规范库）**：表单与校验、保存模型与 Toast、空状态与加载、首屏 99/1 渐进披露与聚焦弹窗、分割线与推拉导航、实时状态面板与反模式速查。
+5. **根目录 `ui-diff.config.json` + [`ui-diff`](https://github.com/imuratalpay/ui-diff)（UI PR 必做视觉回归门禁）**：维护者自行在本机安装 `ui-diff`（不入库第三方源码）；所有涉及 UI 改动的 PR（含登录态业务页）须本地生成 `before | after | diff` 对比图与 UX 摘要，并以 `gh --attach` 上传为 GitHub PR 原生附件（不推 `ui-diff-assets` 分支）。
 
-请勿在本文件中重复抄写具体规则，所有架构与视觉规范均在上方四处单一出处维护。
+请勿在本文件中重复抄写具体规则，所有架构与视觉规范均在上方五处单一出处维护。
