@@ -82,7 +82,23 @@ RUN set -eux; \
 
 COPY --from=toolkit-builder /opt/memoh/toolkit /opt/memoh/toolkit
 COPY scripts/desktop-style.sh scripts/display-apply-style.sh scripts/display-prepare.sh /opt/memoh/scripts/
-RUN printf '%s\n' 'export PATH="/opt/memoh/toolkit/bin:$PATH"' > /etc/profile.d/memoh-toolkit.sh \
+
+# The workspace user environment (internal/workspace/userenv): the data
+# volume is the user's home, for programs that read HOME and for those that
+# look the home up in passwd (ssh, ~root). It is set after the build steps
+# above, because anything the image wrote under /data would be hidden by the
+# volume. userenv_test.go keeps these values equal to the Go definition.
+ENV HOME=/data \
+    XDG_CONFIG_HOME=/data/.config \
+    XDG_DATA_HOME=/data/.local/share \
+    XDG_CACHE_HOME=/data/.cache \
+    NPM_CONFIG_PREFIX=/data/.local \
+    PATH=/data/.memoh/deps/bin:/data/.local/bin:/opt/memoh/toolkit/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# usermod refuses while root runs this very build step, so the passwd entry is
+# edited directly and then checked.
+RUN sed -i -E 's#^(root:[^:]*:0:0:[^:]*:)[^:]*:#\1/data:#' /etc/passwd \
+  && test "$(getent passwd root | cut -d: -f6)" = /data \
+  && printf '%s\n' 'export PATH="/data/.memoh/deps/bin:/data/.local/bin:/opt/memoh/toolkit/bin:$PATH"' > /etc/profile.d/memoh-toolkit.sh \
   && chmod 0755 /opt/memoh/scripts/*.sh \
   && test -x /usr/bin/tini \
   && flock -n -E 75 /tmp/memoh-workspace-lock-check true \

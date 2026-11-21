@@ -55,11 +55,12 @@ const (
 // command is killed.
 var ErrNotReading = errors.New("agent process is not reading its input")
 
-// Spawn launches command on env alone, without a bridge-side timeout.
-// Closing the returned process cancels the exec stream and terminates the
-// command.
+// Spawn launches command on env alone, without a bridge-side timeout, with
+// the PATH the workspace user's shell gives them so the CLI and the commands
+// it runs find what the user installed. Closing the returned process cancels
+// the exec stream and terminates the command.
 func Spawn(ctx context.Context, client *bridge.Client, command, workDir string, env []string) (*Child, error) {
-	return SpawnWith(ctx, client, command, workDir, bridge.ExecOptions{Env: env, CleanEnv: true})
+	return SpawnWith(ctx, client, command, workDir, bridge.ExecOptions{Env: env, CleanEnv: true, UserShellPath: true})
 }
 
 // SpawnWith is Spawn for a caller that shapes the environment itself: a user

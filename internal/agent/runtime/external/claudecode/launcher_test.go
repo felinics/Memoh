@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external/claudecode/claudecfg"
+	"github.com/felinics/memoh/internal/workspace/userenv"
 )
 
 func TestCLICommandQuotesTheLauncher(t *testing.T) {
@@ -18,8 +18,11 @@ func TestCLICommandQuotesTheLauncher(t *testing.T) {
 		t.Fatalf("bare launcher = %q", cliCommand(" /x/claude ", nil))
 	}
 	got := cliEnv(claudecfg.Config{}, "agent")
-	if got[0] != "PATH="+agentproc.ContainerPath {
-		t.Fatalf("cliEnv PATH = %q", got[0])
+	// The CLI runs in the workspace user environment, the terminal's.
+	for _, want := range userenv.Env() {
+		if !slices.Contains(got, want) {
+			t.Fatalf("cliEnv = %q, missing %q", got, want)
+		}
 	}
 	// Each Agent keeps its own login, sessions and settings.
 	if !slices.Contains(got, "CLAUDE_CONFIG_DIR=/data/.claude-code/agents/agent") {

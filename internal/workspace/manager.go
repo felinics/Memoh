@@ -28,6 +28,7 @@ import (
 	"github.com/felinics/memoh/internal/settings"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/userenv"
 	workspacetemplates "github.com/felinics/memoh/templates"
 )
 
@@ -150,6 +151,7 @@ func NewManager(log *slog.Logger, service runtimeService, networkController netc
 		templateBootstrap: NewTemplateBootstrapper(workspacetemplates.WorkspaceFS()),
 	}
 	m.grpcPool = bridge.NewPool(m.dialTarget)
+	m.grpcPool.SetCommandEnv(userenv.HomeEnv())
 	return m
 }
 
@@ -619,8 +621,15 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 		return ctr.ContainerSpec{}, err
 	}
 	skillEnv := skillset.ContainerEnv(skillRoots)
-	env := make([]string, 0, len(tzEnv)+1+len(skillEnv))
+	userEnv := userenv.HomeEnv()
+	env := make([]string, 0, len(tzEnv)+len(userEnv)+1+len(skillEnv))
 	env = append(env, tzEnv...)
+	// The bridge and every process it starts inherit the workspace user
+	// environment; the bridge client also sends it with each command (see
+	// bridge.Pool), so a container created before a change to it still
+	// runs commands with the current one. PATH is the image's: the bridge
+	// puts the user's own directories ahead of it (see bridgesvc.execEnv).
+	env = append(env, userEnv...)
 	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 	env = m.appendBridgeTLSEnv(env)
 	if m.botDisplayEnabled(ctx, botID) {

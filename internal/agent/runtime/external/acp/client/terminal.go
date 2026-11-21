@@ -212,8 +212,9 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		}
 	}
 	stream, err := m.client.ExecStreamWithOptions(execCtx, command, cwd, m.timeout, bridge.ExecOptions{ //nolint:contextcheck // execution outlives the create RPC but not its owning run.
-		Env:      env,
-		UnsetEnv: m.unsetEnv,
+		Env:           env,
+		UnsetEnv:      m.unsetEnv,
+		UserShellPath: true,
 	})
 	if err != nil {
 		err = errs.WrapDependency(err, "")

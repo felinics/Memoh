@@ -47,7 +47,7 @@ func TestProcessEnvFallsBackToDefaultPathWhenShellNeverAnswers(t *testing.T) {
 
 func TestStartProcessFindsCommandOnWorkspaceShellPath(t *testing.T) {
 	client, server := newRecordingBridgeClient(t)
-	shellPath := "/data/.local/bin:" + defaultContainerPath
+	shellPath := "/data/.bun/bin:" + defaultContainerPath
 	server.setShellPath(shellPath)
 	proc, err := StartProcess(context.Background(), client, "devin", []string{"acp"}, "/data", ProcessOptions{
 		AgentID: "acp",
