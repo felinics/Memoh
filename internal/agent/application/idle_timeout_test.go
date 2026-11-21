@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/schedule"
@@ -217,4 +218,49 @@ func TestScheduleBudgetHasDistinctCause(t *testing.T) {
 	if snapshotFailureCode(false, cause) != apperror.CodeScheduleExecutionTimeout {
 		t.Fatal("budget cause lost in terminal snapshot")
 	}
+}
+
+// A command an agent left running in the background reports no progress of
+// its own. While the agent keeps working — every model request it finishes is
+// a runtime activity report — that silence is not a hang. Once the agent goes
+// quiet too, the tool window applies as before.
+func TestIdleTimeoutRuntimeActivityKeepsBackgroundCommands(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, idle := withIdleTimeout(t.Context())
+		defer idle.Stop()
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallStart, ToolCallID: "background"})
+		activity := native.StreamEvent{Type: native.EventProgress, ProgressStatus: event.ProgressRuntimeActivity}
+		for range 8 {
+			time.Sleep(5 * time.Minute)
+			idle.Observe(activity)
+		}
+		synctest.Wait()
+		if ctx.Err() != nil {
+			t.Fatalf("a working agent's background command timed out after 40 minutes: %v", context.Cause(ctx))
+		}
+		time.Sleep(15 * time.Minute)
+		synctest.Wait()
+		if apperror.CodeOf(context.Cause(ctx)) != apperror.CodeAgentToolTimeout {
+			t.Fatalf("cause = %v, want a tool timeout once the agent is quiet", context.Cause(ctx))
+		}
+	})
+}
+
+// Tool output is not agent activity: a command that keeps printing does not
+// keep a silent parallel tool from timing out.
+func TestIdleTimeoutToolOutputIsNotAgentActivity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, idle := withIdleTimeout(t.Context())
+		defer idle.Stop()
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallStart, ToolCallID: "server"})
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallStart, ToolCallID: "stalled"})
+		for range 4 {
+			time.Sleep(5 * time.Minute)
+			idle.Observe(native.StreamEvent{Type: native.EventToolCallProgress, ToolCallID: "server", Progress: "log line"})
+		}
+		synctest.Wait()
+		if apperror.CodeOf(context.Cause(ctx)) != apperror.CodeAgentToolTimeout {
+			t.Fatalf("cause = %v, want the silent tool to time out", context.Cause(ctx))
+		}
+	})
 }

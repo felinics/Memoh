@@ -1,6 +1,7 @@
 package external
 
 import (
+	"strings"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -69,5 +70,56 @@ func TestTranscriptKeepsNativeToolFailure(t *testing.T) {
 	result := messages[1].Content[0].(sdk.ToolResultPart)
 	if !result.IsError || toolexec.OutputValue(result.Result) != "file not found" {
 		t.Fatalf("native failure became a successful tool result: %#v", result)
+	}
+}
+
+func transcriptRoles(msgs []sdk.Message) string {
+	var roles []string
+	for _, msg := range msgs {
+		role := string(msg.Role)
+		for _, part := range msg.Content {
+			switch p := part.(type) {
+			case sdk.ToolCallPart:
+				role += ":call=" + p.ToolCallID
+			case sdk.ToolResultPart:
+				role += ":result=" + p.ToolCallID
+			}
+		}
+		roles = append(roles, role)
+	}
+	return strings.Join(roles, " ")
+}
+
+// A runtime may finish a call after the model went on. The result still goes
+// with its call, so no call is left without its result in the transcript.
+func TestTranscriptFilesLateResultWithItsCall(t *testing.T) {
+	b := NewTranscriptRecorder()
+	b.Add(event.StreamEvent{Type: event.ToolCallStart, ToolCallID: "a", ToolName: "exec"})
+	b.Add(event.StreamEvent{Type: event.TextDelta, Delta: "a is running; meanwhile"})
+	b.Add(event.StreamEvent{Type: event.ToolCallStart, ToolCallID: "b", ToolName: "exec"})
+	b.Add(event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: "b", ToolName: "exec", Result: map[string]any{"exit_code": 0}})
+	b.Add(event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: "a", ToolName: "exec", Result: map[string]any{"exit_code": 1}})
+	b.Add(event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: "unknown", ToolName: "exec"})
+
+	got := transcriptRoles(b.Messages(""))
+	want := "assistant:call=a tool:result=a assistant:call=b tool:result=b tool:result=unknown"
+	if got != want {
+		t.Fatalf("transcript = %s\nwant %s", got, want)
+	}
+}
+
+// An approval repeats a call that was already flushed; its result goes with
+// the last message that makes the call.
+func TestTranscriptFilesResultWithTheLastCopyOfItsCall(t *testing.T) {
+	b := NewTranscriptRecorder()
+	b.Add(event.StreamEvent{Type: event.ToolCallStart, ToolCallID: "a", ToolName: "exec"})
+	b.Add(event.StreamEvent{Type: event.TextDelta, Delta: "needs approval"})
+	b.Add(event.StreamEvent{Type: event.ToolApprovalRequest, ToolCallID: "a", ToolName: "exec", ApprovalID: "ap", Status: "pending"})
+	b.Add(event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: "a", ToolName: "exec", Result: map[string]any{"exit_code": 0}})
+
+	msgs := b.Messages("")
+	last := msgs[len(msgs)-1]
+	if last.Role != sdk.MessageRoleTool || !strings.HasSuffix(transcriptRoles(msgs), "assistant:call=a tool:result=a") {
+		t.Fatalf("transcript = %s", transcriptRoles(msgs))
 	}
 }
