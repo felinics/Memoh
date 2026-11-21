@@ -13,7 +13,7 @@
       :data-workbench-panel-id="tab.id"
       :data-workbench-active-panel="store.activeId === tab.id ? 'true' : undefined"
       :style="panelBoxStyle(tab.id)"
-      @pointerdown="onPanelPointerDown(tab.id)"
+      @pointerdown.capture="onPanelPointerDown(tab.id)"
     >
       <ViewChat
         v-if="tab.target.kind === 'chat'"
@@ -104,6 +104,7 @@ import { useDisplaySnapshotsStore } from '@/store/display-snapshots'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { prefetchLater, whenNetworkQuiet } from '@/lib/idle-prefetch'
 import { withStylesheetRecovery } from '@/lib/chunk-load-error'
+import { getElementScale } from '@/workbench/drag'
 import { listGroups } from '@/workbench/tree'
 import type { WorkbenchNode, WorkbenchTab } from '@/workbench/types'
 import ViewChat from './view-chat.vue'
@@ -216,10 +217,10 @@ watch(
 
 watch(
   [stageBotId, isChatRoute, visibleTabGroupMap],
-  ([_bid, chatRoute]) => {
+  ([bid, chatRoute], prev) => {
     const activeFullscreenId = fullscreenTabId.value
     if (!activeFullscreenId) return
-    if (!chatRoute || !isTabVisible(activeFullscreenId) || !store.workbench.tabs[activeFullscreenId]) {
+    if ((prev && bid !== prev[0]) || !chatRoute || !isTabVisible(activeFullscreenId) || !store.workbench.tabs[activeFullscreenId]) {
       fullscreenTabId.value = null
     }
   },
@@ -275,10 +276,7 @@ function syncSlotRects() {
   const rootRect = root.getBoundingClientRect()
   if (rootRect.width <= 0 && rootRect.height <= 0) return
   // MainSection mounts with a CSS scale-[1.15] login/onboarding entry transition that does not re-fire ResizeObserver when it settles.
-  const scaleX = root.clientWidth > 0 ? rootRect.width / root.clientWidth : 1
-  const scaleY = root.clientHeight > 0 ? rootRect.height / root.clientHeight : 1
-  const sx = scaleX > 0 ? scaleX : 1
-  const sy = scaleY > 0 ? scaleY : 1
+  const { x: sx, y: sy } = getElementScale(root, rootRect)
 
   const next: Record<string, { left: number, top: number, width: number, height: number }> = {}
   for (const slotEl of queryGroupSlots()) {
@@ -298,6 +296,7 @@ function syncSlotRects() {
 function rebuildObservations() {
   if (!resizeObserver) return
   resizeObserver.disconnect()
+  if (store.isMobile) return
   if (stageEl.value) resizeObserver.observe(stageEl.value)
   for (const slotEl of queryGroupSlots()) {
     resizeObserver.observe(slotEl)

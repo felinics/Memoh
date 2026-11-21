@@ -84,6 +84,13 @@ export function findRightNeighborOfSpatialFirst(root: WorkbenchNode): string | n
   return deepestRowSplit ? findSpatialFirstGroupId(deepestRowSplit.second) : null
 }
 
+/** Whether `groupId` touches the top edge of the workbench (eligible for Electron window dragging). */
+export function isTopEdgeGroup(node: WorkbenchNode, groupId: string): boolean {
+  if (node.kind === 'group') return node.id === groupId
+  if (node.axis === 'col') return isTopEdgeGroup(node.first, groupId)
+  return isTopEdgeGroup(node.first, groupId) || isTopEdgeGroup(node.second, groupId)
+}
+
 export function clampRatio(ratio: number): number {
   if (!Number.isFinite(ratio)) return 0.5
   return Math.min(WORKBENCH_MAX_RATIO, Math.max(WORKBENCH_MIN_RATIO, ratio))
@@ -200,9 +207,8 @@ export function setTabPinned(state: WorkbenchState, tabId: string, pinned: boole
   const root = mapGroup(state.root, group.id, (g) => {
     const without = g.tabIds.filter(id => id !== tabId)
     const pinnedCount = without.filter(id => nextTabs[id]?.pinned).length
-    const nextTabIds = pinned
-      ? [...without.slice(0, pinnedCount), tabId, ...without.slice(pinnedCount)]
-      : [...without.slice(0, pinnedCount), tabId, ...without.slice(pinnedCount)]
+    // Pinning appends to the pinned prefix; unpinning prepends to the regular segment — both land at `pinnedCount`.
+    const nextTabIds = [...without.slice(0, pinnedCount), tabId, ...without.slice(pinnedCount)]
     return normalizeGroupTabs({
       ...g,
       tabIds: nextTabIds,
@@ -461,7 +467,7 @@ export function parseWorkbenchState(raw: unknown): WorkbenchState | null {
 
   const tabs: Record<string, WorkbenchTab> = {}
   for (const [id, entry] of Object.entries(candidate.tabs)) {
-    if (!entry || typeof entry !== 'object') continue
+    if (id === '__proto__' || !entry || typeof entry !== 'object') continue
     const e = entry as Partial<WorkbenchTab>
     if (typeof e.id !== 'string' || e.id !== id || !isValidTarget(e.target)) continue
     tabs[id] = { id, target: e.target, pinned: Boolean(e.pinned) }
@@ -473,13 +479,13 @@ export function parseWorkbenchState(raw: unknown): WorkbenchState | null {
   function sanitizeNode(node: unknown): WorkbenchNode | null {
     if (!node || typeof node !== 'object') return null
     const n = node as Record<string, unknown>
-    if (typeof n.id !== 'string' || !n.id.trim() || seenNodeIds.has(n.id)) return null
+    if (typeof n.id !== 'string' || !n.id.trim() || n.id === WORKBENCH_ROOT_DROP_ID || seenNodeIds.has(n.id)) return null
     seenNodeIds.add(n.id)
     if (n.kind === 'group') {
       if (!Array.isArray(n.tabIds)) return null
       const uniqueTabIds: string[] = []
       for (const tid of n.tabIds) {
-        if (typeof tid === 'string' && tabs[tid] && !seenTabIds.has(tid)) {
+        if (typeof tid === 'string' && Object.hasOwn(tabs, tid) && !seenTabIds.has(tid)) {
           seenTabIds.add(tid)
           uniqueTabIds.push(tid)
         }

@@ -364,4 +364,54 @@ describe('WorkbenchStage cross-bot isolation and stacking', () => {
     expect(termWrapper.style.width).toBe('1000px')
     expect(termWrapper.style.height).toBe('760px')
   })
+
+  it('activates an inactive split panel on capture-phase pointerdown and resets display fullscreen across bot switches', async () => {
+    let wbA = createEmptyWorkbenchState('g1')
+    wbA = insertTab(wbA, { id: 'display:1', pinned: false, target: { kind: 'display' } }, { groupId: 'g1' })
+    wbA = splitGroupWithTab(wbA, 'g1', 'right', { id: 'file:/data/a.ts', pinned: false, target: { kind: 'file', filePath: '/data/a.ts' } })
+
+    let wbB = createEmptyWorkbenchState('g2')
+    wbB = insertTab(wbB, { id: 'display:1', pinned: false, target: { kind: 'display' } }, { groupId: 'g2' })
+
+    localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+      'bot-a': { workbench: wbA, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      'bot-b': { workbench: wbB, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+    }))
+
+    const WorkbenchStage = (await import('./workbench-stage.vue')).default
+    const tabsStore = useWorkspaceTabsStore()
+    tabsStore.mountWorkspace()
+
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    app = createApp({
+      setup: () => () => h(WorkbenchStage),
+    })
+    app.use(pinia).use(i18n)
+    app.mount(host)
+    await nextTick()
+    await vi.dynamicImportSettled()
+    await nextTick()
+
+    // File split is active; clicking an inner child of display:1 that calls stopPropagation() must still activate display:1.
+    expect(tabsStore.activeId).toBe('file:/data/a.ts')
+    const displayInner = host.querySelector<HTMLElement>('[data-mock-display="bot-a:display:1"]')!
+    displayInner.addEventListener('pointerdown', e => e.stopPropagation())
+    displayInner.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
+    expect(tabsStore.activeId).toBe('display:1')
+
+    // Enter fullscreen on bot-a's display:1, then switch to bot-b which also has display:1 visible -> fullscreen must reset.
+    childCalls.displayFullscreenEmitter.trigger?.(true)
+    await nextTick()
+    expect(host.querySelector<HTMLElement>('[data-workbench-panel-id="display:1"]')!.classList.contains('z-(--z-top)')).toBe(true)
+
+    useChatSelectionStore().setBot('bot-b')
+    useMockChatStore().currentBotId = 'bot-b'
+    await nextTick()
+    await Promise.resolve()
+    await vi.dynamicImportSettled()
+    await nextTick()
+
+    expect(host.querySelector<HTMLElement>('[data-workbench-panel-id="display:1"]')!.classList.contains('z-(--z-top)')).toBe(false)
+  })
 })

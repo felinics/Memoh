@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   WORKBENCH_MIN_COL_PX,
   WORKBENCH_MIN_ROW_PX,
+  WORKBENCH_ROOT_DROP_ID,
   activateGroup,
   activateTab,
   clampSplitRatioForSize,
@@ -11,6 +12,7 @@ import {
   findRightNeighborOfSpatialFirst,
   findSpatialFirstGroupId,
   insertTab,
+  isTopEdgeGroup,
   keepOpenTab,
   listGroups,
   moveTabToGroup,
@@ -283,5 +285,61 @@ describe('workbench binary split & tab tree', () => {
       'file:/data/c.ts',
       'file:/data/a.ts',
     ])
+  })
+
+  it('identifies top-edge groups accurately across row, column, and nested splits', () => {
+    let state = createEmptyWorkbenchState('g1')
+    state = insertTab(state, makeFileTab('a.ts'))
+    expect(isTopEdgeGroup(state.root, 'g1')).toBe(true)
+
+    // Horizontal split (row): both left and right touch the top edge.
+    state = splitGroupWithTab(state, 'g1', 'right', makeFileTab('b.ts'))
+    const rightGroup = findGroupOfTab(state.root, 'file:/data/b.ts')!
+    expect(isTopEdgeGroup(state.root, 'g1')).toBe(true)
+    expect(isTopEdgeGroup(state.root, rightGroup.id)).toBe(true)
+
+    // Vertical split (col) inside left column: top touches top edge, bottom does not; right column still touches top edge.
+    state = splitGroupWithTab(state, 'g1', 'bottom', makeFileTab('c.ts'))
+    const bottomLeftGroup = findGroupOfTab(state.root, 'file:/data/c.ts')!
+    expect(isTopEdgeGroup(state.root, 'g1')).toBe(true)
+    expect(isTopEdgeGroup(state.root, bottomLeftGroup.id)).toBe(false)
+    expect(isTopEdgeGroup(state.root, rightGroup.id)).toBe(true)
+
+    // Root bottom split: entire new bottom strip does not touch the top edge.
+    state = splitGroupWithTab(state, WORKBENCH_ROOT_DROP_ID, 'bottom', makeFileTab('d.ts'))
+    const rootBottomGroup = findGroupOfTab(state.root, 'file:/data/d.ts')!
+    expect(isTopEdgeGroup(state.root, rootBottomGroup.id)).toBe(false)
+    expect(isTopEdgeGroup(state.root, 'g1')).toBe(true)
+    expect(isTopEdgeGroup(state.root, rightGroup.id)).toBe(true)
+  })
+
+  it('rejects prototype keys and reserved root drop id in parseWorkbenchState', () => {
+    const withReservedRootId = {
+      version: 1,
+      activeGroupId: WORKBENCH_ROOT_DROP_ID,
+      root: { kind: 'group', id: WORKBENCH_ROOT_DROP_ID, tabIds: ['file:/data/a.ts'], activeTabId: 'file:/data/a.ts', previewTabId: null },
+      tabs: { 'file:/data/a.ts': makeFileTab('a.ts') },
+    }
+    expect(parseWorkbenchState(withReservedRootId)).toBeNull()
+
+    const withPrototypeTabIds = {
+      version: 1,
+      activeGroupId: 'g1',
+      root: {
+        kind: 'group',
+        id: 'g1',
+        tabIds: ['toString', 'constructor', 'file:/data/good.ts'],
+        activeTabId: 'toString',
+        previewTabId: null,
+      },
+      tabs: {
+        'file:/data/good.ts': makeFileTab('good.ts'),
+      },
+    }
+    const parsed = parseWorkbenchState(withPrototypeTabIds)
+    expect(parsed).not.toBeNull()
+    expect(Object.keys(parsed!.tabs)).toEqual(['file:/data/good.ts'])
+    expect(listGroups(parsed!.root)[0]!.tabIds).toEqual(['file:/data/good.ts'])
+    expect(validateWorkbenchState(parsed!)).toEqual({ ok: true })
   })
 })

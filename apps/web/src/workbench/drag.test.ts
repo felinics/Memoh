@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   activeWorkbenchDrag,
@@ -370,6 +371,175 @@ describe('workbench pointer drag gestures', () => {
       expect(tabIds).toEqual(['tab:1', 'tab:2', 'tab:3'])
     } finally {
       header.remove()
+    }
+  })
+
+  it('animates moved siblings via WAAPI on first-tab reorder, skips pinned auto-scroll, and aborts cleanly if dragged tab vanishes', async () => {
+    const header = document.createElement('header')
+    header.dataset.workbenchHeaderGroupId = 'group:1'
+    header.getBoundingClientRect = () => new DOMRect(100, 0, 400, 40)
+
+    const pinnedZone = document.createElement('div')
+    pinnedZone.dataset.workbenchPinnedZone = ''
+    const pinnedTrack = document.createElement('div')
+    pinnedTrack.className = 'workbench-tab-track'
+    pinnedTrack.getBoundingClientRect = () => new DOMRect(100, 0, 80, 40)
+    const pinnedEl = document.createElement('div')
+    pinnedEl.dataset.workbenchTabId = 'pin:1'
+    Object.defineProperty(pinnedEl, 'offsetLeft', { configurable: true, value: 0 })
+    Object.defineProperty(pinnedEl, 'offsetWidth', { configurable: true, value: 80 })
+    pinnedEl.getBoundingClientRect = () => new DOMRect(100, 0, 80, 40)
+    pinnedTrack.appendChild(pinnedEl)
+    pinnedZone.appendChild(pinnedTrack)
+
+    const scroller = document.createElement('div')
+    scroller.dataset.workbenchTabScroller = ''
+    Object.defineProperty(scroller, 'scrollWidth', { configurable: true, value: 600 })
+    Object.defineProperty(scroller, 'clientWidth', { configurable: true, value: 300 })
+    scroller.scrollLeft = 50
+    scroller.getBoundingClientRect = () => new DOMRect(180, 0, 300, 40)
+
+    const track = document.createElement('div')
+    track.className = 'workbench-tab-track'
+    track.getBoundingClientRect = () => new DOMRect(180, 0, 300, 40)
+
+    const tabIds = ['pin:1', 'tab:1', 'tab:2']
+    const regularIds = () => tabIds.filter(id => !id.startsWith('pin:'))
+    const animateSpies: Record<string, ReturnType<typeof vi.fn>> = {}
+    const tabEls: Record<string, HTMLElement> = {}
+    for (const id of ['tab:1', 'tab:2']) {
+      const el = document.createElement('div')
+      el.dataset.workbenchTabId = id
+      Object.defineProperty(el, 'offsetLeft', { configurable: true, get: () => regularIds().indexOf(id) * 100 })
+      Object.defineProperty(el, 'offsetWidth', { configurable: true, value: 100 })
+      el.getBoundingClientRect = () => new DOMRect(180 + regularIds().indexOf(id) * 100, 0, 100, 40)
+      const spy = vi.fn(() => ({ cancel: vi.fn(), onfinish: null, oncancel: null }))
+      el.animate = spy as unknown as HTMLElement['animate']
+      animateSpies[id] = spy
+      tabEls[id] = el
+      track.appendChild(el)
+    }
+
+    scroller.appendChild(track)
+    header.append(pinnedZone, scroller)
+    document.body.appendChild(header)
+
+    const onReorder = vi.fn((_gid: string, tid: string, targetIdx: number) => {
+      const from = tabIds.indexOf(tid)
+      tabIds.splice(from, 1)
+      tabIds.splice(targetIdx, 0, tid)
+    })
+
+    try {
+      // 1. Dragging pinned tab near scroller edge must NOT scroll the unpinned scroller.
+      const pinDown = pointerEvent('pointerdown', { button: 0, buttons: 1, clientX: 140, clientY: 20 })
+      Object.defineProperty(pinDown, 'currentTarget', { value: pinnedEl })
+      startWorkbenchTabPointerGesture({
+        event: pinDown,
+        tabId: 'pin:1',
+        groupId: 'group:1',
+        pinned: true,
+        getTitle: () => 'Pinned',
+        isMobile: () => false,
+        getGroupTabIds: () => [...tabIds],
+        isTabPinned: id => id.startsWith('pin:'),
+        onActivate: vi.fn(),
+        onDragStateChange: vi.fn(),
+        onReorderInGroup: onReorder,
+        onCommitDrop: vi.fn(),
+      })
+      window.dispatchEvent(pointerEvent('pointermove', { buttons: 1, clientX: 190, clientY: 20 }))
+      expect(scroller.scrollLeft).toBe(50)
+      window.dispatchEvent(pointerEvent('pointerup', { button: 0, clientX: 190, clientY: 20 }))
+
+      // 2. Dragging first regular tab across sibling triggers WAAPI FLIP animation on tab:2.
+      const tab1Down = pointerEvent('pointerdown', { button: 0, buttons: 1, clientX: 230, clientY: 20 })
+      Object.defineProperty(tab1Down, 'currentTarget', { value: tabEls['tab:1'] })
+      startWorkbenchTabPointerGesture({
+        event: tab1Down,
+        tabId: 'tab:1',
+        groupId: 'group:1',
+        pinned: false,
+        getTitle: () => 'Tab 1',
+        isMobile: () => false,
+        getGroupTabIds: () => [...tabIds],
+        isTabPinned: id => id.startsWith('pin:'),
+        onActivate: vi.fn(),
+        onDragStateChange: vi.fn(),
+        onReorderInGroup: onReorder,
+        onCommitDrop: vi.fn(),
+      })
+      // Move +60px -> right edge 340 > tab:2 mid 330 + 4 -> reorders tab:1 past tab:2.
+      window.dispatchEvent(pointerEvent('pointermove', { buttons: 1, clientX: 290, clientY: 20 }))
+      await nextTick()
+      expect(tabIds).toEqual(['pin:1', 'tab:2', 'tab:1'])
+      expect(animateSpies['tab:2']).toHaveBeenCalledWith(
+        [{ transform: 'translate3d(100px, 0, 0)' }, { transform: 'translate3d(0, 0, 0)' }],
+        { duration: 160, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+      )
+      expect(animateSpies['tab:1']).not.toHaveBeenCalled()
+
+      // 3. If tab:1 DOM element is removed while rail-dragging, next pointermove clears --wb-drag-x cleanly.
+      tabEls['tab:1']!.remove()
+      window.dispatchEvent(pointerEvent('pointermove', { buttons: 1, clientX: 295, clientY: 20 }))
+      expect(tabEls['tab:1']!.style.getPropertyValue('--wb-drag-x')).toBe('')
+    } finally {
+      header.remove()
+    }
+  })
+
+  it('clamps cross-group header insertion lines inside the target scroller and suppresses contextmenu only after drag starts', () => {
+    const targetHeader = document.createElement('header')
+    targetHeader.dataset.workbenchHeaderGroupId = 'group:2'
+    targetHeader.getBoundingClientRect = () => new DOMRect(100, 0, 400, 40)
+
+    const scroller = document.createElement('div')
+    scroller.dataset.workbenchTabScroller = ''
+    scroller.getBoundingClientRect = () => new DOMRect(100, 0, 200, 40)
+
+    const overflowingTab = document.createElement('div')
+    overflowingTab.dataset.workbenchTabId = 'tab:overflow'
+    overflowingTab.getBoundingClientRect = () => new DOMRect(250, 0, 200, 40)
+    scroller.appendChild(overflowingTab)
+    targetHeader.appendChild(scroller)
+    document.body.appendChild(targetHeader)
+
+    try {
+      // Right-click BEFORE crossing drag threshold must NOT suppress contextmenu (allows tab ContextMenu to open).
+      startWorkbenchExternalPointerDrag({
+        event: pointerEvent('pointerdown', { button: 0, buttons: 1, clientX: 10, clientY: 10 }),
+        getTitle: () => 'file.ts',
+        isMobile: () => false,
+        getGroupTabIds: () => ['tab:overflow'],
+        isTabPinned: () => false,
+        onDragStateChange: vi.fn(),
+        onCommitDrop: vi.fn(),
+      })
+      const preStartCtx = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      window.dispatchEvent(preStartCtx)
+      expect(preStartCtx.defaultPrevented).toBe(false)
+
+      // Drag onto target header past overflowing tab -> insertion line clamped inside scroller [102, 298].
+      startWorkbenchExternalPointerDrag({
+        event: pointerEvent('pointerdown', { button: 0, buttons: 1, clientX: 10, clientY: 10 }),
+        getTitle: () => 'file.ts',
+        isMobile: () => false,
+        getGroupTabIds: () => ['tab:overflow'],
+        isTabPinned: () => false,
+        onDragStateChange: vi.fn(),
+        onCommitDrop: vi.fn(),
+      })
+      window.dispatchEvent(pointerEvent('pointermove', { buttons: 1, clientX: 380, clientY: 20 }))
+      expect(activeWorkbenchDrag.value?.target?.isInsertionLine).toBe(true)
+      expect(activeWorkbenchDrag.value?.target?.rect.left).toBe(297) // clampLineX(450)=298, rect.left=298-1
+
+      // Right-click AFTER crossing drag threshold cancels drag AND suppresses stray contextmenu.
+      const postStartCtx = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      window.dispatchEvent(postStartCtx)
+      expect(postStartCtx.defaultPrevented).toBe(true)
+      expect(activeWorkbenchDrag.value).toBeNull()
+    } finally {
+      targetHeader.remove()
     }
   })
 })

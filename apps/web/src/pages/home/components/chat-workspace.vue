@@ -118,7 +118,7 @@ import '@/styles/workbench.css'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { openAssetPreviewKey, openInFileManagerKey } from '../composables/useFileManagerProvider'
 import { normalizeFileManagerPath } from './file-manager-path'
-import { activeWorkbenchDrag, cancelActiveWorkbenchDrag } from '@/workbench/drag'
+import { activeWorkbenchDrag, cancelActiveWorkbenchDrag, getElementScale } from '@/workbench/drag'
 import WorkbenchPrefixNav from './workbench/workbench-prefix-nav.vue'
 import WorkbenchTree from './workbench/workbench-tree.vue'
 import WorkbenchStage from './workbench/workbench-stage.vue'
@@ -139,10 +139,7 @@ const dropPreviewStyle = computed<Record<string, string> | null>(() => {
   if (!target || !root) return null
   const rr = root.getBoundingClientRect()
   // Unscale viewport coords in case an ancestor (e.g. MainSection entry transition) applies CSS scale.
-  const scaleX = root.clientWidth > 0 ? rr.width / root.clientWidth : 1
-  const scaleY = root.clientHeight > 0 ? rr.height / root.clientHeight : 1
-  const sx = scaleX > 0 ? scaleX : 1
-  const sy = scaleY > 0 ? scaleY : 1
+  const { x: sx, y: sy } = getElementScale(root, rr)
   return {
     left: `${(target.rect.left - rr.left) / sx}px`,
     top: `${(target.rect.top - rr.top) / sy}px`,

@@ -100,6 +100,7 @@ async function fetchSchedule() {
   const botId = effectiveBotId.value
   const id = props.scheduleId
   if (!botId || !id) {
+    isLoading.value = false
     schedule.value = null
     if (workspaceTabs.loadedBotId === botId) {
       workspaceTabs.updateScheduleTitle(props.tabId, '')

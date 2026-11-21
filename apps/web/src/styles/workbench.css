@@ -115,18 +115,6 @@
     opacity 120ms ease-out;
 }
 
-.workbench-tab[data-dragging-rail="true"] {
-  /* ui-allow-z: dragged tab glides directly over sibling tabs along its own strip */
-  z-index: 4;
-  transform: translate3d(var(--wb-drag-x, 0px), 0, 0);
-  transition: none;
-  will-change: transform;
-}
-
-.workbench-tab[data-dragging-detached="true"] {
-  opacity: 0.4;
-}
-
 /* Content hit box:
  * Matches the hover pill's vertical bounds (5px top, 5.5px bottom) so label and
  * 20x20 close button share the exact vertical center of the pill.
@@ -138,7 +126,13 @@
   padding-right: var(--wb-pad-inline);
 }
 
-.workbench-header:not(:has([data-workbench-prefix-nav])) .workbench-tab:first-child:not(.workbench-tab-pinned) .workbench-tab-hit {
+.workbench-tab-hit:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  border-radius: var(--wb-tab-hover-radius);
+}
+
+.workbench-header:not(:has([data-workbench-prefix-nav], [data-workbench-pinned-zone])) .workbench-tab:first-child:not(.workbench-tab-pinned) .workbench-tab-hit {
   padding-left: 0.625rem;
 }
 
@@ -151,6 +145,18 @@
 .workbench-tab[data-group-active="true"] {
   /* ui-allow-z: local tab paint order above inactive sibling tabs and strip bottom hairline */
   z-index: 2;
+}
+
+.workbench-tab[data-dragging-rail="true"] {
+  /* ui-allow-z: dragged tab glides directly over active and sibling tabs along its own strip */
+  z-index: 4;
+  transform: translate3d(var(--wb-drag-x, 0px), 0, 0);
+  transition: none;
+  will-change: transform;
+}
+
+.workbench-tab[data-dragging-detached="true"] {
+  opacity: 0.4;
 }
 
 /* Inactive tab floating hover pill:
@@ -171,7 +177,7 @@
   pointer-events: none;
 }
 
-.workbench-header:not(:has([data-workbench-prefix-nav])) .workbench-tab:first-child:not(.workbench-tab-pinned):not([data-group-active="true"])::before {
+.workbench-header:not(:has([data-workbench-prefix-nav], [data-workbench-pinned-zone])) .workbench-tab:first-child:not(.workbench-tab-pinned):not([data-group-active="true"])::before {
   left: 0.03125rem;
 }
 
@@ -305,12 +311,18 @@
   bottom: var(--wb-hover-bottom);
   right: var(--wb-tab-close-edge);
   opacity: 0;
+  pointer-events: none;
 }
 
 .workbench-tab-action.is-dot,
 .workbench-tab[data-group-active="true"]:not([data-tab-dirty="true"]) .workbench-tab-action:not(.is-dot),
 .workbench-tab[data-hover-locked="true"] .workbench-tab-action:not(.is-dot) {
   opacity: 1;
+}
+
+.workbench-tab[data-group-active="true"] .workbench-tab-action:not(.is-dot),
+.workbench-tab[data-hover-locked="true"] .workbench-tab-action:not(.is-dot) {
+  pointer-events: auto;
 }
 
 .workbench-tab[data-hover-locked="true"] .workbench-tab-action.is-dot {
@@ -335,6 +347,7 @@
   }
   .workbench-tab:hover .workbench-tab-action:not(.is-dot) {
     opacity: 1;
+    pointer-events: auto;
   }
   .workbench-tab:hover .workbench-tab-action.is-dot {
     opacity: 0;
@@ -343,6 +356,7 @@
 
 .workbench-tab:focus-within .workbench-tab-action:not(.is-dot) {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .workbench-tab:focus-within .workbench-tab-action.is-dot {
@@ -352,6 +366,11 @@
 /* Flow-coupled tab enter / leave / reorder transitions */
 .wb-tab-move {
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Suppress Vue TransitionGroup FLIP while rail-drag drives sibling glides via WAAPI. */
+.workbench-tab.wb-tab-move-disabled {
+  transition: none;
 }
 
 .wb-tab-enter-from {
@@ -451,6 +470,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .workbench-tab-track,
   .workbench-tab,
   .wb-tab-move,
   .wb-tab-enter-active,

@@ -90,13 +90,15 @@ vi.mock('@/components/monaco-editor/index.vue', () => ({
 
 let app: App | undefined
 let host: HTMLDivElement | undefined
+let pinia: ReturnType<typeof createPinia>
 let disconnect = () => {}
 let store: ReturnType<typeof useWorkspaceTabsStore>
 
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
-  setActivePinia(createPinia())
+  pinia = createPinia()
+  setActivePinia(pinia)
   sdk.read.mockResolvedValue({ data: { content: 'initial', revision: 'r0' } })
   sdk.write.mockResolvedValue({ data: { revision: 'r1' } })
   sdk.write.mockClear()
@@ -126,7 +128,7 @@ async function mountSplitFiles() {
       h(ViewFile, { tabId: 'file:/a.txt', filePath: '/a.txt', visible: Boolean(store.workbench.tabs['file:/a.txt']) }),
       h(ViewFile, { tabId: 'file:/b.txt', filePath: '/b.txt', visible: Boolean(store.workbench.tabs['file:/b.txt']) }),
     ]),
-  }).provide(KEYBOARD_REGISTRY, registry)
+  }).use(pinia).provide(KEYBOARD_REGISTRY, registry)
   app.mount(host)
   disconnect = connectBrowserKeyboardShortcutsLive(registry, () => selectWebBindings(keyboardBindings))
   await vi.waitFor(() => expect(host!.querySelectorAll('textarea')).toHaveLength(2))
@@ -186,7 +188,7 @@ describe('workspace keyboard ownership', () => {
         })
         return () => h('textarea', { ref: textarea, disabled: !ready.value })
       },
-    })
+    }).use(pinia)
     app.mount(host)
     ready.value = true
     await nextTick()

@@ -7,6 +7,7 @@ import { DISPLAY_PANEL_ID, useWorkspaceTabsStore } from './workspace-tabs'
 import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 import { registerWorkbenchCommands } from '@/pages/home/commands/workbench-commands'
 import { createEmptyWorkbenchState, findGroupOfTab, findRightNeighborOfSpatialFirst, insertTab, listGroups, splitGroupWithTab } from '@/workbench/tree'
+import { activeWorkbenchDrag, startWorkbenchTabPointerGesture } from '@/workbench/drag'
 import i18n, { prepareLocale } from '@/i18n'
 
 const terminalCacheMocks = vi.hoisted(() => {
@@ -810,6 +811,170 @@ describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
       store.dropExternalItem({ kind: 'session', sessionId: 's-valid' }, chatGroup.id, 'right')
       expect(store.activeGroupId).toBe(chatGroup.id)
       expect(chatStoreMock.selectSession).toHaveBeenCalledWith('s-valid')
+    })
+
+    it('skips pruning when permissions are absent or empty, and prunes once explicit permissions arrive', async () => {
+      let wb = createEmptyWorkbenchState('g1')
+      wb = insertTab(wb, { id: 'file:/data/a.ts', pinned: false, target: { kind: 'file', filePath: '/data/a.ts' } })
+      wb = insertTab(wb, { id: 'terminal:1', pinned: false, target: { kind: 'terminal', instance: 1 } })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-unhydrated': { workbench: wb, terminalCounter: 1, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      }))
+
+      chatStoreMock.bots.push({ id: 'bot-unhydrated', current_user_permissions: [] })
+      useChatSelectionStore().setBot('bot-unhydrated')
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Empty permissions array during hydration must NOT wipe persisted file/terminal tabs.
+      expect(store.workbench.tabs['file:/data/a.ts']).toBeDefined()
+      expect(store.workbench.tabs['terminal:1']).toBeDefined()
+
+      // Once real permissions arrive (chat-only), restricted tabs are pruned.
+      const botEntry = chatStoreMock.bots.find(b => b.id === 'bot-unhydrated')!
+      botEntry.current_user_permissions = ['chat']
+      // Trigger reactivity by updating bots reference if needed or re-switching
+      chatStoreMock.bots = [...chatStoreMock.bots]
+      useChatSelectionStore().setBot('bot-1')
+      await flushTicks()
+      useChatSelectionStore().setBot('bot-unhydrated')
+      await flushTicks()
+      expect(store.workbench.tabs['file:/data/a.ts']).toBeUndefined()
+      expect(store.workbench.tabs['terminal:1']).toBeUndefined()
+    })
+
+    it('passes activate=true to applyDraftViewRequest when a background draft request replaces the active preview tab', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      // Keep chat:origin open, then open a preview file that becomes the group's active preview tab.
+      store.openSessionChatPinned({ sessionId: 's-origin' })
+      const originTabId = Object.keys(store.workbench.tabs).find((id) => {
+        const tab = store.workbench.tabs[id]
+        return tab?.target.kind === 'chat' && tab.target.sessionId === 's-origin'
+      })!
+      store.openFile('/data/preview.ts')
+      expect(store.activeId).toBe('file:/data/preview.ts')
+
+      chatStoreMock.applyDraftViewRequest.mockClear()
+      chatStoreMock.draftViewRequested.value = {
+        botId: 'bot-1',
+        viewId: originTabId,
+        expectedSessionId: 's-origin',
+        explicitSelection: true,
+        input: null,
+        activate: false,
+        seq: 1,
+      }
+
+      // Replacing the active preview tab makes the newly created draft tab active -> applyDraftViewRequest must receive true.
+      const createdId = store.activeId!
+      expect(createdId).not.toBe('file:/data/preview.ts')
+      expect(store.workbench.tabs[createdId]?.target.kind).toBe('chat')
+      expect(chatStoreMock.applyDraftViewRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ viewId: createdId }),
+        true,
+      )
+    })
+
+    it('preserves an active editing draft on mobile cold-start widen while dropping inactive cold-start drafts', async () => {
+      let desktopWb = createEmptyWorkbenchState('g-desktop')
+      desktopWb = insertTab(desktopWb, { id: 'file:/data/desk.ts', pinned: false, target: { kind: 'file', filePath: '/data/desk.ts' } })
+      localStorage.setItem('memoh:workbench:v1', JSON.stringify({
+        'bot-1': { workbench: desktopWb, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 },
+      }))
+
+      // Cold-start on mobile -> gets fresh draft chat:1, user opens a file, then switches back to draft chat:1 to type.
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+      const mobileDraftId = store.activeId!
+      expect(store.workbench.tabs[mobileDraftId]?.target.kind).toBe('chat')
+
+      store.openFilePinned('/data/mobile.ts')
+      store.activateTab(mobileDraftId)
+      expect(store.activeId).toBe(mobileDraftId)
+
+      // Widen back to desktop -> active editing draft must be preserved and remain active alongside desk.ts and mobile.ts.
+      mobileBreakpoint.setMobile(false)
+      await flushTicks()
+      expect(store.workbench.tabs['file:/data/desk.ts']).toBeDefined()
+      expect(store.workbench.tabs['file:/data/mobile.ts']).toBeDefined()
+      expect(store.workbench.tabs[mobileDraftId]).toBeDefined()
+      expect(store.activeId).toBe(mobileDraftId)
+    })
+
+    it('cancels active drag when entering mobile or removing the dragged tab, and blocks pre-flush tab mutations on bot switch', async () => {
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+      store.openFilePinned('/data/a.ts')
+      store.openFilePinned('/data/b.ts')
+      const groupId = store.activeGroupId!
+
+      const downEv = new MouseEvent('pointerdown', { button: 0, buttons: 1, clientX: 20, clientY: 20, bubbles: true, cancelable: true }) as PointerEvent
+      Object.defineProperty(downEv, 'pointerId', { value: 1 })
+      startWorkbenchTabPointerGesture({
+        event: downEv,
+        tabId: 'file:/data/b.ts',
+        groupId,
+        pinned: false,
+        getTitle: () => 'b.ts',
+        isMobile: () => store.isMobile,
+        getGroupTabIds: gid => listGroups(store.workbench.root).find(g => g.id === gid)?.tabIds ?? [],
+        isTabPinned: tid => Boolean(store.workbench.tabs[tid]?.pinned),
+        onActivate: () => store.activateTab('file:/data/b.ts'),
+        onDragStateChange: (d) => { store.panelDragging = d },
+        onReorderInGroup: (gid, tid, idx) => store.reorderTab(gid, tid, idx),
+        onCommitDrop: vi.fn(),
+      })
+      const moveEv = new MouseEvent('pointermove', { buttons: 1, clientX: 120, clientY: 120, bubbles: true, cancelable: true }) as PointerEvent
+      Object.defineProperty(moveEv, 'pointerId', { value: 1 })
+      window.dispatchEvent(moveEv)
+      expect(activeWorkbenchDrag.value?.detachedTabId).toBe('file:/data/b.ts')
+
+      // Removing the dragged tab cancels the active drag cleanly.
+      store.closeTab('file:/data/b.ts')
+      expect(activeWorkbenchDrag.value).toBeNull()
+      expect(store.panelDragging).toBe(false)
+
+      // Entering mobile while dragging cancels the active drag cleanly.
+      const downEv2 = new MouseEvent('pointerdown', { button: 0, buttons: 1, clientX: 20, clientY: 20, bubbles: true, cancelable: true }) as PointerEvent
+      Object.defineProperty(downEv2, 'pointerId', { value: 2 })
+      startWorkbenchTabPointerGesture({
+        event: downEv2,
+        tabId: 'file:/data/a.ts',
+        groupId,
+        pinned: false,
+        getTitle: () => 'a.ts',
+        isMobile: () => store.isMobile,
+        getGroupTabIds: gid => listGroups(store.workbench.root).find(g => g.id === gid)?.tabIds ?? [],
+        isTabPinned: tid => Boolean(store.workbench.tabs[tid]?.pinned),
+        onActivate: () => store.activateTab('file:/data/a.ts'),
+        onDragStateChange: (d) => { store.panelDragging = d },
+        onReorderInGroup: (gid, tid, idx) => store.reorderTab(gid, tid, idx),
+        onCommitDrop: vi.fn(),
+      })
+      const moveEv2 = new MouseEvent('pointermove', { buttons: 1, clientX: 120, clientY: 120, bubbles: true, cancelable: true }) as PointerEvent
+      Object.defineProperty(moveEv2, 'pointerId', { value: 2 })
+      window.dispatchEvent(moveEv2)
+      expect(activeWorkbenchDrag.value).not.toBeNull()
+      mobileBreakpoint.setMobile(true)
+      await flushTicks()
+      expect(activeWorkbenchDrag.value).toBeNull()
+      mobileBreakpoint.setMobile(false)
+      await flushTicks()
+
+      // Pre-flush bot switch blocks async/child title & session callbacks on stale bot-1 state.
+      store.openTerminal()
+      useChatSelectionStore().setBot('bot-without-layout')
+      store.updateTerminalTitle('terminal:1', 'leaked-shell')
+      expect(store.workbench.tabs['terminal:1']?.target).toEqual({ kind: 'terminal', instance: 1 })
+      await flushTicks()
+      expect(store.loadedBotId).toBe('bot-without-layout')
     })
   })
 })

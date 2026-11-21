@@ -9,7 +9,7 @@ import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { hasBotPermission, type BotPermission } from '@/utils/bot-permissions'
 import { parseBrowserAddress } from '@/utils/browser-address'
-import { cancelActiveWorkbenchDrag, startWorkbenchExternalPointerDrag } from '@/workbench/drag'
+import { activeWorkbenchDrag, cancelActiveWorkbenchDrag, startWorkbenchExternalPointerDrag } from '@/workbench/drag'
 import {
   clearTerminalSnapshots,
   clearTerminalSnapshotsForBot,
@@ -339,6 +339,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     workbench.value = committedState
     const nextActive = activeTabOfState(committedState)
 
+    const drag = activeWorkbenchDrag.value
+    const draggedTabId = drag?.railTab?.tabId ?? drag?.detachedTabId ?? null
+    if (draggedTabId && removedTabs.some(t => t.id === draggedTabId)) {
+      cancelActiveWorkbenchDrag()
+    }
+
     for (const removed of removedTabs) {
       cleanupPanelState(removed.id)
       if (removed.target.kind === 'terminal' && loadedBotId.value) {
@@ -389,7 +395,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function pruneDisallowedTabs() {
-    if (!ready.value || !currentBot.value) return
+    const perms = currentBot.value?.current_user_permissions
+    if (!activeBotId() || !perms || perms.length === 0) return
     let next = workbench.value
     for (const tab of Object.values(next.tabs)) {
       if (!isTabAllowed(tab)) next = removeTab(next, tab.id)
@@ -781,7 +788,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     explicitSelection?: boolean
     activate?: boolean
   }) {
-    if (!ready.value) return
+    if (!activeBotId()) return
     const origin = workbench.value.tabs[opts.viewId]
     const originGroup = findGroupOfTab(workbench.value.root, opts.viewId)
     if (!origin || !originGroup || origin.target.kind !== 'chat') return
@@ -872,7 +879,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function alignSelectionWithDock() {
-    if (!ready.value) return
+    if (!activeBotId()) return
     const sid = (chatStore.sessionId ?? '').trim()
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
     if (sid && !explicitSelection && chatStore.loadingChats) return
@@ -906,7 +913,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function syncDraftChatExplicitSelection() {
-    if (!ready.value) return
+    if (!activeBotId()) return
     const explicitSelection = !chatStore.sessionId && chatStore.hasExplicitSessionSelection === true
     const active = activeTab.value
     if (!active || active.target.kind !== 'chat' || tabSessionId(active) !== null) return
@@ -931,7 +938,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const sid = tabSessionId(tab)
       if (!sid || !deletedSessionIds.has(sid)) continue
 
-      if (resetComposerScope && resetComposerScope === `${bid}:${tab.id}`) {
+      if (sid === latestDeleted?.id && resetComposerScope && resetComposerScope === `${bid}:${tab.id}`) {
         const explicitSelection = chatStore.hasExplicitSessionSelection === true
         next = updateTabTarget(next, tab.id, () => ({ kind: 'chat', sessionId: null, explicitSelection }))
         const owner = findGroupOfTab(next.root, tab.id)
@@ -1214,7 +1221,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function updateTerminalTitle(panelId: string, title: unknown) {
-    if (!ready.value || typeof title !== 'string') return
+    if (!activeBotId() || typeof title !== 'string') return
     const normalized = title.trim()
     if (!normalized) return
     commitWorkbench(updateTabTarget(workbench.value, panelId, t => (
@@ -1223,7 +1230,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function updateBrowserAddress(panelId: string, address: string) {
-    if (!ready.value) return
+    if (!activeBotId()) return
     commitWorkbench(updateTabTarget(workbench.value, panelId, (t) => {
       if (t.kind !== 'browser') return t
       const customTitle = address ? true : t.customTitle
@@ -1232,7 +1239,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function updateScheduleTitle(panelId: string, title: string) {
-    if (!ready.value) return
+    if (!activeBotId()) return
     const nextCustom = title.trim() || undefined
     commitWorkbench(updateTabTarget(workbench.value, panelId, t => (
       t.kind === 'schedule' && t.customTitle !== nextCustom ? { ...t, customTitle: nextCustom } : t
@@ -1417,7 +1424,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // then appending non-duplicate mobile-opened tabs onto the saved desktop snapshot. Upgrade path: split mobile
   // vs desktop storage keys if users ever want independent phone layouts persisted across reloads.
   watch(isMobile, (mobile) => {
-    if (mobile) return
+    if (mobile) {
+      cancelActiveWorkbenchDrag()
+      return
+    }
     mobileNavOpen.value = false
     if (!mobileColdStart) {
       persistWorkbench()
@@ -1438,7 +1448,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!isPureColdStartDraft) {
       const currentActiveId = activeId.value
       for (const tab of currentTabs) {
-        if (tab.target.kind === 'chat' && tabSessionId(tab) === null) continue
+        if (tab.target.kind === 'chat' && tabSessionId(tab) === null && currentActiveId !== tab.id) continue
         const existingMatch = merged.tabs[tab.id]
           ?? (tab.target.kind === 'chat' && tabSessionId(tab) ? chatTabForSession(tabSessionId(tab)!, merged) : undefined)
           ?? (tab.target.kind === 'display' ? Object.values(merged.tabs).find(t => t.target.kind === 'display') : undefined)
@@ -1515,7 +1525,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       { id, pinned: false, target: { kind: 'chat', sessionId: null, explicitSelection: request.explicitSelection } },
       { preview: true, groupId: group.id, activate, explicitOverride: request.explicitSelection },
     )) return
-    chatStore.applyDraftViewRequest({ ...request, viewId: id }, activate)
+    chatStore.applyDraftViewRequest({ ...request, viewId: id }, activeId.value === id)
   }, { flush: 'sync' })
 
   watch(() => chatStore.forkedSessionRequested, (request) => {

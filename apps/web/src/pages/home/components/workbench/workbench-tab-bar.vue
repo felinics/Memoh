@@ -64,7 +64,9 @@
     >
       <TransitionGroup
         name="wb-tab"
+        :move-class="isGroupRailDragging ? 'wb-tab-move-disabled' : 'wb-tab-move'"
         tag="div"
+        role="tablist"
         class="workbench-tab-track relative flex h-full items-end"
         @before-leave="onBeforeTabLeave"
       >
@@ -89,8 +91,8 @@
                 @pointerdown="onTabPointerDown($event, tab)"
                 @dblclick.stop="store.unpinTab(tab.id)"
                 @auxclick.middle.prevent="onCloseTab($event, tab.id, true, false)"
-                @keydown.enter.exact.prevent="store.activateTab(tab.id)"
-                @keydown.space.prevent="store.activateTab(tab.id)"
+                @keydown.enter.exact.self.prevent="store.activateTab(tab.id)"
+                @keydown.space.self.prevent="store.activateTab(tab.id)"
               >
                 <span
                   v-if="group.activeTabId === tab.id"
@@ -135,7 +137,9 @@
     >
       <TransitionGroup
         name="wb-tab"
+        :move-class="isGroupRailDragging ? 'wb-tab-move-disabled' : 'wb-tab-move'"
         tag="div"
+        role="tablist"
         class="workbench-tab-track relative flex h-full items-end"
         :style="trackSpacerStyle"
         @before-leave="onBeforeTabLeave"
@@ -165,8 +169,8 @@
                 @click="onTabHitClick($event)"
                 @dblclick.stop="store.keepOpenTab(tab.id)"
                 @auxclick.middle.prevent="onCloseTab($event, tab.id, false, false)"
-                @keydown.enter.exact.prevent="store.activateTab(tab.id)"
-                @keydown.space.prevent="store.activateTab(tab.id)"
+                @keydown.enter.exact.self.prevent="store.activateTab(tab.id)"
+                @keydown.space.self.prevent="store.activateTab(tab.id)"
               >
                 <span
                   v-if="group.activeTabId === tab.id"
@@ -200,14 +204,14 @@
 
                 <!-- Zero-background close button -->
                 <!-- ui-allow-z: tab-local close control above label and dot -->
-                <div class="workbench-tab-action pointer-events-none absolute z-[2] flex items-center">
+                <div class="workbench-tab-action absolute z-[2] flex items-center">
                   <Button
                     variant="ghost"
                     tone="muted"
                     size="icon-sm"
                     shape="circle"
                     data-workbench-tab-close
-                    class="pointer-events-auto size-5 shrink-0 p-0"
+                    class="size-5 shrink-0 p-0"
                     :aria-label="t('chat.tabMenu.close')"
                     @pointerdown.stop
                     @mousedown.stop
@@ -290,8 +294,9 @@
 
     <!-- Flexible window-drag & header-drop void -->
     <div
+      data-workbench-drag-void
       class="h-full min-w-4 flex-1"
-      :class="panelDragging ? '[-webkit-app-region:no-drag]' : '[-webkit-app-region:drag]'"
+      :class="canDragWindow ? '[-webkit-app-region:drag]' : '[-webkit-app-region:no-drag]'"
     />
 
     <!-- Right-aligned group action: open Markdown/HTML preview to the side -->
@@ -347,7 +352,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workbenchFileBaseName } from '@/workbench/titles'
-import { findGroup } from '@/workbench/tree'
+import { findGroup, isTopEdgeGroup } from '@/workbench/tree'
 import { activeWorkbenchDrag, startWorkbenchTabPointerGesture } from '@/workbench/drag'
 import type { WorkbenchGroupNode, WorkbenchTab } from '@/workbench/types'
 import WorkbenchPrefixNav from './workbench-prefix-nav.vue'
@@ -381,6 +386,10 @@ function syncScrollEdges() {
 }
 
 const isSpatialFirstGroup = computed(() => props.group.id === store.spatialFirstGroupId)
+const isGroupRailDragging = computed(() => activeWorkbenchDrag.value?.railTab?.groupId === props.group.id)
+const canDragWindow = computed(() =>
+  !isMobile.value && !panelDragging.value && isTopEdgeGroup(store.workbench.root, props.group.id),
+)
 
 const currentBot = computed(() =>
   bots.value.find(bot => bot.id === currentBotId.value) ?? null,
@@ -492,11 +501,11 @@ function scheduleUnlockWidth() {
   }, 120)
 }
 
-// Unlock immediately when a brand-new tab is added to this group while locked.
+// Unlock immediately when a brand-new tab is added to this group while locked, or only one tab remains.
 watch(
   () => unpinnedTabs.value.length,
   (nextLen, prevLen) => {
-    if (lockedTabWidthPx.value !== null && nextLen > prevLen && !closingViaStripButton) {
+    if (lockedTabWidthPx.value !== null && (nextLen <= 1 || (nextLen > prevLen && !closingViaStripButton))) {
       clearWidthLock()
     }
     void nextTick(syncScrollEdges)
@@ -507,11 +516,31 @@ watch(lockedTabWidthPx, () => {
   void nextTick(syncScrollEdges)
 })
 
-onMounted(() => {
+function scrollActiveTabIntoView(tabId: string | null) {
+  const scroller = scrollerEl.value
+  if (scroller && tabId) {
+    const activeEl = Array.from(scroller.querySelectorAll<HTMLElement>('[data-workbench-tab-id]'))
+      .find(el => el.dataset.workbenchTabId === tabId)
+    activeEl?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }
   syncScrollEdges()
+}
+
+watch(
+  () => props.group.activeTabId,
+  (tabId) => {
+    if (!tabId || panelDragging.value) return
+    void nextTick(() => scrollActiveTabIntoView(tabId))
+  },
+)
+
+onMounted(() => {
+  scrollActiveTabIntoView(props.group.activeTabId)
   if (typeof ResizeObserver !== 'undefined' && scrollerEl.value) {
     scrollerRo = new ResizeObserver(() => syncScrollEdges())
     scrollerRo.observe(scrollerEl.value)
+    const trackEl = scrollerEl.value.querySelector<HTMLElement>('.workbench-tab-track')
+    if (trackEl) scrollerRo.observe(trackEl)
   }
 })
 
@@ -522,7 +551,8 @@ onBeforeUnmount(() => {
 })
 
 function onCloseTab(event: MouseEvent, tabId: string, pinned: boolean, fromCloseButton: boolean) {
-  if (!pinned && !store.fileDirty[tabId] && unpinnedTabs.value.length >= 1) {
+  const fromPointer = event.detail > 0 || event.type === 'auxclick'
+  if (fromPointer && !pinned && !store.fileDirty[tabId] && unpinnedTabs.value.length >= 1) {
     const idx = unpinnedTabs.value.findIndex(t => t.id === tabId)
     const fallbackEl = scrollerEl.value
       ? Array.from(scrollerEl.value.querySelectorAll<HTMLElement>('[data-workbench-tab-id]'))
