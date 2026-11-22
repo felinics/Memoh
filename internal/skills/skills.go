@@ -108,16 +108,12 @@ func ManagedDir() string {
 	return ManagedDirPath
 }
 
+// ContainerEnv is the skill discovery setting a workspace container starts
+// with. HOME and the XDG directories are the workspace user environment's
+// (internal/workspace/userenv), not this package's.
 func ContainerEnv(rawCompatRoots []string) []string {
 	compatRoots := compatDiscoveryRoots(rawCompatRoots)
-	env := []string{
-		"HOME=" + config.DefaultDataMount,
-		"XDG_CONFIG_HOME=" + path.Join(config.DefaultDataMount, ".config"),
-		"XDG_DATA_HOME=" + path.Join(config.DefaultDataMount, ".local", "share"),
-		"XDG_CACHE_HOME=" + path.Join(config.DefaultDataMount, ".cache"),
-	}
-	env = append(env, SkillDiscoveryRootsEnvVar+"="+strings.Join(compatRoots, ":"))
-	return env
+	return []string{SkillDiscoveryRootsEnvVar + "=" + strings.Join(compatRoots, ":")}
 }
 
 func DiscoveryRoots(rawCompatRoots []string) []Root {

@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
-	"github.com/felinics/memoh/internal/workspace/vpath"
+	"github.com/felinics/memoh/internal/workspace/userenv"
 )
 
 var errListDirEntryLimit = errors.New("directory listing exceeds the requested entry bound")
@@ -696,17 +696,26 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 // overlay of an image runtime (node, python, uv) wins over the toolkit copy
 // in the agent's terminal as well as in Memoh's own execs. A variable so
 // tests can point it at a directory of their own.
-var depsShimDir = vpath.DataMount + "/.memoh/deps/bin"
+var depsShimDir = userenv.DepsBinDir
 
 // defaultExecPath is the PATH given to a command whose environment has none,
 // which only happens with CleanEnv and no explicit PATH entry.
-const defaultExecPath = "/opt/memoh/toolkit/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+const defaultExecPath = userenv.Path
+
+// userBinDir is the workspace user's own command directory (userenv.BinDir).
+// When it exists it is put on PATH ahead of the image's directories, so a
+// command the user installed there is found without replacing the PATH the
+// image set up. A variable so tests can point it at a directory of their own.
+var userBinDir = userenv.BinDir
 
 // execEnv builds the environment of a workspace command. CleanEnv drops the
 // bridge's own environment, UnsetEnv removes the named (or prefixed) keys
-// from it, and Env is appended last so explicit entries win. The shim
-// directory is then put ahead of PATH when it exists; both the pipe and the
-// PTY exec paths go through here.
+// from it, and Env is appended last so explicit entries win. The user's
+// command directory and then the shim directory are put ahead of PATH when
+// they exist; both the pipe and the PTY exec paths go through here. A
+// non-PTY command that asks for it then gets the PATH the user's interactive
+// shell ends up with (a PTY command is that shell and reads the rc files
+// itself).
 func execEnv(input *pb.ExecInput) []string {
 	out := []string{}
 	if !input.GetCleanEnv() {
@@ -716,7 +725,12 @@ func execEnv(input *pb.ExecInput) []string {
 		out = filterUnsetEnv(out, unset)
 	}
 	out = append(out, input.GetEnv()...)
-	return prependPathDir(out, depsShimDir)
+	out = prependPathDir(out, userBinDir)
+	out = prependPathDir(out, depsShimDir)
+	if input.GetUserShellPath() && !input.GetPty() {
+		out = withUserShellPath(out)
+	}
+	return out
 }
 
 func execPTYEnv(input *pb.ExecInput) []string {
@@ -724,10 +738,10 @@ func execPTYEnv(input *pb.ExecInput) []string {
 }
 
 // prependPathDir puts dir first on the PATH entry of env when dir is an
-// existing directory. The last PATH entry is the one exec honours, so that
-// is the one rewritten; an env without PATH gets one built on
-// defaultExecPath. A PATH that already starts with dir is left alone so
-// repeated application, or a caller that did the same, never stacks copies.
+// existing directory, moving it there if PATH already lists it elsewhere, so
+// the order is the same however the PATH was put together. The last PATH
+// entry is the one exec honours, so that is the one rewritten; an env without
+// PATH gets one built on defaultExecPath.
 func prependPathDir(env []string, dir string) []string {
 	if dir == "" {
 		return env
@@ -740,13 +754,33 @@ func prependPathDir(env []string, dir string) []string {
 		if !ok || key != "PATH" {
 			continue
 		}
-		if value == dir || strings.HasPrefix(value, dir+":") {
-			return env
-		}
-		env[i] = "PATH=" + dir + ":" + value
+		env[i] = "PATH=" + pathWithDirFirst(value, dir)
 		return env
 	}
-	return append(env, "PATH="+dir+":"+defaultExecPath)
+	return append(env, "PATH="+pathWithDirFirst(defaultExecPath, dir))
+}
+
+// workspacePath is the PATH the browser terminal starts from: the
+// workspace's own (the image's), with the user's command directory and then
+// the managed shims put first.
+func workspacePath() string {
+	path := os.Getenv("PATH")
+	for _, dir := range []string{userBinDir, depsShimDir} {
+		if info, err := os.Stat(dir); dir != "" && err == nil && info.IsDir() {
+			path = pathWithDirFirst(path, dir)
+		}
+	}
+	return path
+}
+
+func pathWithDirFirst(path, dir string) string {
+	entries := []string{dir}
+	for _, entry := range strings.Split(path, ":") {
+		if entry != dir {
+			entries = append(entries, entry)
+		}
+	}
+	return strings.Join(entries, ":")
 }
 
 func filterUnsetEnv(env []string, unset []string) []string {
