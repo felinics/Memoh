@@ -89,6 +89,7 @@ import ToolCallDetailSpawn from './tool-call-detail-spawn.vue'
 import ToolCallDetailWebFetch from './tool-call-detail-web-fetch.vue'
 import ToolCallDetailWebSearch from './tool-call-detail-web-search.vue'
 import ToolCallDetailWrite from './tool-call-detail-write.vue'
+import { execLeftRunning } from './tool-call-exec-status'
 import { isGuiToolName } from '@/utils/gui-tools'
 import { splitUnifiedDiffFiles } from '@/composables/useShikiHighlighter'
 
@@ -799,9 +800,10 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       const cmd = pickString(input, 'command')
       const description = pickString(input, 'description').trim()
       const background = input.run_in_background === true || input.runInBackground === true
+      const leftRunning = execLeftRunning(resultObject(block)) !== null
       return {
         icon: SquareTerminal,
-        actionKey: background ? 'exec_background' : 'exec',
+        actionKey: leftRunning ? 'exec_left_running' : background ? 'exec_background' : 'exec',
         // No fullTarget: the full command lives in the exec detail, not a tooltip.
         target: firstLine(description || cmd, 80),
         hideAction: Boolean(description),

@@ -1,6 +1,7 @@
 package external
 
 import (
+	"slices"
 	"strings"
 	"sync"
 
@@ -35,7 +36,8 @@ func NewTranscriptRecorder(limits ...contextlimit.ToolOutputLimit) *TranscriptRe
 	return recorder
 }
 
-// Add folds one event into the transcript in arrival order.
+// Add folds one event into the transcript in arrival order; a tool result
+// goes with its call (see resultPosition).
 func (b *TranscriptRecorder) Add(ev event.StreamEvent) {
 	if b == nil {
 		return
@@ -159,12 +161,49 @@ func (b *TranscriptRecorder) appendToolResult(ev event.StreamEvent) {
 	if result == nil && isError {
 		result = strings.TrimSpace(ev.Error)
 	}
-	b.output = append(b.output, sdk.ToolMessage(sdk.ToolResultPart{
-		ToolCallID: strings.TrimSpace(ev.ToolCallID),
+	callID := strings.TrimSpace(ev.ToolCallID)
+	msg := sdk.ToolMessage(sdk.ToolResultPart{
+		ToolCallID: callID,
 		ToolName:   strings.TrimSpace(ev.ToolName),
 		Result:     toolexec.OutputFromValue(result),
 		IsError:    isError,
-	}))
+	})
+	b.output = slices.Insert(b.output, b.resultPosition(callID), msg)
+}
+
+// resultPosition is where a tool result belongs: directly after the call that
+// made it, behind any results already recorded for that message. A result
+// usually arrives right after its call, where this is the end of the
+// transcript. A runtime can finish a call later, after the model went on —
+// Codex reports a command it left running in the background only when the
+// process exits — and appended at the end such a result would be cut off from
+// its call, which the transcript repair then closes as interrupted and drops
+// the real result. The last message with the call is the one it belongs to:
+// an approval projection repeats the call in a later message.
+func (b *TranscriptRecorder) resultPosition(callID string) int {
+	if callID == "" {
+		return len(b.output)
+	}
+	for i := len(b.output) - 1; i >= 0; i-- {
+		if b.output[i].Role != sdk.MessageRoleAssistant || !messageHasToolCall(b.output[i], callID) {
+			continue
+		}
+		at := i + 1
+		for at < len(b.output) && b.output[at].Role == sdk.MessageRoleTool {
+			at++
+		}
+		return at
+	}
+	return len(b.output)
+}
+
+func messageHasToolCall(msg sdk.Message, callID string) bool {
+	for _, part := range msg.Content {
+		if call, ok := part.(sdk.ToolCallPart); ok && strings.TrimSpace(call.ToolCallID) == callID {
+			return true
+		}
+	}
+	return false
 }
 
 func resultIsMCPError(result any) bool {

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/reasoning"
@@ -73,6 +74,15 @@ func (ic *idleCancel) Observe(ev native.StreamEvent) {
 			}
 		}
 	case native.EventProgress:
+		if ev.ProgressStatus == event.ProgressRuntimeActivity {
+			// The agent finished a model request, so it is working. A command
+			// it left running in the background reports no progress of its
+			// own; its silence is not a hang while the agent works.
+			for key, tool := range ic.tools {
+				tool.lastProgress = now
+				ic.tools[key] = tool
+			}
+		}
 		if ev.ProgressStatus == "spawn_running" {
 			// This keeps the parent wait alive; each child has its own watchdog.
 			for key, tool := range ic.tools {
