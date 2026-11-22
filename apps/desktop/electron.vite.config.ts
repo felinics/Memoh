@@ -66,6 +66,16 @@ export default defineConfig(async ({ command }) => {
 
   return {
     main: {
+      build: {
+        // Use build.lib.entry rather than rollupOptions.input so Vite 8's
+        // compat merge does not overwrite externalizeDepsPlugin's externals.
+        lib: {
+          entry: {
+            index: resolve(__dirname, 'src/main/index.ts'),
+            'runtime-worker': resolve(__dirname, 'src/main/runtime-worker.ts'),
+          },
+        },
+      },
       define: {
         'process.env.MEMOH_DESKTOP_BASE_URL': JSON.stringify(desktopBaseUrl),
         'process.env.MEMOH_DESKTOP_APP_ID': JSON.stringify(desktopAppId),

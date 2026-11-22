@@ -202,6 +202,27 @@ describe('DesktopRemoteRuntimeManager', () => {
     pending.finish()
     await manager.stop()
   })
+
+  it('skips delayed startup restore when an explicit configure or setPaused happens first', async () => {
+    const fixture = await createFixture()
+    const factory = vi.fn<RuntimeSessionFactory>(() => resolvedSession())
+    const manager = fixture.manager({ createSession: factory })
+
+    await manager.configure({
+      runtimeId: runtimeID,
+      name: 'Studio Mac',
+      key: runtimeKey,
+    })
+    const state = await manager.restoreOnStartup()
+
+    expect(state).toMatchObject({
+      enabled: true,
+      runtimeId: runtimeID,
+      runtimeName: 'Studio Mac',
+      status: 'connecting',
+    })
+    expect(factory).toHaveBeenCalledTimes(1)
+  })
 })
 
 async function createFixture() {

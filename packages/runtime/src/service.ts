@@ -149,7 +149,22 @@ export function createContainerService(
 
   const ReadFile: handleUnaryCall<ReadFileRequest, unknown> = unary(async call => files.readFile(call.request))
   const WriteFile: handleUnaryCall<WriteFileRequest, unknown> = unary(async call => files.writeFile(call.request))
-  const ListDir: handleUnaryCall<ListDirRequest, unknown> = unary(async call => files.listDir(call.request))
+  const ListDir: handleUnaryCall<ListDirRequest, unknown> = (call, callback) => {
+    const controller = new AbortController()
+    const cancel = () => controller.abort()
+    call.once('cancelled', cancel)
+    if (call.cancelled) controller.abort()
+    void files.listDir(call.request, controller.signal)
+      .then(response => {
+        callback(null, response)
+      })
+      .catch(error => {
+        callback(mapNodeError(error, 'request'))
+      })
+      .finally(() => {
+        call.off('cancelled', cancel)
+      })
+  }
   const Stat: handleUnaryCall<StatRequest, unknown> = unary(async call => files.stat(call.request))
   const Mkdir: handleUnaryCall<MkdirRequest, unknown> = unary(async call => files.mkdir(call.request))
   const Rename: handleUnaryCall<RenameRequest, unknown> = unary(async call => files.rename(call.request))

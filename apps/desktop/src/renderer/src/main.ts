@@ -10,6 +10,7 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 import { watchEffect } from 'vue'
 import i18n, { i18nReady } from '@memohai/web/i18n'
+import { loadMainSection } from '@memohai/web/routes'
 import { setupApiClient } from '@memohai/web/api-client'
 import { loginRedirectForCurrentRoute } from '@memohai/web/router-guards/return-to'
 import { configureProviderIconLoader } from '@memohai/web/components/provider-icon/preload'
@@ -61,16 +62,12 @@ async function bootstrap() {
     handleRendererNavigate(router, target)
   })
 
-  const status = await window.api.desktop.getServerStatus()
-  setupApiClient({
-    baseUrl: status.baseUrl || 'http://127.0.0.1:0',
-    onUnauthorized: () => {
-      if (shouldRedirectOnUnauthorized(router.currentRoute?.value?.path)) {
-        void router.replace(loginRedirectForCurrentRoute(router))
-      }
-    },
-  })
-  const serverProbe = window.api.desktop.probeServer()
+  // Kick off main-process IPC, workspace chunk download (for signed-in sessions),
+  // Pinia Colada cache restore, and locale loading in parallel before setupApiClient.
+  const statusPromise = window.api.desktop.getServerStatus()
+  if (localStorage.getItem('token')) {
+    void loadMainSection().catch(() => {})
+  }
 
   const pinia = createPinia().use(piniaPluginPersistedstate)
   const workspaceTabs = useWorkspaceTabsStore(pinia)
@@ -128,9 +125,23 @@ async function bootstrap() {
         createQueryCachePersistencePlugin(),
       ],
     })
-    .use(router)
     .use(i18n)
     .provide(KEYBOARD_REGISTRY, keyboardCommands)
+
+  // Wait for IPC server baseUrl, persisted query cache, and active locale before
+  // configuring SDK and installing router (initial route guard triggers /api checks).
+  const [status] = await Promise.all([statusPromise, whenQueryCacheRestored(), i18nReady])
+
+  setupApiClient({
+    baseUrl: status.baseUrl || 'http://127.0.0.1:0',
+    onUnauthorized: () => {
+      if (shouldRedirectOnUnauthorized(router.currentRoute?.value?.path)) {
+        void router.replace(loginRedirectForCurrentRoute(router))
+      }
+    },
+  })
+  const serverProbe = window.api.desktop.probeServer()
+  app.use(router)
 
   // Mirror the chat store's bot list into the native tray menu. The main
   // process holds no credentials, so the renderer — owner of the
@@ -149,10 +160,6 @@ async function bootstrap() {
     })
   })
 
-  // Mount only after the snapshot is hydrated so the first render already
-  // has the last-known values (storage is sync, so this resolves fast), and
-  // after the active language has loaded so the first render has its copy.
-  await Promise.all([whenQueryCacheRestored(), i18nReady])
   app.mount('#app')
 
   // The first frame stays optimistic: render the normal auth/app route while

@@ -1,10 +1,14 @@
 import {
   createRouter,
   createMemoryHistory,
+  START_LOCATION,
   type RouteLocationNormalized,
   type RouteRecordRaw,
 } from 'vue-router'
-import { createAppRoutes } from '@memohai/web/routes'
+import { toast } from '@felinic/ui'
+import i18n from '@memohai/web/i18n'
+import { createAppRoutes, loadMainSection, showsChatWorkspace } from '@memohai/web/routes'
+import { isChunkLoadError, reloadForChunkLoadError } from '@memohai/web/lib/chunk-load-error'
 import { ensureOnboarding, hasOnboardingInProgress } from '@memohai/web/router-guards/onboarding'
 import { guardAuthenticatedRoute, normalizeRoutePath } from '@memohai/web/router-guards/return-to'
 import { useUserStore } from '@memohai/web/store/user'
@@ -24,18 +28,22 @@ const router = createRouter({
   routes,
 })
 
+void router.isReady().then(() => {
+  if (showsChatWorkspace(router.currentRoute.value)) loadMainSection().catch(() => {})
+}, () => {})
+
 // Memory history keeps no readable back-stack, so back affordances rely on this
 // afterEach-based tracker instead of history state. See useBackOr.
 installBackHistory(router)
 
-router.onError((error: Error) => {
-  const isChunkLoadError =
-    error.message.includes('Failed to fetch dynamically imported module') ||
-    error.message.includes('Importing a module script failed') ||
-    error.message.includes('error loading dynamically imported module')
-  if (isChunkLoadError) {
-    console.warn('[Router] Chunk load failed, reloading...', error.message)
-    window.location.reload()
+router.onError((error: Error, _to, from) => {
+  if (isChunkLoadError(error)) {
+    if (reloadForChunkLoadError()) {
+      console.warn('[Router] Chunk load failed, reloading...', error.message)
+      return
+    }
+    console.error('[Router] Chunk failed to load again after a reload', error)
+    if (from !== START_LOCATION) toast.error(i18n.global.t('common.loadFailed'))
     return
   }
   throw error
