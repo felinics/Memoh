@@ -30,7 +30,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 // Derives the pane's pending-approval queue from the transcript — a pure
 // projection, no state of its own (the chat architecture rule: the render
 // layer copies the ledger, it never keeps one). Per-pane by construction:
-// each pane passes its own transcript in, so dockview splits each get their
+// each pane passes its own transcript in, so workbench splits each get their
 // own queue even when two panes show the same session.
 //
 // FIFO order: the oldest unresolved approval is what the agent is blocked on,

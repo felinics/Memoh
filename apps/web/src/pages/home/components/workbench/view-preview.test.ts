@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { PiniaColada } from '@pinia/colada'
 import { createApp, nextTick, ref } from 'vue'
-import PanelPreview from './panel-preview.vue'
+import ViewPreview from './view-preview.vue'
 import { useChatStore } from '@/store/chat-list'
 
 const sdk = vi.hoisted(() => ({
@@ -47,9 +47,6 @@ vi.mock('@/components/html-preview/index.vue', () => ({
     template: '<article>{{ content }}</article>',
   },
 }))
-vi.mock('./use-panel-visible', () => ({
-  usePanelVisible: () => ref(true),
-}))
 
 async function flush() {
   await nextTick()
@@ -60,7 +57,7 @@ async function flush() {
   await nextTick()
 }
 
-describe('panel-preview refresh', () => {
+describe('view-preview refresh', () => {
   let root: HTMLElement
   let app: ReturnType<typeof createApp>
   let pinia: ReturnType<typeof createPinia>
@@ -98,12 +95,9 @@ describe('panel-preview refresh', () => {
         data: { isDir: false, size: 6, mode: '-rw-r--r--', modTime: '2026-05-01T12:00:13Z' },
       })
 
-    app = createApp(PanelPreview, {
-      params: {
-        params: { filePath: '/data/readme.md' },
-        api: {},
-        containerApi: {},
-      },
+    app = createApp(ViewPreview, {
+      filePath: '/data/readme.md',
+      visible: true,
     })
     app.use(pinia).use(PiniaColada)
     app.mount(root)
@@ -143,12 +137,9 @@ describe('panel-preview refresh', () => {
         data: { isDir: false, size: 8, mode: '-rw-r--r--', modTime: '2026-05-01T12:00:15Z' },
       })
 
-    app = createApp(PanelPreview, {
-      params: {
-        params: { filePath: '/data/readme.md' },
-        api: {},
-        containerApi: {},
-      },
+    app = createApp(ViewPreview, {
+      filePath: '/data/readme.md',
+      visible: true,
     })
     app.use(pinia).use(PiniaColada)
     app.mount(root)

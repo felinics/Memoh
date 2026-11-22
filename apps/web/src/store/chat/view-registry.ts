@@ -117,7 +117,7 @@ function hasPendingInteraction(messages: ChatMessage[]): boolean {
 }
 
 // Owns the in-memory working set for chat panes. Session entries are shared by
-// (bot, session); drafts are isolated by their stable dockview panel id.
+// (bot, session); drafts are isolated by their stable workbench tab id.
 export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
   const cacheLimit = Math.max(0, deps.cacheLimit ?? CHAT_SESSION_VIEW_CACHE_LIMIT)
   const views = new Map<string, ChatViewEntry>()
@@ -304,11 +304,13 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return { view, activatedSession, deactivatedSession }
   }
 
-  function unbindPanel(panelId: string): ChatViewEntry | null {
+  function unbindPanel(panelId: string, expectedBotId?: string): ChatViewEntry | null {
     const id = normalize(panelId)
     const key = panelKeys.get(id)
     const view = key ? views.get(key) : undefined
     if (!view) return null
+    const expected = normalize(expectedBotId)
+    if (expected && view.botId !== expected) return null
     const deactivated = removePanelFromView(id, view)
     prune()
     return deactivated

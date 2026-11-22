@@ -343,4 +343,19 @@ describe('stale-while-hidden marks', () => {
     await view.transcript.loadInitialMessages('bot-1', 'session-1', async applyHistory => applyHistory())
     expect(view.staleWhileHidden).toBe(false)
   })
+
+  it('ignores stale expectedBotId when unbinding a panel id reused across bots', () => {
+    const { registry } = makeRegistry()
+    const botBView = registry.bindPanel('chat:1', {
+      botId: 'bot-b',
+      sessionId: 'session-b',
+      viewId: 'chat:1',
+    }, true).view
+
+    const deactivated = registry.unbindPanel('chat:1', 'bot-a')
+
+    expect(deactivated).toBeNull()
+    expect(registry.getPanel('chat:1')).toBe(botBView)
+    expect(botBView.visiblePanelIds).toEqual(new Set(['chat:1']))
+  })
 })

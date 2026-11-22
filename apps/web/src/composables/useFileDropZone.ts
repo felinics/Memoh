@@ -46,7 +46,7 @@ export interface FileDropZoneOptions {
 }
 
 // A drag carries OS files iff its type list includes 'Files'. This is what keeps
-// dockview's own panel drags (custom mime, no 'Files') from lighting up the
+// internal workbench tab drags (pointer events, no 'Files') from lighting up the
 // upload overlay, and vice versa.
 function carriesFiles(transfer: DataTransfer | null): boolean {
   return !!transfer && Array.from(transfer.types).includes('Files')

@@ -6,7 +6,7 @@
            hidden with v-show as the route changes), so chat never sits in a
            route outlet that would unmount it when navigating into settings.
            Keeping the instance mounted — DOM attached, not detached like
-           KeepAlive — preserves dockview layout and message scroll position, so
+           KeepAlive — preserves workbench layout and message scroll position, so
            returning from settings has no black flash, no re-scroll, no relayout.
            home reads the route via useRoute() globally, so it still tracks the
            active bot regardless of which route is current (its URL-sync watchers

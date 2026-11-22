@@ -424,9 +424,8 @@ function scanCss(file) {
 // z-index ladder — raw CSS literal (WARN, both scopes). A standalone pass, not
 // folded into scanCss above: scanCss's color/shadow HARD rules are packages/ui-
 // only (the library is their single source) and would misfire on apps/web CSS
-// files' unrelated, never-audited color literals (e.g. dockview-theme.css's
-// --dock-drop-scrim rgba()) if reused wholesale. This pass checks ONLY for a
-// bare `z-index: N` outside var() — WARN, not HARD, because raw CSS can't carry
+// files' unrelated, never-audited color literals if reused wholesale. This pass
+// checks ONLY for a bare `z-index: N` outside var() — WARN, not HARD, because raw CSS can't carry
 // the same same-line marker trick as a Tailwind class (`z-index: 0; /* ui-allow-z */`
 // IS valid CSS, but our own authored exceptions read better as a leading
 // block comment) — so it uses the identical forward-window escape as the
@@ -456,7 +455,7 @@ for (const d of FULL_DIRS) walk(join(ROOT, d), true)
 for (const d of APP_DIRS) walk(join(ROOT, d), false)
 scanCss(join(ROOT, 'packages/ui/src/style.css'))
 scanZIndexCss(join(ROOT, 'packages/ui/src/style.css'))
-scanZIndexCss(join(ROOT, 'apps/web/src/styles/dockview-theme.css'))
+scanZIndexCss(join(ROOT, 'apps/web/src/styles/workbench.css'))
 
 // ── baseline ratchets ────────────────────────────────────────────────────────
 // Per family: count violations per file, then either (re)write the baseline or

@@ -84,8 +84,8 @@ export default defineConfig(async ({ command }) => {
       plugins: [
         // Same startup guard as apps/web/vite.config.ts: verify pnpm
         // patchedDependencies content and sweep dep-optimizer caches built
-        // from pre-patch code. The desktop renderer imports web modules
-        // (dockview included) and keeps its own .vite cache, so it is
+        // from pre-patch code. The desktop renderer imports web modules and
+        // shared UI packages, keeping its own .vite cache, so it is
         // exposed to the same cache-poisoning path — see that file for the
         // full rationale.
         {

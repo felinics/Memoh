@@ -93,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { ChevronLeft, Eye, Globe, Menu, MessageCircle, Monitor, Plus, Terminal, X } from 'lucide-vue-next'
@@ -114,11 +114,12 @@ import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { isHtmlFile, isMarkdownFile } from '@/components/file-manager/utils'
 import { hasBotPermission } from '@/utils/bot-permissions'
+import { workbenchFileBaseName } from '@/workbench/titles'
 
 const { t } = useI18n()
 
 const workspaceTabs = useWorkspaceTabsStore()
-const { activePanelIsChat, activeId, api } = storeToRefs(workspaceTabs)
+const { activePanelIsChat, activeId } = storeToRefs(workspaceTabs)
 const chatStore = useChatStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
 const selectionStore = useChatSelectionStore()
@@ -136,20 +137,16 @@ const hasAnyAction = computed(() =>
 )
 
 const previewPath = computed(() => {
-  if (!canWorkspaceRead.value) return null
-  const id = activeId.value
-  if (!id || !id.startsWith('file:')) return null
-  const path = id.slice('file:'.length)
-  const name = path.slice(path.lastIndexOf('/') + 1)
-  return isMarkdownFile(name) || isHtmlFile(name) ? path : null
+  if (!canWorkspaceRead.value || !activeId.value) return null
+  const tab = workspaceTabs.workbench.tabs[activeId.value]
+  if (!tab || tab.target.kind !== 'file') return null
+  const name = workbenchFileBaseName(tab.target.filePath)
+  return isMarkdownFile(name) || isHtmlFile(name) ? tab.target.filePath : null
 })
 
 function openPreviewToSide() {
-  const path = previewPath.value
-  if (!path) return
-  const name = path.slice(path.lastIndexOf('/') + 1)
-  const panel = activeId.value ? api.value?.getPanel(activeId.value) : undefined
-  workspaceTabs.openPreview(path, t('chat.previewTab', { name }), panel?.group.id)
+  if (!previewPath.value) return
+  workspaceTabs.openPreview(previewPath.value, workspaceTabs.activeGroupId ?? undefined)
 }
 
 const leftLabel = computed(() =>
@@ -164,24 +161,9 @@ const botLabel = computed(() =>
   currentBot.value?.display_name || currentBot.value?.name || '',
 )
 
-// Secondary-panel titles live on the dock panel, outside the reactive stores;
-// subscribe to the active panel's title event so renames / browser address
-// edits reach the bar. Chat titles are NOT read from here — they stay live
-// through chatStore.activeSession (server-assigned titles arrive late).
-const activePanelTitle = ref('')
-let titleSub: { dispose: () => void } | null = null
-watch([activeId, api], ([id, dock]) => {
-  titleSub?.dispose()
-  titleSub = null
-  const panel = id ? dock?.getPanel(id) : undefined
-  activePanelTitle.value = panel?.api.title ?? ''
-  if (panel) {
-    titleSub = panel.api.onDidTitleChange(() => {
-      activePanelTitle.value = panel.api.title ?? ''
-    })
-  }
-}, { immediate: true })
-onBeforeUnmount(() => titleSub?.dispose())
+const activePanelTitle = computed(() =>
+  activeId.value ? workspaceTabs.resolveTabTitle(activeId.value) : '',
+)
 
 const title = computed(() => {
   if (!activePanelIsChat.value) return activePanelTitle.value || botLabel.value

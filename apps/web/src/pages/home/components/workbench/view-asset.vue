@@ -1,5 +1,5 @@
 <template>
-  <DockPanelFrame editor-surface>
+  <div class="h-full w-full bg-surface-editor">
     <!-- A restored background tab loads nothing until it is first shown. -->
     <PanePlaceholder
       v-if="loading || !hasActivated"
@@ -19,7 +19,7 @@
 
     <div
       v-else-if="isImage && renderUrl"
-      class="flex h-full items-center justify-center overflow-auto bg-muted/30 p-4"
+      class="flex h-full items-center justify-center overflow-auto bg-muted p-4"
     >
       <img
         :src="renderUrl"
@@ -70,53 +70,50 @@
         </Button>
       </template>
     </PanePlaceholder>
-  </DockPanelFrame>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { File, Download } from 'lucide-vue-next'
+import { Download, File } from 'lucide-vue-next'
 import { Button, PanePlaceholder, toast } from '@felinic/ui'
-import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import DocumentPreview from '@/components/file-manager/document-preview.vue'
-import DockPanelFrame from './panel-frame.vue'
 import { lazyPanelContent } from './lazy-panel-content'
-import { TEXT_PREVIEW_MAX_BYTES, formatFileSize, getDocumentMimeType, getDocumentPreviewKind, getDocumentPreviewMaxBytes, isImageFile, isTextFile } from '@/components/file-manager/utils'
+import {
+  TEXT_PREVIEW_MAX_BYTES,
+  formatFileSize,
+  getDocumentMimeType,
+  getDocumentPreviewKind,
+  getDocumentPreviewMaxBytes,
+  isImageFile,
+  isTextFile,
+} from '@/components/file-manager/utils'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { fetchBoundedBlob, fetchBoundedText, type BoundedFetchTarget } from '@/lib/bounded-fetch'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { usePanelVisible } from './use-panel-visible'
 
 const MonacoEditor = lazyPanelContent(() => import('@/components/monaco-editor/index.vue').then(m => m.default))
 
-// Renders a message attachment (a stored media asset) inside its own dock tab,
-// instead of handing the source URL to the OS. The source is re-resolved from
-// the content hash on every render so a reload picks up a fresh auth token; an
-// attachment that has no hash yet (an optimistic, just-sent file) falls back to
-// the direct source URL it was opened with.
 const props = defineProps<{
-  params: {
-    params: { name?: string, botId?: string, contentHash?: string, src?: string }
-    api: DockviewPanelApi
-    containerApi: DockviewApi
-  }
+  name: string
+  botId?: string
+  contentHash?: string
+  src?: string
+  visible: boolean
 }>()
 
 const { t } = useI18n()
 
-const visible = usePanelVisible(props.params.api)
-const hasActivated = ref(visible.value)
+const hasActivated = ref(props.visible)
 
-const name = computed(() => props.params.params.name ?? '')
-const isText = computed(() => isTextFile(name.value))
-const isImage = computed(() => isImageFile(name.value))
-const documentKind = computed(() => getDocumentPreviewKind(name.value))
+const isText = computed(() => isTextFile(props.name))
+const isImage = computed(() => isImageFile(props.name))
+const documentKind = computed(() => getDocumentPreviewKind(props.name))
 
 const renderUrl = computed(() => {
-  const { botId, contentHash, src } = props.params.params
-  const hash = (contentHash ?? '').trim()
-  const owner = (botId ?? '').trim()
+  const hash = (props.contentHash ?? '').trim()
+  const owner = (props.botId ?? '').trim()
   if (hash && owner) {
     return sdkApiUrl({
       url: '/bots/{bot_id}/media/{content_hash}',
@@ -124,15 +121,20 @@ const renderUrl = computed(() => {
       query: sdkAuthQuery(),
     })
   }
-  return (src ?? '').trim()
+  return (props.src ?? '').trim()
 })
 
 const assetSource = computed<{ key: string, target: BoundedFetchTarget } | null>(() => {
-  const hash = (props.params.params.contentHash ?? '').trim()
-  const owner = (props.params.params.botId ?? '').trim()
-  if (hash && owner) return { key: `media:${owner}:${hash}:${name.value}`, target: { url: '/bots/{bot_id}/media/{content_hash}', path: { bot_id: owner, content_hash: hash } } }
-  const directSrc = (props.params.params.src ?? '').trim()
-  return directSrc ? { key: `src:${directSrc}:${name.value}`, target: { src: directSrc } } : null
+  const hash = (props.contentHash ?? '').trim()
+  const owner = (props.botId ?? '').trim()
+  if (hash && owner) {
+    return {
+      key: `media:${owner}:${hash}:${props.name}`,
+      target: { url: '/bots/{bot_id}/media/{content_hash}', path: { bot_id: owner, content_hash: hash } },
+    }
+  }
+  const directSrc = (props.src ?? '').trim()
+  return directSrc ? { key: `src:${directSrc}:${props.name}`, target: { src: directSrc } } : null
 })
 const assetIdentityKey = computed(() => assetSource.value?.key ?? '')
 
@@ -145,9 +147,9 @@ let loadedIdentityKey = ''
 let activeLoadController: AbortController | null = null
 
 async function loadAsset() {
-  const src = assetSource.value
+  const source = assetSource.value
   const docKind = documentKind.value
-  if (!src || (!isText.value && !docKind) || loadedIdentityKey === src.key) return
+  if (!source || (!isText.value && !docKind) || loadedIdentityKey === source.key) return
   activeLoadController?.abort()
   const controller = new AbortController()
   activeLoadController = controller
@@ -156,13 +158,18 @@ async function loadAsset() {
   oversizedMaxBytes.value = null
   try {
     const res = isText.value
-      ? await fetchBoundedText({ target: src.target, maxBytes: TEXT_PREVIEW_MAX_BYTES, signal: controller.signal })
-      : await fetchBoundedBlob({ target: src.target, maxBytes: getDocumentPreviewMaxBytes(docKind!), mimeType: getDocumentMimeType(docKind!), signal: controller.signal })
+      ? await fetchBoundedText({ target: source.target, maxBytes: TEXT_PREVIEW_MAX_BYTES, signal: controller.signal })
+      : await fetchBoundedBlob({
+          target: source.target,
+          maxBytes: getDocumentPreviewMaxBytes(docKind!),
+          mimeType: getDocumentMimeType(docKind!),
+          signal: controller.signal,
+        })
     if (controller.signal.aborted) return
     content.value = res.ok && 'text' in res ? res.text : ''
     documentBlob.value = res.ok && 'blob' in res ? res.blob : null
     oversizedMaxBytes.value = res.ok ? null : res.maxBytes
-    loadedIdentityKey = src.key
+    loadedIdentityKey = source.key
   } catch (error) {
     if (controller.signal.aborted) return
     loadedIdentityKey = ''
@@ -171,7 +178,10 @@ async function loadAsset() {
     loadFailed.value = true
     toast.error(resolveApiErrorMessage(error, t('bots.files.readFailed')))
   } finally {
-    if (activeLoadController === controller) { activeLoadController = null; loading.value = false }
+    if (activeLoadController === controller) {
+      activeLoadController = null
+      loading.value = false
+    }
   }
 }
 
@@ -180,7 +190,7 @@ function handleDownload() {
   if (!url) return
   const a = document.createElement('a')
   a.href = url
-  a.download = name.value || 'file'
+  a.download = props.name || 'file'
   a.click()
 }
 
@@ -193,12 +203,17 @@ watch(assetIdentityKey, () => {
   oversizedMaxBytes.value = null
   loadFailed.value = false
   loading.value = false
-  if (visible.value) void loadAsset()
+  if (props.visible) void loadAsset()
 }, { immediate: true })
-watch(visible, (isVisible) => {
+
+watch(() => props.visible, (isVisible) => {
   if (!isVisible) return
   hasActivated.value = true
   void loadAsset()
 })
-onBeforeUnmount(() => { activeLoadController?.abort(); documentBlob.value = null })
+
+onBeforeUnmount(() => {
+  activeLoadController?.abort()
+  documentBlob.value = null
+})
 </script>

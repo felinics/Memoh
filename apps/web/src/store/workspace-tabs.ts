@@ -4,13 +4,12 @@ import { useLocalStorage } from '@vueuse/core'
 import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { focusIsInTextInput } from '@/lib/keyboard-context'
-import type { DockviewApi, DockviewGroupPanel, SerializedDockview } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
-import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { hasBotPermission, type BotPermission } from '@/utils/bot-permissions'
 import { parseBrowserAddress } from '@/utils/browser-address'
+import { activeWorkbenchDrag, cancelActiveWorkbenchDrag, startWorkbenchExternalPointerDrag } from '@/workbench/drag'
 import {
   clearTerminalSnapshots,
   clearTerminalSnapshotsForBot,
@@ -18,682 +17,491 @@ import {
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
 import type { OpenAssetPreviewArgs } from '@/pages/home/composables/useFileManagerProvider'
-import i18n, { type Locale } from '@/i18n'
-
-// Workspace shell state (activity bar + side panel + dockview layout):
-// - the dockview layout in the center area (chat / file / terminal / browser /
-//   display panels, splits, tab order) persisted per bot
-// - the left activity-bar + side-panel state (active view, collapsed, width)
-//
-// The active chat session itself lives in the chat-selection store. Chat
-// panels are multi-instance dockview views keyed by panel id; the global
-// selection still follows whichever chat view is active. Desktop is a
-// singleton WebRTC viewer per bot (DISPLAY_PANEL_ID).
+import {
+  activateGroup as treeActivateGroup,
+  activateTab as treeActivateTab,
+  createEmptyWorkbenchState,
+  findGroup,
+  findGroupOfTab,
+  findRightNeighborOfSpatialFirst,
+  findSpatialFirstGroupId,
+  insertTab,
+  keepOpenTab as treeKeepOpenTab,
+  listGroups,
+  markPreviewTab,
+  moveTabToGroup,
+  parseWorkbenchState,
+  removeTab,
+  reorderTabInGroup,
+  setSplitRatio as treeSetSplitRatio,
+  setTabPinned,
+  splitGroupWithTab,
+  updateTabTarget,
+} from '@/workbench/tree'
+import { resolveWorkbenchTabTitle } from '@/workbench/titles'
+import type {
+  WorkbenchDropZone,
+  WorkbenchSplitDirection,
+  WorkbenchState,
+  WorkbenchTab,
+} from '@/workbench/types'
 
 export type SidebarView = 'sessions' | 'files' | 'schedule' | 'supermarket'
 
-export const CHAT_PANEL_ID = 'chat'
-
-/** One desktop WebRTC viewer per bot; reconnect reuses this panel instead of display:2, display:3, … */
 export const DISPLAY_PANEL_ID = 'display:1'
 
 const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
-const DEFAULT_CHAT_TITLE = 'New Session'
-const DEFAULT_TERMINAL_TITLE = 'Terminal'
-// Persisted layouts from older releases used this value as the terminal title.
-// It is only recognized for migration; it is never used as a new title.
-const LEGACY_TERMINAL_TITLE = 'zsh'
-const PREVIEW_TAB_FORMATTERS = [
-  (name: string) => `Preview: ${name}`,
-  (name: string) => `预览：${name}`,
-  (name: string) => `プレビュー: ${name}`,
-]
-const TERMINAL_FALLBACK_PREFIXES = ['Terminal', '终端']
-const BROWSER_FALLBACK_PREFIXES = ['Browser', '浏览器', 'ブラウザ']
-const DISPLAY_FALLBACK_TITLES = ['Desktop', '桌面', 'デスクトップ']
+const WORKBENCH_STORAGE_KEY = 'memoh:workbench:v1'
+const LEGACY_STORAGE_KEYS = ['workspace-tabs', 'workspace-panes', 'workspace-layout'] as const
+const CHAT_DRAFTS_STORAGE_KEY = 'chat-input-drafts'
 
-export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule'
-
-interface BotLayoutState {
-  layout: SerializedDockview | null
-  terminalCounter: number
-  browserCounter: number
-  displayCounter: number
-  scheduleCounter: number
-  chatCounter: number
-  // Panel ids that were ephemeral (preview/draft) when the layout was saved, so
-  // the replace behavior survives a reload. Intersected with the panels
-  // actually present on restore.
-  ephemeralIds: string[]
-}
-
-type WorkspaceLayoutStorage = Record<string, BotLayoutState>
-
-function emptyBotLayout(): BotLayoutState {
-  return {
-    layout: null,
-    terminalCounter: 0,
-    browserCounter: 0,
-    displayCounter: 0,
-    scheduleCounter: 0,
-    chatCounter: 0,
-    ephemeralIds: [],
-  }
-}
-
-function fileBaseName(filePath: string): string {
-  const idx = filePath.lastIndexOf('/')
-  return idx >= 0 ? filePath.slice(idx + 1) : filePath
-}
-
-function panelComponentOf(id: string): WorkspacePanelComponent | null {
-  // Per-session chat tabs use `chat:<n>`. `chat` (legacy singleton) and `chat~2`
-  // (legacy split twin) are still recognized so old persisted layouts migrate.
-  if (id === CHAT_PANEL_ID) return 'chat'
-  if (id.startsWith(`${CHAT_PANEL_ID}~`)) return 'chat'
-  if (id.startsWith(`${CHAT_PANEL_ID}:`)) return 'chat'
-  if (id.startsWith('file:')) return 'file'
-  if (id.startsWith('preview:')) return 'preview'
-  if (id.startsWith('asset:')) return 'asset'
-  if (id.startsWith('terminal:')) return 'terminal'
-  if (id.startsWith('browser:')) return 'browser'
-  if (id.startsWith('display:')) return 'display'
-  if (id.startsWith('schedule:')) return 'schedule'
-  return null
-}
-
-// Menus and dialogs a conversation can be entered from; how long (in frames,
-// about two seconds) to wait for one to give focus back before the entry gives
-// up on moving the caret; and how long, once one has unmounted, to wait for the
-// focus it returns to its trigger to land.
 const ENTRY_OVERLAY = '[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"], [role="listbox"]'
 const ENTRY_OVERLAY_MAX_FRAMES = 120
 const ENTRY_FOCUS_RETURN_MAX_FRAMES = 6
+
+interface BotWorkbenchRecord {
+  workbench: WorkbenchState | null
+  terminalCounter: number
+  browserCounter: number
+  scheduleCounter: number
+  chatCounter: number
+}
+
+type WorkbenchStorageMap = Record<string, BotWorkbenchRecord>
+type NumberedTabKind = 'chat' | 'terminal' | 'browser' | 'schedule'
+
+const COUNTER_KEY: Record<NumberedTabKind, keyof Omit<BotWorkbenchRecord, 'workbench'>> = {
+  chat: 'chatCounter',
+  terminal: 'terminalCounter',
+  browser: 'browserCounter',
+  schedule: 'scheduleCounter',
+}
+
+function emptyBotRecord(): BotWorkbenchRecord {
+  return { workbench: null, terminalCounter: 0, browserCounter: 0, scheduleCounter: 0, chatCounter: 0 }
+}
+
+function safeCounter(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0
+}
+
+function numberedTabId(kind: NumberedTabKind, n: number): string {
+  return kind === 'schedule' ? `schedule:new:${n}` : `${kind}:${n}`
+}
+
+function maxCountersInState(state: WorkbenchState | null | undefined) {
+  const max = { chat: 0, terminal: 0, browser: 0, schedule: 0 }
+  const has = { terminal: false, browser: false }
+  if (!state || typeof state !== 'object' || !state.tabs || typeof state.tabs !== 'object') {
+    return { max, has }
+  }
+  for (const tab of Object.values(state.tabs)) {
+    if (!tab || typeof tab !== 'object' || !tab.target || typeof tab.target !== 'object') continue
+    if (tab.target.kind === 'terminal') {
+      has.terminal = true
+      max.terminal = Math.max(max.terminal, safeCounter(tab.target.instance))
+    } else if (tab.target.kind === 'browser') {
+      has.browser = true
+      max.browser = Math.max(max.browser, safeCounter(tab.target.instance))
+    } else if (tab.target.kind === 'chat') {
+      const m = /^chat:(\d+)$/.exec(tab.id)
+      if (m) max.chat = Math.max(max.chat, safeCounter(Number(m[1])))
+    } else if (tab.target.kind === 'schedule' && !tab.target.scheduleId) {
+      const m = /^schedule:new:(\d+)$/.exec(tab.id)
+      if (m) max.schedule = Math.max(max.schedule, safeCounter(Number(m[1])))
+    }
+  }
+  return { max, has }
+}
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const selection = useChatSelectionStore()
   const { currentBotId } = storeToRefs(selection)
   const chatStore = useChatStore()
-  const currentBot = computed(() =>
-    chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null,
-  )
-
-  // Mobile shell (see useIsMobile): below 768px the dock runs as a single
-  // stack — one group, no tab strip, no splits. Every constraint in this store
-  // is keyed off this ONE flag; the desktop path (!isMobile) is untouched.
+  const currentBot = computed(() => chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null)
   const isMobile = useIsMobile()
 
-  // Earlier iterations persisted browser-style tab state under these keys;
-  // neither model is compatible with the dockview layout, so drop them.
   if (typeof localStorage !== 'undefined') {
-    localStorage.removeItem('workspace-tabs')
-    localStorage.removeItem('workspace-panes')
+    const hasSessionWorkbench = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(WORKBENCH_STORAGE_KEY) !== null
+    const upgradingFromLegacyLayout = localStorage.getItem('workspace-layout') !== null
+      && localStorage.getItem(WORKBENCH_STORAGE_KEY) === null
+      && !hasSessionWorkbench
+    for (const key of LEGACY_STORAGE_KEYS) localStorage.removeItem(key)
+    if (upgradingFromLegacyLayout) localStorage.removeItem(CHAT_DRAFTS_STORAGE_KEY)
   }
-  // Per-Tab: the dockview layout is the full structure of THIS browser tab's
-  // panels — two tabs are two windows and must lay out independently. Was
-  // localStorage, which shared one layout across all tabs and broadcast every
-  // change, so tab A's split reflowed tab B. sessionStorage isolates it; the
-  // localStorage cold-start seed (same key) restores "reopen where I left off"
-  // after every tab closes, and migrates an existing localStorage layout for free.
-  const storage = useTabScopedStorage<WorkspaceLayoutStorage>('workspace-layout', {}, { seed: true })
+  if (typeof sessionStorage !== 'undefined') {
+    for (const key of LEGACY_STORAGE_KEYS) sessionStorage.removeItem(key)
+  }
 
-  // ---- dockview wiring -----------------------------------------------------
+  const storage = useTabScopedStorage<WorkbenchStorageMap>(WORKBENCH_STORAGE_KEY, {}, { seed: true })
 
-  const api = shallowRef<DockviewApi | null>(null)
-  const activePanelId = ref<string | null>(null)
-  // True while ANY panel/group is being dragged. On the desktop shell the blank
-  // header strip (the growing void container) doubles as a window-drag region
-  // (`-webkit-app-region: drag`), which swallows native drag-and-drop events so a
-  // tab can't land on the blank part of another group's tab bar. chat-workspace
-  // mirrors this onto the dock root as `.memoh-dock-dragging`, and the theme
-  // flips the void to `no-drag` while it's set so the whole header accepts drops,
-  // then back to a window handle on drag end.
+  const ready = ref(false)
+  const workbench = shallowRef<WorkbenchState>(createEmptyWorkbenchState())
+  const loadedBotId = ref<string | null>(null)
   const panelDragging = ref(false)
-  // Per-panel unsaved-changes state for file panels. Kept here (NOT baked into
-  // the tab title) so the tab dot, the sidebar count badge, and the close-confirm
-  // dialog all read ONE reactive source. Keyed by dockview panel id.
   const fileDirty = ref<Record<string, boolean>>({})
-  // VS Code-style "preview tab" state. An ephemeral panel occupies its group's
-  // single preview slot, and is replaced in place when another ephemeral-eligible
-  // tab opens into that group. It pins (drops out of this map) the first time the
-  // user changes it — a file edit, or a message sent in a chat session. The state
-  // is NOT surfaced visually (no italic, no marker): it only drives the in-place
-  // replacement. Keyed by dockview panel id; persistence reads this ONE reactive
-  // source. Mirrors the fileDirty pattern above.
-  const ephemeralPanels = ref<Record<string, true>>({})
-  // Save callbacks registered by each mounted file panel, so a dirty tab can be
-  // written from the close-confirm dialog even while it sits in the background.
-  const saveHandlers = new Map<string, () => Promise<boolean>>()
-  // FIFO of dirty panel ids awaiting a close decision (drives the dialog). A
-  // batch close (others / all) enqueues several; the dialog walks them in turn.
+  const saveHandlers = new Map<string, { botId: string, handler: () => Promise<boolean> }>()
   const closeQueue = ref<string[]>([])
-  // The bot whose layout is currently loaded into dockview. Guards persistence
-  // so that clearing the view during a bot switch can't wipe the old bot's
-  // stored layout.
-  let loadedBotId: string | null = null
+
   let suppressPersist = false
-  // True while the in-memory dock holds a mobile-shaped stack that no DESKTOP
-  // restoreLayout has reconciled with the persisted desktop layout yet — set
-  // on entering mobile and by every mobile restoreLayout, cleared by the next
-  // desktop one. Keeps persistLayout sealed in the post-exit window (see
-  // persistLayout and the isMobile watcher for why the exit path alone is
-  // not enough).
-  let dockHoldsMobileStack = false
-  let apiDisposables: Array<{ dispose(): void }> = []
-  let draftChatQueued = false
+  // Set when restore ran while mobile so phone cold-starts never overwrite a desktop snapshot.
+  let mobileColdStart = false
+  let pendingDragPersist = false
   const deletedSessionIdsByBot = new Map<string, Set<string>>()
-  const chatActivationExplicitOverrides = new Map<string, boolean>()
 
-  function ensureBotLayout(botId: string | null | undefined): BotLayoutState | null {
-    const bid = botId ?? ''
+  /** Mounted + bot-aligned guard: prevents pre-flush cross-bot writes while watch(currentBotId) is pending. */
+  function activeBotId(): string | null {
+    if (!ready.value) return null
+    const bid = (currentBotId.value ?? '').trim()
+    return bid && loadedBotId.value === bid ? bid : null
+  }
+
+  function ensureBotRecord(botId: string | null | undefined): BotWorkbenchRecord | null {
+    const bid = (botId ?? '').trim()
     if (!bid) return null
-    if (!storage.value[bid]) {
-      storage.value = { ...storage.value, [bid]: emptyBotLayout() }
+    const existing = storage.value[bid]
+    if (!existing) {
+      const fresh = emptyBotRecord()
+      storage.value = { ...storage.value, [bid]: fresh }
+      return fresh
     }
-    const state = storage.value[bid]
-    if (state && (typeof state.scheduleCounter !== 'number'
-      || typeof state.chatCounter !== 'number'
-      || !Array.isArray(state.ephemeralIds))) {
-      storage.value = { ...storage.value, [bid]: { ...emptyBotLayout(), ...state } }
+    const { max } = maxCountersInState(existing.workbench)
+    const terminalCounter = Math.max(safeCounter(existing.terminalCounter), max.terminal)
+    const browserCounter = Math.max(safeCounter(existing.browserCounter), max.browser)
+    const scheduleCounter = Math.max(safeCounter(existing.scheduleCounter), max.schedule)
+    const chatCounter = Math.max(safeCounter(existing.chatCounter), max.chat)
+    if (
+      terminalCounter !== existing.terminalCounter
+      || browserCounter !== existing.browserCounter
+      || scheduleCounter !== existing.scheduleCounter
+      || chatCounter !== existing.chatCounter
+    ) {
+      const normalized = { ...emptyBotRecord(), ...existing, terminalCounter, browserCounter, scheduleCounter, chatCounter }
+      storage.value = { ...storage.value, [bid]: normalized }
+      return normalized
     }
-    return storage.value[bid] ?? null
+    return existing
   }
 
-  function patchBotLayout(botId: string, patch: Partial<BotLayoutState>) {
-    const state = ensureBotLayout(botId)
-    if (!state) return
-    storage.value = { ...storage.value, [botId]: { ...state, ...patch } }
+  function patchBotRecord(botId: string, patch: Partial<BotWorkbenchRecord>) {
+    const record = ensureBotRecord(botId)
+    if (!record) return
+    storage.value = { ...storage.value, [botId]: { ...record, ...patch } }
   }
 
-  // Dockview serializes `hideHeader: true` when a group's tab bar is hidden
-  // (display:none). Once this enters localStorage it re-applies on every
-  // fromJSON call, creating a permanent cycle where the tab bar never appears.
-  // Strip the flag from all leaf group data so the tab bar is always visible,
-  // both when reading from storage and when writing back to storage.
-  function sanitizeLayout(layout: SerializedDockview): SerializedDockview {
-    type GridNode = { type: string; data: unknown }
-    function walkNode(node: GridNode): GridNode {
-      if (!node || typeof node !== 'object') return node
-      if (node.type === 'leaf' && node.data && typeof node.data === 'object') {
-        const data = { ...(node.data as Record<string, unknown>) }
-        delete data.hideHeader
-        // Older terminal groups persisted a bottom header and transient drop lock.
-        // Keep their panels and split geometry, but restore ordinary tab chrome.
-        delete data.locked
-        delete data.headerPosition
-        return { ...node, data }
+  function allocateTabNumber(bid: string, kind: NumberedTabKind, activeState: WorkbenchState = workbench.value): number {
+    const record = ensureBotRecord(bid) ?? emptyBotRecord()
+    const key = COUNTER_KEY[kind]
+    const active = maxCountersInState(activeState)
+    const stored = maxCountersInState(record.workbench)
+    const preserveMobileCounters = isMobile.value || mobileColdStart
+
+    let next: number
+    if ((kind === 'terminal' || kind === 'browser') && !active.has[kind] && !(preserveMobileCounters && stored.has[kind])) {
+      next = 1
+    } else {
+      next = Math.max(safeCounter(record[key]), active.max[kind], stored.max[kind]) + 1
+      while (activeState.tabs[numberedTabId(kind, next)] || record.workbench?.tabs?.[numberedTabId(kind, next)]) {
+        next += 1
       }
-      if (node.type === 'branch' && Array.isArray(node.data)) {
-        return { ...node, data: (node.data as GridNode[]).map(walkNode) }
-      }
-      return node
     }
-    // Legacy terminal chips must resolve through the same tab renderer as all panels.
-    function stripTabComponents(panels: SerializedDockview['panels']): SerializedDockview['panels'] {
-      if (!panels || typeof panels !== 'object') return panels
-      const out: Record<string, unknown> = {}
-      for (const [id, panel] of Object.entries(panels)) {
-        if (panel && typeof panel === 'object' && 'tabComponent' in panel) {
-          const { tabComponent: _tabComponent, ...rest } = panel as unknown as Record<string, unknown>
-          out[id] = rest
-        } else {
-          out[id] = panel
-        }
-      }
-      return out as SerializedDockview['panels']
-    }
-    try {
-      return {
-        ...layout,
-        grid: {
-          ...layout.grid,
-          root: walkNode(layout.grid.root as GridNode) as SerializedDockview['grid']['root'],
-        },
-        panels: stripTabComponents(layout.panels),
-      }
-    } catch {
-      return layout
-    }
+    const recorded = preserveMobileCounters ? Math.max(safeCounter(record[key]), next) : next
+    patchBotRecord(bid, { [key]: recorded })
+    return next
   }
 
-  function persistLayout() {
-    // Mobile never serializes: its single stack is a runtime constraint, not a
-    // user arrangement, and must not overwrite the desktop multi-group layout
-    // stored for this bot (the tab-scoped storage is shared across form
-    // factors, so a mobile write would clobber the desktop's restore seed).
-    // dockHoldsMobileStack extends that seal past the breakpoint exit:
-    // crossing back to desktop only un-hides the tab strips, the dock is still
-    // the merged stack, and the next onDidLayoutChange (tab activation, an
-    // async panel title) would otherwise serialize it over the desktop
-    // snapshot before the next desktop restoreLayout rebuilds from it.
-    if (!api.value || suppressPersist || !loadedBotId || isMobile.value || dockHoldsMobileStack) return
-    try {
-      const dock = api.value
-      const ephemeralIds = Object.keys(ephemeralPanels.value).filter(id => dock.getPanel(id))
-      patchBotLayout(loadedBotId, { layout: sanitizeLayout(dock.toJSON()), ephemeralIds })
-    } catch {
-      // Serialization should never throw, but a failed save must not break UI.
+  const activeGroup = computed(() => {
+    if (!ready.value) return null
+    return findGroup(workbench.value.root, workbench.value.activeGroupId)
+      ?? listGroups(workbench.value.root)[0]
+      ?? null
+  })
+  const activeGroupId = computed<string | null>(() => activeGroup.value?.id ?? null)
+  const activeId = computed<string | null>(() => (ready.value ? activeGroup.value?.activeTabId ?? null : null))
+  const activeTab = computed<WorkbenchTab | null>(() => (activeId.value ? workbench.value.tabs[activeId.value] ?? null : null))
+  const spatialFirstGroupId = computed<string | null>(() => (ready.value ? findSpatialFirstGroupId(workbench.value.root) : null))
+  const activePanelIsChat = computed(() => !activeTab.value || activeTab.value.target.kind === 'chat')
+
+  function persistWorkbench() {
+    if (!ready.value || suppressPersist || !loadedBotId.value || isMobile.value || mobileColdStart) return
+    if (panelDragging.value) {
+      pendingDragPersist = true
+      return
     }
+    pendingDragPersist = false
+    patchBotRecord(loadedBotId.value, { workbench: workbench.value })
   }
 
-  function focusPanel(panel: unknown) {
-    (panel as { api?: { setActive?: () => void } }).api?.setActive?.()
-  }
-
-  function setNextChatActivationExplicit(panelId: string, explicitSelection: boolean) {
-    chatActivationExplicitOverrides.set(panelId, explicitSelection)
-  }
-
-  function consumeNextChatActivationExplicit(panelId: string): boolean | null {
-    if (!chatActivationExplicitOverrides.has(panelId)) return null
-    const explicitSelection = chatActivationExplicitOverrides.get(panelId) === true
-    chatActivationExplicitOverrides.delete(panelId)
-    return explicitSelection
-  }
+  watch(panelDragging, (dragging) => {
+    if (!dragging && pendingDragPersist) {
+      pendingDragPersist = false
+      persistWorkbench()
+    }
+  })
 
   function selectChatSession(sid: string, explicitSelection: boolean) {
-    if (explicitSelection) {
-      void chatStore.selectSession(sid)
+    void (explicitSelection
+      ? chatStore.selectSession(sid)
+      : chatStore.selectSession(sid, { explicitSelection: false }))
+  }
+
+  function tabSessionId(tab: WorkbenchTab | undefined | null): string | null {
+    if (!tab || tab.target.kind !== 'chat') return null
+    return tab.target.sessionId?.trim() || null
+  }
+
+  function chatTabForSession(sid: string, state: WorkbenchState = workbench.value): WorkbenchTab | undefined {
+    return Object.values(state.tabs).find(tab => tab.target.kind === 'chat' && tabSessionId(tab) === sid)
+  }
+
+  function isDeletedSessionForCurrentBot(sid: string | null): boolean {
+    const bid = (currentBotId.value ?? '').trim()
+    if (!bid || !sid) return false
+    const latestDeleted = chatStore.deletedSession
+    if (latestDeleted?.botId === bid && latestDeleted.id === sid) return true
+    return Boolean(deletedSessionIdsByBot.get(bid)?.has(sid))
+  }
+
+  function activateChatSession(tab: WorkbenchTab, explicitOverride?: boolean) {
+    if (suppressPersist || tab.target.kind !== 'chat') return
+    const sid = tabSessionId(tab)
+    if (sid && isDeletedSessionForCurrentBot(sid)) return
+    chatStore.focusChatView(tab.id)
+    if (sid) {
+      selectChatSession(sid, explicitOverride ?? tab.target.explicitSelection)
     } else {
-      void chatStore.selectSession(sid, { explicitSelection: false })
+      const explicitSelection = explicitOverride
+        ?? (chatStore.hasExplicitSessionSelection === true || tab.target.explicitSelection === true)
+      chatStore.selectDraft({ explicitSelection })
     }
   }
 
-  function numberedFallbackTitle(prefix: string, id: string): string {
-    const suffix = id.split(':')[1]?.trim()
-    return suffix ? `${prefix} ${suffix}` : prefix
+  function cleanupPanelState(id: string) {
+    if (fileDirty.value[id]) {
+      const next = { ...fileDirty.value }
+      delete next[id]
+      fileDirty.value = next
+    }
+    saveHandlers.delete(id)
+    if (closeQueue.value.includes(id)) {
+      closeQueue.value = closeQueue.value.filter(q => q !== id)
+    }
   }
 
-  function terminalTitleFallback(id: string): string {
-    const prefix = i18n.global.t('bots.terminal.defaultTabLabel') || DEFAULT_TERMINAL_TITLE
-    return numberedFallbackTitle(prefix, id)
+  function activeTabOfState(state: WorkbenchState): WorkbenchTab | null {
+    const group = findGroup(state.root, state.activeGroupId) ?? listGroups(state.root)[0]
+    return group?.activeTabId ? state.tabs[group.activeTabId] ?? null : null
   }
 
-  // System-titled panels always label from the current locale; the English
-  // constants are only guards against a missing key.
-  function defaultChatTitle(): string {
-    return i18n.global.t('chat.newSession') || DEFAULT_CHAT_TITLE
+  function buildEmptyWorkspaceFallbackState(
+    baseState: WorkbenchState,
+    bid: string,
+    opts?: { forceDraft?: boolean },
+  ): { state: WorkbenchState, explicitSelection: boolean } {
+    const explicitSelection = opts?.forceDraft ? false : chatStore.hasExplicitSessionSelection === true
+    const sid = opts?.forceDraft ? '' : (chatStore.sessionId ?? '').trim()
+    const id = `chat:${allocateTabNumber(bid, 'chat', baseState)}`
+    const tab: WorkbenchTab = {
+      id,
+      pinned: false,
+      target: {
+        kind: 'chat',
+        sessionId: sid && explicitSelection && !isDeletedSessionForCurrentBot(sid) ? sid : null,
+        explicitSelection,
+      },
+    }
+    return {
+      explicitSelection,
+      state: insertTab(baseState, tab, {
+        preview: true,
+        activate: true,
+        canReplacePreview: tabId => !fileDirty.value[tabId],
+      }),
+    }
   }
 
-  function browserTabTitle(): string {
-    return i18n.global.t('chat.tabs.browser') || 'Browser'
+  /** Single state-commit funnel: cleans removed tabs, atomically refills empty workspaces, syncs chat, and persists. */
+  function commitWorkbench(nextState: WorkbenchState, explicitOverride?: boolean) {
+    const prevState = workbench.value
+    if (nextState === prevState) return
+
+    const prevActive = activeTabOfState(prevState)
+    const removedTabs = Object.values(prevState.tabs).filter(tab => !nextState.tabs[tab.id])
+
+    const bid = (loadedBotId.value ?? '').trim()
+    const shouldRefillEmpty = ready.value && !suppressPersist && Boolean(bid) && Object.keys(nextState.tabs).length === 0
+    const hadRemovedChat = removedTabs.some(t => t.target.kind === 'chat')
+    const refill = shouldRefillEmpty
+      ? buildEmptyWorkspaceFallbackState(nextState, bid, { forceDraft: hadRemovedChat })
+      : null
+    const committedState = refill ? refill.state : nextState
+
+    workbench.value = committedState
+    const nextActive = activeTabOfState(committedState)
+
+    const drag = activeWorkbenchDrag.value
+    const draggedTabId = drag?.railTab?.tabId ?? drag?.detachedTabId ?? null
+    if (draggedTabId && removedTabs.some(t => t.id === draggedTabId)) {
+      cancelActiveWorkbenchDrag()
+    }
+
+    for (const removed of removedTabs) {
+      cleanupPanelState(removed.id)
+      if (removed.target.kind === 'terminal' && loadedBotId.value) {
+        const removedBid = loadedBotId.value
+        void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(removedBid, removed.id)))
+      }
+    }
+
+    if (hadRemovedChat && !suppressPersist) {
+      const anyChatRemaining = Object.values(committedState.tabs).some(t => t.target.kind === 'chat')
+      if (!anyChatRemaining) {
+        chatStore.selectDraft({ explicitSelection: false })
+      } else if (!shouldRefillEmpty) {
+        const sid = (chatStore.sessionId ?? '').trim()
+        const closedSelectedSid = removedTabs.some(t => tabSessionId(t) === sid)
+        if (sid && closedSelectedSid && !chatTabForSession(sid, committedState) && (!nextActive || nextActive.target.kind !== 'chat')) {
+          chatStore.resetToEmptyComposer({ clearPendingExternalAgent: false, explicitSelection: false, draftIntent: false })
+        }
+      }
+    }
+
+    if (nextActive && nextActive.id !== prevActive?.id && nextActive.target.kind === 'chat') {
+      activateChatSession(nextActive, refill ? refill.explicitSelection : explicitOverride)
+    }
+    if (shouldRefillEmpty) focusChatInputAfterEntry()
+    persistWorkbench()
   }
 
-  function scheduleTabTitle(): string {
-    return i18n.global.t('chat.tabs.schedule') || 'Schedule'
+  function hasCurrentPermission(permission: BotPermission): boolean {
+    return hasBotPermission(currentBot.value?.current_user_permissions, permission)
   }
 
-  // Per-session chat title fallback (syncChatTitles overlays the server title
-  // once known). Draft tabs (no session) are system-titled, and so is a first
-  // send's tab until the server confirms the send (see isSessionTentative).
-  function chatTitleFallbackFor(sid: string | null): string {
-    if (!sid || chatStore.isSessionTentative(sid)) return defaultChatTitle()
-    const session = chatStore.knownSessionSummary(sid)
-    return (session?.title ?? '').trim() || routeConversationLabel(session) || i18n.global.t('chat.untitledSession')
-  }
-
-  function panelTitleFallback(panel: { id: string, params?: Record<string, unknown> }): string {
-    const params = panel.params ?? {}
-    switch (panelComponentOf(panel.id)) {
+  function isTabAllowed(tab: WorkbenchTab): boolean {
+    switch (tab.target.kind) {
       case 'chat':
-        return chatTitleFallbackFor(panelSessionId(panel))
+      case 'asset':
+        return true
       case 'file':
-        return fileBaseName(panel.id.slice('file:'.length))
       case 'preview':
-        return fileBaseName(panel.id.slice('preview:'.length))
-      case 'asset': {
-        const name = params.name
-        return typeof name === 'string' && name.trim() ? name.trim() : 'file'
-      }
+        return hasCurrentPermission('workspace_read')
       case 'terminal':
-        return terminalTitleFallback(panel.id)
-      case 'browser': {
-        const address = params.address
-        return typeof address === 'string' && address.trim()
-          ? address.trim()
-          : numberedFallbackTitle(browserTabTitle(), panel.id)
-      }
+        return hasCurrentPermission('workspace_exec')
+      case 'browser':
       case 'display':
-        // Creation (openDisplay) titles the singleton panel chat.display.title;
-        // the repair fallback must match.
-        return i18n.global.t('chat.display.title')
       case 'schedule':
-        return scheduleTabTitle()
-      default:
-        return panel.id
+        return hasCurrentPermission('manage')
     }
   }
 
-  function matchesLocalizedTitle(
-    title: string,
-    resolve: (locale: Locale) => string,
-    knownTitles: readonly string[] = [],
-  ): boolean {
-    if (knownTitles.includes(title)) return true
-    return i18n.global.availableLocales.some(loc => resolve(loc as Locale) === title)
+  function pruneDisallowedTabs() {
+    const perms = currentBot.value?.current_user_permissions
+    if (!activeBotId() || !perms || perms.length === 0) return
+    let next = workbench.value
+    for (const tab of Object.values(next.tabs)) {
+      if (!isTabAllowed(tab)) next = removeTab(next, tab.id)
+    }
+    if (next !== workbench.value) commitWorkbench(next)
   }
 
-  // Beyond filling empty titles, regenerate system-titled panels (draft chat,
-  // unsaved schedule, preview, and terminal/browser/display fallbacks) from the
-  // current locale: titles are persisted in the layout, and live language
-  // switches re-derive them in place without a reload.
-  function repairPanelTitles(): boolean {
-    const dock = api.value
-    if (!dock) return false
-    let repaired = false
-    for (const panel of dock.panels) {
-      const next = repairedPanelTitle(panel)
-      if (next === null || next === (panel.api.title ?? '').trim()) continue
-      panel.api.setTitle(next)
-      repaired = true
-    }
-    return repaired
-  }
-
-  // The title this panel should have after restore or locale change, or null to
-  // keep the existing one (sessions, non-preview files, user-named schedules,
-  // live shell titles).
-  function repairedPanelTitle(panel: { id: string, api: { title?: string }, params?: Record<string, unknown> }): string | null {
-    const title = (panel.api.title ?? '').trim()
-    const component = panelComponentOf(panel.id)
-    // Draft chat and unsaved schedule tabs never carry user content, so their
-    // titles are always re-derived — this is what migrates a draft persisted
-    // under another locale.
-    if (component === 'chat' && panelSessionId(panel) === null) return defaultChatTitle()
-    if (component === 'schedule' && panel.id.startsWith('schedule:new:')) return scheduleTabTitle()
-    if (!title) return panelTitleFallback(panel)
-    if (component === 'preview') {
-      const name = fileBaseName(panel.id.slice('preview:'.length))
-      if (matchesLocalizedTitle(
-        title,
-        loc => i18n.global.t('chat.previewTab', { name }, { locale: loc }),
-        PREVIEW_TAB_FORMATTERS.map(format => format(name)),
-      )) {
-        return i18n.global.t('chat.previewTab', { name })
-      }
-      return null
-    }
-    if (component === 'terminal') {
-      const isDefaultTerminal = title.toLowerCase() === LEGACY_TERMINAL_TITLE
-        || matchesLocalizedTitle(
-          title,
-          (loc) => {
-            const prefix = i18n.global.t('bots.terminal.defaultTabLabel', {}, { locale: loc })
-            return prefix ? numberedFallbackTitle(prefix, panel.id) : ''
-          },
-          TERMINAL_FALLBACK_PREFIXES.map(prefix => numberedFallbackTitle(prefix, panel.id)),
-        )
-      return isDefaultTerminal ? terminalTitleFallback(panel.id) : null
-    }
-    if (component === 'browser') {
-      const address = typeof panel.params?.address === 'string' ? panel.params.address.trim() : ''
-      if (address) return null
-      const isDefaultBrowser = matchesLocalizedTitle(
-        title,
-        loc => numberedFallbackTitle(i18n.global.t('chat.tabs.browser', {}, { locale: loc }), panel.id),
-        BROWSER_FALLBACK_PREFIXES.map(prefix => numberedFallbackTitle(prefix, panel.id)),
-      )
-      return isDefaultBrowser ? numberedFallbackTitle(browserTabTitle(), panel.id) : null
-    }
-    if (component === 'display' && matchesLocalizedTitle(
-      title,
-      loc => i18n.global.t('chat.display.title', {}, { locale: loc }),
-      DISPLAY_FALLBACK_TITLES,
-    )) {
-      return i18n.global.t('chat.display.title')
-    }
-    return null
-  }
-
-  function updateTerminalTitle(panelId: string, title: unknown) {
-    const dock = api.value
-    if (!dock || panelComponentOf(panelId) !== 'terminal' || typeof title !== 'string') return
-    const panel = dock.getPanel(panelId)
-    const normalized = title.trim()
-    if (!panel || !normalized || panel.api.title === normalized) return
-    panel.api.setTitle(normalized)
-    persistLayout()
-  }
-
-  function restoreLayout(botId: string) {
-    const dock = api.value
-    if (!dock) return
-    let dockEmptyAfterRestore = false
-    let repairedEmptyTitles = false
+  function clearRuntimeState(opts?: { clearLoadedBot?: boolean, clearMobileColdStart?: boolean, clearSaveHandlers?: boolean }) {
+    cancelActiveWorkbenchDrag()
+    panelDragging.value = false
+    pendingDragPersist = false
+    if (opts?.clearMobileColdStart) mobileColdStart = false
+    if (opts?.clearLoadedBot) loadedBotId.value = null
+    if (opts?.clearSaveHandlers) saveHandlers.clear()
+    if (!ready.value && !opts?.clearSaveHandlers) return
     suppressPersist = true
     try {
-      const stored = storage.value[botId]?.layout ?? null
-      // Mobile never restores the persisted layout: that tree is the desktop
-      // multi-group arrangement, and deserializing it would resurrect splits
-      // the mobile shell forbids. The empty branch below drives the mobile
-      // cold start instead — draft fallback + chat-selection rebind.
-      if (stored && !isMobile.value) {
-        try {
-          dock.fromJSON(sanitizeLayout(stored))
-        } catch {
-          dock.clear()
-          patchBotLayout(botId, { layout: null })
-        }
-      } else {
-        dock.clear()
-      }
-      loadedBotId = botId
-      // The dock now holds exactly what this restore put in it: the desktop
-      // snapshot (desktop restore) or a fresh mobile stack (mobile restore —
-      // the snapshot branch above is skipped). Only a DESKTOP restore unseals
-      // persistence; a mobile one keeps the seal on for the eventual exit.
-      dockHoldsMobileStack = isMobile.value
-      prunePanels()
-      // Restore the ephemeral slot from storage, keeping only ids that survived
-      // restore + prune. Wholesale replace so the previous bot's flags are dropped.
-      const storedEphemeral = storage.value[botId]?.ephemeralIds ?? []
-      const nextEphemeral: Record<string, true> = {}
-      for (const id of storedEphemeral) {
-        if (dock.getPanel(id)) nextEphemeral[id] = true
-      }
-      ephemeralPanels.value = nextEphemeral
-      activePanelId.value = dock.activePanel?.id ?? null
-      repairedEmptyTitles = repairPanelTitles()
-      dockEmptyAfterRestore = dock.panels.length === 0
+      workbench.value = createEmptyWorkbenchState()
+      fileDirty.value = {}
+      closeQueue.value = []
     } finally {
       suppressPersist = false
     }
-    if (repairedEmptyTitles && !dockEmptyAfterRestore) persistLayout()
-    // Non-empty restore is authoritative for this tab's panels. Empty restore
-    // still needs the draft fallback.
-    if (dockEmptyAfterRestore) ensureDraftChatPanel()
+  }
+
+  function finalizeRestoredWorkbench(bid: string) {
+    if (Object.keys(workbench.value.tabs).length === 0) {
+      const fallback = buildEmptyWorkspaceFallbackState(workbench.value, bid)
+      commitWorkbench(fallback.state, fallback.explicitSelection)
+    } else {
+      persistWorkbench()
+    }
     syncDraftChatExplicitSelection()
     alignSelectionWithDock()
     focusChatInputAfterEntry()
   }
 
-  function domListener<K extends keyof DocumentEventMap>(
-    type: K,
-    handler: (event: DocumentEventMap[K]) => void,
-    options?: AddEventListenerOptions,
-  ): { dispose(): void } {
-    document.addEventListener(type, handler as EventListener, options)
-    return {
-      dispose() {
-        document.removeEventListener(type, handler as EventListener, options)
-      },
-    }
-  }
-
-  // ---- mobile single-stack constraint --------------------------------------
-  // Below 768px the dock is ONE group with its tab strip hidden: a stack of
-  // full-screen panels where "open X" pushes onto the stack and the top bar's
-  // back affordance re-activates the chat panel (secondary panels are never
-  // closed, so terminals/WebRTC keep running in the background). All of this
-  // is runtime-only — the persisted desktop layout is neither read
-  // (restoreLayout) nor written (persistLayout) while mobile.
-
-  // Merge every group into the first one. group.api.moveTo(center) moves all
-  // of a source group's panels into the target and dissolves the emptied
-  // source; dockview suppresses its per-panel remove/add events mid-move, so
-  // panel state (dirty flags, ephemeral slots) survives the merge.
-  function mergeGroupsIntoSingle(dock: DockviewApi) {
-    const [first, ...rest] = dock.groups
-    if (!first) return
-    for (const group of rest) {
-      group.api.moveTo({ group: first, position: 'center' })
-    }
-  }
-
-  // Hide the tab strip while mobile, restore it when leaving. The
-  // group.model.header.hidden setter is a pure display toggle (no events, no
-  // measurement), so running this on every layout change is cheap and
-  // self-healing: groups created AFTER entering mobile (cold-start draft, bot
-  // switch) get hidden as they appear, and rebuilt groups (fromJSON) re-hide
-  // even though the flag itself is never persisted.
-  function syncMobileGroupHeaders(dock: DockviewApi) {
-    for (const group of dock.groups) {
-      if (group.model.header.hidden !== isMobile.value) {
-        group.model.header.hidden = isMobile.value
-      }
-    }
-  }
-
-  function registerApi(dock: DockviewApi) {
-    for (const d of apiDisposables) d.dispose()
-    api.value = dock
-    apiDisposables = [
-      dock.onDidActivePanelChange((event) => {
-        // dockview v7 renamed this event's payload field: v6 fired the panel on
-        // `event.activePanel`, v7 fires `{ panel, origin }`. Reading the old name
-        // yields undefined every time, silently nulling activePanelId on every
-        // tab switch — which desyncs the sidebar file-tree highlight (its only
-        // consumer via activeId). Use `event.panel`.
-        const panel = event.panel
-        activePanelId.value = panel?.id ?? null
-        // Activating a chat tab makes its session the live one. Strictly gated so
-        // file/terminal activation never touches chat state. This includes the
-        // neighbor dockview activates after a deleted session's tab closes.
-        if (panel && panelComponentOf(panel.id) === 'chat') {
-          activateChatSession(panel)
-        }
-      }),
-      dock.onDidLayoutChange(() => {
-        // Also re-apply the mobile tab-strip visibility: it is runtime-only
-        // state, so groups added or rebuilt by a restore must pick it up here.
-        syncMobileGroupHeaders(dock)
-        persistLayout()
-      }),
-      dock.onDidRemovePanel((panel) => {
-        cleanupPanelState(panel.id)
-        if (panel.id.startsWith('terminal:') && loadedBotId) {
-          const bid = loadedBotId
-          void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(bid, panel.id)))
-        }
-        // Closing the LAST chat tab resets the global view to a fresh draft, so the
-        // dock respawns a "New Session" page instead of reopening the session that
-        // was just closed (its id is still the global one until we clear it).
-        if (
-          panelComponentOf(panel.id) === 'chat'
-          && !dock.panels.some(p => panelComponentOf(p.id) === 'chat')
-        ) {
-          chatStore.selectDraft({ explicitSelection: false })
-        }
-        // With a non-chat tab focused, the selection is the last chat the user
-        // looked at. Once that chat's last tab closes it is no longer on screen,
-        // so Recents must stop highlighting it. A chat tab taking focus instead
-        // updates the selection through its own activation.
-        else if (!suppressPersist && panelComponentOf(panel.id) === 'chat') {
-          const sid = chatStore.sessionId ?? ''
-          const active = dock.activePanel
-          if (
-            sid
-            && panelSessionId(panel) === sid
-            && !chatPanelForSession(sid)
-            && (!active || panelComponentOf(active.id) !== 'chat')
-          ) {
-            chatStore.resetToEmptyComposer({
-              clearPendingExternalAgent: false,
-              explicitSelection: false,
-              draftIntent: false,
-            })
-          }
-        }
-        ensureDraftChatPanel()
-      }),
-      // Let the entire desktop header accept panel and group drops.
-      dock.onWillDragPanel(() => { panelDragging.value = true }),
-      dock.onWillDragGroup(() => { panelDragging.value = true }),
-      dock.onWillShowOverlay((event) => {
-        // Mobile runs a single group: veto any drop that would split off a new
-        // group. A 'center' drop merges as a tab inside the group — the only
-        // arrangement the mobile shell allows — so it stays droppable.
-        if (isMobile.value && event.position !== 'center') {
-          event.preventDefault()
-          return
-        }
-      }),
-      dock.onWillDrop((event) => {
-        if (isMobile.value && event.position !== 'center') {
-          event.preventDefault()
-          return
-        }
-      }),
-      // Clear the drag flags however the drag ends (drop, cancel, Esc). Native
-      // 'dragend' always fires for the HTML5 backend; 'pointerup' covers the
-      // pointer/touch backend.
-      domListener('dragend', () => { panelDragging.value = false }, { capture: true }),
-      domListener('pointerup', () => { panelDragging.value = false }, { capture: true }),
-    ]
-    const bid = currentBotId.value ?? ''
-    if (bid) {
-      restoreLayout(bid)
-      reconcileDeletedChatPanels()
-    }
-  }
-
-  function releaseApi() {
-    for (const d of apiDisposables) d.dispose()
-    apiDisposables = []
-    api.value = null
-    activePanelId.value = null
-    loadedBotId = null
+  function restoreForBot(botId: string) {
+    if (!ready.value) return
+    cancelActiveWorkbenchDrag()
     panelDragging.value = false
-    draftChatQueued = false
+    pendingDragPersist = false
+    suppressPersist = true
+    try {
+      const stored = storage.value[botId]?.workbench ?? null
+      if (stored && !isMobile.value) {
+        const parsed = parseWorkbenchState(stored)
+        if (parsed) {
+          workbench.value = parsed
+          ensureBotRecord(botId)
+        } else {
+          workbench.value = createEmptyWorkbenchState()
+          patchBotRecord(botId, { workbench: null })
+        }
+      } else {
+        workbench.value = createEmptyWorkbenchState()
+      }
+      loadedBotId.value = botId
+      mobileColdStart = isMobile.value
+      fileDirty.value = {}
+      closeQueue.value = []
+      pruneDisallowedTabs()
+      reconcileDeletedChatPanels()
+    } finally {
+      suppressPersist = false
+    }
+    finalizeRestoredWorkbench(botId)
   }
 
-  // ---- panel operations ----------------------------------------------------
+  function mountWorkspace() {
+    ready.value = true
+    const bid = (currentBotId.value ?? '').trim()
+    if (bid) {
+      ensureBotRecord(bid)
+      restoreForBot(bid)
+    }
+  }
 
-  const activeId = computed<string | null>(() => activePanelId.value)
-  const pendingChatInputFocus = ref<{ panelId: string; botId: string; sessionId: string | null } | null>(null)
+  function unmountWorkspace() {
+    ready.value = false
+    clearRuntimeState({ clearLoadedBot: true, clearMobileColdStart: true, clearSaveHandlers: true })
+  }
+
+  // ---- Focus management ----------------------------------------------------
+
+  const pendingChatInputFocus = ref<{ panelId: string, botId: string, sessionId: string | null } | null>(null)
   watch([activeId, currentBotId, () => selection.sessionId], () => { pendingChatInputFocus.value = null }, { flush: 'sync' })
 
   function requestChatInputFocus() {
-    if (!activePanelId.value || panelComponentOf(activePanelId.value) !== 'chat') activateChatPanel()
+    if (!activeTab.value || activeTab.value.target.kind !== 'chat') activateChatPanel()
     requestActiveChatInputFocus()
   }
 
   function requestActiveChatInputFocus() {
-    const panel = api.value?.activePanel
-    if (!activePanelIsChat.value || !panel || !currentBotId.value) return
-    pendingChatInputFocus.value = {
-      panelId: panel.id,
-      botId: currentBotId.value,
-      sessionId: panel.params?.sessionId ?? null,
-    }
+    const tab = activeTab.value
+    if (!tab || tab.target.kind !== 'chat' || !currentBotId.value) return
+    pendingChatInputFocus.value = { panelId: tab.id, botId: currentBotId.value, sessionId: tab.target.sessionId }
   }
 
-  // Desktop: entering a conversation — cold start, a bot switch, New Chat, a
-  // session opened from the sidebar, a menu or search — leaves the caret in its
-  // composer. Requested a tick later, once the activation and selection changes
-  // it rides on (which drop pending requests) have settled. It never takes
-  // focus from another input, never switches away from a non-chat tab, and
-  // never runs on phones, where focusing would raise a keyboard the user did
-  // not ask for.
   let entryFocusRun = 0
   function focusChatInputAfterEntry() {
     if (isMobile.value) return
     const run = ++entryFocusRun
     void nextTick(() => {
       if (isMobile.value || run !== entryFocusRun) return
-      // Entered from a menu or dialog: it still holds focus and hands it back
-      // to its trigger as it closes, which would undo an earlier request.
-      // Wait until focus has left it.
       const overlay = document.activeElement?.closest<HTMLElement>(ENTRY_OVERLAY)
       if (overlay) {
         afterOverlayReleasesFocus(overlay, run)
@@ -704,6 +512,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // ponytail: bounded RAF polling waits for Radix/Reka popovers to release focus (ceiling ~2s at 60Hz);
+  // upgrade path: subscribe to a global overlay-closed bus if popovers ever need deterministic handoff.
   function afterOverlayReleasesFocus(
     overlay: HTMLElement,
     run: number,
@@ -717,10 +527,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         if (framesLeft > 0) afterOverlayReleasesFocus(overlay, run, framesLeft - 1, returnFramesLeft)
         return
       }
-      // Unmounted while it held focus: focus fell to the page, and the
-      // overlay's focus scope gives it back to the trigger in a task queued
-      // after unmounting (reka-ui FocusScope). A request made before that
-      // lands would be undone by it.
       if (!overlay.isConnected && (!active || active === document.body) && returnFramesLeft > 0) {
         afterOverlayReleasesFocus(overlay, run, framesLeft, returnFramesLeft - 1)
         return
@@ -730,175 +536,202 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // ---- Tab & split primitives ----------------------------------------------
+
+  function activateTab(tabId: string) {
+    if (!ready.value) return
+    commitWorkbench(treeActivateTab(workbench.value, tabId))
+  }
+
+  function activateGroup(groupId: string) {
+    if (!ready.value) return
+    commitWorkbench(treeActivateGroup(workbench.value, groupId))
+  }
+
   function focusAdjacentTab(direction: -1 | 1): boolean {
-    const group = api.value?.activeGroup
-    if (!group || group.panels.length < 2) return false
-    const index = group.panels.findIndex(panel => panel.id === activeId.value)
-    if (index < 0) return false
-    const target = group.panels[(index + direction + group.panels.length) % group.panels.length]
-    if (!target) return false
-    focusPanel(target)
+    if (!ready.value) return false
+    const ids = isMobile.value
+      ? listGroups(workbench.value.root).flatMap(g => g.tabIds)
+      : (activeGroup.value?.tabIds ?? [])
+    if (ids.length < 2) return false
+    const idx = ids.indexOf((isMobile.value ? activeId.value : activeGroup.value?.activeTabId) ?? '')
+    if (idx < 0) return false
+    activateTab(ids[(idx + direction + ids.length) % ids.length]!)
     return true
   }
 
-  // The mobile top bar picks its left affordance from this: chat active → "≡"
-  // opens the navigation; a secondary panel (terminal/browser/…) active → "←"
-  // runs activateChatPanel. An empty dock (mid bot-switch) counts as chat so
-  // the fallback affordance is the navigation, not a dead back button.
-  const activePanelIsChat = computed(() => {
-    const id = activePanelId.value
-    return !id || panelComponentOf(id) === 'chat'
-  })
-
-  function hasCurrentPermission(permission: BotPermission): boolean {
-    return hasBotPermission(currentBot.value?.current_user_permissions, permission)
+  function keepOpenTab(tabId: string) {
+    if (!ready.value) return
+    commitWorkbench(treeKeepOpenTab(workbench.value, tabId))
   }
 
-  // New tabs join the requested group, otherwise the currently focused group.
-  function targetGroup(dock: DockviewApi, groupId?: string): DockviewGroupPanel | undefined {
-    return dock.groups.find(group => group.id === groupId) ?? dock.activeGroup ?? dock.groups[0]
+  function pinTab(tabId: string) {
+    if (!ready.value) return
+    commitWorkbench(setTabPinned(workbench.value, tabId, true))
   }
 
-  function tabPosition(dock: DockviewApi, groupId?: string) {
-    const group = targetGroup(dock, groupId)
-    return group ? { referenceGroup: group.id, direction: 'within' as const } : undefined
+  function unpinTab(tabId: string) {
+    if (!ready.value) return
+    commitWorkbench(setTabPinned(workbench.value, tabId, false))
   }
 
-  function focusOrAdd(options: {
-    id: string
-    component: WorkspacePanelComponent
-    title: string
-    params?: Record<string, unknown>
-    // The tab group whose header strip triggered the open (the "+" lives per
-    // group). Without it dockview drops the new panel into the active group,
-    // which is why a "+" in the right split used to open its terminal back in
-    // the left pane.
-    groupId?: string
-  }): boolean {
-    const dock = api.value
-    if (!dock) return false
-    const existing = dock.getPanel(options.id)
-    if (existing) {
-      focusPanel(existing)
+  function setSplitRatio(splitId: string, ratio: number) {
+    if (!ready.value) return
+    commitWorkbench(treeSetSplitRatio(workbench.value, splitId, ratio))
+  }
+
+  function reorderTab(groupId: string, tabId: string, targetIndex: number) {
+    if (!ready.value) return
+    commitWorkbench(reorderTabInGroup(workbench.value, groupId, tabId, targetIndex))
+  }
+
+  function moveTab(tabId: string, targetGroupId: string, zone: WorkbenchDropZone, insertIndex?: number) {
+    if (!ready.value) return
+    const effectiveZone: WorkbenchDropZone = isMobile.value && zone !== 'center' ? 'center' : zone
+    commitWorkbench(moveTabToGroup(workbench.value, tabId, targetGroupId, effectiveZone, insertIndex))
+  }
+
+  function placeDroppedTab(tab: WorkbenchTab, targetGroupId: string, zone: WorkbenchDropZone, insertIndex?: number) {
+    if (zone !== 'center') {
+      commitWorkbench(splitGroupWithTab(workbench.value, targetGroupId, zone, tab, { preview: false, activate: true }))
+    } else {
+      let next = insertTab(workbench.value, tab, { groupId: targetGroupId, preview: false, activate: true })
+      if (typeof insertIndex === 'number') next = reorderTabInGroup(next, targetGroupId, tab.id, insertIndex)
+      commitWorkbench(next)
+    }
+  }
+
+  function dropExternalItem(
+    item: { kind: 'session', sessionId: string, title?: string } | { kind: 'file', filePath: string },
+    targetGroupId: string,
+    zone: WorkbenchDropZone,
+    insertIndex?: number,
+  ) {
+    const bid = activeBotId()
+    if (!bid) return
+    const effectiveZone: WorkbenchDropZone = isMobile.value && zone !== 'center' ? 'center' : zone
+
+    if (item.kind === 'session') {
+      const sid = item.sessionId.trim()
+      if (!sid || isDeletedSessionForCurrentBot(sid)) return
+      focusChatInputAfterEntry()
+      const existing = chatTabForSession(sid)
+      if (existing && existing.target.kind === 'chat') {
+        focusExistingSessionTab(existing, sid, {
+          fallbackTitle: item.title?.trim() || undefined,
+          explicitSelection: true,
+          keepOpen: true,
+          moveTo: { targetGroupId, zone: effectiveZone, insertIndex },
+        })
+        return
+      }
+      const id = `chat:${allocateTabNumber(bid, 'chat')}`
+      placeDroppedTab(
+        { id, pinned: false, target: { kind: 'chat', sessionId: sid, explicitSelection: true, fallbackTitle: item.title?.trim() || undefined } },
+        targetGroupId,
+        effectiveZone,
+        insertIndex,
+      )
+      return
+    }
+
+    if (!hasCurrentPermission('workspace_read')) return
+    const path = item.filePath.trim()
+    if (!path) return
+    const id = `file:${path}`
+    if (workbench.value.tabs[id]) {
+      let next = treeKeepOpenTab(workbench.value, id)
+      next = moveTabToGroup(next, id, targetGroupId, effectiveZone, insertIndex)
+      next = treeActivateTab(next, id)
+      commitWorkbench(next)
+      return
+    }
+    placeDroppedTab({ id, pinned: false, target: { kind: 'file', filePath: path } }, targetGroupId, effectiveZone, insertIndex)
+  }
+
+  function startExternalDrag(
+    event: PointerEvent,
+    item: { kind: 'session', sessionId: string, title?: string } | { kind: 'file', filePath: string },
+    title: string,
+  ) {
+    if (isMobile.value || !ready.value) return
+    startWorkbenchExternalPointerDrag({
+      event,
+      getTitle: () => title,
+      isMobile: () => isMobile.value,
+      getGroupTabIds: gid => findGroup(workbench.value.root, gid)?.tabIds ?? [],
+      isTabPinned: tid => Boolean(workbench.value.tabs[tid]?.pinned),
+      onDragStateChange: (dragging) => { panelDragging.value = dragging },
+      onCommitDrop: (targetGid, zone, idx) => dropExternalItem(item, targetGid, zone, idx),
+    })
+  }
+
+  function resolveTabTitle(tabId: string): string {
+    const tab = workbench.value.tabs[tabId]
+    return tab ? resolveWorkbenchTabTitle(tab.target, chatStore) : tabId
+  }
+
+  // ---- Chat & Session operations -------------------------------------------
+
+  function openTab(
+    tab: WorkbenchTab,
+    opts?: { preview?: boolean, groupId?: string, activate?: boolean, explicitOverride?: boolean },
+  ): boolean {
+    if (!activeBotId()) return false
+    const preview = opts?.preview ?? false
+    const activate = opts?.activate !== false
+    if (workbench.value.tabs[tab.id]) {
+      let next = preview ? workbench.value : treeKeepOpenTab(workbench.value, tab.id)
+      if (activate) next = treeActivateTab(next, tab.id)
+      commitWorkbench(next, opts?.explicitOverride)
       return true
     }
-    const target = tabPosition(dock, options.groupId)
-    dock.addPanel({
-      id: options.id,
-      component: options.component,
-      title: options.title,
-      params: options.params,
-      // Keep panel DOM mounted while hidden: terminals, WebRTC display and
-      // chat scroll state do not survive detach/reattach cycles.
-      renderer: 'always',
-      ...(target ? { position: target } : {}),
+    const next = insertTab(workbench.value, tab, {
+      groupId: opts?.groupId,
+      preview,
+      activate: opts?.activate,
+      canReplacePreview: preview ? id => !fileDirty.value[id] : undefined,
     })
+    commitWorkbench(next, opts?.explicitOverride)
     return true
   }
 
-  function markEphemeral(id: string) {
-    if (ephemeralPanels.value[id]) return
-    ephemeralPanels.value = { ...ephemeralPanels.value, [id]: true }
-  }
-
-  // Pin a panel: drop it out of the ephemeral slot so it stops getting replaced.
-  // Idempotent. Triggered by the first user change (file edit or chat message);
-  // never reversed (VS Code keeps an edited tab pinned).
-  function pinPanel(id: string) {
-    if (!ephemeralPanels.value[id]) return
-    const next = { ...ephemeralPanels.value }
-    delete next[id]
-    ephemeralPanels.value = next
-  }
-
-  // Open (or focus) an ephemeral-slot panel. Each group holds at most
-  // one ephemeral panel; opening another ephemeral-eligible tab into that group
-  // replaces it IN PLACE (add the new one first, then close the old so the group
-  // never empties mid-swap). Ephemeral panels are never dirty, so the close needs
-  // no save prompt. An existing panel for the same id is just focused (its current
-  // pinned/ephemeral state is preserved).
-  function openEphemeral(opts: {
-    id: string
-    component: WorkspacePanelComponent
-    title: string
-    params?: Record<string, unknown>
-    groupId?: string
-    inactive?: boolean
-  }): boolean {
-    const dock = api.value
-    if (!dock) return false
-    const existing = dock.getPanel(opts.id)
-    if (existing) {
-      if (!opts.inactive) focusPanel(existing)
-      return true
+  function focusExistingSessionTab(
+    existing: WorkbenchTab,
+    sid: string,
+    opts: {
+      fallbackTitle?: string
+      explicitSelection: boolean
+      keepOpen?: boolean
+      activate?: boolean
+      replaceTarget?: boolean
+      moveTo?: { targetGroupId: string, zone: WorkbenchDropZone, insertIndex?: number }
+    },
+  ) {
+    const activate = opts.activate !== false
+    const wasAlreadyActive = activeId.value === existing.id
+    let next = updateTabTarget(workbench.value, existing.id, t => t.kind === 'chat'
+      ? {
+          kind: 'chat',
+          sessionId: sid,
+          explicitSelection: opts.explicitSelection,
+          fallbackTitle: opts.replaceTarget ? opts.fallbackTitle : (opts.fallbackTitle ?? t.fallbackTitle),
+        }
+      : t)
+    if (opts.keepOpen) next = treeKeepOpenTab(next, existing.id)
+    if (opts.moveTo) {
+      next = moveTabToGroup(next, existing.id, opts.moveTo.targetGroupId, opts.moveTo.zone, opts.moveTo.insertIndex)
     }
-    const target = tabPosition(dock, opts.groupId)
-    // Only an in-place join ('within' an existing editor group) has a previous
-    // ephemeral to replace; opening a brand-new group never does.
-    const targetGroupId = target?.direction === 'within' ? target.referenceGroup : undefined
-    const prevEphemeral = targetGroupId
-      ? dock.getGroup(targetGroupId)?.panels.find(
-          p => ephemeralPanels.value[p.id] && p.id !== opts.id,
-        )
-      : undefined
-    dock.addPanel({
-      id: opts.id,
-      component: opts.component,
-      title: opts.title,
-      params: opts.params,
-      renderer: 'always',
-      inactive: opts.inactive,
-      ...(target ? { position: target } : {}),
-    })
-    markEphemeral(opts.id)
-    prevEphemeral?.api.close()
-    return true
-  }
-
-  // The session a chat panel renders, read from its dockview params (null = draft).
-  function panelSessionId(panel: { params?: Record<string, unknown> }): string | null {
-    const sid = panel.params?.sessionId
-    const trimmed = typeof sid === 'string' ? sid.trim() : ''
-    return trimmed || null
-  }
-
-  function chatPanelForSession(sid: string) {
-    const dock = api.value
-    if (!dock) return undefined
-    return dock.panels.find(
-      p => panelComponentOf(p.id) === 'chat' && panelSessionId(p) === sid,
-    )
-  }
-
-  function resetDeletedChatPanelToDraft(panel: { id: string, api: { updateParameters(params: Record<string, unknown>): void, setTitle(title: string): void } }) {
-    const explicitSelection = chatStore.hasExplicitSessionSelection === true
-    panel.api.updateParameters({ sessionId: null, explicitSelection })
-    panel.api.setTitle(defaultChatTitle())
-    markEphemeral(panel.id)
-    if (api.value?.activePanel?.id === panel.id) {
-      chatStore.selectDraft({ explicitSelection })
+    if (activate) {
+      next = treeActivateTab(next, existing.id)
+    }
+    commitWorkbench(next, opts.explicitSelection)
+    if (activate && wasAlreadyActive) {
+      chatStore.focusChatView(existing.id)
+      selectChatSession(sid, opts.explicitSelection)
     }
   }
 
-  function isDeletedSessionForCurrentBot(sid: string | null): boolean {
-    const bid = currentBotId.value ?? ''
-    if (!bid || !sid) return false
-    const latestDeleted = chatStore.deletedSession
-    if (latestDeleted?.botId === bid && latestDeleted.id === sid) return true
-    return Boolean(deletedSessionIdsByBot.get(bid)?.has(sid))
-  }
-
-  function nextChatPanelId(bid: string): string {
-    const state = ensureBotLayout(bid)
-    const next = (state?.chatCounter ?? 0) + 1
-    patchBotLayout(bid, { chatCounter: next })
-    return `chat:${next}`
-  }
-
-  /** Open or focus a chat tab for a session. An already-open tab for that session
-   * is focused; otherwise the open reuses the target group's ephemeral slot (so
-   * browsing sessions in the sidebar swaps one preview tab, VS Code-style). The
-   * tab starts ephemeral and pins when the user sends a message in it. */
   function openSessionChat(opts: {
     sessionId: string
     title?: string
@@ -907,69 +740,44 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     groupLocal?: boolean
     activate?: boolean
   }) {
-    const dock = api.value
-    if (!dock) return
+    const bid = activeBotId()
     const sid = opts.sessionId.trim()
-    if (!sid) return
-    const bid = currentBotId.value ?? ''
-    if (!bid) return
-    if (isDeletedSessionForCurrentBot(sid)) return
-    const title = opts.title?.trim() || chatTitleFallbackFor(sid)
+    if (!bid || !sid || isDeletedSessionForCurrentBot(sid)) return
+
+    const fallbackTitle = opts.title?.trim() || undefined
     const explicitSelection = opts.explicitSelection !== false
     const activate = opts.activate !== false
     if (activate) focusChatInputAfterEntry()
+
     const existing = opts.groupLocal && opts.groupId
-      ? dock.getGroup(opts.groupId)?.panels.find(
-          panel => panelComponentOf(panel.id) === 'chat' && panelSessionId(panel) === sid,
-        )
-      : chatPanelForSession(sid)
-    if (existing) {
-      existing.api.setTitle(title)
-      existing.api.updateParameters({ explicitSelection })
-      if (!activate) return
-      if (dock.activePanel?.id === existing.id) {
-        selectChatSession(sid, explicitSelection)
-        return
-      }
-      setNextChatActivationExplicit(existing.id, explicitSelection)
-      focusPanel(existing)
+      ? findGroup(workbench.value.root, opts.groupId)?.tabIds
+          .map(id => workbench.value.tabs[id])
+          .find((t): t is WorkbenchTab => Boolean(t && t.target.kind === 'chat' && tabSessionId(t) === sid))
+      : chatTabForSession(sid)
+
+    if (existing && existing.target.kind === 'chat') {
+      focusExistingSessionTab(existing, sid, { fallbackTitle, explicitSelection, activate })
       return
     }
-    // Repoint the target group's existing ephemeral CHAT slot in place (no
-    // remount). If the slot holds a non-chat ephemeral (or none), fall through to
-    // openEphemeral, which replaces it or adds a fresh chat tab.
-    const target = tabPosition(dock, opts.groupId)
-    const targetGroupId = target?.direction === 'within' ? target.referenceGroup : undefined
-    const reusable = targetGroupId
-      ? dock.getGroup(targetGroupId)?.panels.find(
-          (p) => {
-            if (!ephemeralPanels.value[p.id] || panelComponentOf(p.id) !== 'chat') return false
-            const existingSid = panelSessionId(p)
-            return !isDeletedSessionForCurrentBot(existingSid)
-          },
-        )
-      : undefined
-    if (reusable) {
-      reusable.api.updateParameters({ sessionId: sid, explicitSelection })
-      reusable.api.setTitle(title)
-      if (!activate) return
-      setNextChatActivationExplicit(reusable.id, explicitSelection)
-      focusPanel(reusable)
-      // Repointing an already-active panel doesn't refire activation, so select
-      // the session explicitly (idempotent if it was already active).
-      selectChatSession(sid, explicitSelection)
+
+    const explicitGroup = opts.groupId ? findGroup(workbench.value.root, opts.groupId) : undefined
+    const targetGroup = explicitGroup
+      ?? (isMobile.value
+        ? (activeGroup.value?.tabIds.some(id => workbench.value.tabs[id]?.target.kind === 'chat')
+            ? activeGroup.value
+            : listGroups(workbench.value.root).find(g => g.tabIds.some(id => workbench.value.tabs[id]?.target.kind === 'chat')) ?? activeGroup.value)
+        : activeGroup.value)
+    const reusableTab = targetGroup?.previewTabId ? workbench.value.tabs[targetGroup.previewTabId] : undefined
+    if (reusableTab && reusableTab.target.kind === 'chat' && !isDeletedSessionForCurrentBot(tabSessionId(reusableTab))) {
+      focusExistingSessionTab(reusableTab, sid, { fallbackTitle, explicitSelection, activate, replaceTarget: true })
       return
     }
-    const id = nextChatPanelId(bid)
-    setNextChatActivationExplicit(id, explicitSelection)
-    openEphemeral({
-      id,
-      component: 'chat',
-      title,
-      params: { sessionId: sid, explicitSelection },
-      groupId: opts.groupId,
-      inactive: !activate,
-    })
+
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: sid, explicitSelection, fallbackTitle } },
+      { preview: true, groupId: opts.groupId ?? targetGroup?.id, activate, explicitOverride: explicitSelection },
+    )
   }
 
   function openSessionChatFromView(opts: {
@@ -980,344 +788,184 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     explicitSelection?: boolean
     activate?: boolean
   }) {
-    const dock = api.value
-    const origin = dock?.getPanel(opts.viewId)
-    if (!dock || !origin || panelComponentOf(origin.id) !== 'chat') return
-    if ('expectedSessionId' in opts && panelSessionId(origin) !== opts.expectedSessionId) return
+    if (!activeBotId()) return
+    const origin = workbench.value.tabs[opts.viewId]
+    const originGroup = findGroupOfTab(workbench.value.root, opts.viewId)
+    if (!origin || !originGroup || origin.target.kind !== 'chat') return
+    if ('expectedSessionId' in opts && tabSessionId(origin) !== opts.expectedSessionId) return
     openSessionChat({
       sessionId: opts.sessionId,
       title: opts.title,
-      groupId: origin.group.id,
+      groupId: originGroup.id,
       explicitSelection: opts.explicitSelection,
       groupLocal: true,
       activate: opts.activate,
     })
   }
 
-  /** Open a session as a PINNED chat tab. This is the sidebar right-click "Open
-   * in New Tab": a single click (openSessionChat) reuses the group's ephemeral
-   * chat slot so browsing the sidebar swaps one preview tab, but an explicit
-   * right-click means "give me a separate tab" — so it lands as a pinned chat
-   * tab the preview slot can never evict. An already-open tab for the session is
-   * promoted to pinned + focused. */
   function openSessionChatPinned(opts: { sessionId: string, title?: string, groupId?: string }) {
-    const dock = api.value
-    if (!dock) return
+    const bid = activeBotId()
     const sid = opts.sessionId.trim()
-    if (!sid) return
-    const bid = currentBotId.value ?? ''
-    if (!bid) return
-    // Same guard as openSessionChat: a row mid-deletion can still be visible in
-    // the sidebar, so refuse to (re)open a session being deleted for this bot.
-    if (isDeletedSessionForCurrentBot(sid)) return
-    const title = opts.title?.trim() || chatTitleFallbackFor(sid)
+    if (!bid || !sid || isDeletedSessionForCurrentBot(sid)) return
+    const fallbackTitle = opts.title?.trim() || undefined
     focusChatInputAfterEntry()
-    const existing = chatPanelForSession(sid)
+
+    const existing = chatTabForSession(sid)
     if (existing) {
-      existing.api.setTitle(title)
-      pinPanel(existing.id)
-      focusPanel(existing)
+      focusExistingSessionTab(existing, sid, { fallbackTitle, explicitSelection: true, keepOpen: true })
       return
     }
-    const target = tabPosition(dock, opts.groupId)
-    dock.addPanel({
-      id: nextChatPanelId(bid),
-      component: 'chat',
-      title,
-      params: { sessionId: sid, explicitSelection: true },
-      renderer: 'always',
-      ...(target ? { position: target } : {}),
-    })
-  }
-
-  /** Open (or focus) a subagent session in the region right of the primary
-   * conversation — the same geometry the live Desktop uses for GUI tools: the
-   * chat stays on the left, and the first editor region to its right hosts the
-   * spawned agents. The first subagent open splits that region off
-   * horizontally; later opens join it as additional pinned tabs, so several
-   * subagent sessions can sit side by side without expanding again. An
-   * already-open tab for the session is focused wherever it lives. */
-  function openSubagentSession(opts: { sessionId: string, title?: string }) {
-    const dock = api.value
-    if (!dock) return
-    const sid = opts.sessionId.trim()
-    if (!sid) return
-    const bid = currentBotId.value ?? ''
-    if (!bid) return
-    if (isDeletedSessionForCurrentBot(sid)) return
-    const title = opts.title?.trim() || chatTitleFallbackFor(sid)
-
-    const existing = chatPanelForSession(sid)
-    if (existing) {
-      existing.api.setTitle(title)
-      pinPanel(existing.id)
-      focusPanel(existing)
-      return
-    }
-
-    const primaryGroup = dock.groups[0]
-    if (!primaryGroup) {
-      openSessionChatPinned({ sessionId: sid, title })
-      return
-    }
-    const adjacentRight = dock.adjacentGroupInDirection(primaryGroup, 'right')
-    const secondaryGroup = dock.groups.find(group => group.id === adjacentRight?.id)
-    dock.addPanel({
-      id: nextChatPanelId(bid),
-      component: 'chat',
-      title,
-      params: { sessionId: sid, explicitSelection: true },
-      renderer: 'always',
-      position: secondaryGroup
-        ? { referenceGroup: secondaryGroup.id, direction: 'within' }
-        : { referenceGroup: primaryGroup.id, direction: 'right' },
-    })
-  }
-
-  /** Open or focus a draft chat tab (no session yet). An explicit group owns its
-   * own draft; callers without a group retain the legacy global-first behavior. */
-  function openDraftChat(opts?: { title?: string, groupId?: string, explicitSelection?: boolean }) {
-    const dock = api.value
-    if (!dock) return
-    const bid = currentBotId.value ?? ''
-    if (!bid) return
-    focusChatInputAfterEntry()
-    const draftCandidates = opts?.groupId
-      ? dock.getGroup(opts.groupId)?.panels ?? []
-      : dock.panels
-    const existingDraft = draftCandidates.find(
-      p => panelComponentOf(p.id) === 'chat' && panelSessionId(p) === null,
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: sid, explicitSelection: true, fallbackTitle } },
+      { groupId: opts.groupId, activate: true, explicitOverride: true },
     )
+  }
+
+  function openSubagentSession(opts: { sessionId: string, title?: string }) {
+    const bid = activeBotId()
+    const sid = opts.sessionId.trim()
+    if (!bid || !sid || isDeletedSessionForCurrentBot(sid)) return
+    const fallbackTitle = opts.title?.trim() || undefined
+
+    const existing = chatTabForSession(sid)
+    if (existing) {
+      focusExistingSessionTab(existing, sid, { fallbackTitle, explicitSelection: true, keepOpen: true })
+      return
+    }
+    const primaryGroupId = findSpatialFirstGroupId(workbench.value.root)
+    const primaryGroup = findGroup(workbench.value.root, primaryGroupId)
+    if (isMobile.value || !primaryGroup || primaryGroup.tabIds.length === 0) {
+      openSessionChatPinned({ sessionId: sid, title: opts.title })
+      return
+    }
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    const tab: WorkbenchTab = { id, pinned: false, target: { kind: 'chat', sessionId: sid, explicitSelection: true, fallbackTitle } }
+    const rightNeighborId = findRightNeighborOfSpatialFirst(workbench.value.root)
+    if (rightNeighborId) {
+      openTab(tab, { groupId: rightNeighborId, activate: true, explicitOverride: true })
+    } else {
+      commitWorkbench(splitGroupWithTab(workbench.value, primaryGroupId, 'right', tab, { preview: false, activate: true }), true)
+    }
+  }
+
+  function openDraftChat(opts?: { title?: string, groupId?: string, explicitSelection?: boolean }) {
+    const bid = activeBotId()
+    if (!bid) return
+    focusChatInputAfterEntry()
+
+    const candidateIds = opts?.groupId
+      ? (findGroup(workbench.value.root, opts.groupId)?.tabIds ?? [])
+      : Object.keys(workbench.value.tabs)
+    const existingDraft = candidateIds
+      .map(id => workbench.value.tabs[id])
+      .find((t): t is WorkbenchTab => Boolean(t && t.target.kind === 'chat' && tabSessionId(t) === null))
+
+    const explicitSelection = opts?.explicitSelection === true
     if (existingDraft) {
-      const explicitSelection = opts?.explicitSelection === true
-      if (dock.activePanel?.id !== existingDraft.id) {
-        setNextChatActivationExplicit(existingDraft.id, explicitSelection)
-        focusPanel(existingDraft)
+      if (activeId.value !== existingDraft.id) {
+        commitWorkbench(treeActivateTab(workbench.value, existingDraft.id), explicitSelection)
+      } else {
+        chatStore.selectDraft({ explicitSelection })
       }
-      chatStore.selectDraft({ explicitSelection })
       return
     }
-    const id = nextChatPanelId(bid)
-    setNextChatActivationExplicit(id, opts?.explicitSelection === true)
-    openEphemeral({
-      id,
-      component: 'chat',
-      title: opts?.title?.trim() || defaultChatTitle(),
-      params: { sessionId: null, explicitSelection: opts?.explicitSelection === true },
-      groupId: opts?.groupId,
-    })
+
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: null, explicitSelection } },
+      { preview: true, groupId: opts?.groupId, activate: true, explicitOverride: explicitSelection },
+    )
   }
 
-  // Activating a chat tab focuses its panel-scoped state and mirrors its session
-  // into the global selection. Gated to chat panels by the caller.
-  function activateChatSession(
-    panel: { id: string, params?: Record<string, unknown> },
-    options?: { explicitSelection?: boolean },
-  ) {
-    // Dockview emits active-panel changes while fromJSON restores the saved layout.
-    // That is not a user click, and must not promote a stale restored chat tab into
-    // an explicit chat-selection entry before chat initialization/default External Agent wins.
-    if (suppressPersist) return
-    // A deleted session's tabs are closing. When one of them was split into
-    // several tabs, dockview may hand focus to another copy on its way out;
-    // selecting it would revive the deleted session's runtime and selection.
-    const deletedSid = panelSessionId(panel)
-    if (deletedSid && isDeletedSessionForCurrentBot(deletedSid)) return
-    // Switch the panel-scoped chat state before the global selection changes. ACP
-    // draft staging uses this transition to persist the old view before loading
-    // the newly focused panel.
-    chatStore.focusChatView(panel.id)
-    const explicitOverride = consumeNextChatActivationExplicit(panel.id)
-    const sid = panelSessionId(panel)
-    if (sid) {
-      const panelExplicitSelection = typeof panel.params?.explicitSelection === 'boolean'
-        ? panel.params.explicitSelection
-        : true
-      const explicitSelection = options?.explicitSelection
-        ?? explicitOverride
-        ?? panelExplicitSelection
-      selectChatSession(sid, explicitSelection)
-    }
-    else {
-      const explicitSelection = options?.explicitSelection
-        ?? explicitOverride
-        ?? (
-          chatStore.hasExplicitSessionSelection === true
-          || panel.params?.explicitSelection === true
-        )
-      chatStore.selectDraft({ explicitSelection })
-    }
-  }
-
-  // The dock owns focus and the chat selection mirrors the focused chat tab
-  // (activateChatSession). Two moments change one side without a tab
-  // activation: a layout restore (fromJSON activates panels while activation
-  // is muted) and initialize() settling a session it picked or kept. Bring the
-  // selection back in line with the dock then — never the other way round:
-  // this must not focus, open, or close a tab, so nothing running in the
-  // background can pull the user off the tab they are looking at.
   function alignSelectionWithDock() {
-    const dock = api.value
-    if (!dock) return
-    const sid = chatStore.sessionId ?? ''
+    if (!activeBotId()) return
+    const sid = (chatStore.sessionId ?? '').trim()
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
-    // A non-explicit pick may still be overridden by the default External
-    // Agent while chats load; the loadingChats watcher runs this again.
     if (sid && !explicitSelection && chatStore.loadingChats) return
-    const active = dock.activePanel
-    // Empty dock: ensureDraftChatPanel owns what appears first.
+
+    const active = activeTab.value
     if (!active) return
-    if (panelComponentOf(active.id) !== 'chat') {
-      // No conversation on screen. A selected session that still has a tab
-      // is the last one the user focused; one without a tab is dropped so
-      // Recents does not highlight a conversation that is not open.
-      if (sid && !chatPanelForSession(sid)) {
-        chatStore.resetToEmptyComposer({
-          clearPendingExternalAgent: false,
-          explicitSelection: false,
-          draftIntent: false,
-        })
+    if (active.target.kind !== 'chat') {
+      if (sid && !chatTabForSession(sid)) {
+        chatStore.resetToEmptyComposer({ clearPendingExternalAgent: false, explicitSelection: false, draftIntent: false })
       }
       return
     }
+
     chatStore.focusChatView(active.id)
-    const activeSid = panelSessionId(active)
+    const activeSid = tabSessionId(active)
     if (activeSid) {
-      if (activeSid === sid) return
-      // Layout ownership, not a user click: non-explicit.
-      selectChatSession(activeSid, false)
+      if (activeSid !== sid) selectChatSession(activeSid, false)
       return
     }
-    // The focused tab is a draft. It may take an explicitly selected session
-    // that has no tab yet — filling it changes the draft's content, not which
-    // tab has focus. A non-explicit selection never fills it: the draft's
-    // composer is already on screen, and swapping in a history afterwards
-    // would move it under the user.
-    if (
-      sid
-      && explicitSelection
-      && !isDeletedSessionForCurrentBot(sid)
-      && !chatPanelForSession(sid)
-    ) {
-      active.api.updateParameters({ sessionId: sid, explicitSelection })
-      active.api.setTitle(chatTitleFallbackFor(sid))
+
+    if (sid && explicitSelection && !isDeletedSessionForCurrentBot(sid) && !chatTabForSession(sid)) {
+      commitWorkbench(updateTabTarget(workbench.value, active.id, () => ({ kind: 'chat', sessionId: sid, explicitSelection })))
       selectChatSession(sid, explicitSelection)
       return
     }
-    if (active.params?.explicitSelection !== explicitSelection) {
-      active.api.updateParameters({ explicitSelection })
+
+    if (active.target.explicitSelection !== explicitSelection) {
+      commitWorkbench(updateTabTarget(workbench.value, active.id, t => (t.kind === 'chat' ? { ...t, explicitSelection } : t)))
     }
     chatStore.selectDraft({ explicitSelection })
   }
 
   function syncDraftChatExplicitSelection() {
-    const dock = api.value
-    if (!dock) return
+    if (!activeBotId()) return
     const explicitSelection = !chatStore.sessionId && chatStore.hasExplicitSessionSelection === true
-    const panel = dock.activePanel
-    if (!panel || panelComponentOf(panel.id) !== 'chat' || panelSessionId(panel) !== null) return
-    if (panel.params?.explicitSelection === explicitSelection) return
-    panel.api.updateParameters({ explicitSelection })
+    const active = activeTab.value
+    if (!active || active.target.kind !== 'chat' || tabSessionId(active) !== null) return
+    if (active.target.explicitSelection === explicitSelection) return
+    commitWorkbench(updateTabTarget(workbench.value, active.id, t => (t.kind === 'chat' ? { ...t, explicitSelection } : t)))
   }
 
-  // Keep each open chat tab's title in step with its session's server title. Draft
-  // tabs (and real sessions with no title yet) keep their caller-set i18n title, so
-  // we only overwrite when the server has a non-empty title — guarded against
-  // setTitle thrash on background reorders.
-  function syncChatTitles() {
-    const dock = api.value
-    if (!dock) return
-    for (const panel of dock.panels) {
-      if (panelComponentOf(panel.id) !== 'chat') continue
-      const sid = panelSessionId(panel)
-      if (!sid) continue
-      const session = chatStore.knownSessionSummary(sid)
-      // Unknown session (not yet in the loaded list): leave the tab alone —
-      // deriving from nothing would overwrite a correct title with a fallback.
-      if (!session) continue
-      // Untitled sessions (channel/discuss ones) derive their tab title from the
-      // fallback chain (conversation name → untitled): this refreshes a persisted
-      // "Untitled Session" placeholder after upgrade and follows a group rename —
-      // repairPanelTitles skips non-empty session titles, so without this both stay stale.
-      const next = chatTitleFallbackFor(sid)
-      if (panel.api.title !== next) panel.api.setTitle(next)
-    }
-  }
-
-  // Drop chat tabs for sessions whose delete request has actually succeeded.
-  // Do not infer this from the paginated sessions list: an open older tab may be
-  // valid even when it is not present in the current sidebar page.
   function reconcileDeletedChatPanels(targetBotId?: string | null) {
-    const dock = api.value
-    const bid = targetBotId ?? loadedBotId ?? currentBotId.value ?? ''
-    if (!dock || !bid) return
-    if (!targetBotId && loadedBotId && loadedBotId !== bid) return
+    if (!ready.value) return
+    const bid = (targetBotId ?? loadedBotId.value ?? currentBotId.value ?? '').trim()
+    if (!bid || !loadedBotId.value || loadedBotId.value !== bid) return
     const deletedSessionIds = deletedSessionIdsByBot.get(bid)
     if (!deletedSessionIds || deletedSessionIds.size === 0) return
+
     const latestDeleted = chatStore.deletedSession
     const resetComposerScope = latestDeleted?.botId === bid ? latestDeleted.composerScope?.trim() : ''
-    for (const panel of [...dock.panels]) {
-      if (panelComponentOf(panel.id) !== 'chat') continue
-      const sid = panelSessionId(panel)
+    let next = workbench.value
+    let resetActiveToDraft = false
+
+    for (const tab of Object.values(next.tabs)) {
+      if (tab.target.kind !== 'chat') continue
+      const sid = tabSessionId(tab)
       if (!sid || !deletedSessionIds.has(sid)) continue
-      if (resetComposerScope && resetComposerScope === `${bid}:${panel.id}`) {
-        resetDeletedChatPanelToDraft(panel)
+
+      if (sid === latestDeleted?.id && resetComposerScope && resetComposerScope === `${bid}:${tab.id}`) {
+        const explicitSelection = chatStore.hasExplicitSessionSelection === true
+        next = updateTabTarget(next, tab.id, () => ({ kind: 'chat', sessionId: null, explicitSelection }))
+        const owner = findGroupOfTab(next.root, tab.id)
+        if (owner && !owner.previewTabId && !next.tabs[tab.id]?.pinned) {
+          next = markPreviewTab(next, tab.id)
+        }
+        if (activeTabOfState(next)?.id === tab.id) resetActiveToDraft = true
         continue
       }
-      // Like closing a browser tab: dockview activates a neighbor, and the
-      // selection follows that activation. No replacement session is opened.
-      panel.api.close()
+      next = removeTab(next, tab.id)
+    }
+
+    commitWorkbench(next)
+    if (resetActiveToDraft && !suppressPersist) {
+      chatStore.selectDraft({ explicitSelection: chatStore.hasExplicitSessionSelection === true })
     }
   }
 
-  // Refill an EMPTY dock with the persistent "New Session" page. Guarded to the
-  // empty dock (not merely "no chat tab"): the respawn opens into the group's
-  // ephemeral slot, so firing while a file/preview tab is open would evict it.
-  function ensureDraftChatPanel() {
-    const dock = api.value
-    if (!dock || suppressPersist || draftChatQueued) return
-    if (dock.panels.length > 0) return
-    if (!currentBotId.value) return
-
-    draftChatQueued = true
-    void nextTick(() => {
-      draftChatQueued = false
-      const latestDock = api.value
-      if (!latestDock || suppressPersist || latestDock.panels.length > 0) return
-      if (!currentBotId.value) return
-      // Only an EXPLICIT selection may refill as that session. A non-explicit
-      // sessionId is layout bookkeeping (or a stale leftover); honoring it here
-      // would surface a random Untitled Session the moment the user closes the
-      // last file tab. Live tabs that already selected a session explicitly
-      // keep that refill.
-      const sid = chatStore.sessionId ?? ''
-      const explicitSelection = chatStore.hasExplicitSessionSelection === true
-      if (sid && explicitSelection && !isDeletedSessionForCurrentBot(sid)) {
-        openSessionChat({
-          sessionId: sid,
-          explicitSelection,
-        })
-      } else {
-        openDraftChat({ explicitSelection })
-      }
-    })
-  }
-
-  // Explicit navigation back to chat differs from automatic empty-dock repair:
-  // a file/preview-only layout is valid until the user asks to return. Recreate
-  // the selected chat (or a draft) as a pinned panel so neither this action nor
-  // the next file open evicts another panel from its ephemeral slot.
   function activateChatPanel() {
-    const dock = api.value
-    const bid = currentBotId.value ?? ''
-    // Do not focus the previous bot's panels while its replacement is queued.
-    if (!dock || !bid || loadedBotId !== bid) return
+    const bid = activeBotId()
+    if (!bid) return
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
-    const sid = selection.sessionId ?? ''
+    const sid = (selection.sessionId ?? '').trim()
     if (sid && !isDeletedSessionForCurrentBot(sid)) {
-      const current = chatPanelForSession(sid)
+      const current = chatTabForSession(sid)
       if (current) {
-        focusPanel(current)
+        activateTab(current.id)
         return
       }
       if (explicitSelection) {
@@ -1325,578 +973,382 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return
       }
     }
-    const anyChat = dock.panels.find(p => panelComponentOf(p.id) === 'chat')
+    const anyChat = Object.values(workbench.value.tabs).find(t => t.target.kind === 'chat')
     if (anyChat) {
-      focusPanel(anyChat)
+      activateTab(anyChat.id)
       return
     }
-    const id = nextChatPanelId(bid)
-    const target = tabPosition(dock)
-    setNextChatActivationExplicit(id, explicitSelection)
-    dock.addPanel({
-      id,
-      component: 'chat',
-      title: defaultChatTitle(),
-      params: { sessionId: null, explicitSelection },
-      renderer: 'always',
-      ...(target ? { position: target } : {}),
-    })
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: null, explicitSelection } },
+      { explicitOverride: explicitSelection },
+    )
   }
+
+  // ---- File, Preview, Asset, Terminal, Browser, Display, Schedule ----------
 
   function openFile(filePath: string): boolean {
-    if (!hasCurrentPermission('workspace_read') || !api.value) return false
+    if (!hasCurrentPermission('workspace_read')) return false
     const path = (filePath ?? '').trim()
     if (!path) return false
-    openEphemeral({
-      id: `file:${path}`,
-      component: 'file',
-      title: fileBaseName(path),
-      params: { filePath: path },
-    })
-    return true
+    return openTab({ id: `file:${path}`, pinned: false, target: { kind: 'file', filePath: path } }, { preview: true })
   }
 
-  // Open a file as a PINNED tab in the active editor group. This is the
-  // right-click "Open": a single click opens an ephemeral preview (replaced by
-  // the next preview open), but an explicit right-click → Open means "keep this
-  // one" — so it lands as a normal pinned tab that the preview slot can never
-  // evict. Same group as a preview (no split — that is Open to the Side), it
-  // just skips the ephemeral mark. A file already open is promoted to pinned +
-  // focused rather than duplicated.
   function openFilePinned(filePath: string, groupId?: string) {
     if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
     if (!path) return
-    const dock = api.value
-    if (!dock) return
-    const id = `file:${path}`
-    const existing = dock.getPanel(id)
-    if (existing) {
-      pinPanel(existing.id)
-      focusPanel(existing)
-      return
-    }
-    const target = tabPosition(dock, groupId)
-    dock.addPanel({
-      id,
-      component: 'file',
-      title: fileBaseName(path),
-      params: { filePath: path },
-      renderer: 'always',
-      ...(target ? { position: target } : {}),
-    })
+    openTab({ id: `file:${path}`, pinned: false, target: { kind: 'file', filePath: path } }, { groupId, activate: true })
   }
 
-  // "Open to the Side": show a file as a PINNED panel in a group to the RIGHT of
-  // the active editor group. dockview enforces ONE panel per id (a file can't be
-  // opened twice), so this is an ACTION not a duplicate-open: if the file is
-  // already open anywhere, the existing panel is MOVED to a fresh right-side group
-  // (api.moveTo) rather than focused in place — so right-clicking "Open to the
-  // Side" always lands the file beside its neighbour, even when it was sitting in
-  // the active group as a tab. Pinned from the start (never in ephemeralPanels) so
-  // the preview slot can't evict it. A brand-new file is added split-right.
   function openFileToSide(filePath: string, groupId?: string) {
-    if (!hasCurrentPermission('workspace_read')) return
+    if (!hasCurrentPermission('workspace_read') || !activeBotId()) return
     const path = (filePath ?? '').trim()
     if (!path) return
-    // Mobile has no "side": degrade to a pinned tab in the single stack.
     if (isMobile.value) {
       openFilePinned(path, groupId)
       return
     }
-    const dock = api.value
-    if (!dock) return
     const id = `file:${path}`
-    const anchor = targetGroup(dock, groupId)
-    const existing = dock.getPanel(id)
-    if (existing) {
-      pinPanel(existing.id)
-      // Already alone in its own group → it's effectively "to the side" already,
-      // so just focus it instead of moving (which would nest another group and
-      // shuffle the layout on every repeat). Otherwise pull it out beside the
-      // anchor (or its own group when there is no editor anchor to split from).
-      const alreadyAlone = existing.group.panels.length === 1
-      if (!alreadyAlone) {
-        existing.api.moveTo({ group: anchor ?? existing.group, position: 'right' })
-      }
-      focusPanel(existing)
+    const anchor = findGroup(workbench.value.root, groupId) ?? activeGroup.value ?? listGroups(workbench.value.root)[0]!
+    if (workbench.value.tabs[id]) {
+      let next = treeKeepOpenTab(workbench.value, id)
+      const owner = findGroupOfTab(next.root, id)
+      next = owner && owner.tabIds.length > 1
+        ? moveTabToGroup(next, id, anchor.id, 'right')
+        : treeActivateTab(next, id)
+      commitWorkbench(next)
       return
     }
-    const position = anchor
-      ? { referenceGroup: anchor.id, direction: 'right' as const }
-      : tabPosition(dock, groupId)
-    dock.addPanel({
-      id,
-      component: 'file',
-      title: fileBaseName(path),
-      params: { filePath: path },
-      renderer: 'always',
-      ...(position ? { position } : {}),
-    })
+    commitWorkbench(splitGroupWithTab(
+      workbench.value,
+      anchor.id,
+      'right',
+      { id, pinned: false, target: { kind: 'file', filePath: path } },
+      { preview: false, activate: true },
+    ))
   }
 
-  // VS Code's "Open Preview to the Side": render a markdown/html file's preview
-  // as its own panel in a group beside the source editor, instead of toggling the
-  // source view in place. Focuses an existing preview for the same file.
-  function openPreview(filePath: string, title?: string, groupId?: string) {
-    if (!hasCurrentPermission('workspace_read')) return
+  function openPreview(filePath: string, groupId?: string) {
+    if (!hasCurrentPermission('workspace_read') || !activeBotId()) return
     const path = (filePath ?? '').trim()
     if (!path) return
-    const dock = api.value
-    if (!dock) return
     const id = `preview:${path}`
-    const existing = dock.getPanel(id)
-    if (existing) {
-      focusPanel(existing)
+    if (workbench.value.tabs[id]) {
+      activateTab(id)
       return
     }
-    // A preview is the side equivalent of the editor's ephemeral slot: keep ONE
-    // preview to the side. If an ephemeral preview already exists, replace it in
-    // its own group; otherwise split to the right of the source editor's group
-    // (the preview action lives in that group's header), falling back to active.
-    const prevPreview = dock.panels.find(
-      p => ephemeralPanels.value[p.id] && panelComponentOf(p.id) === 'preview',
-    )
-    const position = prevPreview
-      ? { referenceGroup: prevPreview.group.id, direction: 'within' as const }
-      : (() => {
-          // Mobile forbids the side-by-side preview: join the stack as a tab.
-          if (isMobile.value) return tabPosition(dock, groupId)
-          const referenceGroup = groupId || dock.activeGroup?.id
-          return referenceGroup
-            ? { referenceGroup, direction: 'right' as const }
-            : undefined
-        })()
-    dock.addPanel({
-      id,
-      component: 'preview',
-      title: title || fileBaseName(path),
-      params: { filePath: path },
-      renderer: 'always',
-      ...(position ? { position } : {}),
-    })
-    markEphemeral(id)
-    if (prevPreview && prevPreview.id !== id) prevPreview.api.close()
+    const existingEphemeralPreview = listGroups(workbench.value.root)
+      .map(g => (g.previewTabId ? { group: g, tab: workbench.value.tabs[g.previewTabId] } : null))
+      .find(item => item?.tab?.target.kind === 'preview')
+    const tab: WorkbenchTab = { id, pinned: false, target: { kind: 'preview', filePath: path } }
+    if (existingEphemeralPreview) {
+      openTab(tab, { preview: true, groupId: existingEphemeralPreview.group.id, activate: true })
+      return
+    }
+    if (isMobile.value) {
+      openTab(tab, { preview: true, groupId, activate: true })
+      return
+    }
+    commitWorkbench(splitGroupWithTab(workbench.value, groupId || activeGroup.value?.id, 'right', tab, { preview: true, activate: true }))
   }
 
-  // Open or focus a tab that renders a message attachment (a stored media asset).
-  // Unlike openFile/openPreview this is NOT a workspace path: the tab re-resolves
-  // its source from the content hash (or falls back to a direct URL), so it works
-  // for the user's own uploads without a workspace_read grant. Lands in the editor
-  // area like a file tab; refocuses an existing tab for the same asset.
   function openAsset(args: OpenAssetPreviewArgs) {
     const key = (args.key ?? '').trim()
     if (!key) return
-    openEphemeral({
-      id: `asset:${key}`,
-      component: 'asset',
-      title: args.name || 'file',
-      params: {
-        name: args.name,
-        botId: args.botId,
-        contentHash: args.contentHash,
-        src: args.src,
+    openTab(
+      {
+        id: `asset:${key}`,
+        pinned: false,
+        target: { kind: 'asset', assetKey: key, name: args.name || 'file', botId: args.botId, contentHash: args.contentHash, src: args.src },
       },
-    })
+      { preview: true },
+    )
   }
 
   function openTerminal(groupId?: string) {
-    if (!hasCurrentPermission('workspace_exec')) return
-    const bid = currentBotId.value ?? ''
-    const state = ensureBotLayout(bid)
-    const dock = api.value
-    if (!state || !dock) return
-    // Mobile hides the tab strip — the only UI enumerating open panels — and ←
-    // only re-activates chat, so an always-new terminal would strand the
-    // previous one alive but unreachable and unclosable, leaking a shell per
-    // tap. Focus the existing terminal instead (same focus-existing semantics
-    // as Browser/Display); a second terminal requires closing the first.
+    const bid = activeBotId()
+    if (!bid || !hasCurrentPermission('workspace_exec')) return
     if (isMobile.value) {
-      const existing = dock.panels.find(panel => panel.id.startsWith('terminal:'))
+      const existing = Object.values(workbench.value.tabs).find(t => t.target.kind === 'terminal')
       if (existing) {
-        focusPanel(existing)
+        activateTab(existing.id)
         return
       }
     }
-    const next = nextTabNumber('terminal', state.terminalCounter)
-    patchBotLayout(bid, { terminalCounter: next })
-    const id = `terminal:${next}`
-    focusOrAdd({
-      id,
-      component: 'terminal',
-      title: terminalTitleFallback(id),
-      groupId,
-    })
+    const next = allocateTabNumber(bid, 'terminal')
+    openTab({ id: `terminal:${next}`, pinned: false, target: { kind: 'terminal', instance: next } }, { groupId, activate: true })
+  }
+
+  function addBrowserPanel(address: string, customTitle: boolean, groupId?: string): boolean {
+    const bid = activeBotId()
+    if (!bid) return false
+    const next = allocateTabNumber(bid, 'browser')
+    return openTab(
+      { id: `browser:${next}`, pinned: false, target: { kind: 'browser', instance: next, address, customTitle } },
+      { groupId, activate: true },
+    )
   }
 
   function openBrowser(groupId?: string) {
-    if (!hasCurrentPermission('manage')) return
-    const dock = api.value
-    // Mobile hides the tab strip, so an always-new browser would strand the
-    // previous panel alive but unreachable after returning to chat. Match the
-    // terminal/display mobile behavior: focus the existing browser first.
-    if (isMobile.value && dock) {
-      const existing = dock.panels.find(panel => panel.id.startsWith('browser:'))
+    if (!hasCurrentPermission('manage') || !activeBotId()) return
+    if (isMobile.value) {
+      const existing = Object.values(workbench.value.tabs).find(t => t.target.kind === 'browser')
       if (existing) {
-        focusPanel(existing)
+        activateTab(existing.id)
         return
       }
     }
-    addBrowserPanel(DEFAULT_BROWSER_ADDRESS, undefined, groupId)
+    addBrowserPanel(DEFAULT_BROWSER_ADDRESS, false, groupId)
   }
 
-  // Tab numbers restart at 1 once no tab of that kind is open (#1341), so a fresh
-  // terminal reads "Terminal 1" instead of a lifetime count. While any tab of the
-  // kind is open the counter keeps climbing, so open ids never collide; a closed
-  // terminal's cached snapshot is dropped on close, so reusing its id is safe.
-  function nextTabNumber(prefix: 'terminal' | 'browser', counter: number): number {
-    const anyOpen = api.value?.panels.some(panel => panel.id.startsWith(`${prefix}:`)) ?? false
-    return anyOpen ? counter + 1 : 1
-  }
-
-  // Create a fresh browser panel at `address`. Shared by the manual "+ New
-  // Browser" entry (always-new, default localized "Browser N" title) and the
-  // link-click path (after a dedup miss, titled with the address). Returns false
-  // when there is no dock/bot layout.
-  function addBrowserPanel(address: string, title: string | undefined, groupId?: string): boolean {
-    const bid = currentBotId.value ?? ''
-    const state = ensureBotLayout(bid)
-    if (!state || !api.value) return false
-    const next = nextTabNumber('browser', state.browserCounter)
-    patchBotLayout(bid, { browserCounter: next })
-    focusOrAdd({
-      id: `browser:${next}`,
-      component: 'browser',
-      title: title ?? `${browserTabTitle()} ${next}`,
-      params: { address },
-      groupId,
-    })
-    return true
-  }
-
-  // Open the workspace browser panel at a specific local address (e.g. from a
-  // clicked localhost link in chat markdown or terminal output). If a browser
-  // tab already shows the exact same normalized URL, focus it instead of opening
-  // a duplicate. Returns true when a tab was opened or focused, false when the
-  // browser is unavailable (no permission / no dock / unparseable address) so
-  // callers can fall back to the OS browser.
   function openBrowserAt(address: string, groupId?: string): boolean {
-    if (!hasCurrentPermission('manage')) return false
-    const dock = api.value
-    if (!dock) return false
+    if (!hasCurrentPermission('manage') || !activeBotId()) return false
     let target: string
     try {
       target = parseBrowserAddress(address).display
     } catch {
       return false
     }
-    const existing = dock.panels.find((panel) => {
-      if (!panel.id.startsWith('browser:')) return false
-      const current = (panel.params as { address?: string } | undefined)?.address
-      if (!current) return false
+    const existing = Object.values(workbench.value.tabs).find((tab) => {
+      if (tab.target.kind !== 'browser' || !tab.target.address) return false
       try {
-        return parseBrowserAddress(current).display === target
+        return parseBrowserAddress(tab.target.address).display === target
       } catch {
         return false
       }
     })
     if (existing) {
-      focusPanel(existing)
+      activateTab(existing.id)
       return true
     }
-    return addBrowserPanel(target, target, groupId)
-  }
-
-  function focusExistingDisplayPanel(dock: DockviewApi): boolean {
-    const panels = dock.panels.filter(panel => panel.id.startsWith('display:'))
-    if (!panels.length) return false
-    focusPanel(panels[0]!)
-    for (const extra of panels.slice(1)) {
-      extra.api.close()
-    }
-    return true
+    return addBrowserPanel(target, true, groupId)
   }
 
   function openDisplay(groupId?: string) {
-    if (!hasCurrentPermission('manage')) return
-    const dock = api.value
-    if (!dock) return
-    if (focusExistingDisplayPanel(dock)) return
-    focusOrAdd({
-      id: DISPLAY_PANEL_ID,
-      component: 'display',
-      title: i18n.global.t('chat.display.title'),
-      groupId,
-    })
-  }
-
-  function uniqueSplitPanelId(baseId: string): string {
-    const dock = api.value
-    if (!dock) return baseId
-    if (!dock.getPanel(baseId)) return baseId
-    let n = 2
-    while (dock.getPanel(`${baseId}~${n}`)) n++
-    return `${baseId}~${n}`
-  }
-
-  /** Split the group's active tab into a new pane beside/below it (VS Code-style).
-   * Duplicates the current panel into the new split rather than moving it. */
-  function splitGroup(groupId: string, direction: 'right' | 'below') {
-    const dock = api.value
-    if (!dock) return
-    const group = dock.getGroup(groupId)
-    const source = group?.activePanel
-    if (!source || !group) return
-
-    const comp = panelComponentOf(source.id)
-    if (!comp) return
-
-    // Mobile forbids splits: duplicate into the SAME group as a tab instead.
-    const position = isMobile.value
-      ? { referenceGroup: groupId, direction: 'within' as const }
-      : { referenceGroup: groupId, direction }
-    const title = source.title ?? source.api.title ?? ''
-    const params = source.params as Record<string, unknown> | undefined
-
-    switch (comp) {
-      case 'chat': {
-        const bid = currentBotId.value ?? ''
-        if (!bid) return
-        const id = nextChatPanelId(bid)
-        const explicitSelection = typeof params?.explicitSelection === 'boolean'
-          ? params.explicitSelection
-          : chatStore.hasExplicitSessionSelection === true
-        setNextChatActivationExplicit(id, explicitSelection)
-        dock.addPanel({
-          id,
-          component: 'chat',
-          title,
-          params: {
-            sessionId: params?.sessionId ?? null,
-            explicitSelection,
-          },
-          renderer: 'always',
-          position,
-        })
-        // Each split starts as this new group's preview slot. Choosing another
-        // session in that group repoints the split in place until the user sends.
-        markEphemeral(id)
-        break
-      }
-      case 'terminal': {
-        if (!hasCurrentPermission('workspace_exec')) return
-        const bid = currentBotId.value ?? ''
-        const state = ensureBotLayout(bid)
-        if (!state) return
-        const next = nextTabNumber('terminal', state.terminalCounter)
-        patchBotLayout(bid, { terminalCounter: next })
-        const id = `terminal:${next}`
-        dock.addPanel({
-          id,
-          component: 'terminal',
-          title: terminalTitleFallback(id),
-          renderer: 'always',
-          position,
-        })
-        break
-      }
-      case 'file':
-      case 'preview': {
-        if (!hasCurrentPermission('workspace_read')) return
-        dock.addPanel({
-          id: uniqueSplitPanelId(source.id),
-          component: comp,
-          title,
-          params: params ? { ...params } : undefined,
-          renderer: 'always',
-          position,
-        })
-        break
-      }
-      case 'browser': {
-        if (!hasCurrentPermission('manage')) return
-        const bid = currentBotId.value ?? ''
-        const state = ensureBotLayout(bid)
-        if (!state) return
-        const next = nextTabNumber('browser', state.browserCounter)
-        patchBotLayout(bid, { browserCounter: next })
-        dock.addPanel({
-          id: `browser:${next}`,
-          component: 'browser',
-          title: title || `${browserTabTitle()} ${next}`,
-          params: { address: (params?.address as string | undefined) ?? DEFAULT_BROWSER_ADDRESS },
-          renderer: 'always',
-          position,
-        })
-        break
-      }
-      case 'display': {
-        if (!hasCurrentPermission('manage')) return
-        if (focusExistingDisplayPanel(dock)) return
-        openDisplay(group.id)
-        break
-      }
-      case 'schedule': {
-        if (!hasCurrentPermission('manage')) return
-        dock.addPanel({
-          id: uniqueSplitPanelId(source.id),
-          component: 'schedule',
-          title,
-          params: params ? { ...params } : undefined,
-          renderer: 'always',
-          position,
-        })
-        break
-      }
-      case 'asset': {
-        dock.addPanel({
-          id: uniqueSplitPanelId(source.id),
-          component: 'asset',
-          title,
-          params: params ? { ...params } : undefined,
-          renderer: 'always',
-          position,
-        })
-        break
-      }
+    if (!hasCurrentPermission('manage') || !activeBotId()) return
+    const existing = Object.values(workbench.value.tabs).filter(t => t.target.kind === 'display')
+    if (existing.length > 0) {
+      let next = treeActivateTab(workbench.value, existing[0]!.id)
+      for (const extra of existing.slice(1)) next = removeTab(next, extra.id)
+      commitWorkbench(next)
+      return
     }
+    openTab({ id: DISPLAY_PANEL_ID, pinned: false, target: { kind: 'display' } }, { groupId, activate: true })
   }
 
   function openSchedule(scheduleId?: string, title?: string, groupId?: string) {
-    if (!hasCurrentPermission('manage')) return
-    const bid = currentBotId.value ?? ''
-    if (!bid) return
-    const panelTitle = title?.trim() || scheduleTabTitle()
-    const state = ensureBotLayout(bid)
-    if (!state) return
-    const panelId = scheduleId
-      ? `schedule:${scheduleId}`
-      : `schedule:new:${state.scheduleCounter + 1}`
-    const panel = api.value?.getPanel(panelId)
-    if (panel) {
-      panel.api.setTitle(panelTitle)
-      focusPanel(panel)
+    const bid = activeBotId()
+    if (!bid || !hasCurrentPermission('manage')) return
+    const customTitle = title?.trim() || undefined
+    if (scheduleId) {
+      const panelId = `schedule:${scheduleId}`
+      if (workbench.value.tabs[panelId]) {
+        let next = updateTabTarget(workbench.value, panelId, t => (t.kind === 'schedule' ? { ...t, customTitle: customTitle ?? t.customTitle } : t))
+        next = treeActivateTab(next, panelId)
+        commitWorkbench(next)
+        return
+      }
+      openTab({ id: panelId, pinned: false, target: { kind: 'schedule', scheduleId, customTitle } }, { groupId, activate: true })
       return
     }
-    if (!scheduleId) {
-      patchBotLayout(bid, { scheduleCounter: state.scheduleCounter + 1 })
-    }
-    focusOrAdd({
-      id: panelId,
-      component: 'schedule',
-      title: panelTitle,
-      params: { scheduleId },
-      groupId,
-    })
+    const panelId = `schedule:new:${allocateTabNumber(bid, 'schedule')}`
+    openTab({ id: panelId, pinned: false, target: { kind: 'schedule', scheduleId: undefined, customTitle } }, { groupId, activate: true })
   }
 
-  // Don't let the sole remaining tab close if it's an empty draft chat — there is
-  // nothing to gain by closing then respawning a draft. A real-session chat tab
-  // CAN close (the dock then respawns a draft via ensureDraftChatPanel).
-  function shouldKeepLastDraftChat(id: string) {
-    const dock = api.value
-    if (!dock || dock.panels.length !== 1) return false
-    const panel = dock.getPanel(id)
-    if (!panel) return false
-    return panelComponentOf(id) === 'chat' && panelSessionId(panel) === null
+  function uniqueSplitPanelId(baseId: string): string {
+    const record = loadedBotId.value ? storage.value[loadedBotId.value] : undefined
+    const exists = (id: string) => Boolean(workbench.value.tabs[id] || record?.workbench?.tabs?.[id])
+    if (!exists(baseId)) return baseId
+    let n = 2
+    while (exists(`${baseId}~${n}`)) n += 1
+    return `${baseId}~${n}`
+  }
+
+  function splitGroup(groupId: string, direction: 'right' | 'below') {
+    const bid = activeBotId()
+    if (!bid) return
+    const group = findGroup(workbench.value.root, groupId)
+    const source = group?.activeTabId ? workbench.value.tabs[group.activeTabId] : null
+    if (!group || !source) return
+
+    const splitDir: WorkbenchSplitDirection = direction === 'right' ? 'right' : 'bottom'
+    const placeCopy = (copy: WorkbenchTab, preview = false, explicitOverride?: boolean) => {
+      if (isMobile.value) {
+        commitWorkbench(
+          insertTab(workbench.value, copy, {
+            groupId: group.id,
+            preview,
+            activate: true,
+            canReplacePreview: id => !fileDirty.value[id],
+          }),
+          explicitOverride,
+        )
+      } else {
+        commitWorkbench(splitGroupWithTab(workbench.value, group.id, splitDir, copy, { preview, activate: true }), explicitOverride)
+      }
+    }
+
+    switch (source.target.kind) {
+      case 'chat': {
+        const id = `chat:${allocateTabNumber(bid, 'chat')}`
+        placeCopy({ id, pinned: false, target: { ...source.target } }, true, source.target.explicitSelection)
+        return
+      }
+      case 'terminal': {
+        if (!hasCurrentPermission('workspace_exec')) return
+        const next = allocateTabNumber(bid, 'terminal')
+        placeCopy({ id: `terminal:${next}`, pinned: false, target: { kind: 'terminal', instance: next } })
+        return
+      }
+      case 'browser': {
+        if (!hasCurrentPermission('manage')) return
+        const next = allocateTabNumber(bid, 'browser')
+        placeCopy({ id: `browser:${next}`, pinned: false, target: { ...source.target, instance: next } })
+        return
+      }
+      case 'display':
+        if (hasCurrentPermission('manage')) openDisplay(group.id)
+        return
+      case 'file':
+      case 'preview':
+      case 'schedule':
+      case 'asset': {
+        if (!isTabAllowed(source)) return
+        placeCopy({ id: uniqueSplitPanelId(source.id), pinned: false, target: { ...source.target } })
+      }
+    }
+  }
+
+  function updateTerminalTitle(panelId: string, title: unknown) {
+    if (!activeBotId() || typeof title !== 'string') return
+    const normalized = title.trim()
+    if (!normalized) return
+    commitWorkbench(updateTabTarget(workbench.value, panelId, t => (
+      t.kind === 'terminal' && t.shellTitle !== normalized ? { ...t, shellTitle: normalized } : t
+    )))
+  }
+
+  function updateBrowserAddress(panelId: string, address: string) {
+    if (!activeBotId()) return
+    commitWorkbench(updateTabTarget(workbench.value, panelId, (t) => {
+      if (t.kind !== 'browser') return t
+      const customTitle = address ? true : t.customTitle
+      return t.address === address && t.customTitle === customTitle ? t : { ...t, address, customTitle }
+    }))
+  }
+
+  function updateScheduleTitle(panelId: string, title: string) {
+    if (!activeBotId()) return
+    const nextCustom = title.trim() || undefined
+    commitWorkbench(updateTabTarget(workbench.value, panelId, t => (
+      t.kind === 'schedule' && t.customTitle !== nextCustom ? { ...t, customTitle: nextCustom } : t
+    )))
+  }
+
+  // ---- Close & Unsaved-file confirmation queue -----------------------------
+
+  function shouldKeepLastDraftChat(id: string, state: WorkbenchState = workbench.value): boolean {
+    const ids = Object.keys(state.tabs)
+    const tab = ids.length === 1 ? state.tabs[id] : undefined
+    return Boolean(tab && tab.target.kind === 'chat' && tabSessionId(tab) === null)
   }
 
   function closeTab(id: string) {
-    if (shouldKeepLastDraftChat(id)) return
-    const panel = api.value?.getPanel(id)
-    panel?.api.close()
+    if (!ready.value || shouldKeepLastDraftChat(id)) return
+    commitWorkbench(removeTab(workbench.value, id))
   }
 
-  function setFileDirty(panelId: string, dirty: boolean) {
-    if (!!fileDirty.value[panelId] === dirty) return
+  function setFileDirty(panelId: string, dirty: boolean, botId?: string) {
+    const ownerBot = botId?.trim()
+    if (ownerBot && ownerBot !== loadedBotId.value) return
+    if (Boolean(fileDirty.value[panelId]) === dirty) return
     const next = { ...fileDirty.value }
     if (dirty) next[panelId] = true
     else delete next[panelId]
     fileDirty.value = next
+    if (dirty && ready.value) keepOpenTab(panelId)
   }
 
-  function registerFileSaveHandler(panelId: string, handler: () => Promise<boolean>) {
-    saveHandlers.set(panelId, handler)
+  function registerFileSaveHandler(panelId: string, handler: () => Promise<boolean>, botId?: string) {
+    saveHandlers.set(panelId, { botId: (botId ?? loadedBotId.value ?? '').trim(), handler })
   }
 
-  function unregisterFileSaveHandler(panelId: string) {
-    saveHandlers.delete(panelId)
+  function unregisterFileSaveHandler(panelId: string, handler?: () => Promise<boolean>) {
+    const current = saveHandlers.get(panelId)
+    if (current && (!handler || current.handler === handler)) saveHandlers.delete(panelId)
   }
 
-  // Drop every trace of a panel once it's gone, so a stale dirty flag can't keep
-  // a phantom count on the sidebar badge or a phantom entry in the close queue.
-  function cleanupPanelState(id: string) {
-    if (fileDirty.value[id]) {
-      const next = { ...fileDirty.value }
-      delete next[id]
-      fileDirty.value = next
-    }
-    if (ephemeralPanels.value[id]) {
-      const next = { ...ephemeralPanels.value }
-      delete next[id]
-      ephemeralPanels.value = next
-    }
-    saveHandlers.delete(id)
-    if (closeQueue.value.includes(id)) {
-      closeQueue.value = closeQueue.value.filter(q => q !== id)
-    }
-  }
+  const dirtyFileCount = computed(() => Object.values(fileDirty.value).filter(Boolean).length)
 
-  const dirtyFileCount = computed(
-    () => Object.values(fileDirty.value).filter(Boolean).length,
-  )
-
-  function tabBaseName(id: string): string {
-    if (id.startsWith('file:')) return fileBaseName(id.slice('file:'.length))
-    if (id.startsWith('preview:')) return fileBaseName(id.slice('preview:'.length))
-    return api.value?.getPanel(id)?.api.title ?? id
-  }
-
-  // The tab the close-confirm dialog is currently asking about (head of queue).
   const pendingClose = computed<{ panelId: string, title: string } | null>(() => {
     const id = closeQueue.value[0]
-    return id ? { panelId: id, title: tabBaseName(id) } : null
+    return id ? { panelId: id, title: resolveTabTitle(id) } : null
   })
 
-  // User-initiated close. Clean tabs close at once; a dirty file is queued for
-  // the close-confirm dialog instead of vanishing with its unsaved edits.
   function requestCloseTab(id: string) {
+    if (!ready.value || !workbench.value.tabs[id]) return
     if (!fileDirty.value[id]) {
       closeTab(id)
       return
     }
-    if (!closeQueue.value.includes(id)) {
-      closeQueue.value = [...closeQueue.value, id]
+    if (!closeQueue.value.includes(id)) closeQueue.value = [...closeQueue.value, id]
+  }
+
+  function requestCloseTabs(ids: string[]) {
+    if (!ready.value) return
+    const toQueue: string[] = []
+    let next = workbench.value
+    for (const id of ids) {
+      if (!next.tabs[id]) continue
+      if (fileDirty.value[id]) {
+        if (!toQueue.includes(id)) toQueue.push(id)
+      } else if (!shouldKeepLastDraftChat(id, next)) {
+        next = removeTab(next, id)
+      }
+    }
+    commitWorkbench(next)
+    if (toQueue.length > 0) {
+      const merged = [...closeQueue.value]
+      for (const id of toQueue) {
+        if (workbench.value.tabs[id] && !merged.includes(id)) merged.push(id)
+      }
+      closeQueue.value = merged
     }
   }
 
-  // Batch close (close-others / close-all): clean tabs go immediately, dirty ones
-  // queue up and the dialog walks them one at a time.
-  function requestCloseTabs(ids: string[]) {
-    const queued = [...closeQueue.value]
-    for (const id of ids) {
-      if (fileDirty.value[id]) {
-        if (!queued.includes(id)) queued.push(id)
-      } else {
-        closeTab(id)
-      }
-    }
-    closeQueue.value = queued
+  function closeOtherTabs(groupId: string, keepTabId: string) {
+    const group = findGroup(workbench.value.root, groupId)
+    if (group) requestCloseTabs(group.tabIds.filter(id => id !== keepTabId && !workbench.value.tabs[id]?.pinned))
+  }
+
+  function closeTabsToRight(groupId: string, fromTabId: string) {
+    const group = findGroup(workbench.value.root, groupId)
+    const idx = group ? group.tabIds.indexOf(fromTabId) : -1
+    if (group && idx >= 0) requestCloseTabs(group.tabIds.slice(idx + 1).filter(id => !workbench.value.tabs[id]?.pinned))
+  }
+
+  function closeAllTabsInGroup(groupId: string) {
+    const group = findGroup(workbench.value.root, groupId)
+    if (group) requestCloseTabs(group.tabIds.filter(id => !workbench.value.tabs[id]?.pinned))
   }
 
   async function resolvePendingClose(action: 'save' | 'discard' | 'cancel') {
     const id = closeQueue.value[0]
     if (!id) return
     if (action === 'cancel') {
-      // Cancel aborts the whole pending batch — matches VS Code.
       closeQueue.value = []
       return
     }
     if (action === 'save') {
-      const handler = saveHandlers.get(id)
-      const ok = handler ? await handler() : true
-      // On save failure leave the tab open (the viewer surfaced the error); just
-      // drop it from the queue so the dialog can move to the next one.
+      const botAtStart = loadedBotId.value
+      const entry = saveHandlers.get(id)
+      if (entry && entry.botId && botAtStart && entry.botId !== botAtStart) {
+        closeQueue.value = closeQueue.value.filter(q => q !== id)
+        return
+      }
+      const ok = entry ? await entry.handler() : true
+      if (!ready.value || loadedBotId.value !== botAtStart || closeQueue.value[0] !== id) return
       if (ok) closeTab(id)
     } else {
       closeTab(id)
@@ -1904,111 +1356,28 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     closeQueue.value = closeQueue.value.filter(q => q !== id)
   }
 
-  function updateBrowserAddress(panelId: string, address: string) {
-    const panel = api.value?.getPanel(panelId)
-    if (!panel) return
-    panel.api.updateParameters({ address })
-    if (address) {
-      panel.api.setTitle(address)
-    }
-  }
-
-  function isPanelAllowed(id: string): boolean {
-    switch (panelComponentOf(id)) {
-      case 'chat':
-        return true
-      case 'file':
-      case 'preview':
-        return hasCurrentPermission('workspace_read')
-      case 'asset':
-        // A message attachment is the user's own content, not a workspace file —
-        // viewing it never requires the workspace_read grant.
-        return true
-      case 'terminal':
-        return hasCurrentPermission('workspace_exec')
-      case 'browser':
-      case 'display':
-      case 'schedule':
-        return hasCurrentPermission('manage')
-      default:
-        return false
-    }
-  }
-
-  function prunePanels() {
-    const dock = api.value
-    if (!dock) return
-    const perms = currentBot.value?.current_user_permissions
-    if (!perms || perms.length === 0) return
-    for (const panel of [...dock.panels]) {
-      if (!isPanelAllowed(panel.id)) {
-        panel.api.close()
-      }
-    }
-  }
-
-  // ---- sidebar (activity bar + side panel) ---------------------------------
+  // ---- Sidebar & shell preferences -----------------------------------------
 
   const sidebarView = useLocalStorage<SidebarView>('workspace-sidebar-view', 'sessions')
-  const sidebarOpen = useLocalStorage('workspace-sidebar-open', true)
   const sidebarWidth = useLocalStorage('workspace-sidebar-width', 256)
   const workbenchOpen = useLocalStorage('workspace-workbench-open', true)
-
-  // Mobile main-navigation sheet. Deliberately NOT persisted and deliberately
-  // NOT one of the four desktop workbench keys above: navigation is a
-  // transient overlay, and the desktop rail preference must stay untouched by
-  // anything the mobile shell does.
   const mobileNavOpen = ref(false)
+  const pendingFilesPath = ref<string | null>(null)
 
-  function openMobileNav() {
-    mobileNavOpen.value = true
-  }
+  function openMobileNav() { mobileNavOpen.value = true }
+  function closeMobileNav() { mobileNavOpen.value = false }
+  function toggleWorkbench() { workbenchOpen.value = !workbenchOpen.value }
 
-  function closeMobileNav() {
-    mobileNavOpen.value = false
-  }
-
-
-  // Push/pull model (see main-section + sidebar): the rail is in flow and slides
-  // out to the left (margin-left) while the dock, a flex sibling, grows to fill
-  // the space — content shifts. Toggling just flips this boolean; the rail
-  // animates its margin on a shared curve and dockview relays out per frame as
-  // the dock width changes, so the right-side actions ("+") stay pinned (right
-  // edge never moves) instead of snapping.
-  function setWorkbench(open: boolean) {
-    workbenchOpen.value = open
-  }
-
-  // Horizontal nav only switches the active view and ensures the sidebar is
-  // shown. Collapsing the whole sidebar lives on the workbench toggle (the
-  // chrome button over the dock), not on the nav items.
   function selectSidebarView(view: SidebarView) {
     if (view === 'files' && !hasCurrentPermission('workspace_read')) return
     sidebarView.value = view
-    sidebarOpen.value = true
-    setWorkbench(true)
+    workbenchOpen.value = true
   }
-
-  function toggleWorkbench() {
-    setWorkbench(!workbenchOpen.value)
-  }
-
-  function showWorkbench() {
-    setWorkbench(true)
-  }
-
-  function hideWorkbench() {
-    setWorkbench(false)
-  }
-
-  // One-shot navigation request consumed by the sidebar files panel.
-  const pendingFilesPath = ref<string | null>(null)
 
   function openFilesAt(path: string) {
     if (!hasCurrentPermission('workspace_read')) return
-    setWorkbench(true)
+    workbenchOpen.value = true
     sidebarView.value = 'files'
-    sidebarOpen.value = true
     pendingFilesPath.value = (path ?? '').trim() || null
   }
 
@@ -2018,203 +1387,165 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return path
   }
 
-  // ---- lifecycle -----------------------------------------------------------
+  // ---- Reset & global watchers ---------------------------------------------
 
   function resetBot(botId: string) {
-    if (!botId) return
+    const bid = (botId ?? '').trim()
+    if (!bid) return
     const next = { ...storage.value }
-    delete next[botId]
+    delete next[bid]
     storage.value = next
-    if (loadedBotId === botId && api.value) {
-      suppressPersist = true
-      try {
-        api.value.clear()
-      } finally {
-        suppressPersist = false
-      }
-    }
-    void nextTick(() => clearTerminalSnapshotsForBot(botId))
+    if (loadedBotId.value === bid && ready.value) clearRuntimeState()
+    void nextTick(() => clearTerminalSnapshotsForBot(bid))
   }
 
   function resetAll() {
     storage.value = {}
     pendingFilesPath.value = null
-    if (api.value) {
-      suppressPersist = true
-      try {
-        api.value.clear()
-      } finally {
-        suppressPersist = false
-      }
-    }
-    loadedBotId = null
+    clearRuntimeState({ clearLoadedBot: true, clearMobileColdStart: true })
     void nextTick(() => clearTerminalSnapshots())
   }
 
   onAuthSessionCleared(() => resetAll())
 
   watch(currentBotId, (bid) => {
-    const next = bid ?? ''
+    const next = (bid ?? '').trim()
     if (!next) {
-      loadedBotId = null
+      clearRuntimeState({ clearLoadedBot: true, clearMobileColdStart: true })
       return
     }
-    ensureBotLayout(next)
-    if (api.value && loadedBotId !== next) {
-      restoreLayout(next)
-      reconcileDeletedChatPanels()
+    ensureBotRecord(next)
+    if (ready.value && loadedBotId.value !== next) {
+      restoreForBot(next)
     }
   }, { immediate: true })
 
-  // Crossing the breakpoint either way re-shapes the dock. Entering mobile
-  // collapses any multi-group arrangement (only reachable by narrowing a
-  // desktop window — a phone session is single-group from cold start); live
-  // panels survive the merge, terminals/WebRTC included. Leaving mobile
-  // restores the tab strips but deliberately does NOT rebuild the dock from
-  // the persisted snapshot: a rebuild would go through onDidRemovePanel,
-  // which deletes terminal snapshots — killing live shells just because a
-  // window widened. Instead the merged stack stays up with persistence sealed
-  // (dockHoldsMobileStack, armed on entry), and the desktop arrangement comes
-  // back from the untouched persisted snapshot on the next bot load, not from
-  // memory. The nav sheet is a mobile-only overlay, so its state resets on
-  // exit.
+  // ponytail: mobile cold-start avoids overwriting persisted desktop splits by staying in-memory until widen,
+  // then appending non-duplicate mobile-opened tabs onto the saved desktop snapshot. Upgrade path: split mobile
+  // vs desktop storage keys if users ever want independent phone layouts persisted across reloads.
   watch(isMobile, (mobile) => {
-    if (!mobile) {
-      mobileNavOpen.value = false
-    }
-    const dock = api.value
-    if (!dock) return
     if (mobile) {
-      // From here the dock diverges from the persisted desktop layout (the
-      // merge now, mobile-only opens later) with no desktop restore to
-      // re-sync it — seal persistence until one happens.
-      dockHoldsMobileStack = true
-      mergeGroupsIntoSingle(dock)
+      cancelActiveWorkbenchDrag()
+      return
     }
-    syncMobileGroupHeaders(dock)
+    mobileNavOpen.value = false
+    if (!mobileColdStart) {
+      persistWorkbench()
+      return
+    }
+    mobileColdStart = false
+    const bid = loadedBotId.value
+    if (!ready.value || !bid) return
+    const parsed = parseWorkbenchState(storage.value[bid]?.workbench ?? null)
+    if (!parsed) {
+      persistWorkbench()
+      return
+    }
+    const currentTabs = Object.values(workbench.value.tabs)
+    const isPureColdStartDraft = currentTabs.length === 1 && currentTabs[0]?.target.kind === 'chat' && tabSessionId(currentTabs[0]) === null
+    let merged = parsed
+    let preferredActiveTabId: string | null = null
+    if (!isPureColdStartDraft) {
+      const currentActiveId = activeId.value
+      for (const tab of currentTabs) {
+        if (tab.target.kind === 'chat' && tabSessionId(tab) === null && currentActiveId !== tab.id) continue
+        const existingMatch = merged.tabs[tab.id]
+          ?? (tab.target.kind === 'chat' && tabSessionId(tab) ? chatTabForSession(tabSessionId(tab)!, merged) : undefined)
+          ?? (tab.target.kind === 'display' ? Object.values(merged.tabs).find(t => t.target.kind === 'display') : undefined)
+        if (existingMatch) {
+          if (currentActiveId === tab.id) preferredActiveTabId = existingMatch.id
+          continue
+        }
+        merged = insertTab(merged, tab, { preview: false, activate: currentActiveId === tab.id })
+        if (currentActiveId === tab.id) preferredActiveTabId = tab.id
+      }
+      if (preferredActiveTabId && merged.tabs[preferredActiveTabId]) {
+        merged = treeActivateTab(merged, preferredActiveTabId)
+      }
+    }
+    suppressPersist = true
+    try {
+      workbench.value = merged
+      pruneDisallowedTabs()
+      reconcileDeletedChatPanels()
+    } finally {
+      suppressPersist = false
+    }
+    finalizeRestoredWorkbench(bid)
   })
 
   watch(
     () => [currentBotId.value, ...(currentBot.value?.current_user_permissions ?? [])].join('|'),
-    () => prunePanels(),
+    () => pruneDisallowedTabs(),
   )
 
-  // A draft becoming a session repoints exactly that panel — its content, not
-  // which tab has focus; the creator updates the selection itself. Sync flush:
-  // the send that created the session resumes right after promotion and
-  // matches the pane against this param to keep its scroll pin and turn
-  // entrance.
   watch(() => chatStore.draftPromoted, (sig) => {
-    if (!sig) return
-    const dock = api.value
-    const bid = currentBotId.value ?? ''
-    if (!dock || !bid || sig.botId !== bid) return
-    const panel = dock.getPanel(sig.viewId)
-    if (!panel || panelComponentOf(panel.id) !== 'chat') return
-    const currentSessionId = panelSessionId(panel)
-    // A delayed create must not overwrite a panel since reused for another session.
-    if (currentSessionId && currentSessionId !== sig.sessionId) return
-    if (currentSessionId !== sig.sessionId) {
-      panel.api.updateParameters({ sessionId: sig.sessionId })
-    }
+    const bid = activeBotId()
+    if (!sig || !bid || sig.botId !== bid) return
+    const tab = workbench.value.tabs[sig.viewId]
+    if (!tab || tab.target.kind !== 'chat' || tabSessionId(tab)) return
+    commitWorkbench(updateTabTarget(workbench.value, tab.id, t => (t.kind === 'chat' ? { ...t, sessionId: sig.sessionId } : t)))
   }, { flush: 'sync' })
 
-  // A sent message pins exactly the originating chat view (it is no longer a
-  // preview). Draft promotion also repoints only that view to the new session.
   watch(() => chatStore.userSentInSession, (sig) => {
-    if (!sig) return
-    const dock = api.value
-    const bid = currentBotId.value ?? ''
-    if (!dock || !bid || sig.botId !== bid) return
-    const panel = dock.getPanel(sig.viewId)
-    if (!panel || panelComponentOf(panel.id) !== 'chat') return
-    const currentSessionId = panelSessionId(panel)
+    const bid = activeBotId()
+    if (!sig || !bid || sig.botId !== bid) return
+    const tab = workbench.value.tabs[sig.viewId]
+    if (!tab || tab.target.kind !== 'chat') return
+    const currentSid = tabSessionId(tab)
+    let next = workbench.value
     if (sig.wasDraft) {
-      // A delayed create must not overwrite a panel that has since been reused
-      // for another session.
-      if (currentSessionId && currentSessionId !== sig.id) return
-      panel.api.updateParameters({ sessionId: sig.id })
-    }
-    else if (currentSessionId !== sig.id) return
-    pinPanel(panel.id)
-    syncChatTitles()
-  })
-
-  // `/new` can finish resolving Agent defaults after focus has moved to a
-  // different split. The workspace owns the final Draft panel id because a
-  // preview can be reused in place while a pinned source must remain open and
-  // receive a new preview beside it.
-  watch(() => chatStore.draftViewRequested, (request) => {
-    if (!request) return
-    const dock = api.value
-    const bid = currentBotId.value ?? ''
-    if (!dock || request.botId !== bid) return
-    const panel = dock.getPanel(request.viewId)
-    if (!panel || panelComponentOf(panel.id) !== 'chat') return
-    if (panelSessionId(panel) !== request.expectedSessionId) return
-
-    const activate = request.activate && dock.activePanel?.id === panel.id
-    if (ephemeralPanels.value[panel.id]) {
-      chatStore.applyDraftViewRequest(request, activate)
-      panel.api.updateParameters({
-        sessionId: null,
-        explicitSelection: request.explicitSelection,
-      })
-      panel.api.setTitle(defaultChatTitle())
+      if (currentSid && currentSid !== sig.id) return
+      next = updateTabTarget(next, tab.id, t => (t.kind === 'chat' ? { ...t, sessionId: sig.id } : t))
+    } else if (currentSid !== sig.id) {
       return
     }
+    commitWorkbench(treeKeepOpenTab(next, tab.id))
+  })
 
-    const id = nextChatPanelId(bid)
-    const draftRequest = { ...request, viewId: id }
-    if (activate) setNextChatActivationExplicit(id, request.explicitSelection)
-    if (!openEphemeral({
-      id,
-      component: 'chat',
-      title: defaultChatTitle(),
-      params: {
+  watch(() => chatStore.draftViewRequested, (request) => {
+    const bid = activeBotId()
+    if (!request || !bid || request.botId !== bid) return
+    const tab = workbench.value.tabs[request.viewId]
+    const group = findGroupOfTab(workbench.value.root, request.viewId)
+    if (!tab || !group || tab.target.kind !== 'chat' || tabSessionId(tab) !== request.expectedSessionId) return
+
+    const activate = request.activate && activeId.value === tab.id
+    if (group.previewTabId === tab.id) {
+      chatStore.applyDraftViewRequest(request, activate)
+      commitWorkbench(updateTabTarget(workbench.value, tab.id, () => ({
+        kind: 'chat',
         sessionId: null,
         explicitSelection: request.explicitSelection,
-      },
-      groupId: panel.group.id,
-      inactive: !activate,
-    })) return
-    chatStore.applyDraftViewRequest(draftRequest, activate)
+      })))
+      return
+    }
+    const id = `chat:${allocateTabNumber(bid, 'chat')}`
+    if (!openTab(
+      { id, pinned: false, target: { kind: 'chat', sessionId: null, explicitSelection: request.explicitSelection } },
+      { preview: true, groupId: group.id, activate, explicitOverride: request.explicitSelection },
+    )) return
+    chatStore.applyDraftViewRequest({ ...request, viewId: id }, activeId.value === id)
   }, { flush: 'sync' })
 
-  // A Fork belongs to the panel where it was requested, even if hydration
-  // completes after another split gains focus. Preview sources are repointed;
-  // pinned sources keep their Session and get a new preview in the same group.
   watch(() => chatStore.forkedSessionRequested, (request) => {
-    if (!request) return
-    const dock = api.value
-    const bid = currentBotId.value ?? ''
-    if (!dock || request.botId !== bid) return
-    const panel = dock.getPanel(request.viewId)
-    if (!panel || panelComponentOf(panel.id) !== 'chat') return
-    if (panelSessionId(panel) !== request.expectedSessionId) return
+    const bid = activeBotId()
+    if (!request || !bid || request.botId !== bid) return
+    const tab = workbench.value.tabs[request.viewId]
+    if (!tab || tab.target.kind !== 'chat' || tabSessionId(tab) !== request.expectedSessionId) return
     openSessionChatFromView({
       viewId: request.viewId,
       sessionId: request.sessionId,
       title: request.title,
       expectedSessionId: request.expectedSessionId,
       explicitSelection: request.explicitSelection,
-      activate: request.activate && dock.activePanel?.id === panel.id,
+      activate: request.activate && activeId.value === tab.id,
     })
   }, { flush: 'sync' })
 
   watch(
     () => `${chatStore.sessionId ?? ''}:${chatStore.hasExplicitSessionSelection === true ? '1' : '0'}`,
     () => syncDraftChatExplicitSelection(),
-  )
-
-  // Server renames flow into each open chat tab's title. Keyed by a sorted
-  // id:title:conversation-name digest so it fires on title changes AND on
-  // channel route (group/peer name) changes, not on every sidebar reorder.
-  // Tentativeness is part of the key so a first send's tab takes the session
-  // title once the server confirms the send.
-  watch(
-    () => chatStore.knownSessions.map(s => `${s.id}:${s.title ?? ''}:${(s.route_metadata?.conversation_name as string) ?? ''}:${chatStore.isSessionTentative(s.id) ? 1 : 0}`).sort().join('|'),
-    () => syncChatTitles(),
   )
 
   watch(() => chatStore.deletedSession, (deleted) => {
@@ -2225,20 +1556,17 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     reconcileDeletedChatPanels(deleted.botId)
   })
 
-  // initialize() settled the selection (kept, picked, or cleared it). Align it
-  // with the dock once; later session-list refreshes never touch the dock.
   watch(() => chatStore.loadingChats, (loading) => {
-    if (loading) return
-    alignSelectionWithDock()
-  })
-
-  watch(() => i18n.global.locale.value, () => {
-    if (repairPanelTitles()) persistLayout()
+    if (!loading) alignSelectionWithDock()
   })
 
   return {
-    api,
+    ready,
+    loadedBotId,
+    workbench,
+    activeGroupId,
     activeId,
+    spatialFirstGroupId,
     pendingChatInputFocus,
     requestChatInputFocus,
     focusAdjacentTab,
@@ -2247,21 +1575,27 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     mobileNavOpen,
     panelDragging,
     fileDirty,
-    ephemeralPanels,
-    pinPanel,
+    keepOpenTab,
+    pinTab,
+    unpinTab,
     dirtyFileCount,
     pendingClose,
     sidebarView,
-    sidebarOpen,
     workbenchOpen,
     sidebarWidth,
     pendingFilesPath,
-    registerApi,
-    releaseApi,
+    mountWorkspace,
+    unmountWorkspace,
+    activateTab,
+    activateGroup,
+    setSplitRatio,
+    reorderTab,
+    moveTab,
+    dropExternalItem,
+    startExternalDrag,
+    resolveTabTitle,
     selectSidebarView,
     toggleWorkbench,
-    showWorkbench,
-    hideWorkbench,
     openMobileNav,
     closeMobileNav,
     activateChatPanel,
@@ -2286,13 +1620,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     closeTab,
     requestCloseTab,
     requestCloseTabs,
+    closeOtherTabs,
+    closeTabsToRight,
+    closeAllTabsInGroup,
     resolvePendingClose,
     setFileDirty,
     registerFileSaveHandler,
     unregisterFileSaveHandler,
     updateBrowserAddress,
     updateTerminalTitle,
+    updateScheduleTitle,
     resetBot,
-    resetAll,
   }
 })

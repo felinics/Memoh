@@ -549,8 +549,8 @@ export function createChatViews(deps: ChatViewsDeps) {
     releaseSessionRuntime,
     bindChatView,
     setChatViewVisible,
-    unbindChatView: (panelId: string) =>
-      releaseHiddenSessionView(chatViews.unbindPanel(panelId)),
+    unbindChatView: (panelId: string, expectedBotId?: string) =>
+      releaseHiddenSessionView(chatViews.unbindPanel(panelId, expectedBotId)),
     focusChatView,
     promoteDraftChatView,
     configure,
