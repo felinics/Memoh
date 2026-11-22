@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -91,7 +92,7 @@ func TestServerRendersAppErrorAsProblemWithRequestID(t *testing.T) {
 		errorTestHandler{err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, cause, nil)},
 	)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	server.echo.ServeHTTP(rec, req)
 
@@ -130,7 +131,7 @@ func TestServerLogsFinalProblemStatus(t *testing.T) {
 		errorTestHandler{err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("private cause"), nil)},
 	)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	server.echo.ServeHTTP(rec, req)
 

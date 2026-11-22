@@ -49,15 +49,16 @@ func (c *rfbInputClient) startClipboard(onText func(string), onError func(error)
 	}
 	conn := c.conn
 	go func() {
-		if err := c.readClipboard(conn, onText, onError); err != nil {
-			// Close interrupts any concurrent input write before taking its lock.
-			_ = c.Close()
-			onDisconnect(err)
-		}
+		err := c.readClipboard(conn, onText, onError)
+		// Close interrupts any concurrent input write before taking its lock.
+		_ = c.Close()
+		onDisconnect(err)
 	}()
 	return nil
 }
 
+// readClipboard reads server messages until the connection fails; the error
+// it returns is never nil.
 func (c *rfbInputClient) readClipboard(reader io.Reader, onText func(string), onRejected func(error)) error {
 	for {
 		var kind [1]byte
@@ -269,7 +270,7 @@ func (c *rfbInputClient) setClipboardLocked(text string) error {
 			if r > 255 {
 				return errors.New("VNC server does not support UTF-8 clipboard")
 			}
-			latin1 = append(latin1, byte(r))
+			latin1 = append(latin1, byte(r)) //nolint:gosec // G115: at most 255 here, and a rune ranged from a string is never negative.
 		}
 		msg := make([]byte, 8+len(latin1))
 		msg[0] = 6

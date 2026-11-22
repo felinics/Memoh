@@ -1081,7 +1081,7 @@ func TestWorkspaceDependencyCatalogReadsMetadataWithoutWorkspace(t *testing.T) {
 	h := newDepsTestHandler("member", svc)
 	e := echo.New()
 	rec := httptest.NewRecorder()
-	if err := h.ListWorkspaceDependencyCatalog(e.NewContext(httptest.NewRequest(http.MethodGet, "/workspace-dependencies", nil), rec)); err != nil {
+	if err := h.ListWorkspaceDependencyCatalog(e.NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/workspace-dependencies", nil), rec)); err != nil {
 		t.Fatal(err)
 	}
 	var response WorkspaceDependencyCatalogResponse
@@ -1101,7 +1101,7 @@ func TestWorkspaceDependencyCatalogReadsMetadataWithoutWorkspace(t *testing.T) {
 func TestWorkspaceDependencyCatalogUnavailable(t *testing.T) {
 	h := newDepsTestHandler("member", nil)
 	e := echo.New()
-	err := h.ListWorkspaceDependencyCatalog(e.NewContext(httptest.NewRequest(http.MethodGet, "/workspace-dependencies", nil), httptest.NewRecorder()))
+	err := h.ListWorkspaceDependencyCatalog(e.NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/workspace-dependencies", nil), httptest.NewRecorder()))
 	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyCatalogUnavailable)
 }
 

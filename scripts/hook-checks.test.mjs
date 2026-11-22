@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -44,6 +44,9 @@ function fixture(t) {
   const localNames = spawnSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' })
   assert.equal(localNames.status, 0, localNames.stderr)
   for (const name of localNames.stdout.trim().split('\n')) delete fixtureEnv[name]
+  // The caller's own hook settings are not the fixture's either: a commit made
+  // with the documented MEMOH_CHECK_TIMEOUT_SECONDS override runs these tests.
+  for (const name of Object.keys(fixtureEnv)) if (name.startsWith('MEMOH_')) delete fixtureEnv[name]
   const git = (...args) => {
     const result = spawnSync('git', args, { cwd, encoding: 'utf8', env: fixtureEnv })
     assert.equal(result.status, 0, result.stderr)
@@ -81,7 +84,7 @@ if (process.env.BUSY_COMMAND === '${name}') setInterval(() => {}, 1000)
     writeFileSync(join(cwd, path), content)
     git('add', '--', path)
   }
-  const run = (env = {}, args = [], runCwd = cwd) => spawnSync(process.execPath, [runner, ...args], {
+  const run = (env = {}, args = [], runCwd = cwd, script = runner) => spawnSync(process.execPath, [script, ...args], {
     cwd: runCwd, encoding: 'utf8', timeout: 10000,
     env: { ...fixtureEnv, MEMOH_FULL_CHECKS: '0', PATH: `${bin}:${process.env.PATH}`, ...env },
   })
@@ -212,6 +215,21 @@ test('real Go build constraints skip tag-only packages and honor GOFLAGS', t => 
   assert.match(missing.stdout, /CALLED go .*internal\/tagged/)
 })
 
+test('a checkout reached through a symlink still runs its checks', t => {
+  const { cwd, stage, run } = fixture(t)
+  stage('apps/web/a.ts', 'export {}')
+  // Git and the hook wrappers start the runner by the path the user typed. Node
+  // reports the module by its real path, so the two differ under a symlink.
+  const link = join(cwd, 'checkout')
+  symlinkSync(dirname(dirname(runner)), link)
+  const viaLink = join(link, '.husky', 'checks.mjs')
+  const plan = run({}, ['--plan'], cwd, viaLink)
+  assert.equal(plan.status, 0, plan.stderr)
+  assert.deepEqual(JSON.parse(plan.stdout), { go: [], web: 'staged' })
+  const unknown = run({}, ['not-a-check'], cwd, viaLink)
+  assert.equal(unknown.status, 1)
+  assert.match(unknown.stderr, /Unknown check/)
+})
 test('manual checks from a subdirectory select and run packages at the root', t => {
   const { cwd, stage, run } = fixture(t)
   stage('internal/a/a.go', 'package a')

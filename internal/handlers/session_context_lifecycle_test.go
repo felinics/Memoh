@@ -107,7 +107,7 @@ func newContextLifecycleTestHandler(queries *contextLifecycleQueryStub) *Session
 func newContextLifecycleTestContext(t *testing.T, query string) echo.Context {
 	t.Helper()
 	e := echo.New()
-	req := httptest.NewRequest(
+	req := httptest.NewRequestWithContext(context.Background(),
 		http.MethodGet,
 		"/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/context-lifecycle"+query,
 		nil,

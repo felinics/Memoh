@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +15,7 @@ import (
 
 func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/acp/profiles", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/acp/profiles", nil)
 	rec := httptest.NewRecorder()
 
 	if err := NewACPHandler().ListProfiles(e.NewContext(req, rec)); err != nil {

@@ -102,7 +102,7 @@ func TestValidateBrowserPort(t *testing.T) {
 func TestBrowserProxyURLAndHostParsing(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/bots/bot-1/container/browser/sessions", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://127.0.0.1/bots/bot-1/container/browser/sessions", nil)
 	req.Host = "127.0.0.1:8080"
 	got := buildBrowserProxyURL(req, "0123456789abcdef0123456789abcdef", "app?q=1")
 	want := "http://0123456789abcdef0123456789abcdef.browser.localhost:8080/app?q=1"
@@ -181,7 +181,7 @@ func TestBrowserReverseProxyHTTPThroughBridgeTunnel(t *testing.T) {
 	client := newBrowserTestBridgeClient(t)
 	proxy := newBrowserReverseProxy(client, port)
 
-	req := httptest.NewRequest(http.MethodPost, "http://session.browser.localhost/hello?name=memoh", bytes.NewBufferString("payload"))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://session.browser.localhost/hello?name=memoh", bytes.NewBufferString("payload"))
 	req.Header.Set("X-Forwarded-Host", "spoofed.example")
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("X-Forwarded-For", "spoofed")

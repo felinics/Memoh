@@ -6,7 +6,7 @@ config_roots = ["apps/web", "cmd/agent"]
 
 [tools]
 # Go version from go.mod
-go = "1.26.10"
+go = "1.27.4"
 # Node.js for frontend packages
 node = "24.22.1"
 # pnpm for workspace management
@@ -14,7 +14,7 @@ pnpm = "10"
 # sqlc for sql management
 sqlc = "1.31.1"
 # golangci-lint for Go linting
-"golangci-lint" = "2.10.1"
+"golangci-lint" = "2.15.0"
 # Rust toolchain for the a11y-cli helper used by Computer Use.
 # Pinned to a stable >= zbus MSRV (1.87+).
 rust = "1.90"

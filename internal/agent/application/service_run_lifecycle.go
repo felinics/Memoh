@@ -414,7 +414,7 @@ func (s *Service) reconcileTerminalContextLifecycle(ctx context.Context, run ses
 		replaceSnapshot = true
 	case existingReady:
 		snapshot = append([]byte(nil), existing.Snapshot...)
-	case !existingReady:
+	default:
 		recovered, ready, recoverErr := s.assistantContextLifecycleSnapshot(writeCtx, runUUID)
 		if recoverErr != nil {
 			s.recordContextLifecyclePersistenceError(recoverErr, run.RunID, run.BotID, run.SessionID, status)

@@ -128,7 +128,10 @@ func TestRuntimeConnectActivatesReadyConnectionAndUnregistersDisconnect(t *testi
 		grpcServer.Stop()
 		_ = listener.Close()
 		select {
-		case <-serveDone:
+		case err := <-serveDone:
+			if err != nil {
+				t.Logf("Runtime gRPC server stopped: %v", err)
+			}
 		case <-time.After(time.Second):
 			t.Error("Runtime gRPC server did not stop")
 		}

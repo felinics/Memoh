@@ -49,8 +49,8 @@ func ConfigHash(spec Spec, networkTarget string) string {
 		h.Write([]byte(e))
 		h.Write([]byte{0})
 	}
-	for _, cap := range spec.AddedCaps {
-		h.Write([]byte(cap))
+	for _, added := range spec.AddedCaps {
+		h.Write([]byte(added))
 		h.Write([]byte{0})
 	}
 	h.Write([]byte{0})

@@ -315,7 +315,7 @@ func TestHandleMCPToolsCallRoutesPublicEventHeadersWithoutTrustingIdentity(t *te
 
 func TestBuildToolSessionContextPreservesRoutingHeadersAndIgnoresIdentityHeaders(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/bot-1/tools", nil)
 	req.Header.Set(headerBotID, "spoofed-bot")
 	req.Header.Set(headerChatID, "chat-1")
 	req.Header.Set(mcpgw.ToolHeaderRuntimeToken, "runtime-token-1")
@@ -359,7 +359,7 @@ func TestBuildToolSessionContextPreservesRoutingHeadersAndIgnoresIdentityHeaders
 
 func TestBuildToolSessionContextUsesAuthenticatedIdentity(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/bot-1/tools", nil)
 	req.Header.Set(headerChannelIdentityID, "spoofed-user")
 	rec := httptest.NewRecorder()
 	c := testAuthContext(e, req, rec, "user-1")

@@ -507,7 +507,7 @@ func TestServeReverseHTTPForwardsRequests(t *testing.T) {
 
 	deadline := time.Now().Add(time.Second)
 	for {
-		req := httptest.NewRequest(http.MethodPost, "/mcp?q=1", strings.NewReader("ping"))
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/mcp?q=1", strings.NewReader("ping"))
 		req.Header.Set("X-Test", "ok")
 		rec := httptest.NewRecorder()
 		broker.ServeHTTP(rec, req)
@@ -610,7 +610,7 @@ func TestServeReverseHTTPStopWaitsForInFlightRequests(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("ping")).WithContext(reqCtx)
+			req := httptest.NewRequestWithContext(reqCtx, http.MethodPost, "/mcp", strings.NewReader("ping"))
 			rec := httptest.NewRecorder()
 			broker.ServeHTTP(rec, req)
 		}()
@@ -660,7 +660,7 @@ func TestServeReverseHTTPStopWaitsForInFlightRequests(t *testing.T) {
 
 func reverseHTTPTestRequest(t *testing.T, broker http.Handler, target string) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader("ping"))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, target, strings.NewReader("ping"))
 	rec := httptest.NewRecorder()
 	broker.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

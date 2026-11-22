@@ -110,7 +110,7 @@ func roleFor(content string) string {
 }
 
 func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (func() bool { _, ok := indexOf(s, sub); return ok })()
+	return len(s) >= len(sub) && func() bool { _, ok := indexOf(s, sub); return ok }()
 }
 
 func indexOf(s, sub string) (int, bool) {

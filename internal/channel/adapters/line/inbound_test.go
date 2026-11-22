@@ -112,7 +112,7 @@ func TestHandleWebhookMissingSelfIdentityReturnsError(t *testing.T) {
 func TestHandleWebhookRejectsInvalidSignature(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest(http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(testLineTextCallback("event-invalid")))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(testLineTextCallback("event-invalid")))
 	req.Header.Set("x-line-signature", "invalid")
 
 	err := NewAdapter(nil).HandleWebhook(context.Background(), testLineConfig(), nil, req, httptest.NewRecorder())
@@ -128,7 +128,7 @@ func TestHandleWebhookRejectsInvalidSignature(t *testing.T) {
 func TestHandleWebhookNilBodyFollowsSignatureValidation(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest(http.MethodPost, "/channels/line/webhook/cfg", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/line/webhook/cfg", nil)
 	req.Body = nil
 
 	err := NewAdapter(nil).HandleWebhook(context.Background(), testLineConfig(), nil, req, httptest.NewRecorder())
@@ -157,7 +157,7 @@ func testLineConfig() channel.ChannelConfig {
 }
 
 func signedLineRequest(body string) *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(body))
 	req.Header.Set("x-line-signature", lineSignature(testLineSecret, body))
 	return req
 }

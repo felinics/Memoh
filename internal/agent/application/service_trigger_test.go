@@ -211,7 +211,9 @@ func TestTriggeredNativeStreamCallerCancellationWinsOverIdleTimeout(t *testing.T
 	case <-provider.started:
 	case <-time.After(time.Second):
 		cancel(wantCause)
-		<-done
+		if err := <-done; err != nil {
+			t.Logf("run after cancel: %v", err)
+		}
 		t.Fatal("silent provider was not started")
 	}
 	cancel(wantCause)

@@ -537,7 +537,7 @@ func TestLoadAppExampleTemplateKeepsRootKeysOutsideAgentSection(t *testing.T) {
 	rendered := strings.Replace(string(raw), `timezone = "UTC"`, `timezone = "Asia/Tokyo"`, 1)
 	rendered = strings.Replace(rendered, `instance_id = ""`, `instance_id = "instance-example"`, 1)
 	configPath := filepath.Join(t.TempDir(), "app.example.toml")
-	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil { //nolint:gosec // G703: the path is under t.TempDir.
 		t.Fatalf("write rendered app.example.toml: %v", err)
 	}
 

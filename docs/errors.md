@@ -209,9 +209,11 @@ one, is answered with the field it names:
 
 `field` is the name the request uses: the JSON key, query parameter or path
 parameter as written there, without changing its case, with dots for a nested
-key. It is written as a string literal where the field is read; a guard test
-in `internal/apperror` fails on any other argument. A response names one
-field: a handler returns at the first problem.
+key. A value inside an array is named with its position and a map value with
+its key (`items.1.count`, `meta.k.count`). It is written as a string literal
+where the field is read; a guard test in `internal/apperror` fails on any
+other argument. A response names one field: a handler returns at the first
+problem.
 
 Both HTTP servers bind with `httpx.Binder`, so a JSON value of the wrong type
 is answered as `request.field_invalid` for its key. Malformed JSON has no

@@ -43,7 +43,7 @@ func serveHandlerProblem(t *testing.T, register func(*echo.Echo), target string)
 	e.HTTPErrorHandler = server.NewHTTPErrorHandler(slog.New(slog.DiscardHandler))
 	register(e)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, target, nil))
+	e.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, target, nil))
 	var problem server.Problem
 	_ = json.Unmarshal(rec.Body.Bytes(), &problem)
 	return rec.Code, problem, rec.Body.String()

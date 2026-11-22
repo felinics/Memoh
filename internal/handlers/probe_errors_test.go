@@ -108,7 +108,7 @@ func serveProbe(t *testing.T, register func(*echo.Echo), target string) (int, st
 	e := echo.New()
 	register(e)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, target, nil))
+	e.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, target, nil))
 	return rec.Code, rec.Body.String()
 }
 

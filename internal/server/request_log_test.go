@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -87,7 +88,7 @@ func TestServerRequestLogOmitsQuery(t *testing.T) {
 			if tc.query != "" {
 				target += "?" + tc.query
 			}
-			req := httptest.NewRequest(http.MethodGet, target, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
 			if tc.requestURI != "" {
 				req.RequestURI = tc.requestURI
 			}
@@ -128,7 +129,7 @@ func TestServerRequestLogReportsLatency(t *testing.T) {
 			return c.NoContent(http.StatusNoContent)
 		},
 	})
-	srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/health", nil))
+	srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil))
 
 	var entry struct {
 		Msg     string `json:"msg"`
@@ -172,7 +173,7 @@ func TestServerRequestLogReportsRoute(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", routeLogTestHandler{})
-			srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, tc.path, nil))
+			srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, tc.path, nil))
 
 			var entry map[string]any
 			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
@@ -227,7 +228,7 @@ func TestServerRequestLogAttributesAnErrorReturnedAfterTheResponse(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/stream", nil)
 			req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 			srv.echo.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "problem") || strings.Count(rec.Body.String(), "data:") != 1 {

@@ -29,7 +29,7 @@ func TestMCPOAuthCallbackFailureRendersPageAndReturnsCause(t *testing.T) {
 
 	cause := errors.New("state lookup failed: sensitive detail")
 	handler := NewMCPOAuthHandler(mcp.NewOAuthService(nil, &mcpOAuthStateQueries{err: cause}, ""), nil, nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/oauth/mcp/callback?code=c&state=s", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/mcp/callback?code=c&state=s", nil)
 	rec := httptest.NewRecorder()
 
 	err := handler.Callback(echo.New().NewContext(req, rec))

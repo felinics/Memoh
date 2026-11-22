@@ -42,7 +42,7 @@ func TestToolApprovalHTTPUsesJWTUserIDForPermissionActor(t *testing.T) {
 	e := echo.New()
 	e.Use(auth.JWTMiddleware(secret, func(echo.Context) bool { return false }))
 	handler.Register(e)
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tool-approvals/approval-1/approve", strings.NewReader(`{"control_id":"control-1","option_id":"allow-once"}`))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/bot-1/tool-approvals/approval-1/approve", strings.NewReader(`{"control_id":"control-1","option_id":"allow-once"}`))
 	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()

@@ -50,7 +50,7 @@ func TestEveryExitAnswersAlike(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// HTTP
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(tc.ctx)
+			req := httptest.NewRequestWithContext(tc.ctx, http.MethodGet, "/", nil)
 			rec := httptest.NewRecorder()
 			server.NewHTTPErrorHandler(slog.New(slog.DiscardHandler))(tc.err, e.NewContext(req, rec))
 			var problem server.Problem

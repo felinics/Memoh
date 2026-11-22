@@ -11,7 +11,7 @@ import (
 func TestDecryptFileAES256CBC(t *testing.T) {
 	key := []byte("0123456789abcdef0123456789abcdef")
 	plain := []byte("hello-wecom-aibot")
-	ciphertext := encryptPKCS7To32(t, key, plain)
+	ciphertext := encryptPKCS7To32(t, key, plain) //nolint:gosec // G407: a fixed test key; the WeCom file format takes its IV from the key.
 
 	out, err := DecryptFileAES256CBC(ciphertext, base64.StdEncoding.EncodeToString(key))
 	if err != nil {

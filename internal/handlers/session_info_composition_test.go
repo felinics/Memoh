@@ -177,7 +177,7 @@ func TestGetSessionInfoOmitsCompactionForACPRuntime(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/status")
@@ -293,7 +293,7 @@ func TestGetSessionInfoReportsBudgetPlanAndCompactionMarks(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/status")
@@ -368,7 +368,7 @@ func TestGetSessionInfoFallsBackToLegacyLifecycleMetadata(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/status")

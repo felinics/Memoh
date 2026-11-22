@@ -309,7 +309,7 @@ func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
 }
 
 func callCreateSession(handler *SessionHandler, botID string, body string) error {
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
 	return callCreateSessionRequest(handler, botID, req)
 }
 

@@ -95,7 +95,7 @@ func TestSessionActivitySendsReadyThenQueuedInvalidation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		rec := &activityResponseRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
-		req := httptest.NewRequest(http.MethodGet, "/bots/"+activityTestBotID+"/sessions/events", nil).WithContext(ctx)
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/bots/"+activityTestBotID+"/sessions/events", nil)
 		c := testAuthContext(echo.New(), req, rec, "user-1")
 		c.SetParamNames("bot_id")
 		c.SetParamValues(activityTestBotID)
@@ -128,7 +128,7 @@ func TestSessionActivityForwardsScheduleChanges(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	rec := &activityResponseRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+activityTestBotID+"/sessions/events", nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/bots/"+activityTestBotID+"/sessions/events", nil)
 	c := testAuthContext(echo.New(), req, rec, "user-1")
 	c.SetParamNames("bot_id")
 	c.SetParamValues(activityTestBotID)
@@ -161,7 +161,7 @@ func TestSessionActivityForwardsUserVisibleScheduleSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	rec := &activityResponseRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+activityTestBotID+"/sessions/events", nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/bots/"+activityTestBotID+"/sessions/events", nil)
 	c := testAuthContext(echo.New(), req, rec, "user-1")
 	c.SetParamNames("bot_id")
 	c.SetParamValues(activityTestBotID)
@@ -207,7 +207,7 @@ func TestDeleteMessagesInvalidatesOnlyCommittedHistory(t *testing.T) {
 			}
 			h.messageService = store
 			h.SetRuntimeResetService(&activityHistoryReset{})
-			req := httptest.NewRequest(http.MethodDelete, "/bots/"+activityTestBotID+"/messages?session_id="+sessionID, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/bots/"+activityTestBotID+"/messages?session_id="+sessionID, nil)
 			rec := httptest.NewRecorder()
 			c := testAuthContext(echo.New(), req, rec, "user-1")
 			c.SetParamNames("bot_id")
@@ -270,7 +270,7 @@ func TestDeleteMessagesClassifiesHistoryResetFailures(t *testing.T) {
 				h, _ := activityTestHandler()
 				h.messageService = activityHistoryStore{}
 				h.SetRuntimeResetService(failingHistoryReset{err: tc.err})
-				req := httptest.NewRequest(http.MethodDelete, "/bots/"+activityTestBotID+"/messages?session_id="+sessionID, nil)
+				req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/bots/"+activityTestBotID+"/messages?session_id="+sessionID, nil)
 				c := testAuthContext(echo.New(), req, httptest.NewRecorder(), "user-1")
 				c.SetParamNames("bot_id")
 				c.SetParamValues(activityTestBotID)

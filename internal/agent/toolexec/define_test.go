@@ -99,6 +99,12 @@ func TestTypedReportsDecodeErrorsByProperty(t *testing.T) {
 	if err == nil || err.Error() != "invalid arguments for probe: name must be a string, got object" {
 		t.Fatalf("error = %v", err)
 	}
+	// A value inside an array is named with its position, so the model can
+	// tell which element to fix.
+	_, err = execute(&ToolExecContext{ToolName: "probe"}, sdk.ParseToolArguments(`{"ids": [1, 2, {"x": 1}]}`))
+	if err == nil || err.Error() != "invalid arguments for probe: ids.2 must be an integer, got object" {
+		t.Fatalf("array element error = %v", err)
+	}
 	// A nil context must not panic; the tool name falls back.
 	_, err = execute(nil, sdk.ParseToolArguments(`[1]`))
 	if err == nil || err.Error() != "invalid arguments for tool: arguments must be an object, got array" {

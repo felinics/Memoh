@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +15,7 @@ import (
 func TestWorkspaceManagementRejectsRemovedDeviceFields(t *testing.T) {
 	for _, value := range []string{`"remote-computer"`, `"native"`, `""`, `null`} {
 		for _, body := range []any{&AppInstallRequest{}, &AppUpdateRequest{}, &WorkspaceDependencyPreflightRequest{}, &WorkspaceDependencyInstallRequest{}} {
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"workspace_target_id":`+value+`}`))
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", strings.NewReader(`{"workspace_target_id":`+value+`}`))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			c := echo.New().NewContext(req, httptest.NewRecorder())
 			if err := bindWorkspaceManagementRequest(c, body); err == nil {
@@ -48,7 +49,7 @@ func TestDependencyManagementRejectsDeviceBeforeServiceCalls(t *testing.T) {
 func TestAppManagementRejectsDeviceBeforeAuthorizationOrService(t *testing.T) {
 	h := &AppsHandler{}
 	for _, value := range []string{"remote-computer", "native", ""} {
-		req := httptest.NewRequest(http.MethodGet, "/bots/x/apps?workspace_target_id="+value, nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/x/apps?workspace_target_id="+value, nil)
 		c := echo.New().NewContext(req, httptest.NewRecorder())
 		_, err := h.authorize(c)
 		requireAppErrorCode(t, err, apperror.CodeAppRequestInvalid)

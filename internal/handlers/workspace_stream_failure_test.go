@@ -181,7 +181,7 @@ func TestCreateBotStreamReportsABotItCouldNotLoadOnceReady(t *testing.T) {
 		workspaceSetup: readyLoadFailsWorkspace{createBotStreamWorkspace: inner, db: db},
 	}
 	handler.botService.SetWorkspaceIntents(createBotIntents{w: inner})
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{"name":"ready-bot","display_name":"Ready Bot","acl_preset":"allow_all","wait_for_ready":true}`))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{"name":"ready-bot","display_name":"Ready Bot","acl_preset":"allow_all","wait_for_ready":true}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.Header.Set(echo.HeaderAccept, "text/event-stream")
 	rec := httptest.NewRecorder()

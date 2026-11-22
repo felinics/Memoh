@@ -112,7 +112,7 @@ func TestJWTMiddlewareRejectsInactiveAccountSession(t *testing.T) {
 	}))
 	e.GET("/protected", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
-	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/protected", nil)
 	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -142,7 +142,7 @@ func TestRawTokenFromContextIsTheValidatedToken(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/protected", nil)
 			setup(req)
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, req)
@@ -153,7 +153,7 @@ func TestRawTokenFromContextIsTheValidatedToken(t *testing.T) {
 }
 
 func TestRawTokenFromContextWithoutToken(t *testing.T) {
-	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
+	c := echo.New().NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), httptest.NewRecorder())
 	assert.Empty(t, RawTokenFromContext(c))
 }
 

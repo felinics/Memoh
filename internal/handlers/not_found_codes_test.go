@@ -120,7 +120,7 @@ func lookupCases(err error) []struct {
 }
 
 func resourceIDContext(id string) echo.Context {
-	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
+	c := echo.New().NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), httptest.NewRecorder())
 	c.SetParamNames("id")
 	c.SetParamValues(id)
 	return c
@@ -172,7 +172,7 @@ func TestResourceLookupsKeepOtherFailuresAsServerFaults(t *testing.T) {
 func TestProviderByNameAndTestAnswerProviderNotFound(t *testing.T) {
 	// A lookup that finds no row answers the same code as an unparsable id.
 	handler := &ProvidersHandler{service: providers.NewService(nil, providerNoRows{}, ""), modelsService: &models.Service{}}
-	c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/", nil), httptest.NewRecorder())
+	c := echo.New().NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil), httptest.NewRecorder())
 	c.SetParamNames("id")
 	c.SetParamValues("11111111-1111-1111-1111-111111111111")
 	requireNotFoundCode(t, handler.Test(c), apperror.CodeProviderNotFound, true)
@@ -222,7 +222,7 @@ func (userNoRows) GetByUserID(context.Context, string) (dbstore.AccountRecord, e
 
 func TestGetUserAnswersUserNotFound(t *testing.T) {
 	h := &UsersHandler{service: accounts.NewService(nil, userNoRows{})}
-	c := testAuthContext(echo.New(), httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder(), "user-1")
+	c := testAuthContext(echo.New(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), httptest.NewRecorder(), "user-1")
 	c.SetParamNames("id")
 	c.SetParamValues("user-1")
 	requireNotFoundCode(t, h.GetUser(c), apperror.CodeUserNotFound, false)
@@ -230,7 +230,7 @@ func TestGetUserAnswersUserNotFound(t *testing.T) {
 
 func TestBrowserProxyAnswersBrowserSessionNotFound(t *testing.T) {
 	h := &ContainerdHandler{}
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 	req.Host = "example.com"
 	c := echo.New().NewContext(req, httptest.NewRecorder())
 	requireNotFoundCode(t, h.HandleBrowserProxy(c), apperror.CodeBrowserSessionNotFound, false)
@@ -240,7 +240,7 @@ func TestChannelIdentityConfigAnswersItsNotFoundCode(t *testing.T) {
 	registry := channel.NewRegistry()
 	registry.MustRegister(sentinelTestAdapter{})
 	h := NewChannelHandler(channel.NewStore(bindingQueries{err: pgx.ErrNoRows}, registry), registry)
-	c := testAuthContext(echo.New(), httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder(), uuid.NewString())
+	c := testAuthContext(echo.New(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), httptest.NewRecorder(), uuid.NewString())
 	c.SetParamNames("platform")
 	c.SetParamValues(string(sentinelTestChannelType))
 	requireNotFoundCode(t, h.GetChannelIdentityConfig(c), apperror.CodeChannelIdentityConfigNotFound, true)
@@ -249,7 +249,7 @@ func TestChannelIdentityConfigAnswersItsNotFoundCode(t *testing.T) {
 func TestPublicMediaAnswersMediaAssetNotFound(t *testing.T) {
 	service := media.NewService(slog.Default(), localfs.New(filepath.Join(t.TempDir(), "media")))
 	h := &PublicMediaHandler{logger: slog.Default(), media: service}
-	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
+	c := echo.New().NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), httptest.NewRecorder())
 	_, _, err := h.openImage(c, "bot-1", strings.Repeat("a", 64))
 	requireNotFoundCode(t, err, apperror.CodeMediaAssetNotFound, true)
 }
@@ -262,7 +262,7 @@ func notFoundContainerdHandler() *ContainerdHandler {
 }
 
 func notFoundBotContext(params map[string]string) echo.Context {
-	c := testAuthContext(echo.New(), httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder(), invocationTestOwnerID)
+	c := testAuthContext(echo.New(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), httptest.NewRecorder(), invocationTestOwnerID)
 	names := make([]string, 0, len(params))
 	values := make([]string, 0, len(params))
 	for name, value := range params {
@@ -291,7 +291,7 @@ func (locateNoRows) LocateByExternalIDBySession(context.Context, string, string,
 func TestLocateMessageAnswersMessageNotFound(t *testing.T) {
 	queries := newInvocationTestQueries(invocationTestSession(invocationTestSessionA, invocationTestOwnerID))
 	h := NewMessageHandler(slog.Default(), locateNoRows{}, newThreadServiceForTest(queries), bots.NewService(nil, queries), newTestAdminAccountService("admin"))
-	c := testAuthContext(echo.New(), httptest.NewRequest(http.MethodGet, "/?session_id="+invocationTestSessionA+"&external_message_id=m1", nil), httptest.NewRecorder(), invocationTestOwnerID)
+	c := testAuthContext(echo.New(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/?session_id="+invocationTestSessionA+"&external_message_id=m1", nil), httptest.NewRecorder(), invocationTestOwnerID)
 	c.SetParamNames("bot_id")
 	c.SetParamValues(invocationTestBotID)
 	requireNotFoundCode(t, h.LocateMessage(c), apperror.CodeMessageNotFound, true)

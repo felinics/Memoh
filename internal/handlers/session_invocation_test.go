@@ -129,7 +129,7 @@ func admitInvocationTestRun(t *testing.T, store *sessionledger.Store, runID, ses
 
 func callGetSessionInvocation(handler *SessionHandler, sessionID, invocationID, userID string) (*httptest.ResponseRecorder, error) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+invocationTestBotID+"/sessions/"+sessionID+"/invocations/"+invocationID, nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+invocationTestBotID+"/sessions/"+sessionID+"/invocations/"+invocationID, nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, userID)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/invocations/:invocation_id")

@@ -138,7 +138,7 @@ func TestACPRuntimeHandlerReturnsIdleStatus(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime")
@@ -213,7 +213,7 @@ func TestACPRuntimeHandlerEnsureStartsRuntimeAndReturnsModels(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
 	req.Header.Set("Authorization", "Bearer token-1")
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
@@ -270,7 +270,7 @@ func TestACPRuntimeHandlerEnsureRejectsMissingRuntimeOwner(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime")
@@ -316,7 +316,7 @@ func TestACPRuntimeHandlerEnsureAllowsWorkspaceExecMember(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, actorUserID)
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime")
@@ -434,7 +434,7 @@ func TestACPRuntimeHandlerSetModel(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(
+	req := httptest.NewRequestWithContext(context.Background(),
 		http.MethodPatch,
 		"/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime/model",
 		bytes.NewBufferString(`{"model_id":"gpt-5.1-codex-high"}`),
@@ -513,7 +513,7 @@ func TestACPRuntimeHandlerSetReasoning(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(
+	req := httptest.NewRequestWithContext(context.Background(),
 		http.MethodPatch,
 		"/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime/reasoning",
 		bytes.NewBufferString(`{"reasoning_effort":"low"}`),
@@ -587,7 +587,7 @@ func TestACPRuntimeHandlerGetAgentOptions(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.Header.Set("Authorization", "Bearer token-3")
 	rec := httptest.NewRecorder()
@@ -631,7 +631,7 @@ func TestACPRuntimeHandlerGetAgentOptionsRejectsDisabledAgent(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
@@ -669,7 +669,7 @@ func TestACPRuntimeHandlerGetAgentOptionsRejectsUnconfiguredAgent(t *testing.T) 
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
@@ -701,7 +701,7 @@ func TestACPRuntimeHandlerGetAgentOptionsRedactsStartFailure(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
@@ -821,7 +821,7 @@ func TestACPRuntimeHandlerRejectsNonACPSession(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/sessions/"+sessionID+"/acp-runtime", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/acp-runtime")
@@ -842,7 +842,7 @@ func TestBuildACPMCPToolsURLUsesOnlyExplicitOrLoopbackBaseURL(t *testing.T) {
 
 	t.Run("explicit base URL", func(t *testing.T) {
 		t.Setenv("MEMOH_ACP_MCP_HTTP_BASE_URL", "https://memoh.example")
-		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/acp-runtime", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://127.0.0.1/acp-runtime", nil)
 		req.Header.Set("X-Forwarded-Host", "evil.example")
 		got := buildExternalAgentToolsURLFromRequest(req, botID)
 		want := "https://memoh.example/bots/" + botID + "/tools"
@@ -852,7 +852,7 @@ func TestBuildACPMCPToolsURLUsesOnlyExplicitOrLoopbackBaseURL(t *testing.T) {
 	})
 
 	t.Run("loopback request host", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18080/acp-runtime", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://127.0.0.1:18080/acp-runtime", nil)
 		req.Header.Set("X-Forwarded-Host", "evil.example")
 		req.Header.Set("X-Forwarded-Proto", "https")
 		got := buildExternalAgentToolsURLFromRequest(req, botID)
@@ -863,7 +863,7 @@ func TestBuildACPMCPToolsURLUsesOnlyExplicitOrLoopbackBaseURL(t *testing.T) {
 	})
 
 	t.Run("non-loopback request host", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "https://memoh.example/acp-runtime", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "https://memoh.example/acp-runtime", nil)
 		req.Header.Set("X-Forwarded-Host", "evil.example")
 		if got := buildExternalAgentToolsURLFromRequest(req, botID); got != "" {
 			t.Fatalf("tools URL = %q, want empty", got)
@@ -947,7 +947,7 @@ func TestACPRuntimeHandlerGetAgentOptionsAdmitsOnlyActiveACPInstances(t *testing
 			handler.SetBotAgents(botagents.NewService(slog.Default(), queries))
 
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp&bot_agent_id="+botAgentID, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp&bot_agent_id="+botAgentID, nil)
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			rec := httptest.NewRecorder()
 			ctx := testAuthContext(e, req, rec, "user-1")

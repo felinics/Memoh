@@ -45,7 +45,7 @@ func TestHandleWebhookParseFailureRecordsOneEventWithCause(t *testing.T) {
 	var buf bytes.Buffer
 	adapter := NewAdapter(slog.New(slog.NewJSONHandler(&buf, nil)))
 	body := "{not json"
-	req := httptest.NewRequest(http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/line/webhook/cfg", strings.NewReader(body))
 	req.Header.Set("x-line-signature", lineSignature(testLineSecret, body))
 	rec := httptest.NewRecorder()
 

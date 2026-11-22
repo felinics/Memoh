@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -91,7 +92,7 @@ func TestScheduleHandlerPathParamsAreRequiredFields(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := echo.New()
-			c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder(), userID)
+			c := testAuthContext(e, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), httptest.NewRecorder(), userID)
 			var names, values []string
 			for k, v := range tc.params {
 				names = append(names, k)

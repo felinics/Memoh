@@ -32,7 +32,9 @@ func TestCompactionActivityLifecycle(t *testing.T) {
 	ids := svc.ActiveSessions(cfg.BotID)
 	other := svc.ActiveSessions("other-bot")
 	close(release)
-	<-done
+	if err := <-done; err != nil {
+		t.Logf("Compact: %v", err)
+	}
 	if len(ids) != 1 || ids[0] != cfg.SessionID || len(other) != 0 {
 		t.Fatalf("incorrect active sessions: %v, other bot: %v", ids, other)
 	}

@@ -275,6 +275,15 @@ func writeServerPong(conn *websocket.Conn, cfg *larkws.ClientConfig) error {
 	return conn.WriteMessage(websocket.BinaryMessage, bs)
 }
 
+// waitRun waits for Run to return on a path where the test does not assert
+// its result, and logs a failure so that it still shows up in the test output.
+func waitRun(t testing.TB, runDone <-chan error) {
+	t.Helper()
+	if err := <-runDone; err != nil {
+		t.Logf("Run returned: %v", err)
+	}
+}
+
 func newTestClient(domain string, overrides ...func(*Config)) *Client {
 	cfg := Config{
 		AppID:            "app",
@@ -506,7 +515,7 @@ func TestRunReassemblesFragmentedEvent(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
-	<-runDone
+	waitRun(t, runDone)
 
 	got := disp.seen()
 	if len(got) != 1 {
@@ -566,7 +575,7 @@ func TestRunSendsPing(t *testing.T) {
 		t.Fatal("did not observe ping frame within 1s")
 	}
 	cancel()
-	<-runDone
+	waitRun(t, runDone)
 }
 
 // TestRunDispatcherErrorBecomesNon200 verifies the ack reflects dispatch
@@ -607,7 +616,7 @@ func TestRunDispatcherErrorBecomesNon200(t *testing.T) {
 		t.Errorf("ack status = %d, want %d", ack.StatusCode, http.StatusInternalServerError)
 	}
 	cancel()
-	<-runDone
+	waitRun(t, runDone)
 }
 
 // TestEndpointURLConstruction is a sanity test for the gateway helper to
@@ -893,7 +902,7 @@ func TestSpawnDispatchCapsConcurrency(t *testing.T) {
 	if got := atomic.LoadInt64(&inflight); got != int64(dispatchConcurrency) {
 		close(release)
 		cancel()
-		<-runDone
+		waitRun(t, runDone)
 		t.Fatalf("inflight=%d did not reach cap=%d", got, dispatchConcurrency)
 	}
 
@@ -902,7 +911,7 @@ func TestSpawnDispatchCapsConcurrency(t *testing.T) {
 	if got := atomic.LoadInt64(&peak); got > int64(dispatchConcurrency) {
 		close(release)
 		cancel()
-		<-runDone
+		waitRun(t, runDone)
 		t.Fatalf("peak=%d exceeds cap=%d", got, dispatchConcurrency)
 	}
 
@@ -971,7 +980,10 @@ func TestRunWaitsForInFlightDispatch(t *testing.T) {
 	close(finished)
 
 	select {
-	case <-runDone:
+	case err := <-runDone:
+		if err != nil {
+			t.Logf("Run returned: %v", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after dispatcher unblocked")
 	}
@@ -1084,7 +1096,7 @@ func TestRunReArmsPingTickerOnServerCadenceChange(t *testing.T) {
 	case <-pongSent:
 	case <-time.After(2 * time.Second):
 		cancel()
-		<-runDone
+		waitRun(t, runDone)
 		t.Fatal("server never received the first ping within 2s")
 	}
 
@@ -1093,7 +1105,7 @@ func TestRunReArmsPingTickerOnServerCadenceChange(t *testing.T) {
 	// (the original ping plus one or two at the new cadence).
 	time.Sleep(2 * time.Second)
 	cancel()
-	<-runDone
+	waitRun(t, runDone)
 
 	if got := pingCount.Load(); got > 5 {
 		t.Errorf("ping count = %d, expected <= 5 after server cadence change to 1s", got)
@@ -1156,12 +1168,12 @@ func TestSpawnDispatchRecoversPanic(t *testing.T) {
 	case <-goodAck:
 	case <-time.After(3 * time.Second):
 		cancel()
-		<-runDone
+		waitRun(t, runDone)
 		t.Fatal("good ack never arrived; recover may have failed to keep the session alive")
 	}
 
 	cancel()
-	<-runDone
+	waitRun(t, runDone)
 
 	if got := dispatchCount.Load(); got < 2 {
 		t.Errorf("dispatchCount = %d, want >= 2 (both frames reached the dispatcher)", got)

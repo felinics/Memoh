@@ -425,7 +425,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		BotID:                   bot.ID,
 		ThreadID:                source.ID,
 		TurnID:                  turnID,
-		MessageID:               legacyMessageID,
+		MessageID:               legacyMessageID, //nolint:staticcheck // SA1019: the compatibility input for clients that still send message_id.
 		Title:                   strings.TrimSpace(req.Title),
 		CreatedByUserID:         channelIdentityID,
 		RuntimeMetadataOverride: runtimeMetadataOverride,

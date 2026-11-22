@@ -58,7 +58,6 @@ export default [
       'apps/web/src/components/sidebar/files-pane.vue',
       'apps/web/src/pages/home/components/attachment-block.vue',
       'apps/web/src/pages/home/components/browser-pane.vue',
-      'apps/web/src/pages/home/components/dockview/panel-asset.vue',
     ],
     rules: {
       'no-restricted-globals': [

@@ -4,7 +4,7 @@
 FROM scratch AS gomodcache
 
 # ---- Stage 1: Build base with dependencies ----
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build-base
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine AS build-base
 WORKDIR /build
 RUN apk add --no-cache git make
 COPY go.mod go.sum ./
