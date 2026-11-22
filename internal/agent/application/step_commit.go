@@ -312,7 +312,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 		inputs []messagepkg.PersistInput
 		err    error
 	)
-	if len(messages) > 0 {
+	if len(messages) > 0 && (hasAssistantOutput || failureCode != "" || mode == stepSteered) {
 		inputs, err = c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, opts)
 		if err != nil {
 			return fail(err)

@@ -240,6 +240,12 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		if err != nil {
 			return nil, err
 		}
+		if len(allSteps) == 0 && !stepHasOutput(result) {
+			a.logger.WarnContext(genCtx, "agent produced empty response (no text, no tool calls)",
+				emptyResponseLogAttrs(cfg.Identity.BotID, len(cfg.Messages), result)...,
+			)
+			return nil, fmt.Errorf("%w (finish_reason=%q, raw_finish_reason=%q)", ErrEmptyResponse, result.FinishReason, result.RawFinishReason)
+		}
 		lastResult = result
 
 		sr, kind, err := settleStep(genCtx, thread.dispatch, result, result.TextProviderMetadata, nil)

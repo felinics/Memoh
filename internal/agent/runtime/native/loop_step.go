@@ -2,6 +2,9 @@ package native
 
 import (
 	"context"
+	"errors"
+	"log/slog"
+	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -154,6 +157,55 @@ func (t *stepThread) refusedBatchEndsRun(kind stepKind) bool {
 // begins a fresh answer on new input.
 func (t *stepThread) resetRefused() {
 	t.refused = 0
+}
+
+// ErrEmptyResponse reports a model run whose first step finished without any
+// text, reasoning, tool call, or file output.
+var ErrEmptyResponse = errors.New("model returned empty response")
+
+func stepHasOutput(result sdk.ModelResult) bool {
+	if strings.TrimSpace(result.Text) != "" || len(result.ToolCalls) > 0 {
+		return true
+	}
+	reasoning := reasoningBlockCapture{parts: result.ReasoningParts}
+	return !reasoning.empty()
+}
+
+func emptyResponseLogAttrs(botID string, inputMessages int, result sdk.ModelResult) []any {
+	attrs := []any{
+		slog.String("bot_id", botID),
+		slog.Int("input_messages", inputMessages),
+		slog.Int("input_tokens", result.Usage.InputTokens),
+		slog.Int("output_tokens", result.Usage.OutputTokens),
+		slog.String("finish_reason", string(result.FinishReason)),
+		slog.String("raw_finish_reason", result.RawFinishReason),
+		slog.Int("reasoning_len", len(result.Reasoning)),
+	}
+	if !result.Response.IsZero() {
+		if id := strings.TrimSpace(result.Response.ID); id != "" {
+			attrs = append(attrs, slog.String("response_id", id))
+		}
+		if modelID := strings.TrimSpace(result.Response.ModelID); modelID != "" {
+			attrs = append(attrs, slog.String("response_model", modelID))
+		}
+		if reqID := upstreamRequestIDHeader(result.Response.Headers); reqID != "" {
+			attrs = append(attrs, slog.String("upstream_request_id", reqID))
+		}
+	}
+	return attrs
+}
+
+func upstreamRequestIDHeader(headers map[string]string) string {
+	for _, want := range []string{"x-request-id", "request-id", "anthropic-request-id", "x-amzn-requestid"} {
+		for k, v := range headers {
+			if strings.EqualFold(strings.TrimSpace(k), want) {
+				if trimmed := strings.TrimSpace(v); trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // settleStep turns one model result into the step record both loops commit.

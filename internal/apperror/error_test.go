@@ -108,6 +108,7 @@ func TestAgentResponseErrorCatalog(t *testing.T) {
 	}{
 		{CodeAgentResponseTimeout, http.StatusGatewayTimeout, "The model did not respond in time. Please try again."},
 		{CodeAgentResponseInterrupted, http.StatusBadGateway, "The model response was interrupted. Please try again."},
+		{CodeAgentEmptyResponse, http.StatusBadGateway, "The model returned an empty response. Please try again."},
 	}
 	for _, test := range tests {
 		t.Run(string(test.code), func(t *testing.T) {

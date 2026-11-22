@@ -46,6 +46,7 @@ const CODE_TITLE_KEYS: Record<string, string> = {
   'agent.provider_permission_denied': 'chat.errorActions.titles.auth',
   'agent.provider_request_rejected': 'chat.errorActions.titles.rejected',
   'agent.response_interrupted': 'chat.errorActions.titles.interrupted',
+  'agent.empty_response': 'chat.errorActions.titles.emptyResponse',
   'external_runtime.auth_required': 'chat.errorActions.titles.agentAuth',
 }
 

@@ -156,6 +156,7 @@
     "acp_runtime_start_failed": "外部 Agent 运行时启动失败",
     "agent": {
       "chat_model_not_configured": "尚未选择对话模型。请在 Bot 设置 → 通用中设置默认对话模型，然后重试。",
+      "empty_response": "模型返回了空响应，请重试",
       "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key",
       "provider_overloaded": "模型服务暂时不可用或过载，请稍后重试",
       "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型",
@@ -1869,6 +1870,7 @@
         "auth": "模型服务凭证无效",
         "rejected": "模型服务拒绝了请求",
         "interrupted": "回复生成已中断",
+        "emptyResponse": "模型返回了空响应",
         "agentAuth": "Agent 账号需要重新登录"
       }
     }
