@@ -96,6 +96,7 @@ import { useUnreadStore } from '@/store/unread'
 import AttentionDot from './attention-dot.vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { fetchScheduleRunSessions, type ScheduleRunSession } from '@/composables/api/useScheduleRuns'
+import { prefersReducedMotion } from '@/lib/runtime-env'
 import { formatCalendarTime } from '@/utils/date-time'
 
 const props = defineProps<{
@@ -224,8 +225,7 @@ async function revealFocused() {
   await nextTick()
   const row = [...list.value?.querySelectorAll<HTMLElement>('[data-session-id]') ?? []].find(el => el.dataset.sessionId === id)
   if (row) {
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    row.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' })
+    row.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
     focusPages = 0
     emit('focused')
     return

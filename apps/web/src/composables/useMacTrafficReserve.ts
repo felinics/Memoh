@@ -1,5 +1,7 @@
 import { computed, inject, onScopeDispose, ref, type ComputedRef } from 'vue'
-import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
+import { DesktopWindowKey } from '@/lib/desktop-shell'
+import { detectOsFamily } from '@/lib/runtime-env'
+import { useDesktopShell } from '@/composables/useEnvironment'
 
 // Whether the layout must reserve the macOS traffic-light strip/gutter.
 // True only inside the Electron desktop shell on macOS — and only while
@@ -8,7 +10,7 @@ import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
 // (browser, or the ?desktopShell=1 recording hatch) fullscreen never
 // happens, so the reserve stays constant.
 export function useMacTrafficReserve(): ComputedRef<boolean> {
-  const desktopShell = inject(DesktopShellKey, false)
+  const desktopShell = useDesktopShell()
   const windowBridge = inject(DesktopWindowKey, undefined)
 
   const fullScreen = ref(false)
@@ -22,6 +24,6 @@ export function useMacTrafficReserve(): ComputedRef<boolean> {
   return computed(() =>
     desktopShell
     && !fullScreen.value
-    && navigator.platform.toLowerCase().includes('mac'),
+    && detectOsFamily() === 'mac',
   )
 }

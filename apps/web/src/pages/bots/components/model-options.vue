@@ -270,7 +270,10 @@ const emit = defineEmits<{ select: [value: string] }>()
 
 const searchTerm = ref('')
 const searchInput = ref<HTMLInputElement | null>(null)
-defineExpose({ focusSearch: () => (searchInput.value ?? scrollEl.value)?.focus({ preventScroll: true }) })
+defineExpose({
+  focusSearch: (opts?: { avoidKeyboard?: boolean }) =>
+    ((opts?.avoidKeyboard ? null : searchInput.value) ?? scrollEl.value)?.focus({ preventScroll: true }),
+})
 const scrollElArea = ref<InstanceType<typeof MenuScrollArea> | null>(null)
 const scrollEl = computed(() => scrollElArea.value?.viewportElement ?? null)
 const reasoningScrollElArea = ref<InstanceType<typeof MenuScrollArea> | null>(null)

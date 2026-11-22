@@ -217,7 +217,8 @@ Agent 与不熟悉本仓的开发者顺手写代码时，最容易写出左列�
 | 给带操作按钮（`action`）的 Toast 使用默认 4s 自动消失 | 带按钮的 Toast 显式传 `duration: 8000` 或 `duration: Infinity` | [U3](references/rules.md#u3-界面显示的状态属实) |
 | 手写 `<div class="rounded-xl border bg-card p-4">` 或 `<div class="flex justify-between py-3 border-b">` | 直接组合 `@felinic/ui` 原语：`PageShell`、`SettingsSection`、`SettingsRow`、`FieldStack`、`DialogPanel` | [U9](references/rules.md#u9-同一概念在各处一致)、[M2](references/rules.md#m2-一个概念一个-owner) |
 | 手写 `bg-muted/40`、`border-border/60`、`text-[13px]`、`z-50`、`animate-spin` | 用语义 Token（`bg-muted-soft`、`border-border-soft`、`text-label`、`z-(--z-overlay)`）与四级加载组件 | [M4](references/rules.md#m4-视觉取值来自档位)、[U4](references/rules.md#u4-已获取的数据立即显示加载反馈遵守固定时限) |
-| 在业务页面直接 `import { ... } from 'reka-ui'` 或在共享 store 里 `import router from '@/router'` | 只通过 `@felinic/ui` 消费无头原语；共享 store 使用宿主注入的 router 与 `DesktopShellKey` | [M1](references/rules.md#m1-优先使用平台其次使用库不自行实现)、[M6](references/rules.md#m6-保持分发边界) |
+| 在业务页面直接 `import { ... } from 'reka-ui'` 或在共享 store 里 `import router from '@/router'` | 只通过 `@felinic/ui` 消费无头原语；共享 store 使用宿主注入的 router 与 `useDesktopShell` | [M1](references/rules.md#m1-优先使用平台其次使用库不自行实现)、[M6](references/rules.md#m6-保持分发边界) |
+| 直接调用 `useMediaQuery`、`window.matchMedia`、读取 `navigator.platform` / `userAgent`，或用视口宽度推断触控设备 | 统一经 `composables/useEnvironment.ts` 与 `lib/runtime-env.ts` 按层读取布局空间（`useCompactShell`）、输入方式（`useCoarsePointer` / `useInputModality`）、宿主（`useDesktopShell`）、系统族（`detectOsFamily`）与减动效（`useReducedMotion` / `prefersReducedMotion`） | [U7](references/rules.md#u7-用户控制)、[U8](references/rules.md#u8-在所有运行环境下成立)、[M2](references/rules.md#m2-一个概念一个-owner)、[M6](references/rules.md#m6-保持分发边界) |
 | 后台 SSE/WS 事件到来时直接调 `focusPanel` / `activateChatSession` 切走用户当前面板 | 后台只静默更新对应 tab 数据，需要跳转做成显式按钮由用户点击 | [U7](references/rules.md#u7-用户控制) |
 
 ## 相关指南

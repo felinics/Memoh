@@ -1,4 +1,5 @@
 import { animate } from 'motion/mini'
+import { prefersReducedMotion } from '@/lib/runtime-env'
 
 // Keep the turn entrance and composer placement on the same curve:
 // exponential ease-out — very fast start, extra-soft landing, no overshoot.
@@ -13,7 +14,7 @@ export function animateTurnEntrance(
   onFinish: () => void,
 ): () => void {
   const content = turn.querySelector<HTMLElement>('[data-turn-motion]')
-  if (!content || fromY <= 0 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+  if (!content || fromY <= 0 || prefersReducedMotion()) {
     onFinish()
     return () => {}
   }

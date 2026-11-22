@@ -7,6 +7,7 @@ import {
   watch,
 } from 'vue'
 import { useScroll } from '@vueuse/core'
+import { prefersReducedMotion } from '@/lib/runtime-env'
 import type { ChatMessage } from '@/store/chat-list'
 import { animateTurnEntrance } from './turn-entrance'
 import { nativeScrollTo } from './native-scroll'
@@ -537,7 +538,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
       el.clientHeight - below - promptEl.offsetHeight - promptTop,
       container.offsetHeight - promptEl.offsetHeight,
     ))
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    if (prefersReducedMotion()) {
       cancelSmoothScroll?.()
       el.scrollTop = target
       isProgrammaticScroll = false

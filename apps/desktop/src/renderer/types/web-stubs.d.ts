@@ -364,6 +364,17 @@ declare module '@memohai/web/lib/desktop-shell' {
   export const DesktopUpdatesKey: InjectionKey<DesktopUpdateBridge | undefined>
 }
 
+declare module '@memohai/web/lib/runtime-env' {
+  export type OsFamily = 'mac' | 'windows' | 'linux' | 'ios' | 'android' | 'unknown'
+  export interface NavigatorIdentityLike {
+    platform?: string
+    userAgent?: string
+  }
+  export function detectOsFamily(navigatorLike?: NavigatorIdentityLike): OsFamily
+  export function matchesMedia(query: string, win?: Pick<Window, 'matchMedia'>): boolean
+  export function prefersReducedMotion(win?: Pick<Window, 'matchMedia'>): boolean
+}
+
 declare module '@memohai/web/lib/query-cache-persistence' {
   import type { PiniaColadaPlugin, QueryCache, UseQueryEntryFilter } from '@pinia/colada'
   export const QUERY_CACHE_STORAGE_KEY: string

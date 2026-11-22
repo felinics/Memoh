@@ -121,7 +121,7 @@
 
 <script setup lang="ts">
 import { ChevronLeft } from 'lucide-vue-next'
-import { computed, inject, ref, useSlots, watch } from 'vue'
+import { computed, ref, useSlots, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   SidebarContent,
@@ -133,8 +133,7 @@ import {
 } from '@felinic/ui'
 import MobileBar from '@/components/mobile-bar/index.vue'
 import MobileBarIconButton from '@/components/mobile-bar/icon-button.vue'
-import { DesktopShellKey } from '@/lib/desktop-shell'
-import { useIsMobile } from '@/composables/useIsMobile'
+import { useCompactShell, useDesktopShell } from '@/composables/useEnvironment'
 
 const props = withDefaults(defineProps<{
   // When true, this layout acts as the primary (only) sidebar: it drops the
@@ -159,8 +158,8 @@ defineSlots<{
 }>()
 
 const slots = useSlots()
-const desktopShell = inject(DesktopShellKey, false)
-const isMobile = useIsMobile()
+const desktopShell = useDesktopShell()
+const isMobile = useCompactShell()
 const { t } = useI18n()
 
 const direction = ref<'forward' | 'back'>('forward')

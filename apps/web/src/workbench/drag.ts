@@ -1,4 +1,5 @@
 import { nextTick, shallowRef } from 'vue'
+import { prefersReducedMotion } from '@/lib/runtime-env'
 import { WORKBENCH_ROOT_DROP_ID } from './tree'
 import type { WorkbenchDropZone } from './types'
 
@@ -557,7 +558,7 @@ export function startWorkbenchTabPointerGesture(opts: StartTabDragOptions) {
           return
         }
         setRailOffset(fresh.tabEl, fresh.offsetX)
-        if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+        if (prefersReducedMotion()) return
         for (const el of fresh.tabNodes) {
           const siblingId = el.dataset.workbenchTabId
           if (!siblingId || siblingId === opts.tabId) continue

@@ -1,5 +1,6 @@
 import { nextTick, onScopeDispose, watch, type Ref } from 'vue'
 import { animate } from 'motion/mini'
+import { prefersReducedMotion } from '@/lib/runtime-env'
 import { CHAT_SEND_MOTION } from './turn-entrance'
 
 export function useComposerPlacementMotion(
@@ -23,8 +24,7 @@ export function useComposerPlacementMotion(
   watch(isWelcome, async (welcome) => {
     reset()
     const el = element.value
-    if (welcome || !el || !allowLeaveWelcome()
-      || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    if (welcome || !el || !allowLeaveWelcome() || prefersReducedMotion()) return
     const attempt = revision
     // Measure before Vue changes the welcome layout, then invert the movement.
     // Only the visual offset animates; dock/composer measurements see final layout.

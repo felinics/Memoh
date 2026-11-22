@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useReducedMotion } from '@/composables/useEnvironment'
 
 // The send button's arrow and its busy ring are one drawing. On `busy` the
 // arrow's stem bends into the ring's arc while the head folds into the arc's
@@ -48,7 +49,7 @@ const easeOut = (x: number) => 1 - (1 - x) ** 3
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const fmt = (n: number) => n.toFixed(2)
 
-const reducedMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+const reducedMotion = useReducedMotion()
 
 let frame = 0
 let last = 0
@@ -64,7 +65,7 @@ function stop() {
 // straight.
 function run() {
   stop()
-  if (reducedMotion) {
+  if (reducedMotion.value) {
     progress.value = props.busy ? 1 : 0
     angle.value = 0
     return
@@ -96,7 +97,7 @@ function run() {
   frame = requestAnimationFrame(tick)
 }
 
-watch(() => props.busy, run)
+watch([() => props.busy, reducedMotion], run)
 if (props.busy) run()
 onBeforeUnmount(stop)
 

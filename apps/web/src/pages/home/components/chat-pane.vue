@@ -1392,6 +1392,7 @@ import { commandResultPresentation, isCommandResultItemVisible, resolveCommandRe
 import SendMorphIcon from './send-morph-icon.vue'
 import { captureChatPaneSendContext, clearComposerPairDraft, composerRestoreForSendResult, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
+import { prefersReducedMotion } from '@/lib/runtime-env'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
 import { isACPAgentConfigured } from '@/utils/acp'
@@ -4120,8 +4121,7 @@ watch(
       return
     }
     markEscaped()
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    notice.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' })
+    notice.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
   },
   { flush: 'post' },
 )

@@ -7,6 +7,8 @@
  * an instant change under `prefers-reduced-motion` or where the API is missing.
  */
 
+import { prefersReducedMotion } from '@/lib/runtime-env'
+
 const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
 const ENTER_MS = 340
 const LEAVE_MS = 240
@@ -18,7 +20,7 @@ let enterBatchReset = false
 
 function canAnimate(el: Element): el is HTMLElement {
   if (typeof (el as HTMLElement).animate !== 'function') return false
-  return !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  return !prefersReducedMotion()
 }
 
 /** Rows entering in the same tick cascade, so a burst reads as several arrivals. */
