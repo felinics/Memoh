@@ -14,7 +14,7 @@ import {
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
-import { useIsMobile } from '@/composables/useIsMobile'
+import { useCoarsePointer } from '@/composables/useEnvironment'
 import { EFFORT_LABELS, displayedEffort, selectableEfforts } from '@/pages/bots/components/reasoning-effort'
 
 const props = defineProps<{
@@ -40,7 +40,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const modelOpen = ref(false)
 const reasoningOpen = ref(false)
-const isMobile = useIsMobile()
+const coarsePointer = useCoarsePointer()
 const modelLabelElement = ref<HTMLElement>()
 const modelTriggerElement = computed(() => modelLabelElement.value?.closest<HTMLElement>('[role="menuitem"]'))
 const { right: menuRight } = useElementBounding(modelTriggerElement)
@@ -74,17 +74,17 @@ const effortLabel = computed(() => efforts.value.find(option => option.value ===
   || (currentEffort.value ? t(EFFORT_LABELS[currentEffort.value] ?? 'chat.modelDefault') : t('chat.modelDefault')))
 
 function focusModelSearch() {
-  void nextTick(() => modelOptions.value?.focusSearch())
+  void nextTick(() => modelOptions.value?.focusSearch({ avoidKeyboard: coarsePointer.value }))
 }
 
 function selectModel(value: string) {
   emit('update:modelValue', value)
-  if (isMobile.value) modelOpen.value = false
+  if (coarsePointer.value) modelOpen.value = false
 }
 
 function selectReasoning(value: string) {
   emit('update:reasoningEffort', value)
-  if (isMobile.value) reasoningOpen.value = false
+  if (coarsePointer.value) reasoningOpen.value = false
 }
 
 function onModelKeydown(event: KeyboardEvent) {

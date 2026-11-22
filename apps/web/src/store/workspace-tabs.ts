@@ -2,7 +2,7 @@ import { defineStore, storeToRefs } from 'pinia'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
-import { useIsMobile } from '@/composables/useIsMobile'
+import { useCoarsePointer, useCompactShell } from '@/composables/useEnvironment'
 import { focusIsInTextInput } from '@/lib/keyboard-context'
 import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
@@ -119,7 +119,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const { currentBotId } = storeToRefs(selection)
   const chatStore = useChatStore()
   const currentBot = computed(() => chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null)
-  const isMobile = useIsMobile()
+
+  // Compact shell (see useCompactShell): below 768px the workbench runs as a
+  // single stack — one group, no tab strip, no splits. Layout constraints in
+  // this store key off `isMobile` (retained store property name for callers);
+  // input focus keys off `coarsePointer` so wide tablets/landscape phones do
+  // not pop up a software keyboard while keeping the multi-panel layout.
+  const isMobile = useCompactShell()
+  const coarsePointer = useCoarsePointer()
 
   if (typeof localStorage !== 'undefined') {
     const hasSessionWorkbench = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(WORKBENCH_STORAGE_KEY) !== null
@@ -496,12 +503,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     pendingChatInputFocus.value = { panelId: tab.id, botId: currentBotId.value, sessionId: tab.target.sessionId }
   }
 
+  // Fine-pointer environments: entering a conversation — cold start, a bot
+  // switch, New Chat, a session opened from the sidebar, a menu or search —
+  // leaves the caret in its composer. Requested a tick later, once the
+  // activation and selection changes it rides on (which drop pending requests)
+  // have settled. It never takes focus from another input, never switches away
+  // from a non-chat tab, and never runs when the primary pointer is coarse
+  // (phones, iPads, tablets, landscape phones), where programmatic focusing
+  // inside a tap gesture raises a software keyboard the user did not ask for.
   let entryFocusRun = 0
   function focusChatInputAfterEntry() {
-    if (isMobile.value) return
+    if (coarsePointer.value) return
     const run = ++entryFocusRun
     void nextTick(() => {
-      if (isMobile.value || run !== entryFocusRun) return
+      if (coarsePointer.value || run !== entryFocusRun) return
       const overlay = document.activeElement?.closest<HTMLElement>(ENTRY_OVERLAY)
       if (overlay) {
         afterOverlayReleasesFocus(overlay, run)
@@ -521,7 +536,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     returnFramesLeft = ENTRY_FOCUS_RETURN_MAX_FRAMES,
   ) {
     requestAnimationFrame(() => {
-      if (run !== entryFocusRun || isMobile.value) return
+      if (run !== entryFocusRun || coarsePointer.value) return
       const active = document.activeElement
       if (overlay.isConnected && active && overlay.contains(active)) {
         if (framesLeft > 0) afterOverlayReleasesFocus(overlay, run, framesLeft - 1, returnFramesLeft)

@@ -110,7 +110,7 @@
 
 <script setup lang="ts">
 import { ComputerIcon, ShortcutIcon } from '@memohai/icon/ui'
-import { computed, inject, onBeforeUnmount, ref, type Component } from 'vue'
+import { computed, onBeforeUnmount, ref, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
@@ -140,7 +140,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
 } from '@felinic/ui'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useDesktopShell } from '@/composables/useEnvironment'
 import '@/styles/sidebar-scroll.css'
 
 const props = withDefaults(defineProps<{
@@ -160,7 +160,7 @@ const props = withDefaults(defineProps<{
   fullWidth: false,
 })
 
-const desktopShell = inject(DesktopShellKey, false)
+const desktopShell = useDesktopShell()
 
 // ---- resizable width (web only) ------------------------------------------
 // The sidebar is a plain resizable panel: drag the right-edge handle to set its

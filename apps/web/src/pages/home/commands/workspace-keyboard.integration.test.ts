@@ -48,7 +48,10 @@ vi.mock('@felinic/ui', () => ({
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/i18n', () => ({ default: { global: { t: (key: string) => key, locale: ref('en') } } }))
 vi.mock('@/lib/api-client', () => ({ sdkApiUrl: vi.fn(), sdkAuthQuery: vi.fn() }))
-vi.mock('@/composables/useIsMobile', () => ({ useIsMobile: () => ref(false) }))
+vi.mock('@/composables/useEnvironment', () => ({
+  useCompactShell: () => ref(false),
+  useCoarsePointer: () => ref(false),
+}))
 vi.mock('@/store/chat-list', async () => {
   const { defineStore } = await import('pinia')
   return {

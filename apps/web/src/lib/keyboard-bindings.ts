@@ -1,4 +1,5 @@
 import { appKeyboardCommands, type AppKeyboardCommand } from './keyboard-commands'
+import { detectOsFamily, type NavigatorIdentityLike } from './runtime-env'
 
 /**
  * `menu` also exposes the binding in the native menu; menu clicks route via IPC.
@@ -282,19 +283,17 @@ export function resolveKeyboardBinding<T extends KeyChord & Partial<Record<Keybo
 }
 
 /**
- * Best-effort platform detection for the keydown listener. Accepts a
- * navigator-like object for testability; omitting the argument reads
- * `window.navigator`, while passing `undefined` explicitly falls back to
- * `'linux'` (unknown environment) via rest args rather than a default param.
- * `/\bwin/i` avoids false-matching `darwin` in jsdom user agents.
+ * Best-effort platform detection for the keydown listener, delegated to the
+ * canonical OS detector in `@/lib/runtime-env`. Accepts a navigator-like
+ * object for testability; omitting the argument reads the live `navigator`,
+ * while passing `undefined` explicitly falls back to `'linux'`.
  */
 export function detectPlatform(
-  ...args: [navigatorLike?: { platform?: string; userAgent?: string }]
+  ...args: [navigatorLike?: NavigatorIdentityLike]
 ): KeyboardPlatform {
-  const navigatorLike = args.length > 0 ? args[0] : window.navigator
-  const haystack = `${navigatorLike?.platform ?? ''} ${navigatorLike?.userAgent ?? ''}`
-  if (/mac/i.test(haystack)) return 'mac'
-  if (/\bwin/i.test(haystack)) return 'win'
+  const os = args.length > 0 ? detectOsFamily(args[0]) : detectOsFamily()
+  if (os === 'mac' || os === 'ios') return 'mac'
+  if (os === 'windows') return 'win'
   return 'linux'
 }
 

@@ -533,7 +533,8 @@ import { runtimeGoalObjective } from '@/utils/runtime-slash-commands'
 import { withLiteralSingleDollars } from '@/utils/markdown-dollar'
 
 import { resolveUrl } from '../composables/useMediaGallery'
-import { useElementVisibility, useMediaQuery } from '@vueuse/core'
+import { useElementVisibility } from '@vueuse/core'
+import { useTouchPointer } from '@/composables/useEnvironment'
 import { useLongPress } from '../composables/useLongPress'
 import { injectUserEditDraft } from '../composables/useUserEditDraft'
 
@@ -829,7 +830,7 @@ function onEditCancelKey(event: KeyboardEvent) {
 }
 
 // Long press only exists on touch; see the bubble's DropdownMenu.
-const isTouchPointer = useMediaQuery('(hover: none) and (pointer: coarse)')
+const isTouchPointer = useTouchPointer()
 const bubbleMenuOpen = ref(false)
 const bubbleLongPress = useLongPress(() => { bubbleMenuOpen.value = true })
 const { copyText } = useClipboard()

@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from '@/lib/runtime-env'
+
 /** Browser-owned scrolling with a live destination until natural completion. */
 export function nativeScrollTo(
   root: HTMLElement,
@@ -16,7 +18,7 @@ export function nativeScrollTo(
     root.removeEventListener('scroll', onScroll)
     onFinish()
   }
-  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const reduced = prefersReducedMotion()
   const resolveTarget = () => Math.min(Math.max(getTarget(), 0), Math.max(0, root.scrollHeight - root.clientHeight))
   let target = resolveTarget()
   const settle = () => {

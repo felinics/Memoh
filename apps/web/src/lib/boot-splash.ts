@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from './runtime-env'
+
 // The loading splash itself (markup, timeline, failure state) lives inline in
 // index.html because it must run before this bundle. This module takes it down
 // once the first screen has rendered, and brings it back in its failure state
@@ -38,7 +40,7 @@ export function dismissBootSplash(): void {
   // A failed splash stays: it is the only error surface when the app can't start.
   if (splash.classList.contains('is-failed')) return
   dismissedSplash = splash
-  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const reducedMotion = prefersReducedMotion()
   // performance.now() counts from navigation start, which is close enough to
   // when the splash's CSS delays started.
   if (reducedMotion || performance.now() < SPLASH_VISIBLE_AFTER_MS) {

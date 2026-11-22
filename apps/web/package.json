@@ -16,6 +16,7 @@
     "./i18n": "./src/i18n.ts",
     "./api-client": "./src/lib/api-client.ts",
     "./lib/desktop-shell": "./src/lib/desktop-shell.ts",
+    "./lib/runtime-env": "./src/lib/runtime-env.ts",
     "./store/settings": "./src/store/settings/index.ts",
     "./style.css": "./src/style.css",
     "./*": "./src/*"

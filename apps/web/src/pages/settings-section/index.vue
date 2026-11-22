@@ -119,20 +119,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { SidebarInset } from '@felinic/ui'
 import MainLayout from '@/layout/main-layout/index.vue'
 import SettingsSidebar from '@/components/settings-sidebar/index.vue'
 import MobileTopBar from './components/mobile-top-bar.vue'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useCompactShell, useDesktopShell } from '@/composables/useEnvironment'
 import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
-import { useIsMobile } from '@/composables/useIsMobile'
 import { usePreviousRoute } from '@/composables/useBackOr'
 import { useBackToChatRoute } from '@/composables/useBackToChat'
 
-const desktopShell = inject(DesktopShellKey, false)
-const isMobile = useIsMobile()
+const desktopShell = useDesktopShell()
+const isMobile = useCompactShell()
 
 const route = useRoute()
 const router = useRouter()

@@ -37,8 +37,9 @@ vi.mock('@/lib/idle-prefetch', () => ({
   prefetchLater: vi.fn(),
 }))
 
-vi.mock('@/composables/useIsMobile', () => ({
-  useIsMobile: () => ref(false),
+vi.mock('@/composables/useEnvironment', () => ({
+  useCompactShell: () => ref(false),
+  useCoarsePointer: () => ref(false),
 }))
 
 vi.mock('@/composables/useTerminalCache', () => ({

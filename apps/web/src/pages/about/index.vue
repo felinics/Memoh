@@ -224,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDark } from '@vueuse/core'
 import { RefreshCw, RotateCcw, SlidersHorizontal } from 'lucide-vue-next'
@@ -247,9 +247,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import ChatCodeBlock from '@/pages/home/components/chat-code-block.vue'
 import { registerSharedMarkdownComponents } from '@/components/markdown'
-import {
-  DesktopShellKey,
-} from '@/lib/desktop-shell'
+import { useDesktopShell } from '@/composables/useEnvironment'
 import { useDesktopUpdates } from '@/composables/useDesktopUpdates'
 import { SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -281,7 +279,7 @@ const updatesOpen = computed({
     void router.replace({ query })
   },
 })
-const desktopShell = inject(DesktopShellKey, false)
+const desktopShell = useDesktopShell()
 const { bridge: desktopUpdates, state: desktopUpdate } = useDesktopUpdates()
 const preferencePending = ref(false)
 const actionPending = ref(false)

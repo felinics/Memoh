@@ -187,7 +187,7 @@ import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
 } from '@/lib/desktop-shell'
-import { useIsMobile } from '@/composables/useIsMobile'
+import { useCompactShell } from '@/composables/useEnvironment'
 import {
   workspaceTargetAvailable,
   workspaceTargetName,
@@ -301,7 +301,7 @@ const isDefaultTarget = computed(() => (
 // circle (see the header comment), so it must also PRESS and read like the
 // circle — same composer-circle-press, collapsed slot, hidden from SRs. This
 // is the single source of truth for which form is on screen.
-const isMobileShell = useIsMobile()
+const isMobileShell = useCompactShell()
 const rendersAsPill = computed(() => !isDefaultTarget.value && !isMobileShell.value)
 
 

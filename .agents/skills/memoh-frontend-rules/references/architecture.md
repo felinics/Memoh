@@ -7,15 +7,15 @@
 
 - [技术栈与模块边界](#技术栈与模块边界), L:20
 - [目录地图](#目录地图), L:39
-- [认证样板参考页（抄代码只抄这些）](#认证样板参考页抄代码只抄这些), L:66
-- [宿主页面局部原语（Surface-scoped owners）](#宿主页面局部原语surface-scoped-owners), L:79
-- [页面重构与交接自检流程](#页面重构与交接自检流程), L:106
-- [路由与三层常驻布局](#路由与三层常驻布局), L:117
-- [数据层与客户端 Store 分工](#数据层与客户端-store-分工), L:145
-- [流式传输（WebSocket 与活动 SSE）](#流式传输websocket-与活动-sse), L:167
-- [工作区依赖操作契约](#工作区依赖操作契约), L:182
-- [工作区面板、远程桌面与 Browser / Computer Use](#工作区面板远程桌面与-browser--computer-use), L:189
-- [本地开发与路径别名](#本地开发与路径别名), L:196
+- [认证样板参考页（抄代码只抄这些）](#认证样板参考页抄代码只抄这些), L:65
+- [宿主页面局部原语（Surface-scoped owners）](#宿主页面局部原语surface-scoped-owners), L:78
+- [页面重构与交接自检流程](#页面重构与交接自检流程), L:105
+- [路由与三层常驻布局](#路由与三层常驻布局), L:116
+- [数据层与客户端 Store 分工](#数据层与客户端-store-分工), L:144
+- [流式传输（WebSocket 与活动 SSE）](#流式传输websocket-与活动-sse), L:166
+- [工作区依赖操作契约](#工作区依赖操作契约), L:181
+- [工作区面板、远程桌面与 Browser / Computer Use](#工作区面板远程桌面与-browser--computer-use), L:188
+- [本地开发与路径别名](#本地开发与路径别名), L:195
 
 ## 技术栈与模块边界
 
@@ -43,7 +43,7 @@
 - **入口与基础设施**：`main.ts`（插件挂载、API 客户端初始化）、`App.vue`（常驻聊天层 + 设置层 + `Toaster`）、
   `routes.ts`（Web 与 Desktop 共用的唯一业务路由工厂）、`router.ts`（Web 浏览器路由与鉴权守卫）、
   `lib/api-client.ts`（`VITE_API_URL`、Bearer 注入、401 统一清缓存跳登录）、`lib/query-cache-persistence.ts`
-  （查询缓存落盘与密钥剥离）。
+  （查询缓存落盘与密钥剥离）、`lib/runtime-env.ts`（同步运行环境原语：媒体查询常量、操作系统族识别 `detectOsFamily` 与减动效检查 `prefersReducedMotion`）。
 - **页面（`pages/`）**：页面专属子组件放 `pages/<feature>/components/`，专属逻辑放 `pages/<feature>/composables/`：
   - `main-section/` 与 `home/`：聊天与多面板工作区（`chat-workspace.vue` 承载自研 `workbench/` 二叉分屏与多标签舞台：支持 `chat`、`file`、`preview`、`asset`、`terminal`、`browser`、`display`、`schedule` 面板）。
   - `settings-section/`：设置全屏层（带 `SettingsSidebar` 与 `<KeepAlive>`）。
@@ -56,7 +56,7 @@
   `file-manager/`、`terminal/`、`monaco-editor/`、`loading-button/`、`form-dialog-shell/` 等）。选型前先查
   `packages/ui/skills/ui-owners/SKILL.md`。
 - **组合式函数（`composables/`）**：接口与流封装在 `composables/api/`（`useChat.*`、`sse-error.ts`、`stream-json-sse.ts`、
-  `useContainerStream.ts`、`useWorkspaceDependencyStream.ts`）；通用交互封装在顶层（`use-server-synced-form.ts`、
+  `useContainerStream.ts`、`useWorkspaceDependencyStream.ts`）；通用交互与运行环境封装在顶层（`useEnvironment.ts`［按布局空间、输入方式、宿主容器、减动效四层拆分］、`use-server-synced-form.ts`、
   `useDialogMutation.ts`、`useRetryingStream.ts`、`useSyncedQueryParam.ts`、`useViewSwap.ts`）。
 - **客户端状态（`store/`）**：只放纯客户端状态（见下方 Store 分工表）。
 - **多语言与工具（`i18n/locales/`、`utils/`）**：`en.json`、`zh.json`、`ja.json`；错误解析 `utils/api-error.ts`（`resolveApiErrorMessage` 按 `errors.<code>` → HTTP 状态码兜底 → 流错误事件顺序取本地化文案，绝不直接向用户暴露服务端原始 `message`/`detail`）、
@@ -139,7 +139,7 @@ Web 和 Desktop 各自的入口里。
 - **加载期间只拦发送，不拦输入**：前置数据未就绪时由 `handleSend` 暂缓发送；仍在加载中的前置项（如模型偏好）显示为“加载中”，绝不误报成错误或“未选择模型”。
 - **仅两个未知目标 Bot 例外允许等待一次请求**：当前浏览器从未登录过的新账号首次进入（需拉取 Bot 列表），或 URL 指向本标签页未记住的另一个 Bot（需查找该 Bot）；等待期间绝不显示旧 Bot 的输入框，请求失败时展示错误与重试。
 - **位置从首帧起确定，移动绝不丢内容**：居中欢迎态还是底部停靠态仅由本地同步状态决定（冷启动默认停在新对话，桌面端按本地同步恢复的工作台标签决定），首帧之后只有用户自己的操作（如发出第一条消息）才能移动输入框；位置变化时已输入的文字、光标、附件与焦点完整保留，后台工作绝不切换用户正在打字的标签页。
-- **桌面端自动聚焦，手机端由用户决定键盘**：桌面端主动进入对话时自动聚焦输入框（从菜单或弹窗进入时等浮层关闭归还焦点后再聚焦）；手机端绝不自动聚焦、不自动弹出软键盘。
+- **精细指针环境自动聚焦，粗指针环境由用户触发软键盘**：主指针非粗指针（`!coarsePointer`）时，主动进入对话自动聚焦输入框（从菜单或弹窗进入时等浮层关闭归还焦点后再聚焦）；主指针为粗指针（`coarsePointer`，含手机、iPad/平板及横屏手机）时不自动聚焦，由用户主动点击输入框调起软键盘（外接实体键盘时由 `useUnfocusedComposerInput` 承接直接打字）。
 
 ## 数据层与客户端 Store 分工
 

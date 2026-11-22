@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
 import StepExitShell from '../components/step-exit-shell.vue'
+import { prefersReducedMotion } from '@/lib/runtime-env'
 import { safeLocalGet, safeLocalSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 
@@ -42,7 +43,7 @@ let lastFpsTime = 0
 let isDegraded = false
 
 onMounted(() => {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (prefersReducedMotion()) {
     skipAnimation()
     return
   }

@@ -38,22 +38,36 @@ const terminalCacheMocks = vi.hoisted(() => {
 
 vi.mock('@/composables/useTerminalCache', () => terminalCacheMocks)
 
+// Controllable matchMedia for the compact-shell breakpoint (`(width < 768px)`)
+// and primary pointer modality (`(pointer: coarse)`). The window mock above
+// deliberately omits browser APIs until a test needs them; the store reads both
+// queries at setup and subscribes to 'change', so tests can drive layout space
+// and touch modality independently (e.g. wide iPad = mobile:false, coarse:true).
 const mobileBreakpoint = vi.hoisted(() => {
-  const listeners = new Set<(event: { matches: boolean }) => void>()
-  const state = { mobile: false }
+  const listenersByQuery = new Map<string, Set<(event: { matches: boolean }) => void>>()
+  const state = { mobile: false, coarsePointer: false }
+  function matchesFor(query: string): boolean {
+    if (query === '(pointer: coarse)') return state.coarsePointer
+    if (query === '(width < 768px)') return state.mobile
+    return false
+  }
+  function notify(query: string, matches: boolean) {
+    for (const listener of [...(listenersByQuery.get(query) ?? [])]) listener({ matches })
+  }
   Object.defineProperty(globalThis.window, 'matchMedia', {
     configurable: true,
     writable: true,
     value: (query: string) => ({
       media: query,
       get matches() {
-        return state.mobile
+        return matchesFor(query)
       },
       addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => {
-        listeners.add(listener)
+        if (!listenersByQuery.has(query)) listenersByQuery.set(query, new Set())
+        listenersByQuery.get(query)!.add(listener)
       },
       removeEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => {
-        listeners.delete(listener)
+        listenersByQuery.get(query)?.delete(listener)
       },
       dispatchEvent: () => true,
     }),
@@ -61,11 +75,16 @@ const mobileBreakpoint = vi.hoisted(() => {
   return {
     setMobile(next: boolean) {
       state.mobile = next
-      for (const listener of [...listeners]) listener({ matches: next })
+      notify('(width < 768px)', next)
+    },
+    setCoarsePointer(next: boolean) {
+      state.coarsePointer = next
+      notify('(pointer: coarse)', next)
     },
     reset() {
       state.mobile = false
-      listeners.clear()
+      state.coarsePointer = false
+      listenersByQuery.clear()
     },
   }
 })
@@ -975,6 +994,47 @@ describe('useWorkspaceTabsStore (clean-slate workbench)', () => {
       expect(store.workbench.tabs['terminal:1']?.target).toEqual({ kind: 'terminal', instance: 1 })
       await flushTicks()
       expect(store.loadedBotId).toBe('bot-without-layout')
+    })
+
+    it('keeps the multi-panel shell on wide touch devices (iPad / landscape phone) without auto-focusing the composer on entry', async () => {
+      mobileBreakpoint.setMobile(false)
+      mobileBreakpoint.setCoarsePointer(true)
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      expect(store.isMobile).toBe(false)
+      expect(store.pendingChatInputFocus).toBeNull()
+
+      store.openSessionChat({ sessionId: 's-ipad-1', title: 'Session 1' })
+      await nextTick()
+      expect(store.pendingChatInputFocus).toBeNull()
+
+      store.openSessionChatPinned({ sessionId: 's-ipad-2', title: 'Session 2' })
+      await nextTick()
+      expect(store.pendingChatInputFocus).toBeNull()
+
+      store.openDraftChat()
+      await nextTick()
+      expect(store.pendingChatInputFocus).toBeNull()
+
+      // Explicit keyboard-shortcut focus remains available when a hardware keyboard is attached.
+      store.requestChatInputFocus()
+      expect(store.pendingChatInputFocus?.panelId).toBe(store.activeId)
+    })
+
+    it('still auto-focuses the composer on a narrowed desktop browser window (compact shell + fine pointer)', async () => {
+      mobileBreakpoint.setMobile(true)
+      mobileBreakpoint.setCoarsePointer(false)
+      const store = useWorkspaceTabsStore()
+      store.mountWorkspace()
+      await flushTicks()
+
+      expect(store.isMobile).toBe(true)
+      store.openSessionChat({ sessionId: 's-narrow-desktop', title: 'Narrow Desktop' })
+      await nextTick()
+      expect(store.pendingChatInputFocus?.panelId).toBe(store.activeId)
+      expect(store.pendingChatInputFocus?.sessionId).toBe('s-narrow-desktop')
     })
   })
 })

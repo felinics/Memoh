@@ -15,7 +15,8 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useReducedMotion } from '@/composables/useEnvironment'
 import {
   STAGE_DUR,
   STAGE_FR,
@@ -347,9 +348,9 @@ function render(now: number) {
   scheduleFrame()
 }
 
+const reducedMotionPref = useReducedMotion()
 let resizeObserver: ResizeObserver | null = null
 let themeObserver: MutationObserver | null = null
-let mediaQuery: MediaQueryList | null = null
 
 /** reduce-motion 下仍画一帧静态点阵(含当前形状),只是不再推进 */
 function renderOnce() {
@@ -357,16 +358,17 @@ function renderOnce() {
   raf = requestAnimationFrame(render)
 }
 
-function onReduceMotionChange() {
-  reduceMotion = !!mediaQuery?.matches
+watch(reducedMotionPref, (next) => {
+  reduceMotion = next
   lastNow = 0
   lastFrameAt = 0
+  if (!ctx) return
   if (reduceMotion) {
     renderOnce()
     return
   }
   scheduleFrame()
-}
+})
 
 function onVisibilityChange() {
   pageVisible = !document.hidden
@@ -383,9 +385,7 @@ onMounted(() => {
   const el = canvasEl.value
   if (!el) return
   ctx = el.getContext('2d')
-  mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-  reduceMotion = mediaQuery.matches
-  mediaQuery.addEventListener('change', onReduceMotionChange)
+  reduceMotion = reducedMotionPref.value
   document.addEventListener('visibilitychange', onVisibilityChange)
   resize()
   resizeObserver = new ResizeObserver(() => {
@@ -406,7 +406,6 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
   resizeObserver?.disconnect()
   themeObserver?.disconnect()
-  mediaQuery?.removeEventListener('change', onReduceMotionChange)
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>

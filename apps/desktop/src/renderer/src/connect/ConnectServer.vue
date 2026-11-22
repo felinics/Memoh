@@ -77,6 +77,7 @@ import { setupApiClient } from '@memohai/web/api-client'
 import { loginRedirectForCurrentRoute } from '@memohai/web/router-guards/return-to'
 import { useUserStore } from '@memohai/web/store/user'
 import { LOGIN_ENTRY_ANIMATION_KEY } from '@memohai/web/pages/login/transition'
+import { prefersReducedMotion } from '@memohai/web/lib/runtime-env'
 import {
   applyPostConnectSessionCleanup,
   decidePostConnectNavigation,
@@ -88,7 +89,7 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const exiting = ref(false)
-const exitDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 175
+const exitDuration = prefersReducedMotion() ? 0 : 175
 
 const { defineField, handleSubmit, isSubmitting, meta, setFieldValue } = useForm({
   validationSchema: toTypedSchema(z.object({

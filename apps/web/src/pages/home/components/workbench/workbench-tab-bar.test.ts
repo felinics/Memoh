@@ -17,8 +17,9 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   }
 }
 
-vi.mock('@/composables/useIsMobile', () => ({
-  useIsMobile: () => ref(false),
+vi.mock('@/composables/useEnvironment', () => ({
+  useCompactShell: () => ref(false),
+  useCoarsePointer: () => ref(false),
 }))
 
 vi.mock('@/composables/useTerminalCache', () => ({

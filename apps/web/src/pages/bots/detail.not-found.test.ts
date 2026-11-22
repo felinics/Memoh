@@ -49,9 +49,12 @@ vi.mock('@/composables/useSyncedQueryParam', async () => {
   const { ref } = await import('vue')
   return { useSyncedQueryParam: () => ref('overview') }
 })
-vi.mock('@/composables/useIsMobile', async () => {
+vi.mock('@/composables/useEnvironment', async () => {
   const { ref } = await import('vue')
-  return { useIsMobile: () => ref(false) }
+  return {
+    useCompactShell: () => ref(false),
+    useDesktopShell: () => false,
+  }
 })
 vi.mock('@/composables/useMacTrafficReserve', async () => {
   const { computed } = await import('vue')

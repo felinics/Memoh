@@ -15,13 +15,13 @@
   </section>
 </template>
 <script setup lang="ts">
-import { ref, inject } from 'vue'
+import { ref } from 'vue'
 import { SidebarProvider } from '@felinic/ui'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useDesktopShell } from '@/composables/useEnvironment'
 
 // In the desktop shell the sidebar collapse affordance is intentionally
 // disabled — we keep the sidebar pinned open.
-const desktopShell = inject(DesktopShellKey, false)
+const desktopShell = useDesktopShell()
 
 const sidebarDefaultOpen = desktopShell || !document.cookie.includes('sidebar_state=false')
 const isOpen = ref(sidebarDefaultOpen)

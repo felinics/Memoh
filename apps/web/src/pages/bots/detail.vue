@@ -337,7 +337,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBackAffordance } from '@/composables/useBackOr'
-import { useIsMobile } from '@/composables/useIsMobile'
+import { useCompactShell } from '@/composables/useEnvironment'
 import { registerBotBreadcrumbName } from '@/lib/bot-breadcrumb'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
@@ -351,7 +351,7 @@ type BotContainerInfo = HandlersGetContainerResponse
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-const isMobile = useIsMobile()
+const isMobile = useCompactShell()
 
 // macOS desktop: this page renders its own full-height sidebar (no full-width
 // topbar above it), so the sidebar header clears the traffic lights and the

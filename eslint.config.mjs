@@ -77,16 +77,51 @@ export default [
               message: '违反 M1 / M2：业务层严禁直接导入 reka-ui，请使用 @felinic/ui 封装的组件原语。',
             },
           ],
-          patterns: [
-            {
-              group: ['@fortawesome/*'],
-              message: '违反 M1 / U9：严禁使用 FontAwesome 图标，通用图标请用 lucide-vue-next，品牌图标请用 @memohai/icon。',
-            },
-          ],
-        },
-      ],
-    },
+        patterns: [
+          {
+            group: ['@fortawesome/*'],
+            message: '违反 M1 / U9：严禁使用 FontAwesome 图标，通用图标请用 lucide-vue-next，品牌图标请用 @memohai/icon。',
+          },
+        ],
+      },
+    ],
   },
+},
+{
+  files: ['apps/web/src/**/*.{ts,tsx,vue}', 'apps/desktop/src/renderer/**/*.{ts,tsx,vue}'],
+  ignores: [
+    'apps/web/src/**/*.test.ts',
+    'apps/desktop/src/**/*.test.ts',
+    'apps/web/src/vitest-setup.ts',
+    'apps/web/src/lib/runtime-env.ts',
+    'apps/web/src/composables/useEnvironment.ts',
+  ],
+  rules: {
+    'no-restricted-syntax': [
+      'error',
+      {
+        selector: "ImportSpecifier[imported.name='useMediaQuery']",
+        message: '违反 M1 / M2 / U8：禁止在业务层直接调用 useMediaQuery，请通过 @/composables/useEnvironment 统一读取布局空间、输入方式或无障碍偏好。',
+      },
+      {
+        selector: "CallExpression[callee.name='matchMedia']",
+        message: '违反 M1 / M2 / U8：禁止直接调用裸 matchMedia，请统一使用 @/lib/runtime-env 或 @/composables/useEnvironment。',
+      },
+      {
+        selector: "MemberExpression[property.name='matchMedia']",
+        message: '违反 M1 / M2 / U8：禁止直接调用 window.matchMedia，请统一使用 @/lib/runtime-env 或 @/composables/useEnvironment。',
+      },
+      {
+        selector: "MemberExpression[object.name='navigator'][property.name=/^(platform|userAgent|maxTouchPoints)$/]",
+        message: '违反 M2 / M6 / U8：禁止直接读取 navigator.platform / userAgent / maxTouchPoints，请统一使用 @/lib/runtime-env 或 @/composables/useEnvironment。',
+      },
+      {
+        selector: "MemberExpression[object.property.name='navigator'][property.name=/^(platform|userAgent|maxTouchPoints)$/]",
+        message: '违反 M2 / M6 / U8：禁止直接读取 navigator.platform / userAgent / maxTouchPoints，请统一使用 @/lib/runtime-env 或 @/composables/useEnvironment。',
+      },
+    ],
+  },
+},
   {
     files: ['packages/**/*.vue', 'apps/**/*.vue'],
     languageOptions: {

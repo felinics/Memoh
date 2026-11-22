@@ -1,3 +1,5 @@
+import { detectOsFamily } from '@/lib/runtime-env'
+
 export interface RuntimeCommandCredential {
   key?: string
   team_id?: string
@@ -8,10 +10,12 @@ export type RuntimeConnectMode = 'connect' | 'replace'
 export type RuntimeHostPlatform = 'windows' | 'macos' | 'linux'
 
 // The dialog usually runs on the computer being connected, so the browser's OS
-// is the best first guess; the user can still switch.
-export function detectRuntimeHostPlatform(userAgent = globalThis.navigator?.userAgent ?? ''): RuntimeHostPlatform {
-  if (/Windows/i.test(userAgent)) return 'windows'
-  if (/Linux/i.test(userAgent) && !/Android/i.test(userAgent)) return 'linux'
+// is the best first guess; the user can still switch. Mobile OSes (Android/iOS)
+// cannot run the desktop runtime CLI directly and fall back to 'macos'.
+export function detectRuntimeHostPlatform(userAgent?: string): RuntimeHostPlatform {
+  const os = userAgent === undefined ? detectOsFamily() : detectOsFamily({ userAgent })
+  if (os === 'windows') return 'windows'
+  if (os === 'linux') return 'linux'
   return 'macos'
 }
 
