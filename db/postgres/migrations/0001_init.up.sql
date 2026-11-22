@@ -51,10 +51,37 @@ CREATE TABLE IF NOT EXISTS template.provider_template_models (
 CREATE INDEX IF NOT EXISTS idx_provider_template_models_template_active_order
   ON template.provider_template_models (provider_template_id, active, sort_order, model_id);
 
+-- Workspace dependency definitions and the cached catalog, one copy per
+-- Supermarket source. Definitions are immutable, digest-verified publications
+-- and are never deleted.
+CREATE TABLE IF NOT EXISTS template.workspace_dependency_definitions (
+  source_url TEXT NOT NULL,
+  registry_id TEXT NOT NULL CHECK (registry_id = 'memoh'),
+  dependency_id TEXT NOT NULL,
+  revision TEXT NOT NULL CHECK (revision ~ '^[a-f0-9]{64}$'),
+  release_bytes BYTEA NOT NULL CHECK (octet_length(release_bytes) BETWEEN 1 AND 1048576),
+  artifact_bytes BYTEA NOT NULL CHECK (octet_length(artifact_bytes) BETWEEN 1 AND 1048576),
+  icon_digest TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_url, registry_id, dependency_id, revision)
+);
+
+CREATE INDEX IF NOT EXISTS idx_template_workspace_dependency_definitions_icon
+  ON template.workspace_dependency_definitions (source_url, icon_digest);
+
+CREATE TABLE IF NOT EXISTS template.workspace_dependency_catalogs (
+  source_url TEXT PRIMARY KEY,
+  catalog_bytes BYTEA NOT NULL CHECK (octet_length(catalog_bytes) BETWEEN 1 AND 4194304),
+  generation BIGINT NOT NULL DEFAULT 1 CHECK (generation > 0),
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 GRANT USAGE ON SCHEMA template TO CURRENT_USER;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   template.provider_templates,
-  template.provider_template_models
+  template.provider_template_models,
+  template.workspace_dependency_definitions,
+  template.workspace_dependency_catalogs
 TO CURRENT_USER;
 
 DO $$
@@ -3101,73 +3128,6 @@ CREATE POLICY bot_dependency_installations_team_update ON public.bot_dependency_
     WITH CHECK (team_id = public.memoh_current_team_id());
 DROP POLICY IF EXISTS bot_dependency_installations_team_delete ON public.bot_dependency_installations;
 CREATE POLICY bot_dependency_installations_team_delete ON public.bot_dependency_installations
-    FOR DELETE USING (team_id = public.memoh_current_team_id());
-
--- Immutable dependency definitions and the independently refreshed catalog.
--- Entries are shared only within a team and one configured Supermarket origin.
-CREATE TABLE IF NOT EXISTS public.workspace_dependency_definitions (
-    team_id UUID NOT NULL DEFAULT public.memoh_current_team_id() REFERENCES public.teams(id) ON DELETE RESTRICT,
-    source_url TEXT NOT NULL,
-    registry_id TEXT NOT NULL CHECK (registry_id = 'memoh'),
-    dependency_id TEXT NOT NULL,
-    revision TEXT NOT NULL CHECK (revision ~ '^[a-f0-9]{64}$'),
-    release_bytes BYTEA NOT NULL CHECK (octet_length(release_bytes) BETWEEN 1 AND 1048576),
-    artifact_bytes BYTEA NOT NULL CHECK (octet_length(artifact_bytes) BETWEEN 1 AND 1048576),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    icon_digest TEXT NOT NULL DEFAULT '',
-    last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (team_id, source_url, registry_id, dependency_id, revision)
-);
-
-ALTER TABLE public.workspace_dependency_definitions
-    ADD COLUMN IF NOT EXISTS icon_digest TEXT NOT NULL DEFAULT '',
-    ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT now();
--- Upgrade cached releases written before the indexed icon digest was added.
--- The migration owner can backfill every team while FORCE RLS is lifted.
-ALTER TABLE public.workspace_dependency_definitions NO FORCE ROW LEVEL SECURITY;
-UPDATE public.workspace_dependency_definitions
-SET icon_digest = COALESCE(convert_from(release_bytes, 'UTF8')::jsonb -> 'icon' ->> 'digest', '')
-WHERE icon_digest = '';
-CREATE INDEX IF NOT EXISTS idx_workspace_dependency_definitions_icon
-    ON public.workspace_dependency_definitions (team_id, source_url, icon_digest);
-
-CREATE TABLE IF NOT EXISTS public.workspace_dependency_catalogs (
-    team_id UUID NOT NULL DEFAULT public.memoh_current_team_id() REFERENCES public.teams(id) ON DELETE RESTRICT,
-    source_url TEXT NOT NULL,
-    catalog_bytes BYTEA NOT NULL CHECK (octet_length(catalog_bytes) BETWEEN 1 AND 4194304),
-    generation BIGINT NOT NULL DEFAULT 1 CHECK (generation > 0),
-    fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (team_id, source_url)
-);
-
-ALTER TABLE public.workspace_dependency_definitions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.workspace_dependency_definitions FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS workspace_dependency_definitions_team_select ON public.workspace_dependency_definitions;
-CREATE POLICY workspace_dependency_definitions_team_select ON public.workspace_dependency_definitions
-    FOR SELECT USING (team_id = public.memoh_current_team_id());
-DROP POLICY IF EXISTS workspace_dependency_definitions_team_insert ON public.workspace_dependency_definitions;
-CREATE POLICY workspace_dependency_definitions_team_insert ON public.workspace_dependency_definitions
-    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-DROP POLICY IF EXISTS workspace_dependency_definitions_team_update ON public.workspace_dependency_definitions;
-CREATE POLICY workspace_dependency_definitions_team_update ON public.workspace_dependency_definitions
-    FOR UPDATE USING (team_id = public.memoh_current_team_id()) WITH CHECK (team_id = public.memoh_current_team_id());
-DROP POLICY IF EXISTS workspace_dependency_definitions_team_delete ON public.workspace_dependency_definitions;
-CREATE POLICY workspace_dependency_definitions_team_delete ON public.workspace_dependency_definitions
-    FOR DELETE USING (team_id = public.memoh_current_team_id());
-
-ALTER TABLE public.workspace_dependency_catalogs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.workspace_dependency_catalogs FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS workspace_dependency_catalogs_team_select ON public.workspace_dependency_catalogs;
-CREATE POLICY workspace_dependency_catalogs_team_select ON public.workspace_dependency_catalogs
-    FOR SELECT USING (team_id = public.memoh_current_team_id());
-DROP POLICY IF EXISTS workspace_dependency_catalogs_team_insert ON public.workspace_dependency_catalogs;
-CREATE POLICY workspace_dependency_catalogs_team_insert ON public.workspace_dependency_catalogs
-    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-DROP POLICY IF EXISTS workspace_dependency_catalogs_team_update ON public.workspace_dependency_catalogs;
-CREATE POLICY workspace_dependency_catalogs_team_update ON public.workspace_dependency_catalogs
-    FOR UPDATE USING (team_id = public.memoh_current_team_id()) WITH CHECK (team_id = public.memoh_current_team_id());
-DROP POLICY IF EXISTS workspace_dependency_catalogs_team_delete ON public.workspace_dependency_catalogs;
-CREATE POLICY workspace_dependency_catalogs_team_delete ON public.workspace_dependency_catalogs
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
 -- Temporary Agent authorization sessions, before a Bot exists.

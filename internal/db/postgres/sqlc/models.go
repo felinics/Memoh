@@ -962,6 +962,24 @@ type TemplateProviderTemplateModel struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TemplateWorkspaceDependencyCatalog struct {
+	SourceUrl    string             `json:"source_url"`
+	CatalogBytes []byte             `json:"catalog_bytes"`
+	Generation   int64              `json:"generation"`
+	FetchedAt    pgtype.Timestamptz `json:"fetched_at"`
+}
+
+type TemplateWorkspaceDependencyDefinition struct {
+	SourceUrl     string             `json:"source_url"`
+	RegistryID    string             `json:"registry_id"`
+	DependencyID  string             `json:"dependency_id"`
+	Revision      string             `json:"revision"`
+	ReleaseBytes  []byte             `json:"release_bytes"`
+	ArtifactBytes []byte             `json:"artifact_bytes"`
+	IconDigest    string             `json:"icon_digest"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type ToolApprovalRequest struct {
 	ID                           pgtype.UUID        `json:"id"`
 	BotID                        pgtype.UUID        `json:"bot_id"`
@@ -1119,25 +1137,4 @@ type UserRuntime struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	TeamID           pgtype.UUID        `json:"team_id"`
-}
-
-type WorkspaceDependencyCatalog struct {
-	TeamID       pgtype.UUID        `json:"team_id"`
-	SourceUrl    string             `json:"source_url"`
-	CatalogBytes []byte             `json:"catalog_bytes"`
-	Generation   int64              `json:"generation"`
-	FetchedAt    pgtype.Timestamptz `json:"fetched_at"`
-}
-
-type WorkspaceDependencyDefinition struct {
-	TeamID         pgtype.UUID        `json:"team_id"`
-	SourceUrl      string             `json:"source_url"`
-	RegistryID     string             `json:"registry_id"`
-	DependencyID   string             `json:"dependency_id"`
-	Revision       string             `json:"revision"`
-	ReleaseBytes   []byte             `json:"release_bytes"`
-	ArtifactBytes  []byte             `json:"artifact_bytes"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	IconDigest     string             `json:"icon_digest"`
-	LastAccessedAt pgtype.Timestamptz `json:"last_accessed_at"`
 }
