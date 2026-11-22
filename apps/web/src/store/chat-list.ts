@@ -435,6 +435,7 @@ export const useChatStore = defineStore('chat', () => {
     startWebSocket,
     startBotSessionsActivityStream,
     startSessionRuntime,
+    visibleSessionIds: botId => chatViews.visibleSessionIds(botId),
     releasePreviousSession: (botId, targetSessionId) => {
       releaseHiddenSessionView(chatViews.getSession(botId, targetSessionId) ?? null)
     },

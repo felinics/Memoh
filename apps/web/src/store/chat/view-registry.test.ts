@@ -1,3 +1,4 @@
+import { computed } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { createChatViewRegistry } from './view-registry'
 import type { ChatAssistantTurn, ChatUserTurn } from './types'
@@ -219,6 +220,47 @@ describe('chat view registry', () => {
     const rebound = registry.bindPanel('chat:1', target, true).view
     expect(rebound).not.toBe(attached)
     expect(rebound.transcript.messages).toEqual([])
+  })
+
+  it('invalidates only the evicted session paneView binding without recomputing unrelated open panes', () => {
+    const { registry } = makeRegistry({ cacheLimit: 0 })
+    const targetA = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:1' }
+    const targetB = { botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:2' }
+    let bEvaluations = 0
+    const paneViewA = computed(() => registry.getOrCreate(targetA))
+    const paneViewB = computed(() => {
+      bEvaluations += 1
+      return registry.getOrCreate(targetB)
+    })
+
+    const initialA = registry.bindPanel('chat:1', targetA, true).view
+    const visibleB = registry.bindPanel('chat:2', targetB, true).view
+    initialA.transcript.appendToView(userTurn('old'))
+    expect(paneViewA.value).toBe(initialA)
+    expect(paneViewB.value).toBe(visibleB)
+    expect(bEvaluations).toBe(1)
+
+    registry.setPanelVisible('chat:1', false)
+    registry.prune()
+
+    const recreatedA = registry.bindPanel('chat:1', targetA, true).view
+    recreatedA.transcript.appendToView(userTurn('fresh'))
+    expect(recreatedA).not.toBe(initialA)
+    expect(paneViewA.value).toBe(recreatedA)
+    expect(paneViewA.value.transcript.messages.map(message => message.id)).toEqual(['fresh'])
+    expect(paneViewB.value).toBe(visibleB)
+    expect(bEvaluations).toBe(1)
+  })
+
+  it('lists only visible session ids for a bot', () => {
+    const { registry } = makeRegistry()
+    registry.bindPanel('chat:1', { botId: 'bot-1', sessionId: 'session-visible-1', viewId: 'chat:1' }, true)
+    registry.bindPanel('chat:2', { botId: 'bot-1', sessionId: 'session-visible-2', viewId: 'chat:2' }, true)
+    registry.bindPanel('chat:3', { botId: 'bot-1', sessionId: 'session-hidden', viewId: 'chat:3' }, false)
+    registry.bindPanel('chat:4', { botId: 'bot-1', sessionId: null, viewId: 'chat:4' }, true)
+    registry.bindPanel('chat:5', { botId: 'bot-2', sessionId: 'other-bot-session', viewId: 'chat:5' }, true)
+
+    expect(registry.visibleSessionIds('bot-1').sort()).toEqual(['session-visible-1', 'session-visible-2'])
   })
 
   it('clears a failed initial load once history is applied', async () => {

@@ -33,6 +33,7 @@ export interface ChatBootstrapDeps {
   startWebSocket: (botId: string) => void
   startBotSessionsActivityStream: (botId: string) => void
   startSessionRuntime: (botId: string, sessionId: string) => void
+  visibleSessionIds?: (botId: string) => string[]
   releasePreviousSession: (botId: string, sessionId: string) => void
   clearFsForBotSwitch: () => void
   clearRememberedSessions: () => void
@@ -176,8 +177,13 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
           }
 
           deps.startWebSocket(botId)
-          if (deps.sessionId.value) {
-            deps.startSessionRuntime(botId, deps.sessionId.value)
+          const sessionsToStart = new Set<string>()
+          if (deps.sessionId.value) sessionsToStart.add(deps.sessionId.value)
+          for (const visibleSessionId of deps.visibleSessionIds?.(botId) ?? []) {
+            sessionsToStart.add(visibleSessionId)
+          }
+          for (const targetSessionId of sessionsToStart) {
+            deps.startSessionRuntime(botId, targetSessionId)
           }
         } while (rerunRequested)
       } finally {
