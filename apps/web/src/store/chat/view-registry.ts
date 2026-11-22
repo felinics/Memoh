@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { ref, shallowReactive, type Ref } from 'vue'
 import { createComposerPairSync } from './composer-pair-sync'
 import { createTranscriptController, type TranscriptDeps } from './transcript'
 import type {
@@ -120,7 +120,10 @@ function hasPendingInteraction(messages: ChatMessage[]): boolean {
 // (bot, session); drafts are isolated by their stable dockview panel id.
 export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
   const cacheLimit = Math.max(0, deps.cacheLimit ?? CHAT_SESSION_VIEW_CACHE_LIMIT)
-  const views = new Map<string, ChatViewEntry>()
+  // Per-key shallow reactivity ensures KeepAlive-cached ChatPane computeds
+  // rebind when a hidden session's entry is evicted and later recreated,
+  // without deep-proxying entries or invalidating unrelated open panes.
+  const views = shallowReactive(new Map<string, ChatViewEntry>())
   const panelKeys = new Map<string, string>()
   const coveredBots = new Set<string>()
   let accessClock = 0
@@ -199,6 +202,18 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
   function getSession(botId: string, sessionId: string): ChatViewEntry | undefined {
     const view = views.get(chatSessionViewKey(botId, sessionId))
     return view ? touch(view) : undefined
+  }
+
+  function visibleSessionIds(botId: string): string[] {
+    const bid = normalize(botId)
+    if (!bid) return []
+    const ids: string[] = []
+    for (const view of views.values()) {
+      if (view.botId === bid && view.kind === 'session' && view.sessionId && view.visiblePanelIds.size > 0) {
+        ids.push(view.sessionId)
+      }
+    }
+    return ids
   }
 
   function getDraft(botId: string, viewId: string): ChatViewEntry | undefined {
@@ -456,6 +471,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     get,
     getOrCreate,
     getSession,
+    visibleSessionIds,
     getDraft,
     getPanel,
     bindPanel,
