@@ -207,7 +207,7 @@ func TestClipboardBoundsAndValidation(t *testing.T) {
 	for _, size := range []int32{maxClipboardMessageBytes + 1, -maxClipboardMessageBytes - 1, -2147483648} {
 		var header [8]byte
 		header[0] = 3
-		binary.BigEndian.PutUint32(header[4:], uint32(size))
+		binary.BigEndian.PutUint32(header[4:], uint32(size)) //nolint:gosec // G115: RFB encodes extended lengths as signed two's-complement uint32 values.
 		if err := c.readClipboard(bytes.NewReader(header[:]), func(string) { t.Fatal("unexpected text") }, func(error) {}); !errors.Is(err, io.EOF) {
 			t.Fatalf("oversized frame was not discarded without allocating: %v", err)
 		}
@@ -250,7 +250,10 @@ func TestClipboardTransportFailureDisconnectsInsteadOfReportingCopyError(t *test
 		t.Fatal(err)
 	}
 	select {
-	case <-disconnected:
+	case err := <-disconnected:
+		if err == nil {
+			t.Fatal("viewer disconnected without the transport error")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("transport closure did not disconnect the viewer")
 	}

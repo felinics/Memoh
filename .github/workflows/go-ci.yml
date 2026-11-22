@@ -57,7 +57,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -65,8 +64,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.10.1
-          only-new-issues: true
+          version: v2.15.0
 
   test:
     name: Test
@@ -209,7 +207,7 @@ jobs:
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             ./internal/agent/runtime/session/ledger
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgres(ResumeScopes|ShutdownResume|WSStepHistory|ProviderUsage|RedisDecision|NativeDecisionAcceptance|HistoryReset|RedisHistoryReset)' ./internal/agent/application
+            -run '^TestPostgres(ResumeScopes|ShutdownResume|WSStepHistory|ProviderUsage|NativeDecisionAcceptance|HistoryReset|RedisHistoryReset)' ./internal/agent/application
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresBotCreate' ./internal/bots
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \

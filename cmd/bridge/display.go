@@ -119,7 +119,7 @@ func superviseXvnc(ctx context.Context, log *slog.Logger) {
 			select {
 			case <-ctx.Done():
 				_ = cmd.Process.Kill()
-				<-waitErr
+				<-waitErr //nolint:errcheck // reaps Xvnc; the wait error is the kill above.
 				return
 			case err := <-waitErr:
 				if ctx.Err() != nil {

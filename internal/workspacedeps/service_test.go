@@ -623,15 +623,7 @@ func actionsOf(entry Entry) string {
 }
 
 func statusesEqual(got []Status, want ...Status) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(got, want)
 }
 
 func TestListReconcilesThreeStatesAndCaches(t *testing.T) {

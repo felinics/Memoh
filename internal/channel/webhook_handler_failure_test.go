@@ -2,6 +2,7 @@ package channel
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -27,7 +28,7 @@ func serveWebhook(t *testing.T, h *WebhookHandler, path string) (*httptest.Respo
 	e.Use(server.AccessLog(log))
 	h.Register(e)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`)))
+	e.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, path, strings.NewReader(`{}`)))
 	var records []map[string]any
 	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
 		if line == "" {
@@ -122,7 +123,7 @@ func TestGenericWebhookHandlerRecordsUnknownPlatformCause(t *testing.T) {
 
 	requireOneRequestRecord(t, rec, records, http.StatusBadRequest, "client", "nosuchplatform")
 
-	c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/", nil), httptest.NewRecorder())
+	c := echo.New().NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil), httptest.NewRecorder())
 	c.SetParamNames("platform", "config_id")
 	c.SetParamValues("nosuchplatform", "cfg-1")
 	var httpErr *echo.HTTPError

@@ -61,7 +61,7 @@ func answered(t *testing.T, err error) (apperror.Code, map[string]string, apperr
 }
 
 func jsonCtx(body string) echo.Context {
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	return echo.New().NewContext(req, httptest.NewRecorder())
 }
@@ -200,7 +200,7 @@ func TestProviderOAuthCallbackStateErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			h := NewProviderOAuthHandler(providers.NewService(nil, &mcpErrQueries{oauthState: tc.err}, ""))
-			req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=c&state=s", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/callback?code=c&state=s", nil)
 			err := h.Callback(echo.New().NewContext(req, httptest.NewRecorder()))
 			code, _, fault := answered(t, err)
 			if code != tc.code || fault != tc.fault {

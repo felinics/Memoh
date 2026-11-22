@@ -335,7 +335,9 @@ func TestDirectChatWithoutCallerDeadlineUsesBoundedNonStreamingClient(t *testing
 	case <-fixture.started:
 	case <-time.After(time.Second):
 		cancel()
-		<-done
+		if err := <-done; err != nil {
+			t.Logf("Chat() after cancel: %v", err)
+		}
 		t.Fatal("provider did not receive synchronous Chat request")
 	}
 
@@ -349,7 +351,9 @@ func TestDirectChatWithoutCallerDeadlineUsesBoundedNonStreamingClient(t *testing
 		}
 	case <-time.After(500 * time.Millisecond):
 		cancel()
-		<-done
+		if err := <-done; err != nil {
+			t.Logf("Chat() after cancel: %v", err)
+		}
 		t.Fatal("Chat() remained blocked after the bounded response-header window")
 	}
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -39,7 +40,7 @@ func TestSupermarketSkillRoutesUseRegistryCatalogOnly(t *testing.T) {
 	e := echo.New()
 	handler.Register(e)
 
-	req := httptest.NewRequest(http.MethodGet, "/supermarket/skills?registry=memoh&limit=50", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/supermarket/skills?registry=memoh&limit=50", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -74,7 +75,7 @@ func TestSupermarketAppRoutesUseAppCatalog(t *testing.T) {
 		{"/supermarket/registries/memoh/apps/web-tools", "/api/registries/memoh/apps/web-tools"},
 	}
 	for _, test := range tests {
-		req := httptest.NewRequest(http.MethodGet, test.path, nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, test.path, nil)
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -107,7 +108,7 @@ func TestGetRegistryAppReleaseReturnsPinnedDescriptor(t *testing.T) {
 	}
 	e := echo.New()
 	handler.Register(e)
-	req := httptest.NewRequest(http.MethodGet, "/supermarket/registries/registry/apps/app/releases/"+revision, nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/supermarket/registries/registry/apps/app/releases/"+revision, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -139,7 +140,7 @@ func TestProxySkillIconVerifiesDigestAndHeaders(t *testing.T) {
 		})}),
 	}
 	e := echo.New()
-	request := httptest.NewRequest(http.MethodGet, "/supermarket/artifacts/icon/"+digestText, nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/supermarket/artifacts/icon/"+digestText, nil)
 	recorder := httptest.NewRecorder()
 	if err := handler.proxySkillIcon(e.NewContext(request, recorder), digestText); err != nil {
 		t.Fatalf("proxySkillIcon() error = %v", err)
@@ -180,7 +181,7 @@ func TestProxySkillIconOverridesUpstreamSecurityHeaders(t *testing.T) {
 		})}),
 	}
 	e := echo.New()
-	request := httptest.NewRequest(http.MethodGet, "/supermarket/artifacts/icon/"+digestText, nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/supermarket/artifacts/icon/"+digestText, nil)
 	recorder := httptest.NewRecorder()
 	if err := handler.proxySkillIcon(e.NewContext(request, recorder), digestText); err != nil {
 		t.Fatalf("proxySkillIcon() error = %v", err)
@@ -291,7 +292,7 @@ func TestSupermarketProxyAnswersUpstreamErrorsAsProblem(t *testing.T) {
 				"/supermarket/artifacts/icon/" + strings.Repeat("a", sha256.Size*2),
 			} {
 				rec := httptest.NewRecorder()
-				e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				e.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
 				if rec.Code != tc.status {
 					t.Fatalf("GET %s status = %d, want %d: %s", path, rec.Code, tc.status, rec.Body.String())
 				}

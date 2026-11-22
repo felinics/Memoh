@@ -38,7 +38,7 @@ RUN chmod 0755 /opt/memoh/toolkit/display/bin/a11y-cli
 # Only the live ACP integration-test target needs a bridge baked into the
 # image. Production workspace containers receive the current bridge from the
 # Server as a read-only file mount.
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS bridge-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine AS bridge-builder
 ARG TARGETARCH
 WORKDIR /build
 RUN apk add --no-cache git

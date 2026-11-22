@@ -53,14 +53,14 @@ func TestSessionQueueReorderRequestsDecodeTypedReferences(t *testing.T) {
 	body := []byte(`{"item":{"item_id":"` + itemID + `"},"before":{"item_id":"` + beforeID + `"}}`)
 
 	e := echo.New()
-	steerContext := e.NewContext(httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(body)), httptest.NewRecorder())
+	steerContext := e.NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/", bytes.NewReader(body)), httptest.NewRecorder())
 	steerContext.Request().Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	steer, err := decodeSteerReorderRequest(steerContext)
 	if err != nil || steer.Item.ItemID != sessionruntime.SteerItemID(itemID) || steer.Before.ItemID != sessionruntime.SteerItemID(beforeID) {
 		t.Fatalf("steer reorder request = %#v, %v", steer, err)
 	}
 
-	followContext := e.NewContext(httptest.NewRequest(http.MethodPut, "/", bytes.NewReader(body)), httptest.NewRecorder())
+	followContext := e.NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/", bytes.NewReader(body)), httptest.NewRecorder())
 	followContext.Request().Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	follow, err := decodeFollowUpReorderRequest(followContext)
 	if err != nil || follow.Item.ItemID != sessionruntime.FollowUpItemID(itemID) || follow.Before.ItemID != sessionruntime.FollowUpItemID(beforeID) {
@@ -128,7 +128,7 @@ func TestSessionQueueAuthorizeSeparatesAMissingSessionFromAFailedLookup(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			h := &SessionQueueHandler{queries: tc.queries, agentService: &application.Service{}}
 			e := echo.New()
-			c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder(), "user-1")
+			c := testAuthContext(e, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), httptest.NewRecorder(), "user-1")
 			c.SetParamNames("bot_id", "session_id")
 			c.SetParamValues(botID, sessionID)
 

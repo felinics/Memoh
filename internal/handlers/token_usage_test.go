@@ -89,7 +89,7 @@ func TestGetTokenUsageSeparatesACPAgentBucket(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/token-usage?from=2026-05-01&to=2026-05-02&session_type=acp_agent", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/token-usage?from=2026-05-01&to=2026-05-02&session_type=acp_agent", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/token-usage")
@@ -134,7 +134,7 @@ func TestListTokenUsageRecordsAllowsACPAgentFilter(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/token-usage/records?from=2026-05-01&to=2026-05-02&session_type=acp_agent", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/token-usage/records?from=2026-05-01&to=2026-05-02&session_type=acp_agent", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/token-usage/records")
@@ -176,7 +176,7 @@ func TestListTokenUsageRecordsAllowsDiscussFilter(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/token-usage/records?from=2026-05-01&to=2026-05-02&session_type=discuss", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/token-usage/records?from=2026-05-01&to=2026-05-02&session_type=discuss", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/token-usage/records")
@@ -202,7 +202,7 @@ func TestListTokenUsageRecordsRejectsUnknownSessionType(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/token-usage/records?from=2026-05-01&to=2026-05-02&session_type=conversation", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/token-usage/records?from=2026-05-01&to=2026-05-02&session_type=conversation", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/token-usage/records")

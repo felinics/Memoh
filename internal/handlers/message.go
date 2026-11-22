@@ -621,8 +621,9 @@ func mergeToolApprovals(turns []chatview.UITurn, approvals []toolapproval.Reques
 		if turns[turnIdx].Role != "assistant" {
 			continue
 		}
-		for msgIdx := range turns[turnIdx].Messages {
-			msg := &turns[turnIdx].Messages[msgIdx]
+		messages := turns[turnIdx].Messages
+		for msgIdx := range messages {
+			msg := &messages[msgIdx]
 			if msg.Type != chatview.UIMessageTool {
 				continue
 			}
@@ -679,8 +680,9 @@ func mergeUserInputs(turns []chatview.UITurn, requests []userinput.Request, canR
 		if turns[turnIdx].Role != "assistant" {
 			continue
 		}
-		for msgIdx := range turns[turnIdx].Messages {
-			msg := &turns[turnIdx].Messages[msgIdx]
+		messages := turns[turnIdx].Messages
+		for msgIdx := range messages {
+			msg := &messages[msgIdx]
 			if msg.Type != chatview.UIMessageTool {
 				continue
 			}

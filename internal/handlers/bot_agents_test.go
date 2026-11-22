@@ -146,7 +146,7 @@ func botAgentsRequest(t *testing.T, method, path, body string) (echo.Context, *h
 	} else {
 		reader = bytes.NewReader(nil)
 	}
-	req := httptest.NewRequest(method, path, reader)
+	req := httptest.NewRequestWithContext(context.Background(), method, path, reader)
 	if body != "" {
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	}

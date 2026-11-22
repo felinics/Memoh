@@ -56,7 +56,7 @@ func TestGetChannelIdentityConfigStatusFollowsSentinel(t *testing.T) {
 			h := NewChannelHandler(channel.NewStore(bindingQueries{err: tc.err}, registry), registry)
 			e := echo.New()
 			rec := httptest.NewRecorder()
-			c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/", nil), rec, uuid.NewString())
+			c := testAuthContext(e, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), rec, uuid.NewString())
 			c.SetParamNames("platform")
 			c.SetParamValues(string(sentinelTestChannelType))
 			assertSentinelStatus(t, h.GetChannelIdentityConfig(c), tc.err, tc.want)
@@ -116,7 +116,7 @@ func TestProviderAndModelHandlersRejectInvalidInputWith400(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := echo.New()
-			c := e.NewContext(httptest.NewRequest(http.MethodGet, tc.target, nil), httptest.NewRecorder())
+			c := e.NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodGet, tc.target, nil), httptest.NewRecorder())
 			c.SetParamNames("id")
 			c.SetParamValues(tc.id)
 			err := tc.call(c)

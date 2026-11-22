@@ -43,7 +43,7 @@ func signedPlainRequest(t *testing.T, body string) *http.Request {
 	q.Set("timestamp", "1700000000")
 	q.Set("nonce", "nonce-1")
 	q.Set("signature", verifier.sign("1700000000", "nonce-1"))
-	return httptest.NewRequest(http.MethodPost, "/channels/wechatoa/webhook/cfg-1?"+q.Encode(), strings.NewReader(body))
+	return httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/wechatoa/webhook/cfg-1?"+q.Encode(), strings.NewReader(body))
 }
 
 const testWechatTextXML = `<xml><ToUserName>gh_app</ToUserName><FromUserName>open-1</FromUserName><CreateTime>1700000000</CreateTime><MsgType>text</MsgType><Content>hello</Content><MsgId>1</MsgId></xml>`
@@ -94,7 +94,7 @@ func TestHandleWebhookInvalidXMLKeepsCause(t *testing.T) {
 func TestHandleWebhookUndecodableInboundReturnsForbiddenWithCause(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest(http.MethodPost, "/channels/wechatoa/webhook/cfg-1?timestamp=1700000000&nonce=nonce-1&signature=forged", strings.NewReader(testWechatTextXML))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/channels/wechatoa/webhook/cfg-1?timestamp=1700000000&nonce=nonce-1&signature=forged", strings.NewReader(testWechatTextXML))
 	rec := httptest.NewRecorder()
 	err := NewWeChatOAAdapter(slog.New(slog.DiscardHandler)).HandleWebhook(context.Background(), plainWechatConfig(), nil, req, rec)
 
@@ -126,7 +126,7 @@ func TestHandleWebhookVerifyRejectionReturnsTheAnswerItWrote(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest(http.MethodGet, "/channels/wechatoa/webhook/cfg-1?"+tc.query, nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/channels/wechatoa/webhook/cfg-1?"+tc.query, nil)
 			rec := httptest.NewRecorder()
 			err := NewWeChatOAAdapter(slog.New(slog.DiscardHandler)).HandleWebhook(context.Background(), plainWechatConfig(), nil, req, rec)
 

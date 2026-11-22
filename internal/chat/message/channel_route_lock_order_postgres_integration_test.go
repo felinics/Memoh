@@ -216,7 +216,10 @@ func assertDeleteAndRouteDeleteShareLockOrder(
 		_ = botTx.Rollback(ctx)
 		botOpen = false
 		select {
-		case <-routeDeleted:
+		case err := <-routeDeleted:
+			if err != nil {
+				t.Logf("route deletion during failed order probe cleanup: %v", err)
+			}
 		case <-time.After(3 * time.Second):
 			t.Fatal("route deletion did not resume during failed order probe cleanup")
 		}

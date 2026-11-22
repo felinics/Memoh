@@ -29,8 +29,9 @@ func ApplyToolApprovals(turns []UITurn, approvals []toolapproval.Request, canApp
 		if turns[turnIdx].Role != "assistant" {
 			continue
 		}
-		for msgIdx := range turns[turnIdx].Messages {
-			msg := &turns[turnIdx].Messages[msgIdx]
+		messages := turns[turnIdx].Messages
+		for msgIdx := range messages {
+			msg := &messages[msgIdx]
 			if msg.Type != UIMessageTool {
 				continue
 			}
@@ -85,8 +86,9 @@ func ApplyUserInputs(turns []UITurn, requests []userinput.Request, canRespondFn 
 		if turns[turnIdx].Role != "assistant" {
 			continue
 		}
-		for msgIdx := range turns[turnIdx].Messages {
-			msg := &turns[turnIdx].Messages[msgIdx]
+		messages := turns[turnIdx].Messages
+		for msgIdx := range messages {
+			msg := &messages[msgIdx]
 			if msg.Type != UIMessageTool {
 				continue
 			}

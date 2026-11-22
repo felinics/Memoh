@@ -169,7 +169,7 @@ func newOAuthChain(t *testing.T) oauthChain {
 func (c oauthChain) post(t *testing.T, path, body string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	c.logs.Reset()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c.echo.ServeHTTP(rec, req)

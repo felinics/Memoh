@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +24,7 @@ func requireFieldError(t *testing.T, err error, code apperror.Code, field string
 }
 
 func fieldErrorContext(method, body string, user string, params map[string]string) echo.Context {
-	req := httptest.NewRequest(method, "/", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), method, "/", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	ctx := testAuthContext(echo.New(), req, httptest.NewRecorder(), user)
 	names := make([]string, 0, len(params))

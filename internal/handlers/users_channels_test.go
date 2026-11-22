@@ -95,7 +95,7 @@ func TestListBotChannelConfigs(t *testing.T) {
 		h := newBotChannelsTestHandler(&botChannelsTestQueries{bot: &botRow}, "user")
 		e := echo.New()
 		rec := httptest.NewRecorder()
-		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/channels", nil), rec)
+		c := e.NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/channels", nil), rec)
 		c.SetParamNames("id")
 		c.SetParamValues(botID)
 
@@ -112,7 +112,7 @@ func TestListBotChannelConfigs(t *testing.T) {
 		h := newBotChannelsTestHandler(&botChannelsTestQueries{bot: nil}, "admin")
 		e := echo.New()
 		rec := httptest.NewRecorder()
-		c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/channels", nil), rec, ownerID)
+		c := testAuthContext(e, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/channels", nil), rec, ownerID)
 		c.SetParamNames("id")
 		c.SetParamValues(botID)
 
@@ -125,7 +125,7 @@ func TestListBotChannelConfigs(t *testing.T) {
 		h := newBotChannelsTestHandler(&botChannelsTestQueries{bot: &botRow}, "user")
 		e := echo.New()
 		rec := httptest.NewRecorder()
-		c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/channels", nil), rec, otherUserID)
+		c := testAuthContext(e, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/channels", nil), rec, otherUserID)
 		c.SetParamNames("id")
 		c.SetParamValues(botID)
 
@@ -138,7 +138,7 @@ func TestListBotChannelConfigs(t *testing.T) {
 		h := newBotChannelsTestHandler(&botChannelsTestQueries{bot: &botRow}, "user")
 		e := echo.New()
 		rec := httptest.NewRecorder()
-		c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/channels", nil), rec, ownerID)
+		c := testAuthContext(e, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/channels", nil), rec, ownerID)
 		c.SetParamNames("id")
 		c.SetParamValues(botID)
 
@@ -173,7 +173,7 @@ func TestListBotChannelConfigs(t *testing.T) {
 		}, "user")
 		e := echo.New()
 		rec := httptest.NewRecorder()
-		c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/channels", nil), rec, ownerID)
+		c := testAuthContext(e, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+botID+"/channels", nil), rec, ownerID)
 		c.SetParamNames("id")
 		c.SetParamValues(botID)
 

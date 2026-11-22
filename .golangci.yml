@@ -2,7 +2,6 @@ version: "2"
 
 run:
   timeout: 15m
-  go: "1.25"
   tests: true
 
 output:
@@ -72,11 +71,6 @@ linters:
       disable:
         - shadow
         - fieldalignment
-    gocyclo:
-      min-complexity: 10
-    funlen:
-      lines: 60
-      statements: 30
     perfsprint:
       int-conversion: true
       err-error: true

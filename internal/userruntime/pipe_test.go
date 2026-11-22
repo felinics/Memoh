@@ -95,7 +95,10 @@ func TestDirectPipeWebSocketRoundTripAndDisconnect(t *testing.T) {
 		grpcServer.Stop()
 		_ = listener.Close()
 		select {
-		case <-serveDone:
+		case err := <-serveDone:
+			if err != nil {
+				t.Logf("gRPC server stopped: %v", err)
+			}
 		case <-time.After(time.Second):
 			t.Error("gRPC server did not stop")
 		}

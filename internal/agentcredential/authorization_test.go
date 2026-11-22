@@ -31,8 +31,11 @@ func (q *authorizationQueries) InTx(_ context.Context, fn func(dbstore.Queries) 
 	defer q.mu.Unlock()
 	return fn(q)
 }
+
 func (*authorizationQueries) LockAgentAuthorizationOwner(context.Context, string) error { return nil }
-func (*authorizationQueries) PruneAgentAuthorizations(context.Context) error            { return nil }
+
+func (*authorizationQueries) PruneAgentAuthorizations(context.Context) error { return nil }
+
 func (*authorizationQueries) CountAgentAuthorizations(context.Context, pgtype.UUID) (int64, error) {
 	return 0, nil
 }

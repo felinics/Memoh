@@ -79,7 +79,7 @@ func TestGetSessionInfoDropsThePlanWhenASameNamedModelHasASmallerWindow(t *testi
 	logger := slog.New(slog.DiscardHandler)
 	handler := NewSessionInfoHandler(logger, queries, bots.NewService(logger, queries), newTestAdminAccountService("admin"), models.NewService(logger, queries), settings.NewService(logger, queries, nil, nil))
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status?model_id="+modelB.String(), nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status?model_id="+modelB.String(), nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
 	ctx.SetPath("/bots/:bot_id/sessions/:session_id/status")

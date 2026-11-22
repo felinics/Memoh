@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 func TestRequestFieldErrors(t *testing.T) {
 	jsonBody := func(s string) *http.Request {
-		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(s))
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", strings.NewReader(s))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		return req
 	}
@@ -25,14 +26,14 @@ func TestRequestFieldErrors(t *testing.T) {
 		code   apperror.Code
 		field  string
 	}{
-		{"video path id", httptest.NewRequest(http.MethodGet, "/", nil), map[string]string{"id": " "}, (&VideoHandler{}).GetProvider, apperror.CodeRequestFieldRequired, "id"},
+		{"video path id", httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), map[string]string{"id": " "}, (&VideoHandler{}).GetProvider, apperror.CodeRequestFieldRequired, "id"},
 		{"search provider name", jsonBody(`{"provider":"brave"}`), nil, (&SearchProvidersHandler{}).Create, apperror.CodeRequestFieldRequired, "name"},
 		{"fetch provider provider", jsonBody(`{"name":"a"}`), nil, (&FetchProvidersHandler{}).Create, apperror.CodeRequestFieldRequired, "provider"},
 		{"tts bot id", jsonBody(`{}`), nil, (&BotAudioHandler{}).Synthesize, apperror.CodeRequestFieldRequired, "bot_id"},
 		{"tts text", jsonBody(`{}`), map[string]string{"bot_id": "bot"}, (&BotAudioHandler{}).Synthesize, apperror.CodeRequestFieldRequired, "text"},
-		{"oauth callback code", httptest.NewRequest(http.MethodGet, "/?state=s", nil), nil, (&ProviderOAuthHandler{}).Callback, apperror.CodeRequestFieldRequired, "code"},
-		{"oauth callback state", httptest.NewRequest(http.MethodGet, "/?code=c", nil), nil, (&ProviderOAuthHandler{}).Callback, apperror.CodeRequestFieldRequired, "state"},
-		{"supermarket icon digest", httptest.NewRequest(http.MethodGet, "/", nil), map[string]string{"digest": "short"}, (&SupermarketHandler{}).GetRegistrySkillIcon, apperror.CodeRequestFieldInvalid, "digest"},
+		{"oauth callback code", httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/?state=s", nil), nil, (&ProviderOAuthHandler{}).Callback, apperror.CodeRequestFieldRequired, "code"},
+		{"oauth callback state", httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/?code=c", nil), nil, (&ProviderOAuthHandler{}).Callback, apperror.CodeRequestFieldRequired, "state"},
+		{"supermarket icon digest", httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), map[string]string{"digest": "short"}, (&SupermarketHandler{}).GetRegistrySkillIcon, apperror.CodeRequestFieldInvalid, "digest"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

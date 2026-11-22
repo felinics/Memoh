@@ -20,8 +20,9 @@ func ApplyBackgroundTaskSnapshots(turns []UITurn, tasks []UIBackgroundTask) {
 		if turns[turnIdx].Role != "assistant" {
 			continue
 		}
-		for messageIdx := range turns[turnIdx].Messages {
-			message := &turns[turnIdx].Messages[messageIdx]
+		messages := turns[turnIdx].Messages
+		for messageIdx := range messages {
+			message := &messages[messageIdx]
 			if message.Type != UIMessageTool || message.Background == nil {
 				continue
 			}

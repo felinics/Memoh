@@ -150,7 +150,7 @@ func TestProviderModelListIncludesResolvedReasoning(t *testing.T) {
 		models.NewService(slog.Default(), queries), nil,
 	)
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/providers/"+providerID+"/models", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/providers/"+providerID+"/models", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPath("/providers/:id/models")

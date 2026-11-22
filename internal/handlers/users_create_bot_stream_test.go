@@ -43,7 +43,7 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 		workspaceSetup: &createBotStreamWorkspace{},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{
 		"name": "stream-bot",
 		"display_name": "Stream Bot",
 		"acl_preset": "allow_all",
@@ -101,7 +101,7 @@ func TestCreateBotStreamRequiresWorkspaceLifecycle(t *testing.T) {
 		}))),
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{
 		"name": "misconfigured-bot",
 		"display_name": "Misconfigured Bot",
 		"acl_preset": "allow_all",
@@ -148,7 +148,7 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 		}},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{
 		"name": "progress-bot",
 		"display_name": "Progress Bot",
 		"acl_preset": "allow_all",
@@ -211,7 +211,7 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 		workspaceSetup: &createBotStreamWorkspace{err: errors.New("image pull failed")},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{
 		"name": "setup-failed-bot",
 		"display_name": "Setup Failed Bot",
 		"acl_preset": "allow_all",
@@ -264,7 +264,7 @@ func TestCreateBotStreamReportsStableBootstrapError(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{
 		"name": "bootstrap-failed-bot",
 		"display_name": "Bootstrap Failed Bot",
 		"acl_preset": "allow_all",
@@ -340,7 +340,7 @@ func TestGetMeReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {
 		service: accounts.NewService(nil, createBotMissingAccountStore{}),
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/users/me", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/users/me", nil)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
@@ -362,7 +362,7 @@ func TestCreateBotStreamReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) 
 		botService: bots.NewService(nil, nil),
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{
 		"name": "stale-token-bot",
 		"display_name": "Stale Token Bot",
 		"acl_preset": "allow_all",

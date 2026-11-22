@@ -3,7 +3,7 @@
 # Dev server image: Go + containerd + CNI. Workspace tools come exclusively
 # from the image built by docker/Dockerfile.workspace.
 
-FROM golang:1.26.10-alpine
+FROM golang:1.27.4-alpine
 
 WORKDIR /workspace
 

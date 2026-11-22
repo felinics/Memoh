@@ -41,7 +41,7 @@ func serveQR(t *testing.T, lifecycle *channel.Lifecycle, upstream roundTripFunc,
 	e.HTTPErrorHandler = server.NewHTTPErrorHandler(log)
 	e.Use(server.AccessLog(log))
 	h.Register(e)
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)

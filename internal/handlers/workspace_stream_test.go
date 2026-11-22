@@ -115,7 +115,7 @@ func callCreateContainer(t *testing.T, handler *ContainerdHandler, ownerID, botI
 }
 
 func createContainerContext(ownerID, botID, body string) (echo.Context, *httptest.ResponseRecorder) {
-	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/container", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/"+botID+"/container", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)

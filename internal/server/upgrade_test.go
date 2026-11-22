@@ -165,7 +165,7 @@ func (b *syncLogBuffer) statusesByURI() map[string][]int {
 // been written and send the client nothing.
 func TestFailedHijackLeavesTheResponseUnwritten(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
 	c := e.NewContext(req, httptest.NewRecorder())

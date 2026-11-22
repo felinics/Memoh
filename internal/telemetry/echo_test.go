@@ -66,7 +66,7 @@ func TestEchoServerNamesTheSpanAfterTheRouteNotThePath(t *testing.T) {
 	// the span after the concrete path makes each bot its own operation,
 	// which no backend can aggregate and every backend has to index.
 	recorder := recordSpans(t)
-	serve(t, httptest.NewRequest(http.MethodGet, "/bots/bot-1", nil), func(c echo.Context) error {
+	serve(t, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/bot-1", nil), func(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
 
@@ -86,7 +86,7 @@ func TestEchoServerContinuesAnIncomingTrace(t *testing.T) {
 	// The reason propagation exists: a request that already belongs to a
 	// trace must extend it, not start a second one that nothing links to.
 	recorder := recordSpans(t)
-	req := httptest.NewRequest(http.MethodGet, "/bots/bot-1", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/bot-1", nil)
 	req.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 	serve(t, req, func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
@@ -106,7 +106,7 @@ func TestEchoServerPutsTheRequestIDOnTheSpan(t *testing.T) {
 	// The identifier a user quotes has to reach the trace backend, or a
 	// support report can be found in logs and nowhere else.
 	recorder := recordSpans(t)
-	rec := serve(t, httptest.NewRequest(http.MethodGet, "/bots/bot-1", nil), func(c echo.Context) error {
+	rec := serve(t, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/bot-1", nil), func(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
 
@@ -124,7 +124,7 @@ func TestEchoServerKeepsTheQueryOutOfTheSpan(t *testing.T) {
 	// Span attributes are subject to the same rule as log records: a query
 	// string can carry an authorising token.
 	recorder := recordSpans(t)
-	serve(t, httptest.NewRequest(http.MethodGet, "/bots/bot-1?token=synthetic-secret", nil), func(c echo.Context) error {
+	serve(t, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/bot-1?token=synthetic-secret", nil), func(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
 
@@ -243,7 +243,7 @@ func TestEchoServerRecordsDurationByRouteNotPath(t *testing.T) {
 	// concrete path would make every bot a series of its own, and the other
 	// per-request values would do the same.
 	reader := recordMetrics(t)
-	req := httptest.NewRequest(http.MethodGet, "/bots/bot-1?token=synthetic-secret", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/bot-1?token=synthetic-secret", nil)
 	req.Host = "attacker-chosen.example"
 	serve(t, req, func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
@@ -273,7 +273,7 @@ func TestEchoServerFoldsUnknownMethods(t *testing.T) {
 	// The method is whatever the caller sent; left as is, each spelling is a
 	// series.
 	reader := recordMetrics(t)
-	serve(t, httptest.NewRequest("PURGE", "/bots/bot-1", nil), func(c echo.Context) error {
+	serve(t, httptest.NewRequestWithContext(context.Background(), "PURGE", "/bots/bot-1", nil), func(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
 
@@ -303,7 +303,7 @@ func TestEchoServerRecordsTheStatusTheClientReceived(t *testing.T) {
 			if handler == nil {
 				handler = func(c echo.Context) error { return c.NoContent(http.StatusNoContent) }
 			}
-			rec := serve(t, httptest.NewRequest(http.MethodGet, tc.path, nil), handler)
+			rec := serve(t, httptest.NewRequestWithContext(context.Background(), http.MethodGet, tc.path, nil), handler)
 			if rec.Code != tc.want {
 				t.Fatalf("response status = %d, want %d", rec.Code, tc.want)
 			}
@@ -323,11 +323,11 @@ func TestEchoServerRecordsNoDurationForUpgradesOrProbes(t *testing.T) {
 	// The same exceptions as the span. A WebSocket's duration is the life of
 	// the connection, and a probe's is the same number every few seconds.
 	reader := recordMetrics(t)
-	upgrade := httptest.NewRequest(http.MethodGet, "/bots/bot-1", nil)
+	upgrade := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/bot-1", nil)
 	upgrade.Header.Set("Connection", "Upgrade")
 	upgrade.Header.Set("Upgrade", "websocket")
 	serve(t, upgrade, func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	serve(t, httptest.NewRequest(http.MethodHead, "/health", nil), func(c echo.Context) error {
+	serve(t, httptest.NewRequestWithContext(context.Background(), http.MethodHead, "/health", nil), func(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
 
@@ -351,7 +351,7 @@ func TestEchoServerLabelsEventStreams(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			reader := recordMetrics(t)
 			recorder := recordSpans(t)
-			serve(t, httptest.NewRequest(http.MethodGet, "/bots/bot-1", nil), func(c echo.Context) error {
+			serve(t, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/bot-1", nil), func(c echo.Context) error {
 				c.Response().Header().Set(echo.HeaderContentType, tc.contentType)
 				c.Response().WriteHeader(http.StatusOK)
 				_, err := c.Response().Write([]byte("data: {}\n\n"))

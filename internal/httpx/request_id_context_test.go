@@ -2,6 +2,7 @@ package httpx_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -36,7 +37,7 @@ func TestRequestIDReachesWhatAHandlerLogs(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/probe", nil))
+	e.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/probe", nil))
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
@@ -79,7 +80,7 @@ func TestRequestIDContextPrefersTheAssignedIDOverAClientHeader(t *testing.T) {
 		return c.NoContent(http.StatusNoContent)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/probe", nil)
 	req.Header.Set(echo.HeaderXRequestID, clientSupplied)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -111,7 +112,7 @@ func TestRequestIDContextIsAbsentWithoutTheAssigningMiddleware(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/probe", nil))
+	e.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/probe", nil))
 
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &payload); err != nil {

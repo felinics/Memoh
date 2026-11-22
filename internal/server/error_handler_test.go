@@ -176,7 +176,7 @@ func TestBoundaryAnswersEveryErrorWithAProblem(t *testing.T) {
 			if tc.body != "" {
 				body = strings.NewReader(tc.body)
 			}
-			res := serveBoundary(t, tc.err, httptest.NewRequest(method, tc.path, body))
+			res := serveBoundary(t, tc.err, httptest.NewRequestWithContext(context.Background(), method, tc.path, body))
 
 			if res.rec.Code != tc.status {
 				t.Fatalf("status = %d, want %d: %s", res.rec.Code, tc.status, res.rec.Body.String())
@@ -212,7 +212,7 @@ func TestBoundaryAnswersEveryErrorWithAProblem(t *testing.T) {
 func TestBoundaryAnswersACanceledRequestAsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	res := serveBoundary(t, context.Canceled, httptest.NewRequest(http.MethodGet, "/probe", nil).WithContext(ctx))
+	res := serveBoundary(t, context.Canceled, httptest.NewRequestWithContext(ctx, http.MethodGet, "/probe", nil))
 
 	if res.rec.Code != 499 {
 		t.Fatalf("status = %d, want 499", res.rec.Code)
@@ -228,7 +228,7 @@ func TestBoundaryAnswersACanceledRequestAsCanceled(t *testing.T) {
 }
 
 func TestBoundaryWritesNoBodyForHead(t *testing.T) {
-	res := serveBoundary(t, errors.New("synthetic failure"), httptest.NewRequest(http.MethodHead, "/probe", nil))
+	res := serveBoundary(t, errors.New("synthetic failure"), httptest.NewRequestWithContext(context.Background(), http.MethodHead, "/probe", nil))
 
 	if res.rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d", res.rec.Code)
@@ -245,7 +245,7 @@ func TestBoundaryWritesNoBodyForHead(t *testing.T) {
 }
 
 func TestBoundaryRecordsThePanicWithItsStack(t *testing.T) {
-	res := serveBoundary(t, nil, httptest.NewRequest(http.MethodGet, "/panic", nil))
+	res := serveBoundary(t, nil, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/panic", nil))
 
 	record := res.request(t)
 	if record["panic"] != true {
@@ -261,7 +261,7 @@ func TestBoundaryRecordsThePanicWithItsStack(t *testing.T) {
 }
 
 func TestBoundaryRecordsAServerStatusWrittenWithoutAnError(t *testing.T) {
-	res := serveBoundary(t, nil, httptest.NewRequest(http.MethodGet, "/written", nil))
+	res := serveBoundary(t, nil, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/written", nil))
 
 	record := res.request(t)
 	if record["level"] != "ERROR" || record["fault"] != string(apperror.FaultServer) {
@@ -279,7 +279,7 @@ func TestBoundaryPutsTheTraceOnTheProblemAndTheSpan(t *testing.T) {
 		{"server", errors.New("synthetic failure"), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res := serveBoundary(t, tc.err, httptest.NewRequest(http.MethodGet, "/probe", nil))
+			res := serveBoundary(t, tc.err, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/probe", nil))
 
 			if len(res.spans) != 1 {
 				t.Fatalf("spans = %d, want 1", len(res.spans))
@@ -303,7 +303,7 @@ func TestBoundaryPutsTheTraceOnTheProblemAndTheSpan(t *testing.T) {
 }
 
 func TestBoundaryWritesNoErrorFieldsForASuccess(t *testing.T) {
-	res := serveBoundary(t, nil, httptest.NewRequest(http.MethodGet, "/probe", nil))
+	res := serveBoundary(t, nil, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/probe", nil))
 
 	record := res.request(t)
 	if record["level"] != "INFO" {
@@ -329,7 +329,7 @@ func TestBoundaryAnswersABindingTypeErrorWithItsField(t *testing.T) {
 		"malformed JSON": {`{"count":`, apperror.CodeHTTPBadRequest, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/bind", strings.NewReader(tc.body))
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bind", strings.NewReader(tc.body))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			res := serveBoundary(t, nil, req)
 			if res.rec.Code != http.StatusBadRequest {

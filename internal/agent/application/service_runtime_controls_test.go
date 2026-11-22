@@ -28,8 +28,10 @@ type controlQueries struct {
 	stale  bool
 }
 
-func (*controlQueries) SupportsTransactions() bool                                     { return true }
+func (*controlQueries) SupportsTransactions() bool { return true }
+
 func (q *controlQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error { return fn(q) }
+
 func (*controlQueries) LockBotForSessionWrite(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	return id, nil
 }

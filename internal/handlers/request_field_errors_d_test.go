@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +22,7 @@ func problemOf(t *testing.T, err error) server.Problem {
 	t.Helper()
 	e := echo.New()
 	rec := httptest.NewRecorder()
-	server.NewHTTPErrorHandler(slog.New(slog.DiscardHandler))(err, e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec))
+	server.NewHTTPErrorHandler(slog.New(slog.DiscardHandler))(err, e.NewContext(httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil), rec))
 	var p server.Problem
 	if jsonErr := json.Unmarshal(rec.Body.Bytes(), &p); jsonErr != nil {
 		t.Fatalf("decode problem: %v", jsonErr)

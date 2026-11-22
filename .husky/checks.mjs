@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { dirname, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -169,6 +170,16 @@ async function main() {
   console.log(`[hooks] Total: ${((performance.now() - started) / 1000).toFixed(2)}s`)
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Node reports this module by its real path, while argv[1] is the path the
+// caller used. Compare real paths, or a checkout reached through a symlink
+// (macOS /tmp, a linked worktree directory) imports the module, runs nothing
+// and exits 0.
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)) }
+  catch { return false }
+}
+
+if (isEntryPoint()) {
   main().catch(error => { console.error(`[hooks] ${error.message}`); process.exitCode = 1 })
 }

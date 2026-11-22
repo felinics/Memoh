@@ -40,7 +40,7 @@ func serveJSONProblem(t *testing.T, register func(*echo.Echo), target, body stri
 	e := echo.New()
 	e.HTTPErrorHandler = server.NewHTTPErrorHandler(slog.New(slog.DiscardHandler))
 	register(e)
-	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, target, strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)

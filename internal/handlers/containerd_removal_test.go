@@ -37,7 +37,7 @@ func TestDeleteContainerAnswersAtOnceAndGetReportsTheRemoval(t *testing.T) {
 	call := func(method, target string, fn echo.HandlerFunc) *httptest.ResponseRecorder {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		ctx := testAuthContext(echo.New(), httptest.NewRequest(method, target, nil), rec, ownerID)
+		ctx := testAuthContext(echo.New(), httptest.NewRequestWithContext(context.Background(), method, target, nil), rec, ownerID)
 		ctx.SetParamNames("bot_id")
 		ctx.SetParamValues(botID)
 		if err := fn(ctx); err != nil {

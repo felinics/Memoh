@@ -90,7 +90,7 @@ func attentionTestHandler(creator string) (*MessageHandler, *messageevent.Hub, *
 }
 
 func readStateRequest(userID, body string) (echo.Context, *httptest.ResponseRecorder) {
-	req := httptest.NewRequest(http.MethodPut, "/users/me/read-state", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/users/me/read-state", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	return testAuthContext(echo.New(), req, rec, userID), rec
@@ -141,7 +141,7 @@ func TestSetReadStateRequiresThroughToRead(t *testing.T) {
 func TestUnreadListDropsBotsWithoutAccess(t *testing.T) {
 	h, _, svc := attentionTestHandler(attentionOutsiderID)
 	svc.unread = []attention.Attention{{BotID: activityTestBotID, SessionID: activityTestSessionID, Title: "t", Kind: attention.KindReply}}
-	req := httptest.NewRequest(http.MethodGet, "/users/me/unread", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/users/me/unread", nil)
 	rec := httptest.NewRecorder()
 
 	if err := h.ListUnreadSessions(testAuthContext(echo.New(), req, rec, attentionOutsiderID)); err != nil {
@@ -170,7 +170,7 @@ func streamAttention(t *testing.T, h *MessageHandler, hub *messageevent.Hub, use
 	defer cancel()
 	rec := &countingFlushRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel, stopAfter: frames}
 	h.messageEvents = publishOnSubscribe{hub: hub, publish: publish}
-	req := httptest.NewRequest(http.MethodGet, "/users/me/attention/events", nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/users/me/attention/events", nil)
 	if err := h.StreamAttentionEvents(testAuthContext(echo.New(), req, rec, userID)); err != nil {
 		t.Fatalf("StreamAttentionEvents: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestAttentionStreamStopsAfterAccessRevoked(t *testing.T) {
 		data, _ := json.Marshal(attention.Read{SessionID: activityTestSessionID, ReadAt: time.Now()})
 		hub.Publish(messageevent.Event{Type: messageevent.EventTypeSessionRead, BotID: messageevent.UserTopic(attentionOwnerID), Data: data})
 	}}
-	req := httptest.NewRequest(http.MethodGet, "/users/me/attention/events", nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/users/me/attention/events", nil)
 	if err := h.StreamAttentionEvents(testAuthContext(echo.New(), req, rec, attentionOwnerID)); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestListSessionsIncludesUnread(t *testing.T) {
 	}}
 	h := NewSessionHandler(slog.Default(), session.NewService(nil, queries, nil), nil, bots.NewService(nil, queries), newTestAdminAccountService("member"))
 	h.SetAttentionService(&fakeAttentionService{annotate: map[string]bool{activityTestSessionID: true}})
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+activityTestBotID+"/sessions", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/bots/"+activityTestBotID+"/sessions", nil)
 	rec := httptest.NewRecorder()
 	c := testAuthContext(echo.New(), req, rec, attentionOwnerID)
 	c.SetParamNames("bot_id")

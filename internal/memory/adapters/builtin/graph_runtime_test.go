@@ -591,6 +591,7 @@ func (errWikiStore) ListEdges(context.Context, string) ([]migrate.EdgeSpec, erro
 func (errWikiStore) DeleteEdgesForNode(context.Context, string, string) error { return nil }
 func (errWikiStore) DeleteAllEdges(context.Context, string) error             { return nil }
 func (errWikiStore) CountEdges(context.Context, string) (int, error)          { return 0, errForced }
+
 func (errWikiStore) RebuildDerivedEdges(context.Context, string) (int, error) {
 	return 0, errForced
 }
