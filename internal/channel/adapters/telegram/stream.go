@@ -823,7 +823,7 @@ func (s *telegramOutboundStream) pushFinalRich(ctx context.Context, msg channel.
 }
 
 func shouldUseTelegramFinalRichMessage(msg channel.Message) bool {
-	return len(msg.Parts) > 0 || renderTelegramMarkdownMathRichMessage(msg).hasContent()
+	return len(msg.Parts) > 0 || renderTelegramMarkdownRichMessage(msg).hasContent()
 }
 
 func (s *telegramOutboundStream) deliverLongPlainFallback(ctx context.Context, text string, actions []channel.Action) error {

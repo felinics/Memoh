@@ -35,7 +35,12 @@ func formatTelegramOutput(text string, format channel.MessageFormat) (string, st
 	return text, ""
 }
 
-func renderTelegramMarkdownMathRichMessage(msg channel.Message) telegramInputRichMessage {
+// renderTelegramMarkdownRichMessage returns a rich-message payload when a
+// plain/markdown message body needs Telegram's rich renderer instead of the
+// legacy HTML parse mode. That covers LaTeX math and Markdown tables: legacy
+// Telegram HTML has no table element, so a table sent through
+// markdownToTelegramHTML reaches the user as raw pipe-delimited rows.
+func renderTelegramMarkdownRichMessage(msg channel.Message) telegramInputRichMessage {
 	if len(msg.Parts) > 0 {
 		return telegramInputRichMessage{}
 	}
@@ -49,10 +54,69 @@ func renderTelegramMarkdownMathRichMessage(msg channel.Message) telegramInputRic
 		return telegramInputRichMessage{}
 	}
 	markdown = normalizeTelegramRichMarkdownMath(markdown)
-	if !telegramMarkdownHasMath(markdown) {
+	if !telegramMarkdownHasMath(markdown) && !telegramMarkdownHasTable(markdown) {
 		return telegramInputRichMessage{}
 	}
 	return telegramInputRichMessage{Markdown: markdown}
+}
+
+// telegramMarkdownHasTable reports whether text contains a Markdown table: a
+// header row immediately followed by a delimiter row of dashes and optional
+// alignment colons. Requiring the delimiter row keeps stray pipes in prose or
+// inline code from being mistaken for a table.
+func telegramMarkdownHasTable(text string) bool {
+	lines := strings.Split(text, "\n")
+	for i := 1; i < len(lines); i++ {
+		if isTelegramMarkdownTableDelimiterRow(lines[i]) && isTelegramMarkdownTableRow(lines[i-1]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTelegramMarkdownTableRow(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" || !strings.Contains(line, "|") {
+		return false
+	}
+	return len(splitTelegramMarkdownTableRow(line)) >= 2
+}
+
+func isTelegramMarkdownTableDelimiterRow(line string) bool {
+	line = strings.TrimSpace(line)
+	if !strings.Contains(line, "|") {
+		return false
+	}
+	cells := splitTelegramMarkdownTableRow(line)
+	if len(cells) < 2 {
+		return false
+	}
+	for _, cell := range cells {
+		cell = strings.TrimSpace(cell)
+		cell = strings.TrimPrefix(cell, ":")
+		cell = strings.TrimSuffix(cell, ":")
+		if cell == "" {
+			return false
+		}
+		for _, r := range cell {
+			if r != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func splitTelegramMarkdownTableRow(line string) []string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "|")
+	line = strings.TrimSuffix(line, "|")
+	parts := strings.Split(line, "|")
+	cells := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cells = append(cells, strings.TrimSpace(part))
+	}
+	return cells
 }
 
 func normalizeTelegramRichMarkdownMath(text string) string {

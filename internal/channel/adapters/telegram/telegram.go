@@ -1323,7 +1323,7 @@ func renderTelegramOutboundBody(msg channel.Message) (telegramInputRichMessage, 
 	text, parseMode := renderTelegramPartsFallbackText(msg)
 	rich := renderTelegramMessagePartsRichMessage(msg)
 	if !rich.hasContent() {
-		rich = renderTelegramMarkdownMathRichMessage(msg)
+		rich = renderTelegramMarkdownRichMessage(msg)
 	}
 	if !rich.hasContent() {
 		return telegramInputRichMessage{}, text, parseMode
