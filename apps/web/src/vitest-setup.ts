@@ -26,6 +26,22 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   })
 }
 
+// jsdom has no ResizeObserver. stream-diffs' renderer observes the code element
+// to size its columns, so code-block tests need a no-op implementation rather
+// than an exception from inside its render pass.
+if (typeof window !== 'undefined' && typeof globalThis.ResizeObserver !== 'function') {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    writable: true,
+    configurable: true,
+    value: ResizeObserverStub,
+  })
+}
+
 // Node 25 defines an unconfigured `{}` stub on globalThis.localStorage /
 // sessionStorage when --localstorage-file is unset, preventing Vitest from
 // populating global scope with jsdom's Storage instances; read them from jsdom's

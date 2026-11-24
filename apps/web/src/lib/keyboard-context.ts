@@ -12,7 +12,7 @@ export function isKeyboardElementVisible(element: HTMLElement, root: Document = 
 
 // Controls that take typed text (or keys) of their own: focus resting in one of
 // them belongs to that control, not to the chat composer.
-export const TEXT_INPUT_OWNER = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="listbox"], [role="menu"], [role="tree"], [role="grid"], [role="slider"], [role="spinbutton"], .monaco-editor, .cm-editor, .xterm'
+export const TEXT_INPUT_OWNER = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="listbox"], [role="menu"], [role="tree"], [role="grid"], [role="slider"], [role="spinbutton"], [data-code-surface], .cm-editor, .xterm'
 
 export function focusIsInTextInput(root: Document = document): boolean {
   return !!root.activeElement?.closest(TEXT_INPUT_OWNER)

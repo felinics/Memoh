@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, reactive, ref } from 'vue'
+import { createApp, h, nextTick, reactive } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ToolCallBlock } from '@/store/chat-list'
@@ -12,28 +12,34 @@ vi.mock('@/i18n', () => ({
   i18nRef: (key: string) => ({ value: key }),
 }))
 
-// The real composable needs a pinia settings store and the shiki bundle; the
-// DOM assertions only need the parsed diff rows, so feed the real parser's
-// output through with the raw text as the (unhighlighted) row html.
-vi.mock('@/composables/useShikiHighlighter', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/composables/useShikiHighlighter')>()
+// The code surfaces load stream-diffs from a dynamic import and need a real
+// layout engine; these tests only assert which text the disclosure reveals, so
+// render each surface's input as plain text instead.
+vi.mock('@/components/code-surface/CodeSurface.vue', async () => {
+  const vue = await import('vue')
   return {
-    ...actual,
-    useShikiHighlighter: () => {
-      const diffRows = ref<{ kind: string, lineNumber: number, html: string }[]>([])
-      return {
-        loading: ref(false),
-        html: ref(''),
-        diffRows,
-        highlightContextDiff: async (diff: string) => {
-          diffRows.value = actual.parseUnifiedDiffRows(diff).map((row) => ({ ...row, html: row.text }))
-        },
-        highlight: async () => {},
-        highlightLang: async () => {},
-        highlightDiff: async () => {},
-        highlightLanguage: async () => {},
-      }
-    },
+    default: vue.defineComponent({
+      props: { code: { type: String, default: '' } },
+      setup: p => () => vue.h('pre', p.code),
+    }),
+  }
+})
+vi.mock('@/components/code-surface/PatchSurface.vue', async () => {
+  const vue = await import('vue')
+  return {
+    default: vue.defineComponent({
+      props: { patch: { type: String, default: '' } },
+      setup: p => () => vue.h('pre', p.patch),
+    }),
+  }
+})
+vi.mock('@/components/code-surface/CodeDiff.vue', async () => {
+  const vue = await import('vue')
+  return {
+    default: vue.defineComponent({
+      props: { original: { type: String, default: '' }, modified: { type: String, default: '' } },
+      setup: p => () => vue.h('pre', `${p.original}\n${p.modified}`),
+    }),
   }
 })
 import ToolCallInline from './tool-call-inline.vue'

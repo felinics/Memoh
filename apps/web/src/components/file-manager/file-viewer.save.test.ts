@@ -46,11 +46,25 @@ vi.mock('@/store/chat-list', () => ({
     }
   },
 }))
-vi.mock('@/components/monaco-editor/diff.vue', () => ({ default: 'div' }))
+vi.mock('@/components/code-surface/CodeDiff.vue', () => ({ default: 'div' }))
+// file-viewer reads the shared code appearance; the settings store pulls the
+// real i18n instance, which this file stubs out.
+vi.mock('@/components/code-surface/theme', async () => {
+  const { ref } = await import('vue')
+  return {
+    useCodeSurfaceAppearance: () => ({
+      theme: ref({ dark: 'github-dark', light: 'github-light' }),
+      themeType: ref('light'),
+      fontSize: ref(13),
+      lineHeight: ref(22),
+      fontFamily: ref(undefined),
+    }),
+  }
+})
 // The real editor is created asynchronously from the value it is mounted with,
 // so the value at mount time is recorded and asserted on.
 const editorMountValues = vi.hoisted(() => [] as string[])
-vi.mock('@/components/monaco-editor/index.vue', async () => {
+vi.mock('@/components/code-surface/CodeEditor.vue', async () => {
   const vue = await import('vue')
   return {
     default: vue.defineComponent({

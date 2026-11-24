@@ -36,19 +36,34 @@
       {{ errorText }}
     </div>
 
-    <div
-      v-if="patchText && shiki.loading.value"
-      class="flex items-center gap-1.5 text-xs text-muted-foreground"
-    >
-      <LoaderCircle class="size-3 animate-spin" />
-    </div>
-    <!-- eslint-disable vue/no-v-html -->
-    <div
+    <!-- A unified diff gets one real diff surface per file (a patch surface
+         renders a single file's hunks); apply_patch's own `*** Begin Patch`
+         text is not parseable as one, so it stays a diff-highlighted code
+         block. -->
+    <template v-if="unifiedFiles.length">
+      <PatchSurface
+        v-for="(file, index) in unifiedFiles"
+        :key="`${index}:${file.oldPath}:${file.newPath}`"
+        :patch="file.diff"
+        :theme="theme"
+        :theme-type="themeType"
+        :font-size="fontSize"
+        :line-height="lineHeight"
+        :font-family="fontFamily"
+        max-height="24rem"
+      />
+    </template>
+    <CodeSurface
       v-else-if="patchText"
-      class="shiki-patch-container max-h-96 overflow-x-auto overflow-y-auto rounded-sm text-xs [&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-2 [&_code]:text-xs"
-      v-html="shiki.html.value"
+      :code="patchText"
+      language="diff"
+      :theme="theme"
+      :theme-type="themeType"
+      :font-size="fontSize"
+      :line-height="lineHeight"
+      :font-family="fontFamily"
+      max-height="24rem"
     />
-    <!-- eslint-enable vue/no-v-html -->
 
     <EmptyRow v-if="!summary && !files.length && !patchText && !errorText">
       {{ t('chat.tools.detail.noData') }}
@@ -57,11 +72,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
-import { LoaderCircle } from 'lucide-vue-next'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
-import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
+import { hasUnifiedDiffHunks, splitUnifiedDiffFiles } from '@/utils/unified-diff'
+import { useCodeSurfaceAppearance } from '@/components/code-surface/theme'
+import CodeSurface from '@/components/code-surface/CodeSurface.vue'
+import PatchSurface from '@/components/code-surface/PatchSurface.vue'
 import EmptyRow from './tool-detail/empty-row.vue'
 
 type PatchOperation = 'add' | 'modify' | 'delete'
@@ -73,7 +90,7 @@ interface PatchFile {
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
-const shiki = useShikiHighlighter()
+const { theme, themeType, fontSize, lineHeight, fontFamily } = useCodeSurfaceAppearance()
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
@@ -95,6 +112,18 @@ const patchText = computed(() => {
     .filter((diff): diff is string => typeof diff === 'string' && diff.length > 0)
     .join('\n')
 })
+
+// apply_patch's own input is `*** Begin Patch` text, which no diff parser can
+// consume; the server also attaches a real unified diff for this tool call
+// (`block.diff`), and that is what the surfaces below should show.
+const diffSource = computed(() => {
+  const serverDiff = props.block.diff ?? ''
+  if (serverDiff && hasUnifiedDiffHunks(serverDiff)) return serverDiff
+  return hasUnifiedDiffHunks(patchText.value) ? patchText.value : ''
+})
+// One patch surface per file: a patch surface renders a single file's hunks,
+// and its default 0/0 indices would hide the rest of a multi-file diff.
+const unifiedFiles = computed(() => (diffSource.value ? splitUnifiedDiffFiles(diffSource.value) : []))
 
 const summary = computed(() => {
   const r = resultObject()
@@ -202,12 +231,4 @@ function operationClass(operation: PatchOperation): string {
   if (operation === 'delete') return 'border-destructive/30 bg-destructive/10 text-destructive'
   return 'border-warning/30 bg-warning/10 text-warning-foreground'
 }
-
-watch(
-  patchText,
-  (patch) => {
-    if (patch) void shiki.highlightLang(patch, 'diff')
-  },
-  { immediate: true },
-)
 </script>

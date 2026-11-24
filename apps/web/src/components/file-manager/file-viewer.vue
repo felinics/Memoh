@@ -32,8 +32,9 @@ import {
 } from '@memohai/sdk'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { apiErrorStatus, resolveApiErrorMessage } from '@/utils/api-error'
-import MonacoEditor from '@/components/monaco-editor/index.vue'
-import MonacoDiff from '@/components/monaco-editor/diff.vue'
+import CodeEditor from '@/components/code-surface/CodeEditor.vue'
+import CodeDiff from '@/components/code-surface/CodeDiff.vue'
+import { useCodeSurfaceAppearance } from '@/components/code-surface/theme'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { fetchBoundedBlob } from '@/lib/bounded-fetch'
 import { formatRelativeTime } from '@/utils/date-time'
@@ -63,6 +64,13 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
+const {
+  theme: surfaceTheme,
+  themeType: surfaceThemeType,
+  fontSize: surfaceFontSize,
+  lineHeight: surfaceLineHeight,
+  fontFamily: surfaceFontFamily,
+} = useCodeSurfaceAppearance()
 
 const content = ref('')
 const originalContent = ref('')
@@ -124,10 +132,10 @@ let externalPollController: AbortController | null = null
 // same pattern.
 const chipMessageId = useId()
 const compareStaleId = useId()
-// Reference to MonacoEditor so we can hand focus back when an action removes
+// Reference to the code editor so we can hand focus back when an action removes
 // the chip / closes Compare and the activated button itself was just torn
 // down. Without this, focus would fall through to document.body.
-const monacoEditorRef = ref<{ $el?: HTMLElement } | null>(null)
+const codeEditorRef = ref<{ focus?: () => void } | null>(null)
 // Drives "5s ago" / "2m ago" relative-time labels in the chip. Ticks once a
 // minute; agent writes are usually fresh enough that "just now" wins, but a
 // chip left up across coffee should age gracefully.
@@ -162,17 +170,8 @@ const chipButtons = computed<ChipButton[]>(() => resolveChipButtons({
 }))
 
 function focusEditor() {
-  const host = monacoEditorRef.value?.$el
-  if (!host) return
-  // Monaco renders a hidden <textarea.inputarea> inside its host that
-  // receives text input — focusing it routes keystrokes to the editor and
-  // restores the visible caret.
-  const textarea = host.querySelector?.<HTMLTextAreaElement>('textarea.inputarea')
-  if (textarea) {
-    textarea.focus()
-    return
-  }
-  if (typeof (host as HTMLElement).focus === 'function') (host as HTMLElement).focus()
+  // The editor exposes focus(); test doubles for it may not.
+  codeEditorRef.value?.focus?.()
 }
 
 async function onChipButton(btn: ChipButton) {
@@ -936,14 +935,18 @@ onBeforeUnmount(() => {
       <!-- Outside the v-if chain below, and only hidden while Compare is open:
            unmounting the editor would discard its undo history, which Compare
            is always entered with unsaved edits or a pending conflict. -->
-      <MonacoEditor
+      <CodeEditor
         v-if="editorMounted"
         v-show="conflictState !== 'compare'"
-        ref="monacoEditorRef"
+        ref="codeEditorRef"
         v-model="content"
         :filename="filename"
         :readonly="readonly"
-        :active="visible && conflictState !== 'compare'"
+        :theme="surfaceTheme"
+        :theme-type="surfaceThemeType"
+        :font-size="surfaceFontSize"
+        :line-height="surfaceLineHeight"
+        :font-family="surfaceFontFamily"
         class="h-full"
       />
 
@@ -954,7 +957,9 @@ onBeforeUnmount(() => {
       >
         <DiffTitleBar>
           <span class="min-w-0 truncate">
-            <span>{{ t('bots.files.compare.yours') }} ↔ {{ t('bots.files.compare.disk') }}</span>
+            <!-- Left pane is the disk side (stream-diffs `original`), right is
+                 the editor's own text, so the title reads in that order. -->
+            <span>{{ t('bots.files.compare.disk') }} ↔ {{ t('bots.files.compare.yours') }}</span>
             <span
               v-if="compareStale"
               :id="compareStaleId"
@@ -1010,12 +1015,15 @@ onBeforeUnmount(() => {
             </Button>
           </template>
         </DiffTitleBar>
-        <MonacoDiff
+        <CodeDiff
           :original="compareDiskContent"
           :modified="content"
           :filename="filename"
-          :original-title="t('bots.files.compare.disk')"
-          :modified-title="t('bots.files.compare.yours')"
+          :theme="surfaceTheme"
+          :theme-type="surfaceThemeType"
+          :font-size="surfaceFontSize"
+          :line-height="surfaceLineHeight"
+          :font-family="surfaceFontFamily"
           class="min-h-0 flex-1"
         />
       </div>

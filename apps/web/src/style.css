@@ -173,7 +173,7 @@
  * through automatically (all of :root / .dark / [data-color-scheme] target
  * <html>, so the var() resolves against that element's final value):
  *   · editor plane (the SELECTED tab + the view it owns):
- *       light = pure white (255) — body/reading content (chat view, file/monaco
+ *       light = pure white (255) — body/reading content (chat view, file editor
  *       editor) stays a NEUTRAL white, NOT the faintly-warm --card. Cards/dialogs
  *       carry the warm tint for shell coherence, but the long-read main surface
  *       must not be tinted · dark = --background (0.152).
@@ -287,6 +287,16 @@
   --color-chat-user-bubble: var(--chat-user-bubble);
   --color-chat-user-bubble-fg: var(--chat-user-bubble-fg);
   --color-cop-title: var(--cop-title);
+}
+
+/* stream-diffs paints inside a shadow root, so element selectors from this
+ * stylesheet cannot reach its rows. These custom properties inherit across the
+ * boundary: they keep code surfaces on the user's code typography, which the
+ * appearance settings install on :root. */
+[data-code-surface] {
+  --diffs-font-family: var(--font-mono);
+  --diffs-font-size: var(--memoh-code-font-size, 13px);
+  --diffs-line-height: calc(var(--memoh-code-font-size, 13px) * 1.7);
 }
 
 /* Shell-divider owners outside the workbench split sash. Keep the colour role on the component;
@@ -690,40 +700,11 @@
 
   /* Code-block glyphs carry a touch more weight than the 400 body so the mono
    * run reads as code, not prose. A direct font-weight (not a `font-*` utility)
-   * so the CJK weight-clamp lookup table can't pull it back under :lang(zh). */
-  [data-chat-content] .chat-code-block code,
-  [data-chat-content] .chat-code-block pre {
+   * so the CJK weight-clamp lookup table can't pull it back under :lang(zh).
+   * stream-diffs paints inside a shadow root, so this sits on the host and
+   * inherits in; a `code`/`pre` selector could not reach it. */
+  [data-chat-content] .chat-code-block {
     font-weight: 480;
-  }
-
-  .typography-code-preview pre {
-    counter-reset: typography-code-preview-line;
-    margin: 0;
-    padding: 0;
-    background: transparent;
-  }
-
-  .typography-code-preview pre,
-  .typography-code-preview code {
-    font-family: var(--typography-code-preview-font-family);
-    font-size: var(--typography-code-preview-font-size);
-    line-height: 1.45;
-  }
-
-  .typography-code-preview .line {
-    counter-increment: typography-code-preview-line;
-    display: inline-block;
-    min-width: 100%;
-  }
-
-  .typography-code-preview .line::before {
-    content: counter(typography-code-preview-line);
-    display: inline-block;
-    width: 2ch;
-    margin-right: 1.25ch;
-    color: var(--color-muted-foreground);
-    text-align: right;
-    user-select: none;
   }
 }
 

@@ -22,10 +22,15 @@
           v-if="codePreview"
           class="max-h-48 overflow-auto"
         >
-          <CodeBlock
+          <CodeSurface
             :code="codePreview.code"
-            :lang="codePreview.lang"
-            class="text-body leading-relaxed"
+            :language="codePreview.lang"
+            :theme="surfaceTheme"
+            :theme-type="surfaceThemeType"
+            :font-size="surfaceFontSize"
+            :line-height="surfaceLineHeight"
+            :font-family="surfaceFontFamily"
+            :line-numbers="false"
           />
         </div>
         <component
@@ -72,7 +77,8 @@ import { useI18n } from 'vue-i18n'
 import ToolApprovalActions from '@/components/tool-approval-actions.vue'
 import { useChatStore } from '@/store/chat-list'
 import { useChatViewTarget } from '../composables/useChatViewContext'
-import CodeBlock from './code-block.vue'
+import CodeSurface from '@/components/code-surface/CodeSurface.vue'
+import { useCodeSurfaceAppearance } from '@/components/code-surface/theme'
 import Capsule from './tool-detail/capsule.vue'
 import { getToolDisplay } from './tool-call-registry'
 import type { PendingApprovalItem } from '../composables/usePendingApprovals'
@@ -81,6 +87,13 @@ const props = defineProps<{
   item: PendingApprovalItem
   queueSize: number
 }>()
+const {
+  theme: surfaceTheme,
+  themeType: surfaceThemeType,
+  fontSize: surfaceFontSize,
+  lineHeight: surfaceLineHeight,
+  fontFamily: surfaceFontFamily,
+} = useCodeSurfaceAppearance()
 
 const { t, te } = useI18n()
 const chatStore = useChatStore()

@@ -91,7 +91,7 @@ import ToolCallDetailWebSearch from './tool-call-detail-web-search.vue'
 import ToolCallDetailWrite from './tool-call-detail-write.vue'
 import { execLeftRunning } from './tool-call-exec-status'
 import { isGuiToolName } from '@/utils/gui-tools'
-import { splitUnifiedDiffFiles } from '@/composables/useShikiHighlighter'
+import { splitUnifiedDiffFiles } from '@/utils/unified-diff'
 
 export interface ToolDisplay {
   icon: Component

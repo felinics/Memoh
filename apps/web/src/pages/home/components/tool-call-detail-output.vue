@@ -1,9 +1,15 @@
 <template>
-  <CodeBlock
+  <CodeSurface
     v-if="text"
     :code="text"
     :filename="highlightFilename"
-    class="text-[12px] leading-relaxed whitespace-pre overflow-x-auto max-h-72 overflow-y-auto"
+    :theme="surfaceTheme"
+    :theme-type="surfaceThemeType"
+    :font-size="surfaceFontSize"
+    :line-height="surfaceLineHeight"
+    :font-family="surfaceFontFamily"
+    max-height="18rem"
+    :line-numbers="false"
   />
   <EmptyRow v-else>
     {{ t('chat.tools.detail.noOutput') }}
@@ -14,11 +20,19 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
-import CodeBlock from './code-block.vue'
+import CodeSurface from '@/components/code-surface/CodeSurface.vue'
+import { useCodeSurfaceAppearance } from '@/components/code-surface/theme'
 import EmptyRow from './tool-detail/empty-row.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
+const {
+  theme: surfaceTheme,
+  themeType: surfaceThemeType,
+  fontSize: surfaceFontSize,
+  lineHeight: surfaceLineHeight,
+  fontFamily: surfaceFontFamily,
+} = useCodeSurfaceAppearance()
 
 // Only file reads carry a meaningful language; directory listings and other
 // plain outputs stay unhighlighted (empty filename -> plaintext kernel path).

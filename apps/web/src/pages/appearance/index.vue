@@ -224,16 +224,18 @@
                    the code sample overflows horizontally and its scrollbar
                    must stay draggable. The content is static highlighted
                    markup — nothing focusable to fence off. -->
-              <div
-                class="typography-code-preview shiki-preview overflow-hidden"
-                :style="codeFontPreviewStyle"
-              >
-                <!-- eslint-disable vue/no-v-html -->
-                <div
-                  class="overflow-x-auto"
-                  v-html="codeFontPreviewLightHtml"
+              <div class="overflow-hidden">
+                <CodeSurface
+                  :code="codeFontPreviewCode"
+                  filename="preview.ts"
+                  :theme="{ dark: shikiThemeLight, light: shikiThemeLight }"
+                  theme-type="light"
+                  :font-size="codeFontSizePx"
+                  :line-height="codeFontPreviewLineHeight"
+                  :font-family="codeFontPreviewFontFamily"
+                  :line-numbers="false"
+                  background="theme"
                 />
-                <!-- eslint-enable vue/no-v-html -->
               </div>
             </div>
             <div class="space-y-2">
@@ -247,16 +249,18 @@
                 :empty-text="t('settings.appearance.shikiThemeEmpty')"
                 :show-group-headers="false"
               />
-              <div
-                class="typography-code-preview shiki-preview overflow-hidden"
-                :style="codeFontPreviewStyle"
-              >
-                <!-- eslint-disable vue/no-v-html -->
-                <div
-                  class="overflow-x-auto"
-                  v-html="codeFontPreviewDarkHtml"
+              <div class="overflow-hidden">
+                <CodeSurface
+                  :code="codeFontPreviewCode"
+                  filename="preview.ts"
+                  :theme="{ dark: shikiThemeDark, light: shikiThemeDark }"
+                  theme-type="light"
+                  :font-size="codeFontSizePx"
+                  :line-height="codeFontPreviewLineHeight"
+                  :font-family="codeFontPreviewFontFamily"
+                  :line-numbers="false"
+                  background="theme"
                 />
-                <!-- eslint-enable vue/no-v-html -->
               </div>
             </div>
           </div>
@@ -373,17 +377,17 @@ import { useNotificationSettings } from '@/store/notification-settings'
 import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-vue'
 import { PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
-import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 import { LOCALE_OPTIONS, preloadLocales, type Locale } from '@/i18n'
 import type { BundledTheme } from 'shiki'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
+import CodeSurface from '@/components/code-surface/CodeSurface.vue'
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/constants/color-schemes'
 import { MERMAID_THEMES, type MermaidTheme, useSettingsStore, type ThemePreference } from '@/store/settings'
 import { isMermaidTheme } from '@/store/settings/mermaid'
 import { listBundledShikiThemes } from '@/store/settings/shiki-theme'
-import { cssCodeFontFamilyStyleValue, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX } from '@/store/settings/typography'
+import { DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX } from '@/store/settings/typography'
 
 enableMermaid()
 setCustomComponents({ mermaid: ThemedMermaidBlock })
@@ -421,7 +425,7 @@ const notificationDescription = computed(() => {
   return t('notifications.settingsDescription')
 })
 const settingsStore = useSettingsStore()
-const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily, isDark } = storeToRefs(settingsStore)
+const { language, theme, colorScheme, uiFontFamily, codeFontFamily, codeFontStack, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily, isDark } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme, setMermaidTheme } = settingsStore
 const { sidebarEntryHidden } = useChatExamplesUi()
 
@@ -488,40 +492,13 @@ const themeIcons: Record<ThemePreference, Component> = {
 
 const uiFontFamilyDraft = ref(uiFontFamily.value)
 const codeFontFamilyDraft = ref(codeFontFamily.value)
-// Each variant renders in its own highlighter against its picked theme, so
-// the two previews always show the chosen light + dark side-by-side regardless
-// of the interface mode (mirrors Claude Code's Code-appearance panel).
-const codeFontPreviewLight = useShikiHighlighter()
-const codeFontPreviewDark = useShikiHighlighter()
 const codeFontPreviewCode = `function greet(name: string) {
   return \`Hi, \${name}\`
 }`
-const codeFontPreviewFallback = `<pre><code>${codeFontPreviewCode}</code></pre>`
-const codeFontPreviewLightHtml = computed(() => codeFontPreviewLight.html.value || codeFontPreviewFallback)
-const codeFontPreviewDarkHtml = computed(() => codeFontPreviewDark.html.value || codeFontPreviewFallback)
-const codeFontPreviewStyle = computed(() => ({
-  '--typography-code-preview-font-family': cssCodeFontFamilyStyleValue(codeFontFamilyDraft.value),
-  '--typography-code-preview-font-size': `${codeFontSizePx.value}px`,
-}))
-
-function renderCodeFontPreview() {
-  // Both halves of each preview use the SAME picked theme. The design system's
-  // `.dark .shiki span` !important rule forces every span color to var(--shiki-dark)
-  // in dark interface mode; pinning both halves means that variable already equals
-  // the chosen theme's colors, so the cascade override is a visual no-op and each
-  // preview stays true to its picked theme regardless of interface mode.
-  const light = shikiThemeLight.value as BundledTheme
-  const dark = shikiThemeDark.value as BundledTheme
-  void codeFontPreviewLight.highlightLanguage(codeFontPreviewCode, 'typescript', {
-    themes: { light, dark: light },
-  })
-  void codeFontPreviewDark.highlightLanguage(codeFontPreviewCode, 'typescript', {
-    themes: { light: dark, dark },
-  })
-}
+const codeFontPreviewLineHeight = computed(() => Math.round(codeFontSizePx.value * 1.7))
+const codeFontPreviewFontFamily = computed(() => (codeFontFamily.value ? codeFontStack.value : undefined))
 
 onMounted(() => {
-  renderCodeFontPreview()
   // This page has the language picker; download the other languages now so a
   // pick applies at once (see preloadLocales).
   preloadLocales()
@@ -529,8 +506,6 @@ onMounted(() => {
 
 watch(uiFontFamily, (value) => { uiFontFamilyDraft.value = value })
 watch(codeFontFamily, (value) => { codeFontFamilyDraft.value = value })
-watch([shikiThemeLight, shikiThemeDark], () => { renderCodeFontPreview() })
-
 function updateUiFontFamilyDraft(value: string | number) { uiFontFamilyDraft.value = String(value) }
 function updateCodeFontFamilyDraft(value: string | number) { codeFontFamilyDraft.value = String(value) }
 
@@ -560,30 +535,5 @@ function commitCodeFontFamilyDraft() {
 .appearance-mermaid-preview :deep(.mermaid-preview-area) {
   background: transparent;
   min-height: 470px;
-}
-
-/* The shiki preview keeps the theme's inline background-color on <pre>, so
-   the parent typography-code-preview rule's `padding: 0` would crowd the code
-   against the corners. Re-add comfortable padding inside the themed box, and
-   derive the rounded outline from the theme's own text color (via currentColor)
-   so it stays stable across UI mode flips — UI tokens like --color-border
-   adapt with light/dark, which we want for page chrome but not for these
-   theme previews. Line numbers follow the same idea so they stay legible on
-   any chosen theme. */
-.shiki-preview :deep(pre) {
-  /* width:max-content + min-width:100% makes the themed box grow to the code's
-     full length so its background and inset ring paint UNDER the overflowing
-     text. Without this the <pre> stays at the overflow-x-auto wrapper's width,
-     and scrolling right exposes the page behind the theme color (the box only
-     ever painted the first viewport-width of code). */
-  width: max-content;
-  min-width: 100%;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.375rem;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);
-}
-.shiki-preview :deep(.line::before) {
-  color: currentColor;
-  opacity: 0.45;
 }
 </style>

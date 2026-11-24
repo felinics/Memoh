@@ -177,17 +177,17 @@
 
       <div class="flex min-h-0 flex-col">
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-menu-shell)] border border-border">
-          <MonacoEditor
+          <CodeEditor
             v-model="importJson"
             language="json"
             :readonly="importSubmitting"
+            :theme="surfaceTheme"
+            :theme-type="surfaceThemeType"
+            :font-size="surfaceFontSize"
+            :line-height="surfaceLineHeight"
+            :font-family="surfaceFontFamily"
+            background="card"
             class="min-h-0 flex-1"
-            :options="{
-              automaticLayout: true,
-              fixedOverflowWidgets: true,
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-            }"
           />
         </div>
         <p
@@ -272,7 +272,8 @@ import type { McpImportRequest, McpToolDescriptor } from '@memohai/sdk'
 import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import McpServerDetail from './mcp-server-detail.vue'
 import type { McpItem } from './mcp-types'
-import { LazyMonacoEditor as MonacoEditor } from '@/components/monaco-editor/lazy'
+import { LazyCodeEditor as CodeEditor } from '@/components/code-surface/lazy'
+import { useCodeSurfaceAppearance } from '@/components/code-surface/theme'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -280,6 +281,13 @@ import { joinShellWords } from '@/utils/shell-words'
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
+const {
+  theme: surfaceTheme,
+  themeType: surfaceThemeType,
+  fontSize: surfaceFontSize,
+  lineHeight: surfaceLineHeight,
+  fontFamily: surfaceFontFamily,
+} = useCodeSurfaceAppearance()
 
 const { view, direction, openDetail, backToList } = useViewSwap()
 const loading = ref(false)

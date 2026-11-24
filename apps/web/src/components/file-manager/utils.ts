@@ -132,14 +132,6 @@ export function getExtension(filename: string): string {
   return filename.slice(dotIndex + 1).toLowerCase()
 }
 
-export function getLanguageByFilename(filename: string): string {
-  const lower = filename.toLowerCase()
-  if (lower === 'dockerfile' || lower.startsWith('dockerfile.')) return 'dockerfile'
-  if (lower === 'makefile') return 'makefile'
-  const ext = getExtension(filename)
-  return EXTENSION_LANGUAGE_MAP[ext] ?? 'plaintext'
-}
-
 export function isTextFile(filename: string): boolean {
   if (TEXT_FILENAMES.has(filename)) return true
   const ext = getExtension(filename)
