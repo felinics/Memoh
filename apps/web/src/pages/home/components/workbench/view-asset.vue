@@ -8,11 +8,15 @@
       {{ t('common.loading') }}
     </PanePlaceholder>
 
-    <MonacoEditor
+    <CodeEditor
       v-else-if="isText && oversizedMaxBytes === null && !loadFailed"
       v-model="content"
       :filename="name"
-      :active="visible"
+      :theme="surfaceTheme"
+      :theme-type="surfaceThemeType"
+      :font-size="surfaceFontSize"
+      :line-height="surfaceLineHeight"
+      :font-family="surfaceFontFamily"
       readonly
       class="h-full"
     />
@@ -79,6 +83,7 @@ import { useI18n } from 'vue-i18n'
 import { Download, File } from 'lucide-vue-next'
 import { Button, PanePlaceholder, toast } from '@felinic/ui'
 import DocumentPreview from '@/components/file-manager/document-preview.vue'
+import { useCodeSurfaceAppearance } from '@/components/code-surface/theme'
 import { lazyPanelContent } from './lazy-panel-content'
 import {
   TEXT_PREVIEW_MAX_BYTES,
@@ -93,7 +98,14 @@ import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { fetchBoundedBlob, fetchBoundedText, type BoundedFetchTarget } from '@/lib/bounded-fetch'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
-const MonacoEditor = lazyPanelContent(() => import('@/components/monaco-editor/index.vue').then(m => m.default))
+const CodeEditor = lazyPanelContent(() => import('@/components/code-surface/CodeEditor.vue').then(m => m.default))
+const {
+  theme: surfaceTheme,
+  themeType: surfaceThemeType,
+  fontSize: surfaceFontSize,
+  lineHeight: surfaceLineHeight,
+  fontFamily: surfaceFontFamily,
+} = useCodeSurfaceAppearance()
 
 const props = defineProps<{
   name: string

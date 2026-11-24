@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { parseUnifiedDiffRows, splitUnifiedDiffFiles } from './useShikiHighlighter'
+import { hasUnifiedDiffHunks, parseUnifiedDiffRows, splitUnifiedDiffFiles } from './unified-diff'
 
 describe('parseUnifiedDiffRows', () => {
   it('renders context, removal, and addition rows with their gutter line numbers', () => {
@@ -64,5 +64,16 @@ describe('splitUnifiedDiffFiles', () => {
     expect(splitUnifiedDiffFiles('*** Begin Patch\n*** Update File: a.txt\n@@\n-a\n+b\n*** End Patch')).toEqual([])
     // Hunk header promises more lines than the text holds.
     expect(splitUnifiedDiffFiles('--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n a\n-b')).toEqual([])
+  })
+})
+
+describe('hasUnifiedDiffHunks', () => {
+  it('accepts a git-style unified diff', () => {
+    expect(hasUnifiedDiffHunks('--- a/f.ts\n+++ b/f.ts\n@@ -1 +1 @@\n-a\n+b')).toBe(true)
+  })
+
+  it('rejects apply_patch text and plain content', () => {
+    expect(hasUnifiedDiffHunks('*** Begin Patch\n*** Update File: a.txt\n@@\n-a\n+b\n*** End Patch')).toBe(false)
+    expect(hasUnifiedDiffHunks('const answer = 42')).toBe(false)
   })
 })

@@ -35,7 +35,6 @@
         <div class="mt-1.5 rounded-sm bg-card font-[400] overflow-hidden">
           <DiffPanel
             :diff="file.diff"
-            :filename="extractFilename(file.movedTo || file.path)"
           />
         </div>
       </CollapseSection>
@@ -145,7 +144,7 @@ import {
   patchFileDiffs,
   type PatchFileDiff,
 } from './tool-call-registry'
-import { extractFilename } from '@/composables/useShikiHighlighter'
+import { extractFilename } from '@/utils/unified-diff'
 import DiffPanel from './tool-call-diff-panel.vue'
 import ConnectorLogo from './tool-detail/connector-logo.vue'
 import ToolRow from './tool-detail/tool-row.vue'

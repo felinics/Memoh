@@ -12,12 +12,10 @@ vi.mock('@/i18n', () => ({
   default: { global: { t: (key: string) => key } },
   i18nRef: (key: string) => ({ value: key }),
 }))
-// These tests exercise disclosure and its card shell, not Shiki rendering.
-vi.mock('@/composables/useShikiHighlighter', () => ({
-  useShikiHighlighter: () => ({
-    html: { value: '' }, loading: { value: false }, highlightLang: vi.fn(),
-  }),
-}))
+// These tests exercise disclosure and its card shell, not code rendering.
+vi.mock('@/components/code-surface/CodeSurface.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/code-surface/CodeDiff.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/code-surface/PatchSurface.vue', () => ({ default: { template: '<div />' } }))
 import ToolCallGroup from './tool-call-group.vue'
 
 // Two contracts pinned here:

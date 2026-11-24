@@ -20,8 +20,8 @@ vi.mock('vue-i18n', async importOriginal => ({
   ...await importOriginal<typeof import('vue-i18n')>(),
   useI18n: () => ({ t: (key: string, args?: Record<string, unknown>) => (args?.size ? `${key}:${String(args.size)}` : key) }),
 }))
-vi.mock('@/components/monaco-editor/index.vue', () => ({
-  default: (props: { modelValue?: string }) => h('pre', { 'data-testid': 'monaco' }, props.modelValue),
+vi.mock('@/components/code-surface/CodeEditor.vue', () => ({
+  default: (props: { modelValue?: string }) => h('pre', { 'data-testid': 'code-editor' }, props.modelValue),
 }))
 vi.mock('@/components/file-manager/document-preview.vue', () => ({
   default: (props: { kind?: string, filename?: string }) => h('div', { 'data-testid': 'doc-preview', 'data-kind': props.kind }, props.filename),

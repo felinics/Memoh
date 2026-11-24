@@ -258,9 +258,8 @@ import { useUpdateStore } from '@/store/update'
 import AboutIdentityCard from './components/about-identity-card.vue'
 
 // Release notes are arbitrary upstream markdown and can contain fenced code
-// blocks. markstream 2.0's built-in code block needs the optional stream-diffs
-// peer (not installed) and otherwise falls back to a plain <pre>, so give this
-// scope the same design-system code block chat and file preview already use.
+// blocks. Give this scope the same design-system code block chat and file
+// preview already use instead of markstream's built-in chrome.
 // Idempotent-guarded by the registry; the appearance mermaid scopes need no
 // registration — their content is mermaid-only, served by the global override.
 registerSharedMarkdownComponents('release-notes', { code_block: ChatCodeBlock, shell: ChatCodeBlock })

@@ -37,8 +37,8 @@ vi.mock('./mcp-server-detail.vue', () => ({
     },
   }),
 }))
-vi.mock('@/components/monaco-editor/lazy', () => ({
-  LazyMonacoEditor: { template: '<div />' },
+vi.mock('@/components/code-surface/lazy', () => ({
+  LazyCodeEditor: { template: '<div />' },
 }))
 vi.mock('@/utils/api-error', () => ({
   resolveApiErrorMessage: (_err: unknown, fallback: string) => fallback,

@@ -83,13 +83,27 @@ vi.mock('@/store/chat-list', async () => {
   }
 })
 vi.mock('../components/workbench/workbench-breadcrumb.vue', () => ({ default: 'div' }))
-vi.mock('@/components/monaco-editor/diff.vue', () => ({ default: 'div' }))
-vi.mock('@/components/monaco-editor/index.vue', () => ({
+vi.mock('@/components/code-surface/CodeDiff.vue', () => ({ default: 'div' }))
+vi.mock('@/components/code-surface/CodeEditor.vue', () => ({
   default: (props: { modelValue: string, 'onUpdate:modelValue': (value: string) => void }) => h('textarea', {
     value: props.modelValue,
     onInput: (event: Event) => props['onUpdate:modelValue']((event.target as HTMLTextAreaElement).value),
   }),
 }))
+// The real appearance reads the settings store, which instantiates the app
+// i18n instance this file stubs out.
+vi.mock('@/components/code-surface/theme', async () => {
+  const { ref } = await import('vue')
+  return {
+    useCodeSurfaceAppearance: () => ({
+      theme: ref({ dark: 'github-dark', light: 'github-light' }),
+      themeType: ref('light'),
+      fontSize: ref(13),
+      lineHeight: ref(22),
+      fontFamily: ref(undefined),
+    }),
+  }
+})
 
 let app: App | undefined
 let host: HTMLDivElement | undefined
@@ -134,7 +148,8 @@ async function mountSplitFiles() {
   }).use(pinia).provide(KEYBOARD_REGISTRY, registry)
   app.mount(host)
   disconnect = connectBrowserKeyboardShortcutsLive(registry, () => selectWebBindings(keyboardBindings))
-  await vi.waitFor(() => expect(host!.querySelectorAll('textarea')).toHaveLength(2))
+  // First mount in this file also compiles the editor/viewer module graph.
+  await vi.waitFor(() => expect(host!.querySelectorAll('textarea')).toHaveLength(2), { timeout: 5_000 })
   const editors = [...host.querySelectorAll('textarea')]
   async function edit(index: number, text: string) {
     const editor = editors[index]!

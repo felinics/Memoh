@@ -20,9 +20,8 @@ enableMermaid()
 // covers chat + file preview + any other MarkdownRender call site.
 setCustomComponents({ mermaid: ThemedMermaidBlock })
 // File preview reuses the chat's design-system node components (library
-// Checkbox task markers, link-language footnotes). It also uses the same
-// non-Monaco code block as chat so the file editor's Monaco theme is not
-// affected by code blocks in the preview.
+// Checkbox task markers, link-language footnotes) and the same framed code
+// block, so a fence looks identical in chat and in a rendered Markdown file.
 registerSharedMarkdownComponents('file-preview-md', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
 
 const settings = useSettingsStore()

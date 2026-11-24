@@ -199,18 +199,16 @@
         </DialogHeader>
         
         <div class="flex min-h-0 flex-1 p-4">
-          <MonacoEditor
+          <CodeEditor
             v-model="editorDraftRaw"
             language="json"
+            :theme="surfaceTheme"
+            :theme-type="surfaceThemeType"
+            :font-size="surfaceFontSize"
+            :line-height="surfaceLineHeight"
+            :font-family="surfaceFontFamily"
+            background="card"
             class="min-h-0 flex-1 rounded-md border border-border"
-            :options="{
-              automaticLayout: true,
-              fixedOverflowWidgets: true,
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              formatOnPaste: true,
-              formatOnType: true
-            }"
           />
         </div>
 
@@ -338,13 +336,21 @@ import SchemaField from '@/components/config-schema-form/schema-field.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
-import { LazyMonacoEditor as MonacoEditor } from '@/components/monaco-editor/lazy'
+import { LazyCodeEditor as CodeEditor } from '@/components/code-surface/lazy'
+import { useCodeSurfaceAppearance } from '@/components/code-surface/theme'
 
 const props = defineProps<{
   botId: string
 }>()
 
 const { t } = useI18n()
+const {
+  theme: surfaceTheme,
+  themeType: surfaceThemeType,
+  fontSize: surfaceFontSize,
+  lineHeight: surfaceLineHeight,
+  fontFamily: surfaceFontFamily,
+} = useCodeSurfaceAppearance()
 const queryCache = useQueryCache()
 
 const { data: settings } = useQuery({

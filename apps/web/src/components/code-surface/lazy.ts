@@ -15,8 +15,8 @@ function placeholder(messageKey: string, loading: boolean) {
 // The editor for places outside the workspace panels (dialogs), downloaded when
 // it is first shown. A failed download is retried the next time the editor is
 // mounted, that is, when its dialog is opened again.
-export const LazyMonacoEditor = defineAsyncComponent({
-  loader: withStylesheetRecovery(() => import('./index.vue').then(m => m.default)),
+export const LazyCodeEditor = defineAsyncComponent({
+  loader: withStylesheetRecovery(() => import('./CodeEditor.vue').then(m => m.default)),
   loadingComponent: placeholder('common.loading', true),
   errorComponent: placeholder('common.loadFailed', false),
 })
