@@ -272,9 +272,11 @@ func TestFSWriteRejectsStaleExpectedRevision(t *testing.T) {
 		"content":          "mine",
 		"expectedRevision": "sha256:stale",
 	}, env.handler.FSWrite)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
-		t.Fatalf("expected conflict error, got %v", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceFileRevisionConflict {
+		t.Fatalf("expected %s, got %v", apperror.CodeWorkspaceFileRevisionConflict, err)
+	}
+	if def, _ := apperror.Lookup(apperror.CodeWorkspaceFileRevisionConflict); def.HTTPStatus != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", def.HTTPStatus)
 	}
 	assertLocalFile(t, env.localPath("/data/rev.txt"), "base")
 }
@@ -421,9 +423,11 @@ func TestFSExtractRejectsExistingDestination(t *testing.T) {
 	}
 
 	_, err := env.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/extract", FSExtractRequest{Path: "/data/bundle.zip"}, env.handler.FSExtract)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
-		t.Fatalf("expected conflict error, got %v", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceFileAlreadyExists {
+		t.Fatalf("expected %s, got %v", apperror.CodeWorkspaceFileAlreadyExists, err)
+	}
+	if def, _ := apperror.Lookup(apperror.CodeWorkspaceFileAlreadyExists); def.HTTPStatus != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", def.HTTPStatus)
 	}
 }
 

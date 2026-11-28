@@ -1001,3 +1001,13 @@ func TestClientTunnelCloseUnblocksServerTargetWrite(t *testing.T) {
 	_ = target.Close()
 	<-wrote
 }
+
+func TestPoolGetMissingDialTargetWrapsErrUnavailable(t *testing.T) {
+	t.Parallel()
+
+	pool := NewPool(func(string) string { return "" })
+	_, err := pool.Get(context.Background(), "bot-missing")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Pool.Get() error = %v, want ErrUnavailable", err)
+	}
+}

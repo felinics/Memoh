@@ -15,7 +15,7 @@ import (
 type containerWorkspace interface {
 	bridge.Provider
 	NativeMCPClient(ctx context.Context, botID string) (*bridge.Client, error)
-	BotDisplayEnabled(ctx context.Context, botID string) bool
+	BotDisplayEnabled(ctx context.Context, botID string) (bool, error)
 	DisplaySocketPath(botID string) string
 	EnsureRunning(ctx context.Context, botID string) error
 	EnsureNativeRunning(ctx context.Context, botID string) error

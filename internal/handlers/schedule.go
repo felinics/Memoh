@@ -133,15 +133,15 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
 		return scheduleLookupError(err)
 	}
 	if item.BotID != botID {
 		return apperror.New(apperror.CodeHTTPForbidden, nil)
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
-		return err
 	}
 	return c.JSON(http.StatusOK, item)
 }
@@ -170,6 +170,9 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
 	var req schedule.UpdateRequest
 	if err := c.Bind(&req); err != nil {
 		return err
@@ -180,9 +183,6 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 	}
 	if item.BotID != botID {
 		return apperror.New(apperror.CodeHTTPForbidden, nil)
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
-		return err
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
@@ -214,15 +214,15 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
+		return err
+	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
 		return scheduleLookupError(err)
 	}
 	if item.BotID != botID {
 		return apperror.New(apperror.CodeHTTPForbidden, nil)
-	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
-		return err
 	}
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
 		return errs.Wrap(err, "schedule request")

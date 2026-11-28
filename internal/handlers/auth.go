@@ -60,6 +60,7 @@ func (h *AuthHandler) Register(e *echo.Echo) {
 // @Success 200 {object} LoginResponse
 // @Failure 400 {object} server.Problem
 // @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
 // @Failure 500 {object} server.Problem
 // @Router /auth/login [post].
 func (h *AuthHandler) Login(c echo.Context) error {
@@ -87,13 +88,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	account, err := h.accountService.Login(c.Request().Context(), req.Username, req.Password)
 	if err != nil {
-		if errors.Is(err, accounts.ErrInvalidCredentials) {
-			return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
-		}
-		if errors.Is(err, accounts.ErrInactiveAccount) {
-			return echo.NewHTTPError(http.StatusUnauthorized, "user is inactive")
-		}
-		return errs.Wrap(err, "login")
+		return loginHTTPError(err)
 	}
 	token, expiresAt, err := auth.GenerateToken(account.ID, h.jwtSecret, h.expiresIn)
 	if err != nil {
@@ -142,4 +137,15 @@ func (h *AuthHandler) Refresh(c echo.Context) error {
 		TokenType:   "Bearer",
 		ExpiresAt:   expiresAt.Format(time.RFC3339),
 	})
+}
+
+func loginHTTPError(err error) error {
+	switch {
+	case errors.Is(err, accounts.ErrInvalidCredentials):
+		return apperror.Wrap(apperror.CodeAuthInvalidCredentials, err, nil)
+	case errors.Is(err, accounts.ErrInactiveAccount):
+		return apperror.Wrap(apperror.CodeAuthAccountInactive, err, nil)
+	default:
+		return errs.Wrap(err, "login")
+	}
 }

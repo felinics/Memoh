@@ -41,17 +41,20 @@ func TestWorkdirNotFoundAnswers(t *testing.T) {
 func TestWorkdirHTTPError(t *testing.T) {
 	for name, tc := range map[string]struct {
 		err  error
-		code int
+		code apperror.Code
 	}{
-		"duplicate path":     {workdir.ErrDuplicatePath, http.StatusConflict},
-		"archived":           {workdir.ErrWorkdirArchived, http.StatusConflict},
-		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, http.StatusConflict},
-		"unexpected failure": {errors.New("boom"), 0},
+		"duplicate path":     {workdir.ErrDuplicatePath, apperror.CodeWorkdirPathAlreadyExists},
+		"archived":           {workdir.ErrWorkdirArchived, apperror.CodeWorkdirArchived},
+		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, apperror.CodeWorkspaceTargetOffline},
+		"runtime revoked":    {workspace.ErrRemoteRuntimeRevoked, apperror.CodeWorkspaceTargetRevoked},
+		"owner mismatch":     {workspace.ErrRemoteRuntimeOwnerMismatch, apperror.CodeWorkspaceTargetOwnerMismatch},
+		"client too old":     {workspace.ErrRemoteRuntimeClientUpdateNeeded, apperror.CodeWorkspaceTargetClientUpdateRequired},
+		"unexpected failure": {errors.New("boom"), ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := workdirHTTPError(tc.err)
 			var httpErr *echo.HTTPError
-			if tc.code == 0 {
+			if tc.code == "" {
 				// An unexpected failure is returned with its cause for the
 				// boundary to answer as internal and record.
 				if errors.As(err, &httpErr) || !errors.Is(err, tc.err) {
@@ -59,8 +62,8 @@ func TestWorkdirHTTPError(t *testing.T) {
 				}
 				return
 			}
-			if !errors.As(err, &httpErr) || httpErr.Code != tc.code {
-				t.Fatalf("error = %v, want HTTP %d", err, tc.code)
+			if apperror.CodeOf(err) != tc.code || !errors.Is(apperror.CauseOf(err), tc.err) {
+				t.Fatalf("error = %v, want %s caused by %v", err, tc.code, tc.err)
 			}
 		})
 	}
@@ -68,25 +71,29 @@ func TestWorkdirHTTPError(t *testing.T) {
 
 func TestWorkdirDirectoriesHTTPError(t *testing.T) {
 	for name, tc := range map[string]struct {
-		err  error
-		code int
+		err        error
+		wantStatus int
+		wantCode   apperror.Code
 	}{
-		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, http.StatusServiceUnavailable},
-		"bridge unavailable": {fmt.Errorf("list: %w", bridge.ErrUnavailable), http.StatusServiceUnavailable},
-		"path forbidden":     {workdir.ErrPathForbidden, http.StatusForbidden},
-		"runtime revoked":    {workspace.ErrRemoteRuntimeRevoked, http.StatusConflict},
+		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, http.StatusServiceUnavailable, apperror.CodeWorkspaceUnreachable},
+		"bridge unavailable": {fmt.Errorf("list: %w", bridge.ErrUnavailable), http.StatusServiceUnavailable, apperror.CodeWorkspaceUnreachable},
+		"path forbidden":     {workdir.ErrPathForbidden, http.StatusForbidden, ""},
+		"runtime revoked":    {workspace.ErrRemoteRuntimeRevoked, http.StatusConflict, apperror.CodeWorkspaceTargetRevoked},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := workdirDirectoriesHTTPError(tc.err)
-			var httpErr *echo.HTTPError
-			if errors.As(err, &httpErr) {
-				if httpErr.Code != tc.code {
-					t.Fatalf("error = %v, want HTTP %d", err, tc.code)
+			if tc.wantCode == "" {
+				var httpErr *echo.HTTPError
+				if !errors.As(err, &httpErr) || httpErr.Code != tc.wantStatus {
+					t.Fatalf("error = %v, want HTTP %d", err, tc.wantStatus)
 				}
 				return
 			}
-			if apperror.CodeOf(err) != apperror.CodeWorkspaceUnreachable || tc.code != http.StatusServiceUnavailable {
-				t.Fatalf("error = %v, want HTTP %d", err, tc.code)
+			if apperror.CodeOf(err) != tc.wantCode || !errors.Is(apperror.CauseOf(err), tc.err) {
+				t.Fatalf("error = %v, want %s caused by %v", err, tc.wantCode, tc.err)
+			}
+			if def, _ := apperror.Lookup(tc.wantCode); def.HTTPStatus != tc.wantStatus {
+				t.Fatalf("%s status = %d, want %d", tc.wantCode, def.HTTPStatus, tc.wantStatus)
 			}
 		})
 	}

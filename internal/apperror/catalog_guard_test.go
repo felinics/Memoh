@@ -301,8 +301,11 @@ func TestCatalogGolden(t *testing.T) {
 }
 
 // sessionCodes are the codes that answer 401. The Web client signs out on a
-// 401, so only a missing or invalid Memoh session answers with it.
+// 401, so only a missing or invalid Memoh session answers with it, plus
+// auth.invalid_credentials on /auth/login (which the Web API client exempts
+// from global sign-out).
 var sessionCodes = map[Code]struct{}{
+	CodeAuthInvalidCredentials:                 {},
 	CodeHTTPUnauthorized:                       {},
 	CodeContextLifecycleAuthenticationRequired: {},
 }
@@ -337,6 +340,8 @@ var declaredFaults = map[Code]Fault{
 	CodeRuntimePromptFailed:                FaultDependency,
 	CodeExternalRuntimeSessionResumeFailed: FaultDependency,
 	CodeMCPOAuthDiscoveryFailed:            FaultDependency,
+	CodeMCPOAuthTokenExchangeFailed:        FaultDependency,
+	CodeRegistryUnavailable:                FaultDependency,
 	CodeExternalRuntimeUsageLimited:        FaultDependency,
 	CodeACPConfigUpdateFailed:              FaultDependency,
 	CodeConnectorOAuthClientNotConfigured:  FaultDependency,
@@ -406,6 +411,86 @@ func TestCatalogDeclaredFaults(t *testing.T) {
 	for code := range declaredFaults {
 		if _, ok := catalog[code]; !ok {
 			t.Errorf("declaredFaults lists %q, which is not in the catalog", code)
+		}
+	}
+}
+
+// TestGenericHTTPCodesAvoidSpeculativeRecovery guards the generic HTTP fallback
+// codes against unverified recovery promises ("refresh", "retry", ...) and
+// internal architecture jargon ("upstream") across the catalog Detail and all
+// Web/IM locales.
+func TestGenericHTTPCodesAvoidSpeculativeRecovery(t *testing.T) {
+	t.Parallel()
+
+	guardedCodes := []Code{
+		CodeHTTPConflict,
+		CodeHTTPBadGateway,
+		CodeHTTPGatewayTimeout,
+		CodeHTTPServiceUnavailable,
+		CodeHTTPBadRequest,
+	}
+	forbidden := []string{
+		"refresh", "reload", "retry", "try again",
+		"刷新", "重新加载", "重试", "再试",
+		"更新して", "再読み込み", "もう一度", "再試行",
+		"upstream", "上游", "上流",
+	}
+
+	checkCopy := func(t *testing.T, source string, code Code, text string) {
+		t.Helper()
+		lower := strings.ToLower(text)
+		for _, term := range forbidden {
+			if strings.Contains(lower, term) {
+				t.Errorf("%s %s contains forbidden term %q: %q", source, code, term, text)
+			}
+		}
+	}
+
+	for _, code := range guardedCodes {
+		def, ok := catalog[code]
+		if !ok {
+			t.Fatalf("catalog missing guarded code %q", code)
+		}
+		checkCopy(t, "catalog.Detail", code, def.Detail)
+	}
+
+	for _, path := range localeFiles {
+		raw, err := os.ReadFile(path) //nolint:gosec // repo-local locale file
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var root map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &root); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		var errorsNode map[string]any
+		if err := json.Unmarshal(root["errors"], &errorsNode); err != nil {
+			t.Fatalf("decode %s errors: %v", path, err)
+		}
+		values := make(map[string]string)
+		collectLeafValues(errorsNode, "", values)
+		for _, code := range guardedCodes {
+			text, ok := values[string(code)]
+			if !ok {
+				t.Errorf("%s missing errors.%s", path, code)
+				continue
+			}
+			checkCopy(t, path, code, text)
+		}
+	}
+}
+
+func collectLeafValues(node map[string]any, prefix string, out map[string]string) {
+	for key, value := range node {
+		full := key
+		if prefix != "" {
+			full = prefix + "." + key
+		}
+		switch typed := value.(type) {
+		case string:
+			out[full] = typed
+		case map[string]any:
+			collectLeafValues(typed, full, out)
 		}
 	}
 }

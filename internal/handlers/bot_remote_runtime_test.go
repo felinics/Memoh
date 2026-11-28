@@ -16,27 +16,22 @@ import (
 
 func TestWorkspaceTargetHTTPError(t *testing.T) {
 	for name, tc := range map[string]struct {
-		err  error
-		code int
+		err        error
+		wantCode   apperror.Code
+		wantStatus int
+		wantFault  apperror.Fault
 	}{
-		"owner mismatch":        {workspace.ErrRemoteRuntimeOwnerMismatch, http.StatusConflict},
-		"client too old":        {workspace.ErrRemoteRuntimeClientUpdateNeeded, http.StatusConflict},
-		"workspace unreachable": {bridgeUnavailable(), http.StatusServiceUnavailable},
-		"unexpected failure":    {errors.New("boom"), 0},
+		"runtime offline":       {workspace.ErrRemoteRuntimeOffline, apperror.CodeWorkspaceTargetOffline, http.StatusConflict, ""},
+		"runtime revoked":       {workspace.ErrRemoteRuntimeRevoked, apperror.CodeWorkspaceTargetRevoked, http.StatusConflict, ""},
+		"owner mismatch":        {workspace.ErrRemoteRuntimeOwnerMismatch, apperror.CodeWorkspaceTargetOwnerMismatch, http.StatusConflict, ""},
+		"client too old":        {workspace.ErrRemoteRuntimeClientUpdateNeeded, apperror.CodeWorkspaceTargetClientUpdateRequired, http.StatusConflict, ""},
+		"workspace unreachable": {bridgeUnavailable(), apperror.CodeWorkspaceUnreachable, http.StatusServiceUnavailable, apperror.FaultDependency},
+		"unexpected failure":    {errors.New("boom"), "", 0, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := workspaceTargetHTTPError(tc.err)
 			var httpErr *echo.HTTPError
-			if tc.code == http.StatusServiceUnavailable {
-				if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceUnreachable {
-					t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceUnreachable)
-				}
-				if got := errs.FaultOf(err); got != apperror.FaultDependency {
-					t.Fatalf("fault = %q, want dependency", got)
-				}
-				return
-			}
-			if tc.code == 0 {
+			if tc.wantCode == "" {
 				// An unexpected failure is returned with its cause for the
 				// boundary to answer as internal and record.
 				if errors.As(err, &httpErr) || !errors.Is(err, tc.err) {
@@ -44,8 +39,19 @@ func TestWorkspaceTargetHTTPError(t *testing.T) {
 				}
 				return
 			}
-			if !errors.As(err, &httpErr) || httpErr.Code != tc.code {
-				t.Fatalf("error = %v, want HTTP %d", err, tc.code)
+			if got := apperror.CodeOf(err); got != tc.wantCode {
+				t.Fatalf("code = %q, want %q", got, tc.wantCode)
+			}
+			if !errors.Is(apperror.CauseOf(err), tc.err) {
+				t.Fatalf("cause = %v, want %v", apperror.CauseOf(err), tc.err)
+			}
+			if def, _ := apperror.Lookup(tc.wantCode); def.HTTPStatus != tc.wantStatus {
+				t.Fatalf("%s status = %d, want %d", tc.wantCode, def.HTTPStatus, tc.wantStatus)
+			}
+			if tc.wantFault != "" {
+				if got := errs.FaultOf(err); got != tc.wantFault {
+					t.Fatalf("fault = %q, want %q", got, tc.wantFault)
+				}
 			}
 		})
 	}

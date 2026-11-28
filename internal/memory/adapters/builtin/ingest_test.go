@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -204,5 +205,15 @@ func TestQualifyIngestID(t *testing.T) {
 				t.Fatalf("qualifyIngestID(%q,%q) = %q, want %q", c.botID, c.in, got, c.want)
 			}
 		})
+	}
+}
+
+func TestBuiltinProviderIngestFromMarkdownUnsupportedReturnsSentinel(t *testing.T) {
+	t.Parallel()
+
+	provider := &BuiltinProvider{service: &fileRuntime{}}
+	_, err := provider.IngestFromMarkdown(context.Background(), "bot-1")
+	if !errors.Is(err, ErrMarkdownIngestUnsupported) {
+		t.Fatalf("IngestFromMarkdown() error = %v, want ErrMarkdownIngestUnsupported", err)
 	}
 }

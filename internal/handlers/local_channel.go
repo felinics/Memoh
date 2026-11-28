@@ -49,6 +49,8 @@ import (
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
 	"github.com/felinics/memoh/internal/telemetry"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // localSpeechSynthesizer synthesizes text to speech audio.
@@ -1189,10 +1191,20 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	return resolved, nil
 }
 
-// workspaceTargetError is the answer to a send whose selected workspace
-// target does not resolve: a conflict, on HTTP and WebSocket alike.
+// workspaceTargetError maps workspace target validation failures to explicit
+// catalog errors, leaving unexpected failures to the boundary's internal handler.
 func workspaceTargetError(err error) error {
-	return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
+	if mapped := remoteRuntimeTargetError(err); mapped != nil {
+		return mapped
+	}
+	switch {
+	case errors.Is(err, workspace.ErrWorkspaceTargetNotFound):
+		return apperror.Wrap(apperror.CodeWorkspaceTargetNotFound, err, nil)
+	case errors.Is(err, bridge.ErrUnavailable):
+		return workspaceUnavailableError(err)
+	default:
+		return errs.Wrap(err, "validate workspace target")
+	}
 }
 
 // sendWSAgentError sends a stream error with its code and the code's catalog

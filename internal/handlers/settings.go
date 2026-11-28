@@ -127,7 +127,7 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 			return modelRefErr
 		}
 		if errors.Is(err, settings.ErrModelIDAmbiguous) {
-			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; select by model UUID")
+			return apperror.Wrap(apperror.CodeModelIDAmbiguous, err, nil)
 		}
 		return errs.Wrap(err, "update bot settings")
 	}

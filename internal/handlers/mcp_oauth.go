@@ -189,17 +189,21 @@ func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 
 	_, err := h.oauthService.HandleCallback(c.Request().Context(), state, code)
 	if err != nil {
-		switch {
-		case errors.Is(err, mcp.ErrOAuthStateInvalid):
-			return apperror.Wrap(apperror.CodeOAuthStateInvalid, err, nil)
-		case errors.Is(err, mcp.ErrTokenExchange):
-			return apperror.Wrap(apperror.CodeHTTPBadGateway, errs.WrapDependency(err, "exchange mcp oauth code"), nil)
-		default:
-			return errs.Wrap(err, "exchange mcp oauth code")
-		}
+		return mcpOAuthExchangeError(err)
 	}
 
 	return c.JSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+func mcpOAuthExchangeError(err error) error {
+	switch {
+	case errors.Is(err, mcp.ErrOAuthStateInvalid):
+		return apperror.Wrap(apperror.CodeOAuthStateInvalid, err, nil)
+	case errors.Is(err, mcp.ErrTokenExchange):
+		return apperror.Wrap(apperror.CodeMCPOAuthTokenExchangeFailed, errs.WrapDependency(err, "exchange mcp oauth code"), nil)
+	default:
+		return errs.Wrap(err, "exchange mcp oauth code")
+	}
 }
 
 // Callback godoc

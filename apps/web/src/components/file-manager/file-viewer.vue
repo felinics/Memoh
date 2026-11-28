@@ -31,7 +31,7 @@ import {
   getBotsByBotIdContainerFsDownload,
 } from '@memohai/sdk'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
-import { apiErrorStatus, resolveApiErrorMessage } from '@/utils/api-error'
+import { apiErrorStatus, isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import MonacoDiff from '@/components/monaco-editor/diff.vue'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
@@ -616,7 +616,7 @@ async function handleSave(force = false): Promise<boolean> {
     return !isDirty.value
   } catch (error) {
     if (snapshot.generation !== fileGeneration) return false
-    if (apiErrorStatus(error) === 409) {
+    if (isApiErrorCode(error, 'workspace_file.revision_conflict') || apiErrorStatus(error) === 409) {
       // A 409 means our baseline is stale; bumping the disk state surfaces
       // "Try again" (Reload) as the chip's primary affordance and prevents a
       // Cmd+S loop from re-POSTing with the same stale expectedRevision.

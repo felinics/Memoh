@@ -26,6 +26,8 @@ var (
 	ErrInvalidModelType = errors.New("invalid model type")
 )
 
+const modelProviderIDModelIDConstraint = "models_provider_id_model_id_unique"
+
 // Service provides CRUD operations for models.
 type Service struct {
 	queries dbstore.Queries
@@ -79,8 +81,8 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 
 	created, err := s.queries.CreateModel(ctx, params)
 	if err != nil {
-		if db.IsUniqueViolation(err) {
-			return AddResponse{}, ErrModelIDAlreadyExists
+		if db.IsUniqueViolationConstraint(err, modelProviderIDModelIDConstraint) {
+			return AddResponse{}, fmt.Errorf("%w: %w", ErrModelIDAlreadyExists, err)
 		}
 		return AddResponse{}, fmt.Errorf("failed to create model: %w", err)
 	}
@@ -334,8 +336,8 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 
 	updated, err := s.queries.UpdateModel(ctx, params)
 	if err != nil {
-		if db.IsUniqueViolation(err) {
-			return GetResponse{}, ErrModelIDAlreadyExists
+		if db.IsUniqueViolationConstraint(err, modelProviderIDModelIDConstraint) {
+			return GetResponse{}, fmt.Errorf("%w: %w", ErrModelIDAlreadyExists, err)
 		}
 		return GetResponse{}, fmt.Errorf("failed to update model: %w", err)
 	}
@@ -400,8 +402,8 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 
 	updated, err := s.queries.UpdateModel(ctx, params)
 	if err != nil {
-		if db.IsUniqueViolation(err) {
-			return GetResponse{}, ErrModelIDAlreadyExists
+		if db.IsUniqueViolationConstraint(err, modelProviderIDModelIDConstraint) {
+			return GetResponse{}, fmt.Errorf("%w: %w", ErrModelIDAlreadyExists, err)
 		}
 		return GetResponse{}, fmt.Errorf("failed to update model: %w", err)
 	}

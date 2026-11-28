@@ -107,7 +107,7 @@ func TestErrorEvent(t *testing.T) {
 			name:     "uncoded client refusal gets the bad request copy",
 			locale:   "en",
 			err:      fmt.Errorf("start turn: %w", status.Error(codes.InvalidArgument, "SECRET field")),
-			wantText: "The request is invalid.",
+			wantText: "We couldn't process this request.",
 			wantCode: string(apperror.CodeHTTPBadRequest),
 		},
 	}

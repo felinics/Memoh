@@ -260,7 +260,7 @@ func (*BotUserAccessHandler) mapGrantError(err error) error {
 	case errors.Is(err, bots.ErrGrantOwnerConflict):
 		return apperror.FieldInvalid("user_id", err)
 	case errors.Is(err, bots.ErrGrantExists):
-		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
+		return apperror.Wrap(apperror.CodeBotAccessGrantExists, err, nil)
 	case errors.Is(err, bots.ErrBotNotFound):
 		return apperror.Wrap(apperror.CodeBotNotFound, err, nil)
 	default:

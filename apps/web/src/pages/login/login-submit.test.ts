@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import { submitLogin, type SubmitLoginDependencies } from './login-submit'
+import { resolveLoginErrorNotification, submitLogin, type SubmitLoginDependencies } from './login-submit'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -27,7 +27,7 @@ function createDependencies(overrides: Partial<SubmitLoginDependencies> = {}): S
     }),
     applyLogin: vi.fn(),
     navigateHome: vi.fn().mockResolvedValue(undefined),
-    notifyInvalidCredentials: vi.fn(),
+    notifyLoginError: vi.fn(),
     ...overrides,
   }
 }
@@ -67,7 +67,7 @@ describe('submitLogin', () => {
     expect(isSubmitting.value).toBe(false)
   })
 
-  it('notifies and releases the form when authentication fails', async () => {
+  it('notifies and releases the form when authentication fails with empty payload', async () => {
     const isSubmitting = ref(false)
     const dependencies = createDependencies({
       authenticate: vi.fn().mockResolvedValue({ data: null }),
@@ -77,7 +77,22 @@ describe('submitLogin', () => {
 
     expect(dependencies.applyLogin).not.toHaveBeenCalled()
     expect(dependencies.navigateHome).not.toHaveBeenCalled()
-    expect(dependencies.notifyInvalidCredentials).toHaveBeenCalledTimes(1)
+    expect(dependencies.notifyLoginError).toHaveBeenCalledWith(null)
+    expect(isSubmitting.value).toBe(false)
+  })
+
+  it('forwards thrown authentication errors without collapsing them', async () => {
+    const isSubmitting = ref(false)
+    const authError = { code: 'auth.account_inactive', status: 403 }
+    const dependencies = createDependencies({
+      authenticate: vi.fn().mockRejectedValue(authError),
+    })
+
+    await expect(submitLogin({ username: 'alice', password: 'secret' }, isSubmitting, dependencies)).resolves.toBe(false)
+
+    expect(dependencies.applyLogin).not.toHaveBeenCalled()
+    expect(dependencies.navigateHome).not.toHaveBeenCalled()
+    expect(dependencies.notifyLoginError).toHaveBeenCalledWith(authError)
     expect(isSubmitting.value).toBe(false)
   })
 
@@ -104,7 +119,7 @@ describe('submitLogin', () => {
     expect(callOrder).toEqual(['applyLogin', 'syncTimezone', 'navigateHome'])
     expect(dependencies.syncTimezone).toHaveBeenCalledWith('Asia/Shanghai')
     expect(dependencies.applySyncedTimezone).toHaveBeenCalledWith('Asia/Shanghai')
-    expect(dependencies.notifyInvalidCredentials).not.toHaveBeenCalled()
+    expect(dependencies.notifyLoginError).not.toHaveBeenCalled()
     expect(isSubmitting.value).toBe(false)
   })
 
@@ -150,7 +165,7 @@ describe('submitLogin', () => {
     await expect(submitLogin({ username: 'alice', password: 'secret' }, isSubmitting, dependencies)).resolves.toBe(true)
 
     // A failed profile write must not be reported as a credential failure.
-    expect(dependencies.notifyInvalidCredentials).not.toHaveBeenCalled()
+    expect(dependencies.notifyLoginError).not.toHaveBeenCalled()
     expect(dependencies.notifyTimezoneSyncFailed).toHaveBeenCalledWith(syncError)
     expect(dependencies.applySyncedTimezone).not.toHaveBeenCalled()
     expect(dependencies.navigateHome).toHaveBeenCalledTimes(1)
@@ -176,5 +191,68 @@ describe('submitLogin', () => {
     sync.resolve({ timezone: 'Asia/Shanghai' })
     await expect(submission).resolves.toBe(true)
     expect(isSubmitting.value).toBe(false)
+  })
+})
+
+describe('resolveLoginErrorNotification', () => {
+  it('shows invalid credentials copy with retry hint for auth.invalid_credentials', () => {
+    expect(
+      resolveLoginErrorNotification(
+        { code: 'auth.invalid_credentials', status: 401 },
+        'Login Failed',
+        'Check your credentials',
+      ),
+    ).toEqual({
+      message: 'Incorrect username or password.',
+      description: 'Check your credentials',
+    })
+  })
+
+  it('shows deactivated account copy without retry hint for auth.account_inactive', () => {
+    expect(
+      resolveLoginErrorNotification(
+        { code: 'auth.account_inactive', status: 403 },
+        'Login Failed',
+        'Check your credentials',
+      ),
+    ).toEqual({
+      message: 'This account is inactive. Contact an administrator.',
+    })
+  })
+
+  it('shows server error copy instead of invalid credentials for 500 internal errors', () => {
+    expect(
+      resolveLoginErrorNotification(
+        { code: 'internal', status: 500 },
+        'Login Failed',
+        'Check your credentials',
+      ),
+    ).toEqual({
+      message: 'Something went wrong on the server. Please try again.',
+    })
+  })
+
+  it('returns an empty message for canceled 499 requests so the UI skips toasting', () => {
+    expect(
+      resolveLoginErrorNotification(
+        { status: 499 },
+        'Login Failed',
+        'Check your credentials',
+      ),
+    ).toEqual({
+      message: '',
+    })
+  })
+
+  it('falls back to Login Failed when no structured error is available', () => {
+    expect(
+      resolveLoginErrorNotification(
+        null,
+        'Login Failed',
+        'Check your credentials',
+      ),
+    ).toEqual({
+      message: 'Login Failed',
+    })
   })
 })

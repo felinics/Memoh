@@ -818,7 +818,7 @@ func (p *Pool) Get(ctx context.Context, botID string) (*Client, error) {
 
 	target := p.dialTargetFunc(botID)
 	if target == "" {
-		return nil, fmt.Errorf("no dial target for bot %s", botID)
+		return nil, fmt.Errorf("%w: no dial target for bot %s", ErrUnavailable, botID)
 	}
 
 	c, err := DialTLS(ctx, target, p.tlsOptions())

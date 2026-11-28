@@ -786,7 +786,7 @@ func (h *ContainerdHandler) workspaceDependencyRequest(c echo.Context) (string, 
 		return "", nil, err
 	}
 	if h.workspaceDeps == nil {
-		return "", nil, echo.NewHTTPError(http.StatusServiceUnavailable, "workspace dependency service not configured")
+		return "", nil, apperror.Wrap(apperror.CodeWorkspaceDependencyCatalogUnavailable, errs.New("workspace dependency service not configured"), nil)
 	}
 	return botID, h.workspaceDeps, nil
 }

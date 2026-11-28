@@ -22,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	memorybuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
 	"github.com/felinics/memoh/internal/settings"
 )
 
@@ -250,11 +251,54 @@ func TestChatStatusDoesNotFallbackToBuiltinWhenConfiguredProviderIsUnavailable(t
 	if err == nil {
 		t.Fatal("expected configured provider lookup error")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo HTTP error, got %T", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeHTTPServiceUnavailable {
+		t.Fatalf("code = %q, want %q", got, apperror.CodeHTTPServiceUnavailable)
 	}
-	if httpErr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", httpErr.Code)
+	if def, ok := apperror.Lookup(apperror.CodeOf(err)); !ok || def.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", def.HTTPStatus)
+	}
+}
+
+type unsupportedIngestProvider struct {
+	unsupportedCompactProvider
+}
+
+func (*unsupportedIngestProvider) IngestFromMarkdown(context.Context, string) (memprovider.IngestResult, error) {
+	return memprovider.IngestResult{}, memorybuiltin.ErrMarkdownIngestUnsupported
+}
+
+func TestChatIngestMapsUnsupportedSentinelToMemoryOperationUnsupported(t *testing.T) {
+	t.Parallel()
+
+	botID := "11111111-1111-1111-1111-111111111111"
+	userID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	registry := memprovider.NewRegistry(slog.Default())
+	registry.Register(defaultBuiltinProviderID, &unsupportedIngestProvider{})
+
+	botRow := testBotRow(botID, map[string]any{})
+	botRow.OwnerUserID = testUUID(userID)
+	botRow.Status = bots.BotStatusReady
+	queries := &memoryCapabilityQueries{bot: botRow}
+	handler := NewMemoryHandler(
+		slog.Default(),
+		bots.NewService(slog.Default(), queries),
+		accounts.NewService(slog.Default(), testAdminAccountStore{role: "admin"}),
+	)
+	handler.SetMemoryRegistry(registry)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots/"+botID+"/memory/ingest", nil)
+	rec := httptest.NewRecorder()
+	e := echo.New()
+	echoCtx := testAuthContext(e, req, rec, userID)
+	echoCtx.SetPath("/bots/:bot_id/memory/ingest")
+	echoCtx.SetParamNames("bot_id")
+	echoCtx.SetParamValues(botID)
+
+	err := handler.ChatIngest(echoCtx)
+	if apperror.CodeOf(err) != apperror.CodeMemoryOperationUnsupported {
+		t.Fatalf("ChatIngest() error = %v, want %s", err, apperror.CodeMemoryOperationUnsupported)
+	}
+	if !errors.Is(apperror.CauseOf(err), memorybuiltin.ErrMarkdownIngestUnsupported) {
+		t.Fatalf("ChatIngest() lost ErrMarkdownIngestUnsupported cause: %v", apperror.CauseOf(err))
 	}
 }

@@ -87,7 +87,11 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 		return c.JSON(http.StatusOK, resp)
 	}
 
-	resp.Enabled = h.manager.BotDisplayEnabled(ctx, botID)
+	enabled, err := h.manager.BotDisplayEnabled(ctx, botID)
+	if err != nil {
+		return errs.Wrap(err, "check bot display enabled")
+	}
+	resp.Enabled = enabled
 	if _, err := h.manager.NativeMCPClient(ctx, botID); err != nil {
 		// unavailable_reason is a wire-level enum consumed by older Desktop clients.
 		resp.UnavailableReason = "container not reachable"
@@ -139,7 +143,7 @@ func displayOfferHTTPError(err error) error {
 	case errors.Is(err, displaypkg.ErrOfferInvalid), errors.Is(err, displaypkg.ErrCodecUnsupported):
 		return apperror.FieldInvalid("sdp", err)
 	case errors.Is(err, displaypkg.ErrEncoderUnavailable), errors.Is(err, displaypkg.ErrDisplayUnavailable):
-		return echo.NewHTTPError(http.StatusServiceUnavailable).WithInternal(err)
+		return apperror.Wrap(apperror.CodeHTTPServiceUnavailable, err, nil)
 	default:
 		return errs.Wrap(err, "display webrtc offer")
 	}
@@ -290,7 +294,11 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	if h.manager == nil {
 		return fail("checking", apperror.New(apperror.CodeWorkspaceManagerUnavailable, nil))
 	}
-	if !h.manager.BotDisplayEnabled(ctx, botID) {
+	enabled, err := h.manager.BotDisplayEnabled(ctx, botID)
+	if err != nil {
+		return fail("checking", errs.Wrap(err, "check bot display enabled"))
+	}
+	if !enabled {
 		return fail("checking", apperror.New(apperror.CodeWorkspaceDisplayDisabled, nil))
 	}
 

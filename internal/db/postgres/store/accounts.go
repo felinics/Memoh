@@ -3,6 +3,7 @@ package postgresstore
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -176,7 +177,7 @@ func mapQueryErr(err error) error {
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.ConstraintName == "team_members_last_active_admin" {
-		return db.ErrLastActiveAdmin
+		return fmt.Errorf("%w: %w", db.ErrLastActiveAdmin, err)
 	}
 	return err
 }

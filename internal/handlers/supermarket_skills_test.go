@@ -267,8 +267,8 @@ func TestSupermarketProxyAnswersUpstreamErrorsAsProblem(t *testing.T) {
 		fault    apperror.Fault
 	}{
 		{"not found", http.StatusNotFound, http.StatusNotFound, apperror.CodeSupermarketNotFound, apperror.FaultClient},
-		{"other client status", http.StatusUnauthorized, http.StatusBadGateway, apperror.CodeHTTPBadGateway, apperror.FaultDependency},
-		{"server status", http.StatusServiceUnavailable, http.StatusBadGateway, apperror.CodeHTTPBadGateway, apperror.FaultDependency},
+		{"other client status", http.StatusUnauthorized, http.StatusBadGateway, apperror.CodeRegistryUnavailable, apperror.FaultDependency},
+		{"server status", http.StatusServiceUnavailable, http.StatusBadGateway, apperror.CodeRegistryUnavailable, apperror.FaultDependency},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -703,7 +703,7 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 	// caller that has not prepared one (no override) would leave two Memoh
 	// sessions sharing a single runtime session.
 	if input.RuntimeForkRequired && input.RuntimeMetadataOverride == nil {
-		return Thread{}, ErrForkSourceNotChat
+		return Thread{}, errors.New("fork thread: runtime metadata override required")
 	}
 
 	title := strings.TrimSpace(source.Title)
@@ -763,6 +763,9 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 			CreatedByUserID:         pgCreatedByUserID,
 		})
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: %w", ErrForkSourceNotReply, err)
+			}
 			return err
 		}
 		forkID = row.ID
@@ -780,9 +783,6 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Thread{}, ErrForkSourceNotReply
-		}
 		return Thread{}, err
 	}
 	forkRow, err := s.queries.GetSessionByID(ctx, forkID)

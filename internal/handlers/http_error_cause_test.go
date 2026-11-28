@@ -7,7 +7,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/workdir"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -23,8 +22,6 @@ func TestStatusOnlyHTTPErrorsKeepCause(t *testing.T) {
 	}{
 		{"fs forbidden", fsHTTPError(bridge.ErrForbidden), bridge.ErrForbidden, http.StatusForbidden},
 		{"workdir picker forbidden", workdirDirectoriesHTTPError(workdir.ErrPathForbidden), workdir.ErrPathForbidden, http.StatusForbidden},
-		{"workdir duplicate", workdirHTTPError(workdir.ErrDuplicatePath), workdir.ErrDuplicatePath, http.StatusConflict},
-		{"grant exists", (*BotUserAccessHandler)(nil).mapGrantError(bots.ErrGrantExists), bots.ErrGrantExists, http.StatusConflict},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

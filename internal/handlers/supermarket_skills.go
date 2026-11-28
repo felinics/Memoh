@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 	skillset "github.com/felinics/memoh/internal/skills"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
 )
@@ -192,7 +193,7 @@ func (h *SupermarketHandler) GetRegistryAppRelease(c echo.Context) error {
 		if supermarketclient.ErrorKindOf(err) == supermarketclient.ErrorNotFound {
 			return apperror.Wrap(apperror.CodeSupermarketNotFound, err, nil)
 		}
-		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		return apperror.Wrap(apperror.CodeRegistryUnavailable, errs.WrapDependency(err, "fetch supermarket app release"), nil)
 	}
 	pkg.Categories = appCategories(pkg.Skills)
 	return c.JSON(http.StatusOK, pkg)
@@ -266,7 +267,7 @@ func (h *SupermarketHandler) proxySkillIcon(c echo.Context, digest string) error
 		headers,
 	)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		return apperror.Wrap(apperror.CodeRegistryUnavailable, errs.WrapDependency(err, "fetch supermarket skill icon"), nil)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotModified {
@@ -278,16 +279,23 @@ func (h *SupermarketHandler) proxySkillIcon(c echo.Context, digest string) error
 	}
 	contentType := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
 	if contentType != "image/svg+xml" && contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" {
-		return echo.NewHTTPError(http.StatusBadGateway, "Supermarket returned an unsupported Skill icon")
+		return echo.NewHTTPError(http.StatusBadGateway, "Supermarket returned an unsupported Skill icon").
+			WithInternal(errs.NewDependency("unsupported skill icon content type"))
 	}
 	const maxSkillImageBytes = 512 * 1024
 	content, err := io.ReadAll(io.LimitReader(resp.Body, maxSkillImageBytes+1))
 	if err != nil || len(content) == 0 || len(content) > maxSkillImageBytes {
-		return echo.NewHTTPError(http.StatusBadGateway, "Supermarket returned an invalid Skill icon")
+		cause := errs.NewDependency("invalid skill icon size")
+		if err != nil {
+			cause = errs.WrapDependency(err, "read skill icon")
+		}
+		return echo.NewHTTPError(http.StatusBadGateway, "Supermarket returned an invalid Skill icon").
+			WithInternal(cause)
 	}
 	actualDigest := sha256.Sum256(content)
 	if hex.EncodeToString(actualDigest[:]) != digest {
-		return echo.NewHTTPError(http.StatusBadGateway, "Skill icon digest mismatch")
+		return echo.NewHTTPError(http.StatusBadGateway, "Skill icon digest mismatch").
+			WithInternal(errs.NewDependency("skill icon digest mismatch"))
 	}
 	copySkillIconHeaders(c.Response().Header(), resp.Header)
 	c.Response().Header().Set(echo.HeaderContentType, contentType)

@@ -354,4 +354,36 @@ describe('setupApiClient auth handling', () => {
 
     expect(sdkApiBaseUrl()).toBe('http://127.0.0.1:18731')
   })
+
+  it('does not trigger global logout when /auth/login returns 401', async () => {
+    localStorage.setItem('token', 'existing-token')
+    const onUnauthorized = vi.fn()
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ code: 'auth.invalid_credentials', detail: 'Invalid username or password.' }),
+      {
+        status: 401,
+        statusText: 'Unauthorized',
+        headers: { 'Content-Type': 'application/problem+json' },
+      },
+    ))
+
+    setupApiClient({
+      baseUrl: 'http://example.test/api',
+      fetch: fetchMock as unknown as typeof fetch,
+      onUnauthorized,
+    })
+
+    await expect(client.post({
+      url: '/auth/login',
+      body: { username: 'alice', password: 'wrong' },
+      throwOnError: true,
+    })).rejects.toMatchObject({
+      code: 'auth.invalid_credentials',
+      status: 401,
+    })
+
+    expect(onUnauthorized).not.toHaveBeenCalled()
+    expect(mockedNotifyAuthSessionCleared).not.toHaveBeenCalled()
+    expect(localStorage.getItem('token')).toBe('existing-token')
+  })
 })

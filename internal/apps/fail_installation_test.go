@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestFailInstallationReturnsCauseWithoutLogging(t *testing.T) {
@@ -25,5 +27,13 @@ func TestFailInstallationReturnsCauseWithoutLogging(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("failInstallation logged %q; the caller records the returned cause", buf.String())
+	}
+}
+
+func TestPublicCodeMapsDeadlineExceededToAppOperationTimeout(t *testing.T) {
+	t.Parallel()
+
+	if got := publicCode(context.DeadlineExceeded); got != apperror.CodeAppOperationTimeout {
+		t.Fatalf("publicCode(DeadlineExceeded) = %q, want %q", got, apperror.CodeAppOperationTimeout)
 	}
 }

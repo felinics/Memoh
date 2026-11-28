@@ -77,7 +77,7 @@ import LoadingButton from '@/components/loading-button/index.vue'
 import PasswordInput from '@/components/password-input/index.vue'
 import DotMatrixBg from '@/pages/login/components/dot-matrix-bg.vue'
 import { sanitizeReturnTo } from '@/router-guards/return-to'
-import { submitLogin } from './login-submit'
+import { resolveLoginErrorNotification, submitLogin } from './login-submit'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
@@ -126,7 +126,7 @@ const login = async () => {
     { username: username.value.trim(), password: password.value },
     isSubmitting,
     {
-      authenticate: (body) => postAuthLogin({ body }),
+      authenticate: (body) => postAuthLogin({ body, throwOnError: true }),
       applyLogin: loginHandle,
       // 登录边界自动上报浏览器时区(#1148):凭据就绪后走与手动修改 profile
       // 相同的 putUsersMe;仅在登录成功路径触发,普通刷新不会反复覆盖手选时区。
@@ -154,11 +154,15 @@ const login = async () => {
         await new Promise<void>(resolve => setTimeout(resolve, 175))
         await router.replace(destination)
       },
-      notifyInvalidCredentials: () => {
+      notifyLoginError: (error) => {
         // 可显隐密码框:失败不清空,用户多半只改账号或笔误。
-        toast.error(t('auth.invalidCredentials'), {
-          description: t('auth.retryHint'),
-        })
+        const { message, description } = resolveLoginErrorNotification(
+          error,
+          t('auth.loginFailed'),
+          t('auth.retryHint'),
+        )
+        if (!message) return
+        toast.error(message, description ? { description } : undefined)
       },
     },
   )

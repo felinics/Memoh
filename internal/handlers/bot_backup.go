@@ -106,7 +106,7 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	// rather than a truncated body after a misleading "200 OK".
 	tmp, err := os.CreateTemp("", "memoh-backup-*.zip")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
+		return errs.Wrap(err, "create backup temp file")
 	}
 	tmpPath := tmp.Name()
 	defer func() {

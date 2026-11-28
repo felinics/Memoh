@@ -138,10 +138,10 @@ func TestDisplayOfferErrors(t *testing.T) {
 	if got := apperror.CodeOf(displayOfferHTTPError(display.ErrDisplayDisabled)); got != apperror.CodeWorkspaceDisplayDisabled {
 		t.Fatalf("disabled code = %q", got)
 	}
-	var httpErr *echo.HTTPError
-	if err := displayOfferHTTPError(display.ErrEncoderUnavailable); !errors.As(err, &httpErr) || httpErr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("encoder error = %v, want 503", err)
+	if err := displayOfferHTTPError(display.ErrEncoderUnavailable); apperror.CodeOf(err) != apperror.CodeHTTPServiceUnavailable {
+		t.Fatalf("encoder error = %v, want %s", err, apperror.CodeHTTPServiceUnavailable)
 	}
+	var httpErr *echo.HTTPError
 	internal := displayOfferHTTPError(errors.New("pion exploded"))
 	if errors.As(internal, &httpErr) || errs.FaultOf(internal) != apperror.FaultServer {
 		t.Fatalf("internal failure = %v, want an internal fault", internal)

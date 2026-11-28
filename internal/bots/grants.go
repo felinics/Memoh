@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -395,8 +396,8 @@ func (s *Service) CreateUserGrant(ctx context.Context, botID, createdByUserID st
 
 	row, err := s.queries.CreateBotUserGrant(ctx, params)
 	if err != nil {
-		if db.IsUniqueViolation(err) {
-			return UserGrant{}, ErrGrantExists
+		if db.IsUniqueViolationConstraint(err, "idx_bot_user_grants_unique_user", "idx_bot_user_grants_unique_everyone") {
+			return UserGrant{}, fmt.Errorf("%w: %w", ErrGrantExists, err)
 		}
 		return UserGrant{}, err
 	}

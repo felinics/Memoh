@@ -77,7 +77,7 @@ func publicCode(err error) apperror.Code {
 	case errors.Is(err, context.Canceled):
 		return apperror.CodeCanceled
 	case errors.Is(err, context.DeadlineExceeded):
-		return apperror.CodeHTTPGatewayTimeout
+		return apperror.CodeAppOperationTimeout
 	}
 	return apperror.CodeAppOperationFailed
 }

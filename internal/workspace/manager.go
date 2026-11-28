@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/felinics/memoh/internal/config"
@@ -623,7 +624,11 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	env = append(env, tzEnv...)
 	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 	env = m.appendBridgeTLSEnv(env)
-	if m.botDisplayEnabled(ctx, botID) {
+	displayEnabled, err := m.botDisplayEnabled(ctx, botID)
+	if err != nil {
+		return ctr.ContainerSpec{}, err
+	}
+	if displayEnabled {
 		env = append(env,
 			"MEMOH_DISPLAY_ENABLED=true",
 			"MEMOH_DISPLAY_RFB_TCP_ADDR=127.0.0.1:5999",
@@ -653,22 +658,25 @@ func (m *Manager) appendBridgeTLSEnv(env []string) []string {
 	)
 }
 
-func (m *Manager) botDisplayEnabled(ctx context.Context, botID string) bool {
+func (m *Manager) botDisplayEnabled(ctx context.Context, botID string) (bool, error) {
 	if m.queries == nil {
-		return false
+		return false, nil
 	}
 	id, err := db.ParseUUID(botID)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("parse bot id %q: %w", botID, err)
 	}
 	row, err := m.queries.GetSettingsByBotID(ctx, id)
 	if err != nil {
-		return false
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get bot display settings: %w", err)
 	}
-	return row.DisplayEnabled
+	return row.DisplayEnabled, nil
 }
 
-func (m *Manager) BotDisplayEnabled(ctx context.Context, botID string) bool {
+func (m *Manager) BotDisplayEnabled(ctx context.Context, botID string) (bool, error) {
 	return m.botDisplayEnabled(ctx, botID)
 }
 

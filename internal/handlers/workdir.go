@@ -262,16 +262,14 @@ func workdirHTTPError(err error) error {
 	case errors.Is(err, workdir.ErrWorkdirNotFound),
 		errors.Is(err, db.ErrNotFound):
 		return apperror.Wrap(apperror.CodeWorkdirNotFound, err, nil)
-	case errors.Is(err, workdir.ErrDuplicatePath),
-		errors.Is(err, workdir.ErrWorkdirArchived),
-		errors.Is(err, workspace.ErrRemoteRuntimeOffline),
-		errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
-		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
-		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded),
-		errors.Is(err, workspace.ErrRemoteRuntimeNotUsable),
-		errors.Is(err, workspace.ErrRemoteWorkspaceNotBound):
-		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
+	case errors.Is(err, workdir.ErrDuplicatePath):
+		return apperror.Wrap(apperror.CodeWorkdirPathAlreadyExists, err, nil)
+	case errors.Is(err, workdir.ErrWorkdirArchived):
+		return apperror.Wrap(apperror.CodeWorkdirArchived, err, nil)
 	default:
+		if mapped := remoteRuntimeTargetError(err); mapped != nil {
+			return mapped
+		}
 		return errs.Wrap(err, "workdir request")
 	}
 }

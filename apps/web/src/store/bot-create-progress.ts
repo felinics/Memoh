@@ -206,7 +206,12 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   const percent = computed(() => botCreateProgressPercent(progress.value))
   const isActive = computed(() => status.value === 'creating')
   // A retry needs something to retry on: an existing Bot, or the rejected payload.
-  const canRetry = computed(() => status.value !== 'creating' && (!!bot.value?.id || hasPayload.value))
+  // A deleted create request cannot reuse the same Idempotency-Key and must be restarted.
+  const canRetry = computed(() =>
+    status.value !== 'creating'
+    && errorCode.value !== 'bot.create_request_deleted'
+    && (!!bot.value?.id || hasPayload.value),
+  )
 
   function reset() {
     status.value = 'idle'
@@ -506,7 +511,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   }
 
   async function retry() {
-    if (status.value === 'creating') return
+    if (!canRetry.value) return
     if (status.value === 'workspace-error' && bot.value?.id) return await retryWorkspace()
     if (bot.value?.id) {
       beginStep()

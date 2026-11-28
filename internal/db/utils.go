@@ -82,3 +82,18 @@ func IsUniqueViolation(err error) bool {
 	}
 	return false
 }
+
+// IsUniqueViolationConstraint reports whether err is a PostgreSQL UNIQUE
+// constraint violation matching any of the named constraints.
+func IsUniqueViolationConstraint(err error, constraints ...string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return false
+	}
+	for _, name := range constraints {
+		if pgErr.ConstraintName == name {
+			return true
+		}
+	}
+	return false
+}

@@ -5,10 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/runtimekind"
@@ -83,5 +86,27 @@ func TestPrepareExternalForkRejectsActiveTurnBeforeNativeFork(t *testing.T) {
 	_, err := svc.PrepareExternalFork(t.Context(), forkTestBotID, forkTestSessionID, forkTestTurnID)
 	if apperror.CodeOf(err) != apperror.CodeSessionBusy || len(admitter.finishes) != 0 {
 		t.Fatalf("busy fork: %v", err)
+	}
+}
+
+func TestPrepareExternalForkWrapsMissingSessionAsForkSourceNotFound(t *testing.T) {
+	t.Parallel()
+	for name, getErr := range map[string]error{
+		"pgx.ErrNoRows":  pgx.ErrNoRows,
+		"db.ErrNotFound": db.ErrNotFound,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc := &Service{
+				sessionRuntime: newScriptedAdmitter(),
+				sessionService: &fakeBackgroundSessionService{getFn: func(context.Context, string) (session.Thread, error) {
+					return session.Thread{}, getErr
+				}},
+			}
+			_, err := svc.PrepareExternalFork(t.Context(), forkTestBotID, forkTestSessionID, forkTestTurnID)
+			if !errors.Is(err, session.ErrForkSourceNotFound) || !errors.Is(err, getErr) {
+				t.Fatalf("PrepareExternalFork() error = %v, want ErrForkSourceNotFound wrapping %v", err, getErr)
+			}
+		})
 	}
 }

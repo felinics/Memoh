@@ -141,7 +141,7 @@ func (h *PublicMediaHandler) openImage(c echo.Context, botID, contentHash string
 		if errors.Is(err, media.ErrAssetNotFound) {
 			return nil, media.Asset{}, apperror.Wrap(apperror.CodeMediaAssetNotFound, err, nil)
 		}
-		return nil, media.Asset{}, echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
+		return nil, media.Asset{}, errs.Wrap(err, "open public media")
 	}
 	asset.Mime = attachment.NormalizeMime(asset.Mime)
 	if asset.Mime != "image/jpeg" && asset.Mime != "image/png" {
@@ -190,7 +190,7 @@ func publicMediaTooLargeHTTPError(err error) error {
 	if errors.Is(err, media.ErrAssetTooLarge) {
 		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "media is too large")
 	}
-	return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("read media failed"))
+	return errs.Wrap(err, "read public media")
 }
 
 func encodePublicMediaPreviewJPEG(data []byte) ([]byte, error) {

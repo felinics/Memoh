@@ -48,7 +48,7 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(err)
+		return apperror.FieldInvalid("platform", err)
 	}
 	resp, err := h.store.GetChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType)
 	if err != nil {
@@ -77,7 +77,7 @@ func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(err)
+		return apperror.FieldInvalid("platform", err)
 	}
 	var req channel.UpsertChannelIdentityConfigRequest
 	if err := c.Bind(&req); err != nil {
@@ -144,7 +144,7 @@ func (h *ChannelHandler) ListChannels(c echo.Context) error {
 func (h *ChannelHandler) GetChannel(c echo.Context) error {
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(err)
+		return apperror.FieldInvalid("platform", err)
 	}
 	desc, ok := h.registry.GetDescriptor(channelType)
 	if !ok {

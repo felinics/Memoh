@@ -290,7 +290,25 @@ func toolApprovalModeHTTPError(err error) error {
 	return errs.Wrap(err, "tool approval mode")
 }
 
+func remoteRuntimeTargetError(err error) error {
+	switch {
+	case errors.Is(err, workspace.ErrRemoteRuntimeOffline):
+		return apperror.Wrap(apperror.CodeWorkspaceTargetOffline, err, nil)
+	case errors.Is(err, workspace.ErrRemoteRuntimeRevoked):
+		return apperror.Wrap(apperror.CodeWorkspaceTargetRevoked, err, nil)
+	case errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch):
+		return apperror.Wrap(apperror.CodeWorkspaceTargetOwnerMismatch, err, nil)
+	case errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
+		return apperror.Wrap(apperror.CodeWorkspaceTargetClientUpdateRequired, err, nil)
+	default:
+		return nil
+	}
+}
+
 func workspaceTargetHTTPError(err error) error {
+	if mapped := remoteRuntimeTargetError(err); mapped != nil {
+		return mapped
+	}
 	switch {
 	case errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode):
 		return toolApprovalModeHTTPError(err)
@@ -298,10 +316,6 @@ func workspaceTargetHTTPError(err error) error {
 		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):
 		return apperror.Wrap(apperror.CodeWorkspaceTargetNotFound, err, nil)
-	case errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
-		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
-		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
-		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
 	case errors.Is(err, bridge.ErrUnavailable):
 		return workspaceUnavailableError(err)
 	default:

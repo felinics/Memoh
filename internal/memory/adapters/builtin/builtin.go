@@ -533,6 +533,10 @@ func (p *BuiltinProvider) Rebuild(ctx context.Context, botID string) (adapters.R
 	return p.service.Rebuild(ctx, botID)
 }
 
+// ErrMarkdownIngestUnsupported reports that the active memory runtime does not
+// support ingesting agent-authored Markdown files into the wiki store.
+var ErrMarkdownIngestUnsupported = errors.New("selected memory runtime does not support markdown ingest")
+
 // markdownIngestor is the optional Runtime capability for ingesting agent-
 // authored Markdown files back into the DB as nodes. Only the graph runtime
 // implements it (the file runtime treats files as the source of truth).
@@ -549,7 +553,7 @@ func (p *BuiltinProvider) IngestFromMarkdown(ctx context.Context, botID string) 
 	}
 	ing, ok := p.service.(markdownIngestor)
 	if !ok {
-		return adapters.IngestResult{}, errors.New("selected memory runtime does not support markdown ingest")
+		return adapters.IngestResult{}, ErrMarkdownIngestUnsupported
 	}
 	res, err := ing.IngestMarkdownFiles(ctx, botID)
 	if err != nil {
