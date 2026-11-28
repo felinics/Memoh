@@ -312,7 +312,7 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	resp, err := h.service.UpdateAdmin(c.Request().Context(), targetID, req)
 	if err != nil {
 		if errors.Is(err, db.ErrLastActiveAdmin) {
-			return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
+			return apperror.Wrap(apperror.CodeUserLastActiveAdmin, err, nil)
 		}
 		return errs.Wrap(err, "update user")
 	}
@@ -392,7 +392,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 	}
 	if err := h.service.RemoveMember(c.Request().Context(), targetID); err != nil {
 		if errors.Is(err, db.ErrLastActiveAdmin) {
-			return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
+			return apperror.Wrap(apperror.CodeUserLastActiveAdmin, err, nil)
 		}
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return apperror.Wrap(apperror.CodeUserNotFound, err, nil)
@@ -498,6 +498,9 @@ func (h *UsersHandler) createOrReplay(ctx context.Context, ownerID string, req b
 			return bot, err
 		}
 		winner, found, lookupErr := h.botService.FindCreated(ctx, ownerID, req.RequestKey)
+		if errors.Is(lookupErr, bots.ErrCreateRequestDeleted) {
+			return bots.Bot{}, lookupErr
+		}
 		if lookupErr != nil || !found {
 			return bot, err
 		}
@@ -538,7 +541,7 @@ func createBotHTTPError(err error, ownerFromToken bool) error {
 		return apperror.Wrap(apperror.CodeBotNameInvalid, err, nil)
 	}
 	if errors.Is(err, bots.ErrCreateRequestDeleted) {
-		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
+		return apperror.Wrap(apperror.CodeBotCreateRequestDeleted, err, nil)
 	}
 	return errs.Wrap(err, "create bot")
 }
@@ -1088,11 +1091,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 		if errors.Is(err, channel.ErrEnableChannelFailed) {
 			return apperror.Wrap(apperror.CodeChannelEnableFailed, err, nil)
 		}
-		status := http.StatusInternalServerError
-		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
-			status = http.StatusBadGateway
-		}
-		return echo.NewHTTPError(status).WithInternal(err)
+		return errs.Wrap(err, "upsert bot channel config")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -1146,11 +1145,7 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 		if errors.Is(err, channel.ErrEnableChannelFailed) {
 			return apperror.Wrap(apperror.CodeChannelEnableFailed, err, nil)
 		}
-		status := http.StatusInternalServerError
-		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
-			status = http.StatusBadGateway
-		}
-		return echo.NewHTTPError(status).WithInternal(err)
+		return errs.Wrap(err, "update bot channel status")
 	}
 	return c.JSON(http.StatusOK, resp)
 }

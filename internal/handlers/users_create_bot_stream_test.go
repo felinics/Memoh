@@ -809,8 +809,23 @@ func TestCreateBotRefusesAResendWhoseBotIsBeingDeleted(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000101"
 	dbFake := &createBotStreamDB{ownerID: ownerID, botID: "00000000-0000-0000-0000-000000000201", requestKey: "key-1", keyHeld: true, status: bots.BotStatusDeleting}
 	err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", true), httptest.NewRecorder(), ownerID))
-	if httpErr := requireHTTPError(t, err); httpErr.Code != http.StatusConflict || dbFake.inserts != 0 {
-		t.Fatalf("status = %d inserts = %d, want %d and no insert", httpErr.Code, dbFake.inserts, http.StatusConflict)
+	if got := apperror.CodeOf(err); got != apperror.CodeBotCreateRequestDeleted || dbFake.inserts != 0 {
+		t.Fatalf("code = %q inserts = %d, want %q and no insert (err=%v)", got, dbFake.inserts, apperror.CodeBotCreateRequestDeleted, err)
+	}
+}
+
+func TestCreateBotRaceWithDeletingBotReturnsCreateRequestDeleted(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	dbFake := &createBotStreamDB{
+		ownerID:     ownerID,
+		botID:       "00000000-0000-0000-0000-000000000201",
+		requestKey:  "key-1",
+		racedInsert: true,
+		status:      bots.BotStatusDeleting,
+	}
+	err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), httptest.NewRecorder(), ownerID))
+	if got := apperror.CodeOf(err); got != apperror.CodeBotCreateRequestDeleted {
+		t.Fatalf("code = %q, want %q (err=%v)", got, apperror.CodeBotCreateRequestDeleted, err)
 	}
 }
 

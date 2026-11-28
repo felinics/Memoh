@@ -3,6 +3,7 @@ package display
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -554,4 +555,37 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+type failingDisplayWorkspace struct {
+	err error
+}
+
+func (w failingDisplayWorkspace) BotDisplayEnabled(context.Context, string) (bool, error) {
+	return false, w.err
+}
+
+func (failingDisplayWorkspace) DisplaySocketPath(string) string {
+	return ""
+}
+
+func TestServicePropagatesBotDisplayEnabledErrors(t *testing.T) {
+	t.Parallel()
+
+	dbErr := errors.New("settings db down")
+	svc := NewService(nil, failingDisplayWorkspace{err: dbErr})
+
+	if _, err := svc.Answer(context.Background(), "bot-1", OfferRequest{Type: "offer", SDP: "v=0"}); !errors.Is(err, dbErr) || errors.Is(err, ErrDisplayDisabled) {
+		t.Fatalf("Answer() error = %v, want %v (not ErrDisplayDisabled)", err, dbErr)
+	}
+	if _, _, err := svc.Screenshot(context.Background(), "bot-1"); !errors.Is(err, dbErr) || errors.Is(err, ErrDisplayDisabled) {
+		t.Fatalf("Screenshot() error = %v, want %v (not ErrDisplayDisabled)", err, dbErr)
+	}
+	if err := svc.ControlInputs(context.Background(), "bot-1", nil); !errors.Is(err, dbErr) || errors.Is(err, ErrDisplayDisabled) {
+		t.Fatalf("ControlInputs() error = %v, want %v (not ErrDisplayDisabled)", err, dbErr)
+	}
+	status := svc.Status(context.Background(), "bot-1")
+	if status.Enabled || status.Available || status.UnavailableReason != "display settings unavailable" {
+		t.Fatalf("Status() = %+v, want UnavailableReason=%q", status, "display settings unavailable")
+	}
 }

@@ -241,14 +241,14 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			if publicErr := botAgentHTTPError(resolveErr); publicErr != nil {
 				return publicErr
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
+			return errs.Wrap(resolveErr, "resolve bot agent")
 		}
 		descriptor, descriptorErr := botagents.DescriptorFor(agent)
 		if descriptorErr != nil {
 			if publicErr := botAgentHTTPError(descriptorErr); publicErr != nil {
 				return publicErr
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent runtime")
+			return errs.Wrap(descriptorErr, "resolve bot agent runtime")
 		}
 		botAgent = agent
 		// The persisted BotAgent descriptor is authoritative for the runtime:
@@ -272,7 +272,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			if publicErr := botAgentHTTPError(configErr); publicErr != nil {
 				return publicErr
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to validate bot Agent")
+			return errs.Wrap(configErr, "validate bot agent")
 		}
 	}
 	boundWorkdir, err := resolveSessionWorkdirBinding(c.Request().Context(), h.workdirs, bot.ID, req.WorkdirID, targetRuntimeType)
@@ -355,7 +355,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		return err
 	}
 	if source.Type != session.TypeChat {
-		return echo.NewHTTPError(http.StatusConflict, "only chat sessions can be forked")
+		return sessionForkError(session.ErrForkSourceNotChat)
 	}
 
 	var req forkSessionRequest
@@ -396,14 +396,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		}
 		override, forkErr := h.agentRuntimes.PrepareExternalFork(c.Request().Context(), bot.ID, sessionID, turnID)
 		if forkErr != nil {
-			switch {
-			case errors.Is(forkErr, application.ErrExternalForkUnsupported):
-				return echo.NewHTTPError(http.StatusConflict, "this session's runtime does not support forking")
-			case errors.Is(forkErr, application.ErrExternalForkAnchorMissing):
-				return echo.NewHTTPError(http.StatusConflict, "fork source turn has no runtime anchor")
-			default:
-				return forkErr
-			}
+			return sessionForkError(forkErr)
 		}
 		runtimeMetadataOverride = override
 	}
@@ -855,14 +848,14 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 				if publicErr := botAgentHTTPError(resolveErr); publicErr != nil {
 					return publicErr
 				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
+				return errs.Wrap(resolveErr, "resolve bot agent")
 			}
 			descriptor, descriptorErr := botagents.DescriptorFor(targetAgent)
 			if descriptorErr != nil {
 				if publicErr := botAgentHTTPError(descriptorErr); publicErr != nil {
 					return publicErr
 				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent runtime")
+				return errs.Wrap(descriptorErr, "resolve bot agent runtime")
 			}
 			// The persisted BotAgent descriptor is authoritative for the runtime.
 			targetRuntime = botagents.SessionRuntime(descriptor.Runtime)
@@ -895,7 +888,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 				if publicErr := botAgentHTTPError(configErr); publicErr != nil {
 					return publicErr
 				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to validate bot Agent")
+				return errs.Wrap(configErr, "validate bot agent")
 			}
 		}
 		if targetRuntime == session.RuntimeACPAgent {
@@ -912,7 +905,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			// being rejected. The authoritative check re-runs inside the
 			// fenced update transaction below.
 			if count, countErr := h.sessionService.MessageCount(c.Request().Context(), sessionID); countErr == nil && count > 0 {
-				return echo.NewHTTPError(http.StatusConflict, "session agent cannot be changed after messages are sent")
+				return apperror.New(apperror.CodeSessionAgentLocked, nil)
 			}
 			if h.runtimeResets == nil {
 				return apperror.Wrap(
@@ -944,7 +937,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			}
 			if err != nil {
 				if errors.Is(err, session.ErrSessionHasMessages) {
-					return echo.NewHTTPError(http.StatusConflict, "session agent cannot be changed after messages are sent")
+					return apperror.Wrap(apperror.CodeSessionAgentLocked, err, nil)
 				}
 				if leaseErr := runtimefence.ResetLeaseFailure(c.Request().Context(), err); leaseErr != nil {
 					return apperror.Wrap(apperror.CodeSessionResetConflict, leaseErr, nil)
@@ -1263,11 +1256,17 @@ func sessionForkError(err error) error {
 	switch {
 	case errors.Is(err, session.ErrForkSourceNotFound):
 		return apperror.Wrap(apperror.CodeSessionNotFound, err, nil)
-	case errors.Is(err, session.ErrForkSourceNotReply):
-		return echo.NewHTTPError(http.StatusConflict, "fork source is not a visible assistant reply")
-	case errors.Is(err, session.ErrForkSourceNotChat):
-		return echo.NewHTTPError(http.StatusConflict, "only chat sessions can be forked")
+	case errors.Is(err, session.ErrForkSourceNotReply),
+		errors.Is(err, session.ErrForkSourceNotChat):
+		return apperror.Wrap(apperror.CodeSessionForkSourceInvalid, err, nil)
+	case errors.Is(err, application.ErrExternalForkUnsupported):
+		return apperror.Wrap(apperror.CodeSessionForkRuntimeUnsupported, err, nil)
+	case errors.Is(err, application.ErrExternalForkAnchorMissing):
+		return apperror.Wrap(apperror.CodeSessionForkAnchorMissing, err, nil)
 	default:
+		if apperror.CodeOf(err) != "" {
+			return err
+		}
 		return sessionServiceError(err)
 	}
 }

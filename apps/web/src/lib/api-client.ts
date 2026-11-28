@@ -116,8 +116,23 @@ function createApiFetch(
   }
 }
 
+function isLoginRequest(input: Parameters<typeof fetch>[0], response: Response): boolean {
+  const rawUrl = typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url || response.url
+  if (!rawUrl) return false
+  try {
+    const pathname = new URL(rawUrl, 'http://localhost').pathname.replace(/\/+$/, '')
+    return pathname.endsWith('/auth/login')
+  } catch {
+    return false
+  }
+}
+
 function handleAuthResponse(response: Response, context: ApiFetchContext) {
-  if (response.status === 401) {
+  if (response.status === 401 && !isLoginRequest(context.input, response)) {
     handleUnauthorized(context.requestToken)
   }
 }

@@ -1,10 +1,17 @@
 package models_test
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -132,6 +139,67 @@ func TestModel_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeModelUniqueQueries struct {
+	dbstore.Queries
+	err error
+}
+
+func (f fakeModelUniqueQueries) CreateModel(context.Context, sqlc.CreateModelParams) (sqlc.Model, error) {
+	return sqlc.Model{}, f.err
+}
+
+func (fakeModelUniqueQueries) GetModelByID(_ context.Context, id pgtype.UUID) (sqlc.Model, error) {
+	return sqlc.Model{ID: id, ModelID: "gpt-4", Type: string(models.ModelTypeChat), Enable: true}, nil
+}
+
+func (f fakeModelUniqueQueries) UpdateModel(context.Context, sqlc.UpdateModelParams) (sqlc.Model, error) {
+	return sqlc.Model{}, f.err
+}
+
+func TestModelUniqueConstraintFiltering(t *testing.T) {
+	t.Parallel()
+
+	providerID := "11111111-1111-4111-8111-111111111111"
+	modelUUID := "22222222-2222-4222-8222-222222222222"
+
+	t.Run("matching constraint wraps ErrModelIDAlreadyExists and preserves pgconn cause", func(t *testing.T) {
+		t.Parallel()
+		pgErr := &pgconn.PgError{Code: "23505", ConstraintName: "models_provider_id_model_id_unique"}
+		svc := models.NewService(slog.New(slog.DiscardHandler), fakeModelUniqueQueries{err: pgErr})
+
+		_, err := svc.Create(context.Background(), models.AddRequest{
+			ModelID: "gpt-4", Name: "GPT-4", ProviderID: providerID, Type: models.ModelTypeChat,
+		})
+		if !errors.Is(err, models.ErrModelIDAlreadyExists) {
+			t.Fatalf("Create() error = %v, want ErrModelIDAlreadyExists", err)
+		}
+		var gotPG *pgconn.PgError
+		if !errors.As(err, &gotPG) || gotPG.ConstraintName != "models_provider_id_model_id_unique" {
+			t.Fatalf("Create() lost pgconn.PgError cause: %v", err)
+		}
+
+		_, err = svc.UpdateByID(context.Background(), modelUUID, models.UpdateRequest{
+			ModelID: "gpt-4", Name: "GPT-4", ProviderID: providerID, Type: models.ModelTypeChat,
+		})
+		if !errors.Is(err, models.ErrModelIDAlreadyExists) || !errors.As(err, &gotPG) {
+			t.Fatalf("UpdateByID() error = %v, want ErrModelIDAlreadyExists with pgconn cause", err)
+		}
+	})
+
+	t.Run("unrelated unique constraint does not map to ErrModelIDAlreadyExists", func(t *testing.T) {
+		t.Parallel()
+		pgErr := &pgconn.PgError{Code: "23505", ConstraintName: "models_pkey"}
+		svc := models.NewService(slog.New(slog.DiscardHandler), fakeModelUniqueQueries{err: pgErr})
+
+		_, err := svc.Create(context.Background(), models.AddRequest{
+			ModelID: "gpt-4", Name: "GPT-4", ProviderID: providerID, Type: models.ModelTypeChat,
+		})
+		if err == nil || errors.Is(err, models.ErrModelIDAlreadyExists) {
+			t.Fatalf("Create() error = %v, want non-nil error without ErrModelIDAlreadyExists", err)
+		}
+	})
 }
 
 func TestModel_HasCompatibility(t *testing.T) {

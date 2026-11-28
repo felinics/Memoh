@@ -552,15 +552,22 @@
       "dependencies_unavailable": "此服务器未启用工作区依赖服务，应用无法管理依赖。请联系管理员。",
       "not_found": "未找到该应用安装记录。",
       "operation_failed": "应用操作失败。",
+      "operation_timeout": "应用操作超时，请先查看应用状态再决定是否重试。",
       "prerequisite_failed": "所需的前置依赖安装失败。请先处理该依赖，再重试。",
       "request_invalid": "应用请求无效。"
     },
+    "auth": {
+      "account_inactive": "这个账号已停用，请联系管理员。",
+      "invalid_credentials": "用户名或密码不正确。"
+    },
     "bot": {
+      "create_request_deleted": "这次创建请求对应的 Bot 正在删除，请重新发起创建。",
       "name_invalid": "名称需为 2-63 个小写字母、数字或连字符，并以字母或数字开头；部分名称为保留名。",
       "name_taken": "该名称已被占用。",
       "not_found": "这个 Bot 已不存在，请返回 Bot 列表重新选择。"
     },
     "bot_access": {
+      "grant_exists": "该成员或「所有人」已有此 Bot 的访问权限。",
       "grant_not_found": "这条访问授权已不存在，请刷新成员列表后重试。"
     },
     "bot_agent": {
@@ -661,16 +668,16 @@
       "user_message_failed": "消息未能通过消息 Hook，请检查 Hook 配置后重试。"
     },
     "http": {
-      "bad_gateway": "上游服务返回了无效响应，请重试。",
-      "bad_request": "请求无效。",
-      "conflict": "请求与当前状态冲突，请刷新后重试。",
+      "bad_gateway": "外部服务返回了异常响应。",
+      "bad_request": "无法处理这个请求。",
+      "conflict": "当前状态下无法完成这个操作。",
       "forbidden": "你没有执行此操作的权限。",
-      "gateway_timeout": "上游服务响应超时，请重试。",
+      "gateway_timeout": "外部服务响应超时。",
       "method_not_allowed": "此处不允许使用该请求方法。",
       "not_found": "请求的资源不存在。",
       "not_implemented": "服务器不支持此操作。",
       "payload_too_large": "请求内容过大。",
-      "service_unavailable": "服务暂时不可用，请稍后重试。",
+      "service_unavailable": "这项服务当前不可用。",
       "too_many_requests": "请求过于频繁，请稍后再试。",
       "unauthorized": "请先登录。",
       "unsupported_media_type": "不支持该请求内容类型。",
@@ -684,19 +691,23 @@
       "name_taken": "已存在同名的 MCP 连接。",
       "oauth_client_id_required": "该服务器无法自动注册客户端。请填写你在该服务器上注册的 OAuth 应用的 Client ID。",
       "oauth_discovery_failed": "无法从该 MCP 服务器发现 OAuth 配置。请确认 URL 正确且服务器支持 OAuth。",
-      "oauth_not_discovered": "请先对该连接执行 OAuth 发现。"
+      "oauth_not_discovered": "请先对该连接执行 OAuth 发现。",
+      "oauth_token_exchange_failed": "MCP 授权服务器拒绝了令牌交换，请重新发起授权或检查 OAuth 客户端配置。"
     },
     "media": {
       "asset_not_found": "这个文件已不存在，如仍需要请重新上传。",
       "reference_unavailable": "文件未能分享，请让 Agent 重新生成或再次分享。"
     },
     "memory": {
-      "compact_unsupported": "当前记忆提供方不支持记忆压缩，请在 Bot 的记忆设置中换用支持压缩的提供方。"
+      "compact_unsupported": "当前记忆提供方不支持记忆压缩，请在 Bot 的记忆设置中换用支持压缩的提供方。",
+      "operation_unsupported": "当前记忆后端不支持这个操作。"
     },
     "message": {
       "not_found": "这条消息已不存在，请刷新会话后重试。"
     },
     "model": {
+      "id_ambiguous": "多个服务商都包含这个模型 ID，请改用模型的唯一 ID 指定。",
+      "id_taken": "当前服务商下已存在相同的模型 ID。",
       "not_found": "这个模型已不存在，请刷新列表后重新选择。"
     },
     "native_history_lost": "Agent 无法恢复此前的对话上下文，已重新开始。上方消息仅保留作历史记录；继续前，请重新提供所需信息。",
@@ -789,6 +800,10 @@
       "type_conflict": "该搜索提供方已完成配置。"
     },
     "session": {
+      "agent_locked": "会话已有消息，无法更换 Agent 或运行时，请新建会话。",
+      "fork_anchor_missing": "这条回复缺少此 Agent 运行时所需的分叉信息，无法从这里分叉。",
+      "fork_runtime_unsupported": "当前会话的 Agent 运行时不支持分叉。",
+      "fork_source_invalid": "只能从普通对话中的可见助手回复处分叉。",
       "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。",
       "not_found": "会话不存在。"
     },
@@ -861,6 +876,7 @@
     },
     "user": {
       "cannot_remove_self": "不能移除自己，请让其他管理员操作。",
+      "last_active_admin": "团队至少需要一名启用中的管理员，请先将其他成员设为管理员。",
       "not_found": "这个用户已不存在，请刷新成员列表后重试。"
     },
     "user_input": {
@@ -869,6 +885,7 @@
       "operation_failed": "答案处理失败。"
     },
     "user_runtime": {
+      "name_taken": "已存在同名的电脑，请换用其他名称。",
       "not_found": "这个运行环境已不在你的账号下，请刷新列表后重试。"
     },
     "video": {
@@ -881,11 +898,13 @@
       "not_found": "这个视频服务商已不存在，请刷新列表后重新选择。"
     },
     "workdir": {
+      "archived": "这个工作目录已归档，无法继续选用，请改选未归档的工作目录。",
       "git_branch_unavailable": "该本地分支已不可用，请刷新后选择已有分支。",
       "git_busy": "有 Agent 正在使用此工作目录，请等待执行结束后再切换分支。",
       "git_switch_failed": "Git 无法切换分支，请检查未提交的修改，以及目标分支是否被其他 Worktree 使用。",
       "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试。",
       "not_found": "这个工作目录已不存在，请刷新列表后重新选择。",
+      "path_already_exists": "当前工作区已添加过这个路径，请直接使用已有目录或改选其他路径。",
       "remote_unsupported_for_agent": "外部智能体会话不能使用远程电脑，请改选原生工作区中的工作目录。"
     },
     "workspace": {
@@ -923,7 +942,9 @@
     "workspace_dependency_operation_unknown": "操作结果尚未确认，请刷新依赖列表查看状态。",
     "workspace_display_disabled": "工作区桌面未启用。",
     "workspace_file": {
-      "not_found": "工作区里已没有这个文件或文件夹，请刷新后重试。"
+      "already_exists": "目标位置已存在同名文件或文件夹。",
+      "not_found": "工作区里已没有这个文件或文件夹，请刷新后重试。",
+      "revision_conflict": "磁盘上的文件在打开后已被修改或删除。"
     },
     "workspace_load_failed": "加载工作区信息失败，请重试。",
     "workspace_manager_unavailable": "服务器未配置工作区管理。",
@@ -949,7 +970,11 @@
     "workspace_start_failed": "启动工作区失败，请重试。",
     "workspace_stop_failed": "停止工作区失败，请重试。",
     "workspace_target": {
-      "not_found": "这个工作区目标已不可用，请刷新后重新选择。"
+      "client_update_required": "这台远程电脑上的客户端版本过低，请改选其他工作区，或更新该设备上的客户端后重试。",
+      "not_found": "这个工作区目标已不可用，请刷新后重新选择。",
+      "offline": "所选远程电脑当前离线，请改选其他工作区，或在该设备上连接客户端后重试。",
+      "owner_mismatch": "所选远程电脑不属于当前 Bot 的所有者，请改选其他工作区，或由 Bot 所有者重新绑定电脑。",
+      "revoked": "所选远程电脑已撤销或所属账号已停用，请改选其他工作区。"
     }
   },
   "runtime": {

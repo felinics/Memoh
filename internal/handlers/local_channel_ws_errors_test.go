@@ -121,7 +121,7 @@ func TestFailWSRequestClientValidationRecordsLiteral(t *testing.T) {
 	frame := decodeWSTestEvent(t, func(writer *wsWriter) {
 		failWSRequest(context.Background(), logger, writer, "bot-1", wsTurn("", "session-1"), "ws.message", echo.NewHTTPError(http.StatusBadRequest, cause))
 	})
-	if frame["type"] != "error" || frame["code"] != "http.bad_request" || frame["message"] != "The request is invalid." {
+	if frame["type"] != "error" || frame["code"] != "http.bad_request" || frame["message"] != "We couldn't process this request." {
 		t.Fatalf("frame = %#v, want http.bad_request with catalog detail", frame)
 	}
 	encoded, _ := json.Marshal(frame)

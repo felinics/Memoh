@@ -548,9 +548,11 @@ func TestWorkspaceDependencyRoutesRequireManagePermission(t *testing.T) {
 func TestWorkspaceDependencyRoutesNeedService(t *testing.T) {
 	h := newDepsTestHandler("admin", nil)
 	_, err := depsCall{method: http.MethodGet, target: "/bots/x/dependencies"}.invoke(t, h.ListWorkspaceDependencies)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("error = %v, want HTTP 503", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceDependencyCatalogUnavailable {
+		t.Fatalf("code = %q, want %q (err=%v)", got, apperror.CodeWorkspaceDependencyCatalogUnavailable, err)
+	}
+	if def, ok := apperror.Lookup(apperror.CodeOf(err)); !ok || def.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want HTTP 503", def.HTTPStatus)
 	}
 }
 

@@ -48,8 +48,7 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 	}
 	resp, err := h.upstream.Get(c.Request().Context(), requestPath, "application/json")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable").
-			WithInternal(errs.WrapDependency(err, "proxy supermarket request", slog.String("path", upstreamPath)))
+		return apperror.Wrap(apperror.CodeRegistryUnavailable, errs.WrapDependency(err, "proxy supermarket request", slog.String("path", upstreamPath)), nil)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -70,8 +69,7 @@ func upstreamStatusError(status int, upstreamPath string) error {
 	if status == http.StatusNotFound {
 		return apperror.Wrap(apperror.CodeSupermarketNotFound, errs.New("supermarket resource not found", attrs...), nil)
 	}
-	return echo.NewHTTPError(http.StatusBadGateway, "supermarket request failed").
-		WithInternal(errs.NewDependency("supermarket answered with an error status", attrs...))
+	return apperror.Wrap(apperror.CodeRegistryUnavailable, errs.NewDependency("supermarket answered with an error status", attrs...), nil)
 }
 
 // --- Supermarket upstream types (for swagger) ---

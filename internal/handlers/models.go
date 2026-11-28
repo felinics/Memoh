@@ -115,9 +115,6 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
-		if errors.Is(err, models.ErrModelIDAlreadyExists) {
-			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
-		}
 		return modelWriteError(err, "create model")
 	}
 	return c.JSON(http.StatusCreated, resp)
@@ -206,7 +203,7 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 	resp, err := h.service.GetByModelID(c.Request().Context(), modelID)
 	if err != nil {
 		if errors.Is(err, models.ErrModelIDAmbiguous) {
-			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
+			return apperror.Wrap(apperror.CodeModelIDAmbiguous, err, nil)
 		}
 		return resourceLookupError(err, "modelId", apperror.CodeModelNotFound, "get model by model id")
 	}
@@ -237,9 +234,6 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 
 	resp, err := h.service.UpdateByID(c.Request().Context(), id, req)
 	if err != nil {
-		if errors.Is(err, models.ErrModelIDAlreadyExists) {
-			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
-		}
 		return modelWriteError(err, "update model")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
@@ -274,12 +268,6 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 
 	resp, err := h.service.UpdateByModelID(c.Request().Context(), modelID, req)
 	if err != nil {
-		if errors.Is(err, models.ErrModelIDAlreadyExists) {
-			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
-		}
-		if errors.Is(err, models.ErrModelIDAmbiguous) {
-			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
-		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return apperror.Wrap(apperror.CodeModelNotFound, err, nil)
 		}
@@ -333,7 +321,7 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 
 	if err := h.service.DeleteByModelID(c.Request().Context(), modelID); err != nil {
 		if errors.Is(err, models.ErrModelIDAmbiguous) {
-			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
+			return apperror.Wrap(apperror.CodeModelIDAmbiguous, err, nil)
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return apperror.Wrap(apperror.CodeModelNotFound, err, nil)
@@ -420,9 +408,15 @@ func (h *ModelsHandler) Count(c echo.Context) error {
 	return c.JSON(http.StatusOK, models.CountResponse{Count: count})
 }
 
-// modelWriteError names the request field a rejected model write came from and
-// treats any other failure as an internal failure of op.
+// modelWriteError names the request field or conflict a rejected model write
+// came from and treats any other failure as an internal failure of op.
 func modelWriteError(err error, op string) error {
+	if errors.Is(err, models.ErrModelIDAlreadyExists) {
+		return apperror.Wrap(apperror.CodeModelIDTaken, err, nil)
+	}
+	if errors.Is(err, models.ErrModelIDAmbiguous) {
+		return apperror.Wrap(apperror.CodeModelIDAmbiguous, err, nil)
+	}
 	var fieldErr *models.FieldError
 	if errors.As(err, &fieldErr) {
 		code := apperror.CodeRequestFieldInvalid

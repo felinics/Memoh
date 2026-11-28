@@ -93,8 +93,8 @@ describe('resolveApiErrorMessage', () => {
 
   it.each([
     [404, 'The requested resource was not found.'],
-    [422, 'The request is invalid.'],
-    [429, 'Too many requests. Please wait a moment and try again.'],
+    [422, 'We couldn\'t process this request.'],
+    [429, 'Too many requests. Wait a moment and try again.'],
     [502, 'Something went wrong on the server. Please try again.'],
   ])('describes an error without a code by its status %d', (status, expected) => {
     const error = { status, message: 'raw gateway text' }
@@ -333,9 +333,9 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
-    ['client', 409, 'The request conflicts with the current state. Refresh and try again.'],
-    ['client', 422, 'The request is invalid.'],
-    ['dependency', 429, 'Too many requests. Please wait a moment and try again.'],
+    ['client', 409, 'This action could not be completed in the current state.'],
+    ['client', 422, 'We couldn\'t process this request.'],
+    ['dependency', 429, 'Too many requests. Wait a moment and try again.'],
     ['client', 500, 'Something went wrong on the server. Please try again.'],
     ['dependency', 502, 'Something went wrong on the server. Please try again.'],
   ])('describes an unrecognized code with a %s fault and status %d by its status', (fault, status, expected) => {

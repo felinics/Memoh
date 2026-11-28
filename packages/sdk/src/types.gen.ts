@@ -4952,6 +4952,10 @@ export type PostAuthLoginErrors = {
      */
     401: ServerProblem;
     /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
      * Internal Server Error
      */
     500: ServerProblem;

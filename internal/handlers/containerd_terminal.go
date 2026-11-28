@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -13,6 +14,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 	"github.com/felinics/memoh/internal/workspace/shellenv"
 )
@@ -85,7 +89,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 
 	client, err := h.manager.NativeMCPClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
+		return terminalWorkspaceClientError(err)
 	}
 
 	cols := parseUint32Query(c, "cols", 80)
@@ -207,6 +211,22 @@ func (h *ContainerdHandler) serveTerminal(ctx context.Context, conn *websocket.C
 	}()
 
 	<-done
+}
+
+func terminalWorkspaceClientError(err error) error {
+	switch {
+	case errors.Is(err, bridge.ErrUnavailable):
+		return workspaceUnavailableError(err)
+	case errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
+		errors.Is(err, workspace.ErrRemoteRuntimeNotUsable),
+		errors.Is(err, workspace.ErrRemoteRuntimeOffline),
+		errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
+		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
+		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
+		return workspaceTargetHTTPError(err)
+	default:
+		return errs.Wrap(err, "connect workspace terminal")
+	}
 }
 
 func parseUint32Query(c echo.Context, name string, fallback uint32) uint32 {

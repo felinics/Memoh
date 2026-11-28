@@ -47,6 +47,9 @@ func (s *Service) prepareExternalFork(ctx context.Context, botID, sessionID, tur
 	}
 	sess, err := s.sessionService.Get(ctx, sessionID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return nil, fmt.Errorf("%w: %w", session.ErrForkSourceNotFound, err)
+		}
 		return nil, err
 	}
 	if err := validateSessionBot(botID, sessionID, sess.BotID); err != nil {

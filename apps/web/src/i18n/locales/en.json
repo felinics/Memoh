@@ -193,15 +193,22 @@
       "dependencies_unavailable": "Workspace dependencies are unavailable on this server, so the App cannot manage them.",
       "not_found": "This App installation was not found.",
       "operation_failed": "The App operation failed.",
+      "operation_timeout": "The App operation timed out. Check the App status before retrying.",
       "prerequisite_failed": "A dependency this one needs failed to install. Fix that dependency first, then retry.",
       "request_invalid": "The App request is invalid."
     },
+    "auth": {
+      "account_inactive": "This account is inactive. Contact an administrator.",
+      "invalid_credentials": "Incorrect username or password."
+    },
     "bot": {
+      "create_request_deleted": "The Bot from this creation request is being deleted. Start a new creation request.",
       "name_invalid": "Use 2-63 lowercase letters, digits or hyphens, starting with a letter or digit. Some names are reserved.",
       "name_taken": "This name is already taken.",
       "not_found": "This bot no longer exists. Go back to the bot list and pick another one."
     },
     "bot_access": {
+      "grant_exists": "This member or everyone already has access to this Bot.",
       "grant_not_found": "This access grant no longer exists. Refresh the member list and try again."
     },
     "bot_agent": {
@@ -302,17 +309,17 @@
       "user_message_failed": "The message could not be accepted by the message hook. Check the Hook configuration and try again."
     },
     "http": {
-      "bad_gateway": "An upstream service returned an invalid response. Please try again.",
-      "bad_request": "The request is invalid.",
-      "conflict": "The request conflicts with the current state. Refresh and try again.",
+      "bad_gateway": "An external service returned an unexpected response.",
+      "bad_request": "We couldn't process this request.",
+      "conflict": "This action could not be completed in the current state.",
       "forbidden": "You do not have permission to perform this action.",
-      "gateway_timeout": "An upstream service did not respond in time. Please try again.",
+      "gateway_timeout": "An external service did not respond in time.",
       "method_not_allowed": "This request method is not allowed here.",
       "not_found": "The requested resource was not found.",
       "not_implemented": "This operation is not supported by the server.",
       "payload_too_large": "The request is too large.",
-      "service_unavailable": "The service is temporarily unavailable. Please try again shortly.",
-      "too_many_requests": "Too many requests. Please wait a moment and try again.",
+      "service_unavailable": "This service is currently unavailable.",
+      "too_many_requests": "Too many requests. Wait a moment and try again.",
       "unauthorized": "Sign in to continue.",
       "unsupported_media_type": "The request content type is not supported.",
       "upgrade_required": "This endpoint requires a different protocol."
@@ -325,19 +332,23 @@
       "name_taken": "An MCP connection with this name already exists.",
       "oauth_client_id_required": "Automatic client registration is unavailable for this server. Enter a client ID from an OAuth app you registered with it.",
       "oauth_discovery_failed": "Could not discover OAuth settings from this MCP server. Check that the URL is correct and that the server supports OAuth.",
-      "oauth_not_discovered": "Run OAuth discovery for this connection first."
+      "oauth_not_discovered": "Run OAuth discovery for this connection first.",
+      "oauth_token_exchange_failed": "The MCP authorization server rejected the token exchange. Start authorization again or check the OAuth client settings."
     },
     "media": {
       "asset_not_found": "This file no longer exists. Upload it again if you still need it.",
       "reference_unavailable": "This file could not be shared. Ask the agent to recreate or share it again."
     },
     "memory": {
-      "compact_unsupported": "The selected memory provider does not support memory compaction. Choose a provider that supports it in the bot's memory settings."
+      "compact_unsupported": "The selected memory provider does not support memory compaction. Choose a provider that supports it in the bot's memory settings.",
+      "operation_unsupported": "This Bot's memory backend does not support this operation."
     },
     "message": {
       "not_found": "This message no longer exists. Refresh the conversation and try again."
     },
     "model": {
+      "id_ambiguous": "More than one provider uses this model ID. Specify the model by its unique ID.",
+      "id_taken": "A model with this ID already exists under the selected provider.",
       "not_found": "This model no longer exists. Refresh the list and choose another one."
     },
     "native_history_lost": "The agent could not restore its previous context and started over. Earlier messages remain as history only. Provide any context needed to continue.",
@@ -430,6 +441,10 @@
       "type_conflict": "This web search provider has already been configured."
     },
     "session": {
+      "agent_locked": "The Agent or runtime can't be changed after messages are sent. Start a new conversation instead.",
+      "fork_anchor_missing": "This reply is missing the runtime record needed to fork from here.",
+      "fork_runtime_unsupported": "This conversation's Agent runtime does not support forking.",
+      "fork_source_invalid": "Only visible assistant replies in a chat conversation can be forked.",
       "model_preference_conflict": "The model selection changed elsewhere. Refresh or send your message to apply your selection.",
       "not_found": "The conversation was not found."
     },
@@ -502,6 +517,7 @@
     },
     "user": {
       "cannot_remove_self": "You cannot remove yourself. Ask another admin to remove you.",
+      "last_active_admin": "At least one active admin is required. Assign another admin before changing or removing this member.",
       "not_found": "This user no longer exists. Refresh the member list and try again."
     },
     "user_input": {
@@ -510,6 +526,7 @@
       "operation_failed": "The answer could not be processed."
     },
     "user_runtime": {
+      "name_taken": "A computer with this name already exists. Choose a different name.",
       "not_found": "This runtime is no longer registered to your account. Refresh the list and try again."
     },
     "video": {
@@ -522,11 +539,13 @@
       "not_found": "This video provider no longer exists. Refresh the list and choose another one."
     },
     "workdir": {
+      "archived": "This working directory is archived and can no longer be selected. Choose an active working directory.",
       "git_branch_unavailable": "This local branch is unavailable. Refresh and select an existing branch.",
       "git_busy": "An agent is using this working directory. Wait for it to finish before switching branches.",
       "git_switch_failed": "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree.",
       "git_unavailable": "The Git working directory could not be read. Check the workspace and try again.",
       "not_found": "This working directory no longer exists. Refresh the list and choose another one.",
+      "path_already_exists": "This path is already added as a working directory on this workspace. Use the existing directory or choose another path.",
       "remote_unsupported_for_agent": "External agent sessions cannot use a remote computer. Choose a workdir on the native workspace instead."
     },
     "workspace": {
@@ -564,7 +583,9 @@
     "workspace_dependency_operation_unknown": "The operation result is not yet confirmed. Refresh dependencies to check its status.",
     "workspace_display_disabled": "Workspace desktop is not enabled.",
     "workspace_file": {
-      "not_found": "This file or folder no longer exists in the workspace. Refresh and try again."
+      "already_exists": "A file or folder already exists at the destination.",
+      "not_found": "This file or folder no longer exists in the workspace. Refresh and try again.",
+      "revision_conflict": "This file was modified or deleted on disk since it was opened."
     },
     "workspace_load_failed": "Failed to load workspace info. Please try again.",
     "workspace_manager_unavailable": "Workspace manager is not configured.",
@@ -590,7 +611,11 @@
     "workspace_start_failed": "Failed to start the workspace. Please try again.",
     "workspace_stop_failed": "Failed to stop the workspace. Please try again.",
     "workspace_target": {
-      "not_found": "This workspace target is no longer available. Refresh and choose another one."
+      "client_update_required": "The client on this remote computer is outdated. Choose another workspace target, or update the client on that device and try again.",
+      "not_found": "This workspace target is no longer available. Refresh and choose another one.",
+      "offline": "The selected remote computer is offline. Choose another workspace target, or reconnect its client on that device and try again.",
+      "owner_mismatch": "This remote computer no longer belongs to this Bot's owner. Choose another workspace target or have the owner connect their computer.",
+      "revoked": "This remote computer is no longer active or its access has been revoked. Choose another workspace target."
     }
   },
   "auth": {

@@ -548,9 +548,8 @@ func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 	)
 
 	_, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","metadata":{"acp_agent_id":"acp","project_path":"/data/app"}}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 409", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeSessionAgentLocked {
+		t.Fatalf("UpdateSession() error = %v, want %s", err, apperror.CodeSessionAgentLocked)
 	}
 	if queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata should not be called after the session is locked")

@@ -17,4 +17,8 @@ func TestMapQueryErrRecognizesLastActiveAdminConstraint(t *testing.T) {
 	if !errors.Is(err, db.ErrLastActiveAdmin) {
 		t.Fatalf("mapQueryErr() = %v, want ErrLastActiveAdmin", err)
 	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "team_members_last_active_admin" {
+		t.Fatalf("mapQueryErr() lost pgconn.PgError cause: %v", err)
+	}
 }

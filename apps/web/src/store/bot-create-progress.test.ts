@@ -283,6 +283,30 @@ describe('useBotCreateProgressStore', () => {
     expect(store.canRetry).toBe(true)
   })
 
+  it('disables retry when a creation request bot is being deleted', async () => {
+    postBotsStream.mockResolvedValue({
+      stream: (async function* (): AsyncGenerator<BotCreateStreamEvent, void, unknown> {
+        throw {
+          code: 'bot.create_request_deleted',
+          args: {},
+          detail: 'The Bot from this creation request is being deleted. Start a new creation request.',
+          status: 409,
+        }
+      })(),
+    })
+
+    const store = useBotCreateProgressStore()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+
+    expect(store.status).toBe('error')
+    expect(store.errorCode).toBe('bot.create_request_deleted')
+    expect(store.setupError).toBe('The Bot from this creation request is being deleted. Start a new creation request.')
+    expect(store.canRetry).toBe(false)
+
+    await store.retry()
+    expect(postBotsStream).toHaveBeenCalledTimes(1)
+  })
+
   it('recovers the name conflict from a legacy code-less 409 rejection', async () => {
     postBotsStream.mockResolvedValue({
       stream: (async function* (): AsyncGenerator<BotCreateStreamEvent, void, unknown> {
@@ -297,7 +321,7 @@ describe('useBotCreateProgressStore', () => {
 
     expect(store.status).toBe('error')
     expect(store.errorCode).toBe('bot.name_taken')
-    expect(store.setupError).toBe('The request conflicts with the current state. Refresh and try again.')
+    expect(store.setupError).toBe('This action could not be completed in the current state.')
   })
 
   it('applies model and memory settings after the bot is ready', async () => {

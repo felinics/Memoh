@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	memorybuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
 	"github.com/felinics/memoh/internal/memory/migrate"
 	"github.com/felinics/memoh/internal/settings"
 )
@@ -145,12 +146,12 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprovider.Provider, error) {
 	p, err := h.resolveProvider(ctx, botID)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "memory provider unavailable").WithInternal(err)
+		return nil, apperror.Wrap(apperror.CodeHTTPServiceUnavailable, err, nil)
 	}
 	if p != nil {
 		return p, nil
 	}
-	return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "memory service not available")
+	return nil, apperror.Wrap(apperror.CodeHTTPServiceUnavailable, errs.New("memory service not available"), nil)
 }
 
 // --- Bot-level memory endpoints ---
@@ -983,14 +984,14 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 	}
 	syncProvider, ok := provider.(memprovider.SourceSyncProvider)
 	if !ok {
-		return echo.NewHTTPError(http.StatusConflict, "selected memory provider does not support rebuild from markdown source")
+		return apperror.New(apperror.CodeMemoryOperationUnsupported, nil)
 	}
 	status, err := syncProvider.Status(c.Request().Context(), botID)
 	if err != nil {
 		return errs.Wrap(err, "read memory status")
 	}
 	if !status.CanManualSync {
-		return echo.NewHTTPError(http.StatusConflict, "manual sync is not available for the selected memory provider")
+		return apperror.New(apperror.CodeMemoryOperationUnsupported, nil)
 	}
 	result, err := syncProvider.Rebuild(c.Request().Context(), botID)
 	if err != nil {
@@ -1023,10 +1024,13 @@ func (h *MemoryHandler) ChatIngest(c echo.Context) error {
 	}
 	ingestProvider, ok := provider.(memprovider.MarkdownIngestProvider)
 	if !ok {
-		return echo.NewHTTPError(http.StatusConflict, "selected memory provider does not support markdown ingest")
+		return apperror.New(apperror.CodeMemoryOperationUnsupported, nil)
 	}
 	result, err := ingestProvider.IngestFromMarkdown(c.Request().Context(), botID)
 	if err != nil {
+		if errors.Is(err, memorybuiltin.ErrMarkdownIngestUnsupported) {
+			return apperror.Wrap(apperror.CodeMemoryOperationUnsupported, err, nil)
+		}
 		return errs.Wrap(err, "ingest markdown memories")
 	}
 	return c.JSON(http.StatusOK, result)
@@ -1056,7 +1060,7 @@ func (h *MemoryHandler) ChatStatus(c echo.Context) error {
 	}
 	syncProvider, ok := provider.(memprovider.SourceSyncProvider)
 	if !ok {
-		return echo.NewHTTPError(http.StatusConflict, "selected memory provider does not expose runtime status")
+		return apperror.New(apperror.CodeMemoryOperationUnsupported, nil)
 	}
 	status, err := syncProvider.Status(c.Request().Context(), botID)
 	if err != nil {

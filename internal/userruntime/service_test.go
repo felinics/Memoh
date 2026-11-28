@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -361,4 +362,46 @@ func newServiceTestClient(t *testing.T) *bridge.Client {
 		t.Fatalf("grpc.NewClient() error = %v", err)
 	}
 	return bridge.NewClientFromConn(conn)
+}
+
+type failingCreateRuntimeStore struct {
+	serviceTestStore
+	createErr error
+}
+
+func (s *failingCreateRuntimeStore) CreateUserRuntime(context.Context, dbstore.CreateUserRuntimeInput) (dbstore.UserRuntimeRecord, error) {
+	return dbstore.UserRuntimeRecord{}, s.createErr
+}
+
+func TestCreateRuntimeUniqueConstraintHandling(t *testing.T) {
+	t.Parallel()
+
+	t.Run("active name constraint wraps ErrNameTaken and preserves pgconn cause", func(t *testing.T) {
+		t.Parallel()
+		pgErr := &pgconn.PgError{Code: "23505", ConstraintName: activeUserRuntimeNameConstraint}
+		service := NewService(&failingCreateRuntimeStore{createErr: pgErr}, NewHub(nil))
+
+		_, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: "MacBook"})
+		if !errors.Is(err, ErrNameTaken) {
+			t.Fatalf("CreateRuntime() error = %v, want ErrNameTaken", err)
+		}
+		var gotPG *pgconn.PgError
+		if !errors.As(err, &gotPG) || gotPG.ConstraintName != activeUserRuntimeNameConstraint {
+			t.Fatalf("CreateRuntime() lost pgconn.PgError cause: %v", err)
+		}
+	})
+
+	t.Run("other unique constraints do not map to ErrNameTaken", func(t *testing.T) {
+		t.Parallel()
+		pgErr := &pgconn.PgError{Code: "23505", ConstraintName: "user_runtimes_api_token_key"}
+		service := NewService(&failingCreateRuntimeStore{createErr: pgErr}, NewHub(nil))
+
+		_, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: "MacBook"})
+		if err == nil {
+			t.Fatal("CreateRuntime() succeeded, want error")
+		}
+		if errors.Is(err, ErrNameTaken) {
+			t.Fatalf("CreateRuntime() mapped unrelated constraint to ErrNameTaken: %v", err)
+		}
+	})
 }

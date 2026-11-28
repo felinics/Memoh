@@ -102,7 +102,7 @@ var screenshotJPEGCandidates = []screenshotJPEGCandidate{
 }
 
 type Workspace interface {
-	BotDisplayEnabled(ctx context.Context, botID string) bool
+	BotDisplayEnabled(ctx context.Context, botID string) (bool, error)
 	DisplaySocketPath(botID string) string
 }
 
@@ -271,7 +271,15 @@ func (s *Service) Status(ctx context.Context, botID string) Status {
 		return status
 	}
 
-	status.Enabled = s.workspace.BotDisplayEnabled(ctx, botID)
+	enabled, err := s.workspace.BotDisplayEnabled(ctx, botID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.WarnContext(ctx, "failed to check bot display setting", slog.String("bot_id", botID), slog.Any("error", err))
+		}
+		status.UnavailableReason = "display settings unavailable"
+		return status
+	}
+	status.Enabled = enabled
 	gstLaunch, gstErr := resolveGSTLaunch()
 	status.EncoderAvailable = gstErr == nil && strings.TrimSpace(gstLaunch) != ""
 
@@ -293,7 +301,11 @@ func (s *Service) Answer(ctx context.Context, botID string, req OfferRequest) (O
 	if s == nil || s.workspace == nil {
 		return OfferResponse{}, ErrManagerUnavailable
 	}
-	if !s.workspace.BotDisplayEnabled(ctx, botID) {
+	enabled, err := s.workspace.BotDisplayEnabled(ctx, botID)
+	if err != nil {
+		return OfferResponse{}, err
+	}
+	if !enabled {
 		return OfferResponse{}, ErrDisplayDisabled
 	}
 	if strings.TrimSpace(req.SDP) == "" {
@@ -354,7 +366,11 @@ func (s *Service) Screenshot(ctx context.Context, botID string) ([]byte, string,
 	if s == nil || s.workspace == nil {
 		return nil, "", ErrManagerUnavailable
 	}
-	if !s.workspace.BotDisplayEnabled(ctx, botID) {
+	enabled, err := s.workspace.BotDisplayEnabled(ctx, botID)
+	if err != nil {
+		return nil, "", err
+	}
+	if !enabled {
 		return nil, "", ErrDisplayDisabled
 	}
 	if !s.displayReachable(ctx, botID) {
@@ -417,7 +433,11 @@ func (s *Service) ControlInputs(ctx context.Context, botID string, events []Cont
 	if s == nil || s.workspace == nil {
 		return ErrManagerUnavailable
 	}
-	if !s.workspace.BotDisplayEnabled(ctx, botID) {
+	enabled, err := s.workspace.BotDisplayEnabled(ctx, botID)
+	if err != nil {
+		return err
+	}
+	if !enabled {
 		return ErrDisplayDisabled
 	}
 	if !s.displayReachable(ctx, botID) {

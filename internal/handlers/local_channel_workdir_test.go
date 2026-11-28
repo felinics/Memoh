@@ -69,7 +69,7 @@ func TestLocalChannelWSFirstSendBindsRequestedWorkdir(t *testing.T) {
 	}{
 		{name: "active workdir of this bot", workdirID: activeWorkdirID, wantCreated: true, wantWorkdirID: activeWorkdirID},
 		{name: "no workdir", wantCreated: true},
-		{name: "archived workdir", workdirID: archivedWorkdir, wantCode: "http.conflict"},
+		{name: "archived workdir", workdirID: archivedWorkdir, wantCode: "workdir.archived"},
 		{name: "workdir of another bot", workdirID: foreignWorkdirID, wantCode: "workdir.not_found"},
 	}
 	for _, tt := range tests {

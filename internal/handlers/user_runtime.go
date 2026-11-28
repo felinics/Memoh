@@ -113,8 +113,8 @@ func runtimeHTTPError(err error) error {
 	if errors.Is(err, db.ErrNotFound) {
 		return apperror.Wrap(apperror.CodeUserRuntimeNotFound, err, nil)
 	}
-	if db.IsUniqueViolation(err) {
-		return echo.NewHTTPError(http.StatusConflict, "runtime already exists")
+	if errors.Is(err, userruntime.ErrNameTaken) {
+		return apperror.Wrap(apperror.CodeUserRuntimeNameTaken, err, nil)
 	}
 	return errs.Wrap(err, "runtime request")
 }

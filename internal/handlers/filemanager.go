@@ -676,7 +676,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 			return fsHTTPError(err)
 		}
 		if currentRevision != *req.ExpectedRevision {
-			return echo.NewHTTPError(http.StatusConflict, "file changed on disk")
+			return apperror.New(apperror.CodeWorkspaceFileRevisionConflict, nil)
 		}
 	}
 
@@ -818,7 +818,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	containerPath := resolveContainerPath(req.Path)
 
 	if containerPath == "/" {
-		return echo.NewHTTPError(http.StatusForbidden, "cannot delete root directory")
+		return apperror.FieldInvalid("path", errors.New("cannot delete root directory"))
 	}
 
 	ctx := c.Request().Context()
@@ -926,7 +926,7 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 
 	destination := defaultExtractDestination(containerPath)
 	if _, err := client.Stat(ctx, destination); err == nil {
-		return echo.NewHTTPError(http.StatusConflict, "destination already exists")
+		return apperror.New(apperror.CodeWorkspaceFileAlreadyExists, nil)
 	} else if !errors.Is(err, bridge.ErrNotFound) {
 		return fsHTTPError(err)
 	}

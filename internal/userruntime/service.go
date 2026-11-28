@@ -16,8 +16,11 @@ import (
 var (
 	ErrInvalidInput              = errors.New("invalid runtime input")
 	ErrInvalidName               = errors.New("invalid runtime name")
+	ErrNameTaken                 = errors.New("runtime name already exists")
 	ErrRuntimeConnectionNotReady = errors.New("runtime connection is no longer ready")
 )
+
+const activeUserRuntimeNameConstraint = "idx_user_runtimes_active_user_name"
 
 // maxRuntimeNameBytes matches the hostname cap in handshake metadata and
 // keeps (user_id, lower(name)) well under the Postgres btree index row limit.
@@ -80,6 +83,9 @@ func (s *Service) CreateRuntime(ctx context.Context, userID string, req CreateRu
 		UserID: userID, Name: name, APIToken: key,
 	})
 	if err != nil {
+		if db.IsUniqueViolationConstraint(err, activeUserRuntimeNameConstraint) {
+			return Runtime{}, fmt.Errorf("%w: %w", ErrNameTaken, err)
+		}
 		return Runtime{}, err
 	}
 	return runtimeFromRecord(row, nil), nil

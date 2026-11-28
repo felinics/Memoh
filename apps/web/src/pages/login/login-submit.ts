@@ -1,5 +1,23 @@
 import type { Ref } from 'vue'
 import type { UserInfo } from '@/store/user'
+import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
+
+export interface LoginErrorNotification {
+  message: string
+  description?: string
+}
+
+export function resolveLoginErrorNotification(
+  error: unknown,
+  fallbackMessage: string,
+  retryHint: string,
+): LoginErrorNotification {
+  const message = resolveApiErrorMessage(error, fallbackMessage)
+  if (isApiErrorCode(error, 'auth.invalid_credentials')) {
+    return { message, description: retryHint }
+  }
+  return { message }
+}
 
 export interface LoginCredentials {
   username: string
@@ -20,7 +38,7 @@ export interface SubmitLoginDependencies {
   authenticate: (values: LoginCredentials) => Promise<{ data?: LoginResponseData | null }>
   applyLogin: (userData: UserInfo, token: string) => void
   navigateHome: () => Promise<unknown> | unknown
-  notifyInvalidCredentials: () => void
+  notifyLoginError: (error: unknown) => void
   // Browser-timezone auto-report (login boundary only). All optional: when any
   // piece is missing the sync is skipped and login proceeds unchanged.
   readBrowserTimezone?: () => string | null
@@ -62,13 +80,13 @@ export async function submitLogin(
     try {
       const response = await dependencies.authenticate(values)
       data = response.data
-    } catch {
-      dependencies.notifyInvalidCredentials()
+    } catch (error) {
+      dependencies.notifyLoginError(error)
       return false
     }
 
     if (!data?.access_token || !data.user_id) {
-      dependencies.notifyInvalidCredentials()
+      dependencies.notifyLoginError(null)
       return false
     }
 
